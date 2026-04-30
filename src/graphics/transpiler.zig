@@ -18,7 +18,7 @@
 ///   Lambda:       {[args] body}  (last unnamed = fragment entry)
 
 const std = @import("std");
-const ast = @import("ast");
+const ast = @import("lang").ast;
 const color = @import("./color.zig");
 
 pub const Error = error{

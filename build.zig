@@ -12,15 +12,6 @@ pub fn build(b: *std.Build) !void {
   const dawn_dep  = b.dependency("dawn_aarch64_macos", .{});
   const tatfi_dep = b.dependency("tatfi", .{});
 
-  // --- Shared tree-sitter grammar (compiled once, linked by all consumers) ---
-  const grammar_mod = b.createModule(.{ .target = target, .optimize = optimize });
-  const grammar = b.addLibrary(.{ .name = "terse_grammar", .root_module = grammar_mod, .linkage = .static });
-  grammar_mod.addCSourceFiles(.{ .files = &.{"src/parser.c", "src/scanner.c"}, .flags = &.{"-std=c99"} });
-  grammar_mod.addIncludePath(b.path("src"));
-  grammar_mod.addIncludePath(b.path("src/tree_sitter"));
-  grammar_mod.linkSystemLibrary("tree-sitter", .{});
-  grammar_mod.link_libc = true;
-
   // --- GPU/graphics stack ---
   const zgpu_mod = zgpu_dep.module("root");
   zgpu_mod.addImport("zpool", zpool_dep.module("root"));
@@ -43,9 +34,6 @@ pub fn build(b: *std.Build) !void {
     .link_libc = true,
   });
   lang_mod.addIncludePath(b.path("src"));
-  lang_mod.addIncludePath(b.path("src/tree_sitter"));
-  lang_mod.linkSystemLibrary("tree-sitter", .{});
-  lang_mod.linkLibrary(grammar);
   lang_mod.addImport("ink", ink_lib_mod);
 
   // --- Tests ---
@@ -58,9 +46,6 @@ pub fn build(b: *std.Build) !void {
   test_options.addOption(bool, "enable_jit", enable_jit);
   test_mod.addOptions("build_options", test_options);
   test_mod.addIncludePath(b.path("src"));
-  test_mod.addIncludePath(b.path("src/tree_sitter"));
-  test_mod.linkSystemLibrary("tree-sitter", .{});
-  test_mod.linkLibrary(grammar);
   const test_exe = b.addTest(.{ .root_module = test_mod });
   const test_run = b.addRunArtifact(test_exe);
   const test_step = b.step("test", "Run unit tests");
@@ -72,9 +57,6 @@ pub fn build(b: *std.Build) !void {
     .target = target, .optimize = optimize, .link_libc = true,
   });
   corpus_mod.addIncludePath(b.path("src"));
-  corpus_mod.addIncludePath(b.path("src/tree_sitter"));
-  corpus_mod.linkSystemLibrary("tree-sitter", .{});
-  corpus_mod.linkLibrary(grammar);
   const corpus_exe = b.addTest(.{ .root_module = corpus_mod });
   const corpus_run = b.addRunArtifact(corpus_exe);
   const corpus_step = b.step("corpus", "Run corpus tests for the Zig parser");
@@ -93,9 +75,6 @@ pub fn build(b: *std.Build) !void {
   const runner_exe = b.addExecutable(.{ .name = "ink", .root_module = runner_mod });
   runner_mod.addOptions("build_options", runner_options);
   runner_mod.addIncludePath(b.path("src"));
-  runner_mod.addIncludePath(b.path("src/tree_sitter"));
-  runner_mod.linkSystemLibrary("tree-sitter", .{});
-  runner_mod.linkLibrary(grammar);
 
   if (enable_ui) {
     runner_mod.addImport("ink",   ink_lib_mod);
@@ -219,20 +198,11 @@ pub fn build(b: *std.Build) !void {
   hello_step.dependOn(&hello_run_cmd.step);
 
   // --- Transpiler check ---
-  const ast_mod = b.createModule(.{
-    .root_source_file = b.path("src/parser/ast.zig"),
-    .target = target, .optimize = optimize, .link_libc = true,
-  });
-  ast_mod.addIncludePath(b.path("src"));
-  ast_mod.addIncludePath(b.path("src/tree_sitter"));
-  ast_mod.linkSystemLibrary("tree-sitter", .{});
-  ast_mod.linkLibrary(grammar);
-
   const tr_mod = b.createModule(.{
     .root_source_file = b.path("src/graphics/transpiler.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
-  tr_mod.addImport("ast", ast_mod);
+  tr_mod.addImport("lang", lang_mod);
   ink_demo_mod.addImport("transpiler", tr_mod);
   const tr_check = b.addLibrary(.{ .name = "transpiler", .root_module = tr_mod, .linkage = .static });
   const tr_step = b.step("transpiler", "Type-check the WGSL transpiler");
