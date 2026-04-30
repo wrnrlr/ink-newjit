@@ -1,0 +1,108 @@
+==================
+transit int+int
+==================
+1+1
+---
+(terse (transit (literal (int)) (op) (literal (int))))
+==================
+transit with spaces
+==================
+1 + 1
+---
+(terse (transit (literal (int)) (op) (literal (int))))
+==================
+transit vec
+==================
+1 2 3 + 4 5 6
+---
+(terse (transit (literal (ints)) (op) (literal (ints))))
+==================
+transit subtract
+==================
+10 20 - 1 2
+---
+(terse (transit (literal (ints)) (op) (literal (ints))))
+==================
+apposit monadic
+==================
+,57
+---
+(terse (apposit (op) (literal (int))))
+==================
+apposit floor
+==================
+_ 2.1
+---
+(terse (apposit (op) (literal (float))))
+==================
+bind
+==================
+a:1
+---
+(terse (bind (literal (var)) (literal (int))))
+==================
+bind augmented
+==================
+a+:1
+---
+(terse (bind (literal (var)) (op) (literal (int))))
+==================
+adverb term
+==================
++/ 1 2 3
+---
+(terse (apposit (term (op) (adverb)) (literal (ints))))
+==================
+adverb scan
+==================
++\ 1 2 3
+---
+(terse (apposit (term (op) (adverb)) (literal (ints))))
+==================
+each
+==================
+{x+1}' 1 2 3
+---
+(terse (apposit (term (lambda (seq (transit (literal (var)) (op) (literal (int))))) (adverb)) (literal (ints))))
+==================
+apply
+==================
+f[1;2]
+---
+(terse (apply (literal (var)) (seq (literal (int)) (div) (literal (int)))))
+==================
+apply verb
+==================
+%[4;2]
+---
+(terse (apply (op) (seq (literal (int)) (div) (literal (int)))))
+==================
+lambda
+==================
+{x+1}
+---
+(terse (lambda (seq (transit (literal (var)) (op) (literal (int))))))
+==================
+lambda with args
+==================
+{[a;b]a+b}
+---
+(terse (lambda (args (var) (div) (var)) (seq (transit (literal (var)) (op) (literal (var))))))
+==================
+cond
+==================
+$[1=1;`a;`b]
+---
+(terse (cond (transit (literal (int)) (op) (literal (int))) (literal (symbol)) (literal (symbol))))
+==================
+dict
+==================
+[a:1;b:2]
+---
+(terse (dict (item (var) (literal (int))) (item (var) (literal (int)))))
+==================
+multi-statement
+==================
+a:1;b:2
+---
+(terse (bind (literal (var)) (literal (int))) (sep) (bind (literal (var)) (literal (int))))

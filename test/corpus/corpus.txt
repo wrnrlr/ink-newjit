@@ -1,0 +1,323 @@
+empty
+=================
+
+---
+(terse)
+==================
+integer
+==================
+0N; 0W; 42; -3
+---
+(terse
+  (literal (int)) (sep)
+  (literal (int)) (sep)
+  (literal (int)) (sep)
+  (literal (int))
+)
+==================
+float
+==================
+0n; 0w; 1.; .2; -.3
+0.0 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0
+---
+(terse
+  (literal (float)) (sep)
+  (literal (float)) (sep)
+  (literal (float)) (sep)
+  (literal (float)) (sep)
+  (literal (float)) (sep)
+  (literal (floats))
+)
+==================
+symbol
+==================
+`123; `+; `a; `1.2; `; `"hello world"
+---
+(terse
+  (literal (symbol)) (sep)
+  (literal (symbol)) (sep)
+  (literal (symbol)) (sep)
+  (literal (symbol)) (sep)
+  (literal (symbol)) (sep)
+  (literal (symbol)))
+==================
+symbols
+==================
+`abc`sin
+``
+```
+`1`2`3
+---
+(terse
+  (literal (symbols)) (sep)
+  (literal (symbols)) (sep)
+  (literal (symbols)) (sep)
+  (literal (symbols))
+)
+==================
+also stranded symbols
+==================
+`1`2`3
+`1 `2 `3
+`+`*
+`1`*`"hello world"
+`"hello" `"world!"
+---
+(terse
+  (literal (symbols)) (sep)
+  (literal (symbols)) (sep)
+  (literal (symbols)) (sep)
+  (literal (symbols)) (sep)
+  (literal (symbols))
+)
+==================
+string
+==================
+""; "H"; "Hi"
+---
+(terse
+  (literal (string)) (sep)
+  (literal (string)) (sep)
+  (literal (string))
+)
+==================
+list
+==================
+(2;3.4;`c)
+---
+(terse
+  (list (seq
+    (literal (int)) (div)
+    (literal (float)) (div)
+    (literal (symbol)))))
+=================
+stranding
+=================
+0N  1
+1  .1 3. 0.1
+1  .1 3. 0.
+---
+(terse
+  (literal (ints)) (sep)
+  (literal (floats)) (sep)
+  (literal (floats))
+)
+==================
+name
+==================
+abc
+---
+(terse (literal (var)))
+==================
+assign
+==================
+a:1
+a:1+2
+a:@2
+a+:1
+a:
+---
+(terse
+  (bind (literal (var)) (literal (int))) (sep)
+  (bind (literal (var)) (transit (literal (int)) (op) (literal (int)))) (sep)
+  (bind (literal (var)) (apposit (op) (literal (int)))) (sep)
+  (bind (literal (var)) (op) (literal (int))) (sep)
+  (bind (literal (var)))
+)
+==================
+list assign
+==================
+(a;b):!2
+(a;b)+:1 2
+---
+(terse
+  (bind
+    (list (seq (literal (var)) (div) (literal (var))))
+    (apposit (op) (literal (int)))) (sep)
+  (bind
+    (list (seq (literal (var)) (div) (literal (var)))) (op)
+    (literal (ints)))
+)
+==================
+arithmetic
+==================
+1+2
+1 + 2
+2 - 5
+2*3
+4*-2
+2-3
+---
+(terse
+  (transit (literal (int)) (op) (literal (int))) (sep)
+  (transit (literal (int)) (op) (literal (int))) (sep)
+  (transit (literal (int)) (op) (literal (int))) (sep)
+  (transit (literal (int)) (op) (literal (int))) (sep)
+  (transit (literal (int)) (op) (literal (int))) (sep)
+  (transit (literal (int)) (op) (literal (int)))
+)
+==================
+adverbs
+==================
++/ 1
++/ 1 2
++\ 1
++\ 1 2 3
+#'(1 2; 3 4)
+---
+(terse
+  (apposit f: (term f: (op) a: (adverb)) a: (literal (int))) (sep)
+  (apposit f: (term f: (op) a: (adverb)) a: (literal (ints))) (sep)
+  (apposit f: (term f: (op) a: (adverb)) a: (literal (int))) (sep)
+  (apposit f: (term f: (op) a: (adverb)) a: (literal (ints))) (sep)
+  (apposit f: (term f: (op) a: (adverb)) a: (list (seq (literal (ints)) (div) (literal (ints)))))
+)
+==================
+lambda
+==================
+{}
+{x+1}
+{[a;b]a+b}
+---
+(terse
+  (lambda) (sep)
+  (lambda (seq (transit (literal (var)) (op) (literal (int))))) (sep)
+  (lambda
+    (args (var) (div) (var))
+    (seq (transit (literal (var)) (op) (literal (var))))))
+==================
+transit
+==================
+1_1 2
+1_1.0 2.0 3.0
+1_1.0 2 3
+---
+(terse
+  (transit
+    a: (literal (int)) v: (op)
+    b: (literal (ints))) (sep)
+  (transit
+    a: (literal (int)) v: (op)
+    b: (literal (floats))) (sep)
+  (transit
+    a: (literal (int)) v: (op)
+    b: (literal (floats)))
+)
+==================
+IO verbs
+==================
+0:<fd
+"abc"0:<fd
+---
+(terse
+  (apposit
+    f: (verb_io) a: (apposit f: (op) a: (literal (var)))) (sep)
+  (transit
+    a: (literal (string)) v: (verb_io)
+    b: (apposit f: (op) a: (literal (var))))
+)
+==================
+conditional
+==================
+$[1;2;3]
+---
+(terse (cond
+  (literal (int))
+  (literal (int))
+  (literal (int))))
+==================
+apply/index
+==================
+a[1 2 3];
+a [1 2 3];
+(!10)[1 3]
+---
+(terse
+  (apply (literal (var))
+    (seq (literal (ints)))) (sep)
+  (apply (literal (var))
+    (seq (literal (ints)))) (sep)
+  (apply
+    (group (apposit (op) (literal (int))))
+    (seq (literal (ints))))
+)
+==================
+partial
+==================
+1+
+---
+(terse (adjunct (intrans (literal (int)) (op))))
+==================
+op
+==================
++
+*
+---
+(terse (op) (sep) (op))
+==================
+adjuct compose
+==================
++*
+---
+(terse (adjunct (compose (op) (adjunct (compose (op))))))
+==================
+apposite train
+==================
+*|1 2 3
+---
+(terse (apposit (op) (apposit (op) (literal (ints)))))
+==================
+keyword op
+==================
+sin
+---
+(terse (op))
+==================
+each-left adverb
+==================
+1 2*\:3 4
+---
+(terse
+  (transit (literal (ints))
+    (term (op) (adverb))
+    (literal (ints))))
+==================
+integer bug
+==================
+numbers: 0 1 2;
+integers: 0 1 2
+---
+(terse
+  (bind (literal (var)) (literal (ints))) (sep)
+  (bind (literal (var)) (literal (ints))) )
+==================
+bool
+==================
+0b; 1b
+---
+(terse
+  (literal (bool)) (sep)
+  (literal (bool))
+)
+==================
+bools
+==================
+10b; 01b; 1001b
+---
+(terse
+  (literal (bools)) (sep)
+  (literal (bools)) (sep)
+  (literal (bools))
+)
+==================
+command
+==================
+\h
+\l file.k
+\v
+---
+(terse
+  (command) (sep)
+  (command) (sep)
+  (command)
+)

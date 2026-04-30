@@ -1,0 +1,27 @@
+==================
+First
+==================
+(*:)
+---
+(terse
+  (group
+    (monad
+      f: (op))))
+==================
+flip
+==================
+(+:)
+---
+(terse
+  (group
+    (monad
+      f: (op))))
+==================
+monadic applied
+==================
+*:1 2 3
+---
+(terse
+  (apposit
+    (monad (op))
+    (literal (ints))))

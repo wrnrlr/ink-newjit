@@ -1,0 +1,48 @@
+==================
+dict
+==================
+[1:`b]
+[key:"abc"]
+[name:"Bob";age:42]
+["abc":2]
+---
+(terse
+  (dict (item k: (name (int)) v: (literal (symbol)))) (sep)
+  (dict (item k: (name (var)) v: (literal (string)))) (sep)
+  (dict
+    (item k: (name (var)) v: (literal (string))) (div)
+    (item k: (name (var)) v: (literal (int)))) (sep)
+  (dict (item k: (name (string)) v: (literal (int))))
+)
+==================
+table
+==================
+[[]a:1 2]
+[[]n:`b`c;i:2 3]
+[[]sin:`b`c`d;i:2 3 4]
+---
+(terse
+  (table
+    (item k: (name (var)) v: (literal (ints)))) (sep)
+  (table
+    (item k: (name (var)) v: (literal (symbols))) (div)
+    (item k: (name (var)) v: (literal (ints)))) (sep)
+  (table
+    (item k: (name (var)) v: (literal (symbols))) (div)
+    (item k: (name (var)) v: (literal (ints))))
+)
+==================
+utable
+==================
+[[n:`b`c]i:2 3]
+[[n:`b`c]i:2 3;j:0 1]
+---
+(terse
+  (utable
+    (item k: (name (var)) v: (literal (symbols)))
+    (item k: (name (var)) v: (literal (ints)))) (sep)
+  (utable
+    (item k: (name (var)) v: (literal (symbols)))
+    (item k: (name (var)) v: (literal (ints))) (div)
+    (item k: (name (var)) v: (literal (ints))))
+)

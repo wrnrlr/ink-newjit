@@ -1,0 +1,31 @@
+==================
+select A from T
+==================
+select A from T
+---
+(terse
+  (expr
+    (query
+      (select
+        (expr
+          (literal
+            (var)))
+        (from
+          (var))))))
+==================
+select A by B from T
+==================
+select A by B from T
+---
+(terse
+  (expr
+    (query
+      (select
+        (expr
+          (literal
+            (var)))
+        (expr
+          (literal
+            (var)))
+        (from
+          (var))))))

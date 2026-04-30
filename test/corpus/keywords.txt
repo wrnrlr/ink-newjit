@@ -1,0 +1,27 @@
+==================
+named monad ops
+==================
+sqrt 1; sqr 1; exp 1; log 1; sin 1; cos 1; first 1; last 1; count 1; sin' 1
+---
+(terse
+  (apposit f: (op) a: (literal (int))) (sep)
+  (apposit f: (op) a: (literal (int))) (sep)
+  (apposit f: (op) a: (literal (int))) (sep)
+  (apposit f: (op) a: (literal (int))) (sep)
+  (apposit f: (op) a: (literal (int))) (sep)
+  (apposit f: (op) a: (literal (int))) (sep)
+  (apposit f: (op) a: (literal (int))) (sep)
+  (apposit f: (op) a: (literal (int))) (sep)
+  (apposit f: (op) a: (literal (int))) (sep)
+  (apposit f: (term f: (op) a: (adverb)) a: (literal (int))))
+==================
+named dyad ops
+==================
+1 in 2
+1 has 2
+`b in `a`b
+---
+(terse
+  (transit (literal (int)) (op) (literal (int))) (sep)
+  (transit (literal (int)) (op) (literal (int))) (sep)
+  (transit (literal (symbol)) (op) (literal (symbols))))

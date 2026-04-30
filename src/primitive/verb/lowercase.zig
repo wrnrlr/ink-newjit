@@ -1,0 +1,23 @@
+const std = @import("std");
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/value.zig").N;
+const Op = @import("../../runtime/tape.zig").Op;
+const VM = @import("../../runtime/vm.zig").VM;
+const util = @import("../../util.zig");
+
+pub const Lowercase = struct {
+  pub const op = .@"_";
+  _c: util.MonadFn = lowercase_c,
+  _C: util.MonadFn = lowercase_C,
+  // TODO lowercase of symbol?
+};
+
+fn lowercase_c(_: *VM, x: V) !V {
+  return .{ .c = std.ascii.toLower(@intCast(x.c)) };
+}
+
+fn lowercase_C(vm: *VM, x: V) !V {
+  const res = try N(u8).init(vm.alloc, x.C.ptr.len);
+  for (x.C.slice(), res.slice()) |v, *r| r.* = std.ascii.toLower(v);
+  return .{ .C = res };
+}

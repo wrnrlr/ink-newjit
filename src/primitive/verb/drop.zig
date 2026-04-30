@@ -1,0 +1,91 @@
+const std = @import("std");
+const N = @import("../../noun/value.zig").N;
+const V = @import("../../noun/value.zig").V;
+const K = @import("../../noun/class.zig").K;
+const VM = @import("../../runtime/vm.zig").VM;
+const util = @import("../../util.zig");
+
+/// i_Y: drop n items from the front (n>0) or back (n<0) of a sequence.
+pub const Drop = struct {
+  pub const op = .@"_";
+  _i_I: util.DyadFn = dropVec(.I),
+  _i_F: util.DyadFn = dropVec(.F),
+  _i_S: util.DyadFn = dropVec(.S),
+  _i_C: util.DyadFn = dropVec(.C),
+  _i_B: util.DyadFn = dropVec(.B),
+  // _i_L: util.DyadFn = genDrop(.L), // TODO fix drop list
+};
+
+fn dropVec(comptime yk: K) util.DyadFn {
+  return struct {
+    fn f(vm: *VM, x: V, y: V) !V {
+      const b = @field(y, @tagName(yk));
+      const drop_count: usize = @intCast(@abs(x.i));
+      const old_len = b.ptr.len;
+      var new_len: usize = 0;
+      var start_offset: usize = 0;
+      if (x.i > 0) {
+        if (drop_count < old_len) { new_len = old_len - drop_count; start_offset = drop_count; }
+      } else if (x.i < 0) {
+        if (drop_count < old_len) new_len = old_len - drop_count;
+      } else {
+        new_len = old_len;
+      }
+      const result = try N(K.backing(yk)).init(vm.alloc, new_len);
+      if (new_len > 0) @memcpy(result.slice(), b.slice()[start_offset .. start_offset + new_len]);
+      return @unionInit(V, @tagName(yk), result);
+    }
+  }.f;
+}
+
+const testing = std.testing;
+
+test "drop positive" {
+  const vm = try VM.create(testing.allocator);
+  defer vm.deinit();
+  var y = try V.intsFromSlice(vm.alloc, &.{ 1, 2, 3, 4, 5 });
+  defer y.deinit(vm.alloc);
+  const res = try dropVec(.I)(vm, .{ .i = 2 }, y);
+  defer res.deinit(vm.alloc);
+  try testing.expectEqualSlices(i32, &.{ 3, 4, 5 }, res.I.slice());
+}
+
+test "drop negative" {
+  const vm = try VM.create(testing.allocator);
+  defer vm.deinit();
+  var y = try V.intsFromSlice(vm.alloc, &.{ 1, 2, 3, 4, 5 });
+  defer y.deinit(vm.alloc);
+  const res = try dropVec(.I)(vm, .{ .i = -2 }, y);
+  defer res.deinit(vm.alloc);
+  try testing.expectEqualSlices(i32, &.{ 1, 2, 3 }, res.I.slice());
+}
+
+test "drop zero" {
+  const vm = try VM.create(testing.allocator);
+  defer vm.deinit();
+  var y = try V.intsFromSlice(vm.alloc, &.{ 1, 2, 3 });
+  defer y.deinit(vm.alloc);
+  const res = try dropVec(.I)(vm, .{ .i = 0 }, y);
+  defer res.deinit(vm.alloc);
+  try testing.expectEqualSlices(i32, &.{ 1, 2, 3 }, res.I.slice());
+}
+
+test "drop all" {
+  const vm = try VM.create(testing.allocator);
+  defer vm.deinit();
+  var y = try V.intsFromSlice(vm.alloc, &.{ 1, 2, 3 });
+  defer y.deinit(vm.alloc);
+  const res = try dropVec(.I)(vm, .{ .i = 10 }, y);
+  defer res.deinit(vm.alloc);
+  try testing.expectEqual(@as(usize, 0), res.I.slice().len);
+}
+
+test "drop chars" {
+  const vm = try VM.create(testing.allocator);
+  defer vm.deinit();
+  var y = try V.charsFromSlice(vm.alloc, "hello");
+  defer y.deinit(vm.alloc);
+  const res = try dropVec(.C)(vm, .{ .i = 2 }, y);
+  defer res.deinit(vm.alloc);
+  try testing.expectEqualSlices(u8, "llo", res.C.slice());
+}

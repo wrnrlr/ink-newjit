@@ -1,0 +1,77 @@
+=================
+i+i
+=================
+1+1
+---
+(terse
+  (transit (literal (int)) (op) (literal (int))))
+=================
+i + i
+=================
+1 + 1
+---
+(terse
+  (transit (literal (int)) (op) (literal (int))))
+=================
+i+ i
+=================
+1+ 1
+---
+(terse
+  (transit (literal (int)) (op) (literal (int))))
+=================
+i +i
+=================
+1 +1
+---
+(terse
+  (transit (literal (int)) (op) (literal (int))))
+=================
+I+i
+=================
+1 2 3+1
+---
+(terse
+  (transit (literal (ints)) (op) (literal (int))))
+=================
+i+I
+=================
+1+1 2 3
+---
+(terse
+  (transit (literal (int)) (op) (literal (ints))))
+=================
+i + I
+=================
+1 + 1 2 3
+---
+(terse
+  (transit (literal (int)) (op) (literal (ints))))
+=================
+I+I
+=================
+1 2 3+4 5 6
+---
+(terse
+  (transit (literal (ints)) (op) (literal (ints))))
+=================
+I + I
+=================
+1 2 + 4 5
+---
+(terse
+  (transit (literal (ints)) (op) (literal (ints))))
+=================
+I+ I
+=================
+1 2+ 4 5
+---
+(terse
+  (transit (literal (ints)) (op) (literal (ints))))
+=================
+I +I
+=================
+1 2 +4 5
+---
+(terse
+  (transit (literal (ints)) (op) (literal (ints))))

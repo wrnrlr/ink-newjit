@@ -1,0 +1,69 @@
+const std = @import("std");
+const Alloc = std.mem.Allocator;
+
+pub const SourceRange = struct { id: u32, start: u32, end: u32 };
+
+pub const Registry = struct {
+  alloc: Alloc,
+  texts: std.ArrayList([]const u8) = .empty,
+  paths: std.ArrayList(?[]const u8) = .empty,
+  ranges: std.ArrayList(SourceRange) = .empty,
+
+  pub fn init(alloc: Alloc) !Registry {
+    return .{ .alloc = alloc };
+  }
+
+  pub fn deinit(self: *Registry) void {
+    for (self.texts.items) |t| self.alloc.free(t);
+    for (self.paths.items) |p| if (p) |path| self.alloc.free(path);
+    self.texts.deinit(self.alloc);
+    self.paths.deinit(self.alloc);
+    self.ranges.deinit(self.alloc);
+  }
+
+  pub fn addText(self: *Registry, text: []const u8) !u32 {
+    const dupe = try self.alloc.dupe(u8, text);
+    try self.texts.append(self.alloc, dupe);
+    try self.paths.append(self.alloc, null);
+    return @intCast(self.texts.items.len - 1);
+  }
+
+  pub fn addFile(self: *Registry, path: []const u8, text: []const u8) !u32 {
+    try self.texts.append(self.alloc, text);
+    try self.paths.append(self.alloc, try self.alloc.dupe(u8, path));
+    return @intCast(self.texts.items.len - 1);
+  }
+
+  pub fn findFile(self: Registry, path: []const u8) ?u32 {
+    for (self.paths.items, 0..) |p, i| {
+      if (p) |pp| {
+        if (std.mem.eql(u8, pp, path)) return @intCast(i);
+      }
+    }
+    return null;
+  }
+
+  pub fn getFileText(self: Registry, id: u32) []const u8 {
+    return self.texts.items[id];
+  }
+
+  pub fn getPath(self: Registry, id: u32) ?[]const u8 {
+    return self.paths.items[id];
+  }
+
+  pub fn updateFile(self: *Registry, id: u32, content: []const u8) !void {
+    const old = self.texts.items[id];
+    self.texts.items[id] = try self.alloc.dupe(u8, content);
+    self.alloc.free(old);
+  }
+
+  pub fn addRange(self: *Registry, id: u32, start: u32, end: u32) !u32 {
+    try self.ranges.append(self.alloc, .{ .id = id, .start = start, .end = end });
+    return @intCast(self.ranges.items.len - 1);
+  }
+
+  pub fn getSource(self: Registry, id: u32) []const u8 {
+    const r = self.ranges.items[id];
+    return self.texts.items[r.id][r.start..r.end];
+  }
+};

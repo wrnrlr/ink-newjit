@@ -1,0 +1,71 @@
+==================
+comments
+==================
+/line comment
+/ still a line comment
+/
+---
+(terse
+  (comment)
+  (sep)
+  (comment)
+  (sep)
+  (comment))
+
+==================
+inline comment
+==================
+a: / assign blank followed by inline comment
+a: /also assign blank followed by inline comment
++/!3 /inline comment
++ /!3 just plus and again inline comment
+---
+(terse
+  (bind
+    v: (literal
+      (var)))
+  (comment)
+  (sep)
+  (bind
+    v: (literal
+      (var)))
+  (comment)
+  (sep)
+  (apposit
+    f: (term
+      f: (op)
+      a: (adverb))
+    a: (apposit
+      f: (op)
+      a: (literal
+        (int))))
+  (comment)
+  (sep)
+  (op)
+  (comment))
+
+==================
+lambda with comment
+==================
+f: {
+  / line comment
+  x+y / inline comment
+}
+---
+(terse
+  (bind
+    v: (literal
+      (var))
+    a: (lambda
+      b: (seq
+        (div)
+        (comment)
+        (div)
+        (transit
+          a: (literal
+            (var))
+          v: (op)
+          b: (literal
+            (var)))
+        (comment)
+        (div)))))

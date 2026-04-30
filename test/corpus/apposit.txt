@@ -1,0 +1,95 @@
+==================
+enlist ,i
+==================
+,57
+---
+
+(terse
+  (apposit
+    (op)
+    (literal
+      (int))))
+
+==================
+enlist , i
+==================
+, 57
+---
+
+(terse
+  (apposit
+    (op)
+    (literal
+      (int))))
+
+==================
+type @i
+==================
+@57
+---
+
+(terse
+  (apposit
+    (op)
+    (literal
+      (int))))
+
+==================
+type @ i
+==================
+@ 57
+---
+
+(terse
+  (apposit
+    (op)
+    (literal
+      (int))))
+
+==================
+shape @i
+==================
+#57
+---
+
+(terse
+  (apposit
+    (op)
+    (literal
+      (int))))
+
+==================
+type @ i
+==================
+# 57
+---
+
+(terse
+  (apposit
+    (op)
+    (literal
+      (int))))
+
+==================
+shape @I
+==================
+#1 2
+---
+
+(terse
+  (apposit
+    (op)
+    (literal
+      (ints))))
+
+==================
+shape @ I
+==================
+# 1 2
+---
+
+(terse
+  (apposit
+    (op)
+    (literal
+      (ints))))

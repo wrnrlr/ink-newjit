@@ -1,0 +1,34 @@
+.{
+    .name = .terse,
+    .version = "0.16.0-dev.191+9fa2394f8",
+    .dependencies = .{
+        .zglfw = .{
+            .url = "git+https://github.com/IridescenceTech/zglfw.git#188d33b5abdb24768905dec1dad6b3ffd60fc324",
+            .hash = "zglfw-0.1.0-BghZXaTUAAAkCOlD_2akK4k1zIzo6HIXelVZu39yr_MO",
+        },
+        .zgpu = .{
+            .path = "patches/zgpu",
+        },
+        .zpool = .{
+            .url = "https://github.com/zig-gamedev/zpool/archive/7829cf02f78e8c39e19b802ccb47ed44037299c2.tar.gz",
+            .hash = "zpool-0.11.0-dev-bG692QtEAQCyqBnzSBJbJlY0-a_3v1YcjFTGmg0VBjOc",
+        },
+        .dawn_aarch64_macos = .{
+            .url = "https://github.com/michal-z/webgpu_dawn-aarch64-macos/archive/d2360cdfff0cf4a780cb77aa47c57aca03cc6dfe.tar.gz",
+            .hash = "N-V-__8AALVIRAIf5nfpx8-4mEo2RGsynVryPQPcHk95qFM5",
+        },
+        .tatfi = .{
+            .url = "https://git.sr.ht/~asibahi/tatfi/archive/0.1.1.tar.gz",
+            .hash = "tatfi-0.1.0-PJjJTOU6DgCLg3fXiVtVliYaukhvFUKgIqfDsU42mnCe",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "patches",
+        "README.md",
+        "LICENSE",
+    },
+    .fingerprint = 0xa837b5ffbbab4cb2,
+}

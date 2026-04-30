@@ -1,0 +1,245 @@
+{
+  "generated": "2026-04-28T17:49:31",
+  "sizes": [
+    1000,
+    10000,
+    100000,
+    1000000
+  ],
+  "benchmarks": {
+    "baseline": {
+      "description": "Allocate range !N",
+      "complexity": "O(N)",
+      "sizes": {
+        "1000": {
+          "median_ms": 11.618,
+          "min_ms": 9.753,
+          "max_ms": 191.078,
+          "reps": 5
+        },
+        "10000": {
+          "median_ms": 8.098,
+          "min_ms": 7.648,
+          "max_ms": 8.9,
+          "reps": 5
+        },
+        "100000": {
+          "median_ms": 8.389,
+          "min_ms": 8.294,
+          "max_ms": 9.315,
+          "reps": 5
+        },
+        "1000000": {
+          "median_ms": 12.868,
+          "min_ms": 12.686,
+          "max_ms": 13.111,
+          "reps": 5
+        }
+      }
+    },
+    "sum": {
+      "description": "Fold sum +/",
+      "complexity": "O(N)",
+      "sizes": {
+        "1000": {
+          "median_ms": 8.704,
+          "min_ms": 8.463,
+          "max_ms": 12.704,
+          "reps": 5,
+          "net_ms": 0.0
+        },
+        "10000": {
+          "median_ms": 9.965,
+          "min_ms": 9.109,
+          "max_ms": 10.289,
+          "reps": 5,
+          "net_ms": 1.867
+        },
+        "100000": {
+          "median_ms": 15.41,
+          "min_ms": 15.287,
+          "max_ms": 16.092,
+          "reps": 5,
+          "net_ms": 7.021
+        },
+        "1000000": {
+          "median_ms": 69.463,
+          "min_ms": 68.762,
+          "max_ms": 71.155,
+          "reps": 5,
+          "net_ms": 56.595
+        }
+      }
+    },
+    "max": {
+      "description": "Fold max |/",
+      "complexity": "O(N)",
+      "sizes": {
+        "1000": {
+          "median_ms": 8.529,
+          "min_ms": 8.315,
+          "max_ms": 11.443,
+          "reps": 5,
+          "net_ms": 0.0
+        },
+        "10000": {
+          "median_ms": 9.056,
+          "min_ms": 8.663,
+          "max_ms": 10.907,
+          "reps": 5,
+          "net_ms": 0.958
+        },
+        "100000": {
+          "median_ms": 13.54,
+          "min_ms": 13.305,
+          "max_ms": 14.117,
+          "reps": 5,
+          "net_ms": 5.151
+        },
+        "1000000": {
+          "median_ms": 60.596,
+          "min_ms": 60.1,
+          "max_ms": 62.851,
+          "reps": 5,
+          "net_ms": 47.728
+        }
+      }
+    },
+    "reverse": {
+      "description": "Reverse |",
+      "complexity": "O(N)",
+      "sizes": {
+        "1000": {
+          "median_ms": 8.996,
+          "min_ms": 8.516,
+          "max_ms": 9.359,
+          "reps": 5,
+          "net_ms": 0.0
+        },
+        "10000": {
+          "median_ms": 9.436,
+          "min_ms": 8.327,
+          "max_ms": 9.559,
+          "reps": 5,
+          "net_ms": 1.338
+        },
+        "100000": {
+          "median_ms": 10.731,
+          "min_ms": 9.781,
+          "max_ms": 11.164,
+          "reps": 5,
+          "net_ms": 2.342
+        },
+        "1000000": {
+          "median_ms": 24.788,
+          "min_ms": 24.101,
+          "max_ms": 25.504,
+          "reps": 5,
+          "net_ms": 11.92
+        }
+      }
+    },
+    "sort": {
+      "description": "Sort < (worst-case)",
+      "complexity": "O(N log N)",
+      "sizes": {
+        "1000": {
+          "median_ms": 9.046,
+          "min_ms": 8.669,
+          "max_ms": 9.709,
+          "reps": 5,
+          "net_ms": 0.0
+        },
+        "10000": {
+          "median_ms": 9.965,
+          "min_ms": 9.617,
+          "max_ms": 10.633,
+          "reps": 5,
+          "net_ms": 1.867
+        },
+        "100000": {
+          "median_ms": 18.83,
+          "min_ms": 18.088,
+          "max_ms": 19.011,
+          "reps": 5,
+          "net_ms": 10.441
+        },
+        "1000000": {
+          "median_ms": 109.701,
+          "min_ms": 107.505,
+          "max_ms": 110.569,
+          "reps": 5,
+          "net_ms": 96.833
+        }
+      }
+    },
+    "distinct": {
+      "description": "Distinct ?",
+      "complexity": "O(N)",
+      "sizes": {
+        "1000": {
+          "median_ms": 9.507,
+          "min_ms": 9.252,
+          "max_ms": 9.697,
+          "reps": 5,
+          "net_ms": 0.0
+        },
+        "10000": {
+          "median_ms": 11.337,
+          "min_ms": 10.44,
+          "max_ms": 11.766,
+          "reps": 5,
+          "net_ms": 3.239
+        },
+        "100000": {
+          "median_ms": 35.393,
+          "min_ms": 32.679,
+          "max_ms": 36.506,
+          "reps": 5,
+          "net_ms": 27.004
+        },
+        "1000000": {
+          "median_ms": 360.72,
+          "min_ms": 355.728,
+          "max_ms": 370.7,
+          "reps": 5,
+          "net_ms": 347.852
+        }
+      }
+    },
+    "group": {
+      "description": "Group = (100 keys)",
+      "complexity": "O(N)",
+      "sizes": {
+        "1000": {
+          "median_ms": 16.793,
+          "min_ms": 16.28,
+          "max_ms": 17.784,
+          "reps": 5,
+          "net_ms": 5.175
+        },
+        "10000": {
+          "median_ms": 22.486,
+          "min_ms": 22.278,
+          "max_ms": 22.666,
+          "reps": 5,
+          "net_ms": 14.388
+        },
+        "100000": {
+          "median_ms": 81.452,
+          "min_ms": 80.082,
+          "max_ms": 88.567,
+          "reps": 5,
+          "net_ms": 73.063
+        },
+        "1000000": {
+          "median_ms": 659.574,
+          "min_ms": 658.267,
+          "max_ms": 668.237,
+          "reps": 5,
+          "net_ms": 646.706
+        }
+      }
+    }
+  }
+}
