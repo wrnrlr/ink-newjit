@@ -4,11 +4,6 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
 
-    const upstream = b.dependency("zgpu_upstream", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
     const options = .{
         .uniforms_buffer_size = b.option(u64, "uniforms_buffer_size", "") orelse (4 * 1024 * 1024),
         .dawn_skip_validation = b.option(bool, "dawn_skip_validation", "") orelse false,
@@ -32,7 +27,7 @@ pub fn build(b: *std.Build) void {
     }
 
     const zgpu_mod = b.addModule("root", .{
-        .root_source_file = upstream.path("src/zgpu.zig"),
+        .root_source_file = b.path("upstream/src/zgpu.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -48,14 +43,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    zdawn.root_module.addIncludePath(upstream.path("libs/dawn/include"));
-    zdawn.root_module.addIncludePath(upstream.path("src"));
+    zdawn.root_module.addIncludePath(b.path("upstream/libs/dawn/include"));
+    zdawn.root_module.addIncludePath(b.path("upstream/src"));
     zdawn.root_module.addCSourceFile(.{
-        .file = upstream.path("src/dawn.cpp"),
+        .file = b.path("upstream/src/dawn.cpp"),
         .flags = &.{ "-std=c++17", "-fno-sanitize=undefined" },
     });
     zdawn.root_module.addCSourceFile(.{
-        .file = upstream.path("src/dawn_proc.c"),
+        .file = b.path("upstream/src/dawn_proc.c"),
         .flags = &.{"-fno-sanitize=undefined"},
     });
     b.installArtifact(zdawn);
