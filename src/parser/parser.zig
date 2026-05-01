@@ -1,5 +1,4 @@
 // Hand-written recursive-descent parser for the terse/ink language.
-// Produces the same ast.Node types as the tree-sitter based parser.
 // Evaluation order in K is right-to-left, so the parser is right-recursive.
 
 const std = @import("std");
@@ -37,11 +36,13 @@ pub const Parser = struct {
   lex: Lexer,
   tok: Token,
 
-  pub fn init(alloc: Alloc, src: []const u8) Parser {
-    var l = Lexer.init(src);
+  pub fn init(alloc: Alloc) Parser {
+    var l = Lexer.init("");
     const t = l.next();
-    return .{ .alloc = alloc, .src = src, .lex = l, .tok = t };
+    return .{ .alloc = alloc, .src = "", .lex = l, .tok = t };
   }
+
+  pub fn deinit(_: *Parser) void {}
 
   fn advance(self: *Parser) void {
     self.tok = self.lex.next();
@@ -97,7 +98,10 @@ pub const Parser = struct {
 
   // ---- Top-level ----
 
-  pub fn parse(self: *Parser) ParseError!*Node {
+  pub fn parse(self: *Parser, src: []const u8) ParseError!*Node {
+    self.src = src;
+    self.lex = Lexer.init(src);
+    self.tok = self.lex.next();
     return self.parseTerse();
   }
 
@@ -859,6 +863,8 @@ pub const Parser = struct {
       body = body[1 .. body.len - 1];
     return body;
   }
+
+  pub fn free(self: Parser, n: *Node) void { freeNode(self.alloc, n); }
 };
 
 // ---- Free AST ----
@@ -922,9 +928,9 @@ fn freeItems(alloc: Alloc, items: Items) void { for (items) |it| freeNode(alloc,
 const ta = std.testing.allocator;
 
 test "parse int" {
-  var p = Parser.init(ta, "42");
-  const n = try p.parse();
-  defer freeNode(ta, n);
+  var p = Parser.init(ta);
+  const n = try p.parse("42");
+  defer p.free(n);
   try std.testing.expect(n.* == .terse);
   try std.testing.expect(n.terse.stmts.len == 1);
   const s = n.terse.stmts[0].node;
@@ -934,18 +940,18 @@ test "parse int" {
 }
 
 test "parse ints vector" {
-  var p = Parser.init(ta, "1 2 3");
-  const n = try p.parse();
-  defer freeNode(ta, n);
+  var p = Parser.init(ta);
+  const n = try p.parse("1 2 3");
+  defer p.free(n);
   const s = n.terse.stmts[0].node;
   try std.testing.expect(s.literal == .I);
   try std.testing.expectEqualSlices(i32, &.{1, 2, 3}, s.literal.I);
 }
 
 test "parse bind" {
-  var p = Parser.init(ta, "a:1");
-  const n = try p.parse();
-  defer freeNode(ta, n);
+  var p = Parser.init(ta);
+  const n = try p.parse("a:1");
+  defer p.free(n);
   const s = n.terse.stmts[0].node;
   try std.testing.expect(s.* == .bind);
   try std.testing.expect(s.bind.v.literal == .@"var");
@@ -954,27 +960,27 @@ test "parse bind" {
 }
 
 test "parse transit" {
-  var p = Parser.init(ta, "1+1");
-  const n = try p.parse();
-  defer freeNode(ta, n);
+  var p = Parser.init(ta);
+  const n = try p.parse("1+1");
+  defer p.free(n);
   const s = n.terse.stmts[0].node;
   try std.testing.expect(s.* == .transit);
   try std.testing.expectEqualStrings("+", s.transit.v.verb_op);
 }
 
 test "parse apposit (f a)" {
-  var p = Parser.init(ta, "f 1");
-  const n = try p.parse();
-  defer freeNode(ta, n);
+  var p = Parser.init(ta);
+  const n = try p.parse("f 1");
+  defer p.free(n);
   const s = n.terse.stmts[0].node;
   try std.testing.expect(s.* == .apposit);
   try std.testing.expectEqualStrings("f", s.apposit.f.literal.@"var");
 }
 
 test "parse adverb term" {
-  var p = Parser.init(ta, "+/ 1 2 3");
-  const n = try p.parse();
-  defer freeNode(ta, n);
+  var p = Parser.init(ta);
+  const n = try p.parse("+/ 1 2 3");
+  defer p.free(n);
   const s = n.terse.stmts[0].node;
   try std.testing.expect(s.* == .apposit);
   try std.testing.expect(s.apposit.f.* == .term);
@@ -983,9 +989,9 @@ test "parse adverb term" {
 }
 
 test "parse lambda" {
-  var p = Parser.init(ta, "{x+1}");
-  const n = try p.parse();
-  defer freeNode(ta, n);
+  var p = Parser.init(ta);
+  const n = try p.parse("{x+1}");
+  defer p.free(n);
   const s = n.terse.stmts[0].node;
   try std.testing.expect(s.* == .lambda);
   try std.testing.expect(s.lambda.a == null);
@@ -996,36 +1002,36 @@ test "parse lambda" {
 }
 
 test "parse list" {
-  var p = Parser.init(ta, "(1 2 3; 4 5 6)");
-  const n = try p.parse();
-  defer freeNode(ta, n);
+  var p = Parser.init(ta);
+  const n = try p.parse("(1 2 3; 4 5 6)");
+  defer p.free(n);
   const s = n.terse.stmts[0].node;
   try std.testing.expect(s.* == .list);
   try std.testing.expect(s.list.seq.?.len == 2);
 }
 
 test "parse dict" {
-  var p = Parser.init(ta, "[name:\"Bob\";age:42]");
-  const n = try p.parse();
-  defer freeNode(ta, n);
+  var p = Parser.init(ta);
+  const n = try p.parse("[name:\"Bob\";age:42]");
+  defer p.free(n);
   const s = n.terse.stmts[0].node;
   try std.testing.expect(s.* == .dict);
   try std.testing.expect(s.dict.items.?.len == 2);
 }
 
 test "parse symbol" {
-  var p = Parser.init(ta, "`abc");
-  const n = try p.parse();
-  defer freeNode(ta, n);
+  var p = Parser.init(ta);
+  const n = try p.parse("`abc");
+  defer p.free(n);
   const s = n.terse.stmts[0].node;
   try std.testing.expect(s.literal == .s);
   try std.testing.expectEqualStrings("abc", s.literal.s);
 }
 
 test "parse monad value" {
-  var p = Parser.init(ta, "*:1 2 3");
-  const n = try p.parse();
-  defer freeNode(ta, n);
+  var p = Parser.init(ta);
+  const n = try p.parse("*:1 2 3");
+  defer p.free(n);
   const s = n.terse.stmts[0].node;
   try std.testing.expect(s.* == .apposit);
   try std.testing.expect(s.apposit.f.* == .monad);

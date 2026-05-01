@@ -1,32 +1,21 @@
 const std = @import("std");
 
 pub const TT = enum {
-  int,
-  float,
-  bool_lit,
-  bools_lit,
-  date,
-  time,
-  string,
-  symbol,
+  int, float,
+  bool_lit, bools_lit,
+  date, time,
+  string, symbol,
   var_,
-  keyword_op,
-  op,
-  verb_io,
-  adverb,
-  adverb_val,
+  keyword_op, op, verb_io,
+  adverb, adverb_val,
   colon,
-  lparen,
-  rparen,
-  lbrace,
-  rbrace,
-  lbracket,
-  rbracket,
+  lparen, rparen,
+  lbrace, rbrace,
+  lbracket, rbracket,
   dollar_lbracket,
   at_lbracket,
   dot_lbracket,
-  table_open,
-  utable_open,
+  table_open, utable_open,
   sep,
   comment,
   command,
@@ -34,16 +23,9 @@ pub const TT = enum {
 };
 
 pub const Token = struct {
-  tt: TT,
-  start: u32,
-  end: u32,
-
-  pub fn slice(self: Token, src: []const u8) []const u8 {
-    return src[self.start..self.end];
-  }
-  pub fn len(self: Token) u32 {
-    return self.end - self.start;
-  }
+  tt: TT, start: u32, end: u32,
+  pub fn slice(t: Token, s: []const u8) []const u8 { return s[t.start..t.end]; }
+  pub fn len(t: Token) u32 { return t.end - t.start; }
 };
 
 const KEYWORD_OPS = [_][]const u8{

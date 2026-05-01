@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-28T17:49:31",
+  "generated": "2026-05-01T07:16:10",
   "sizes": [
     1000,
     10000,
@@ -12,27 +12,27 @@
       "complexity": "O(N)",
       "sizes": {
         "1000": {
-          "median_ms": 11.618,
-          "min_ms": 9.753,
-          "max_ms": 191.078,
+          "median_ms": 11.568,
+          "min_ms": 9.298,
+          "max_ms": 247.888,
           "reps": 5
         },
         "10000": {
-          "median_ms": 8.098,
-          "min_ms": 7.648,
-          "max_ms": 8.9,
+          "median_ms": 9.234,
+          "min_ms": 8.967,
+          "max_ms": 10.048,
           "reps": 5
         },
         "100000": {
-          "median_ms": 8.389,
-          "min_ms": 8.294,
-          "max_ms": 9.315,
+          "median_ms": 24.446,
+          "min_ms": 23.706,
+          "max_ms": 25.307,
           "reps": 5
         },
         "1000000": {
-          "median_ms": 12.868,
-          "min_ms": 12.686,
-          "max_ms": 13.111,
+          "median_ms": 174.758,
+          "min_ms": 174.455,
+          "max_ms": 176.879,
           "reps": 5
         }
       }
@@ -42,32 +42,32 @@
       "complexity": "O(N)",
       "sizes": {
         "1000": {
-          "median_ms": 8.704,
-          "min_ms": 8.463,
-          "max_ms": 12.704,
+          "median_ms": 9.578,
+          "min_ms": 9.08,
+          "max_ms": 10.113,
           "reps": 5,
           "net_ms": 0.0
         },
         "10000": {
-          "median_ms": 9.965,
-          "min_ms": 9.109,
-          "max_ms": 10.289,
+          "median_ms": 10.358,
+          "min_ms": 10.124,
+          "max_ms": 10.511,
           "reps": 5,
-          "net_ms": 1.867
+          "net_ms": 1.124
         },
         "100000": {
-          "median_ms": 15.41,
-          "min_ms": 15.287,
-          "max_ms": 16.092,
+          "median_ms": 15.818,
+          "min_ms": 14.796,
+          "max_ms": 16.124,
           "reps": 5,
-          "net_ms": 7.021
+          "net_ms": 0.0
         },
         "1000000": {
-          "median_ms": 69.463,
-          "min_ms": 68.762,
-          "max_ms": 71.155,
+          "median_ms": 69.143,
+          "min_ms": 68.02,
+          "max_ms": 72.752,
           "reps": 5,
-          "net_ms": 56.595
+          "net_ms": 0.0
         }
       }
     },
@@ -76,32 +76,32 @@
       "complexity": "O(N)",
       "sizes": {
         "1000": {
-          "median_ms": 8.529,
-          "min_ms": 8.315,
-          "max_ms": 11.443,
+          "median_ms": 9.369,
+          "min_ms": 8.935,
+          "max_ms": 10.031,
           "reps": 5,
           "net_ms": 0.0
         },
         "10000": {
-          "median_ms": 9.056,
-          "min_ms": 8.663,
-          "max_ms": 10.907,
+          "median_ms": 8.644,
+          "min_ms": 8.545,
+          "max_ms": 8.785,
           "reps": 5,
-          "net_ms": 0.958
+          "net_ms": 0.0
         },
         "100000": {
-          "median_ms": 13.54,
-          "min_ms": 13.305,
-          "max_ms": 14.117,
+          "median_ms": 13.265,
+          "min_ms": 13.237,
+          "max_ms": 14.023,
           "reps": 5,
-          "net_ms": 5.151
+          "net_ms": 0.0
         },
         "1000000": {
-          "median_ms": 60.596,
-          "min_ms": 60.1,
-          "max_ms": 62.851,
+          "median_ms": 59.885,
+          "min_ms": 58.972,
+          "max_ms": 61.386,
           "reps": 5,
-          "net_ms": 47.728
+          "net_ms": 0.0
         }
       }
     },
@@ -110,32 +110,32 @@
       "complexity": "O(N)",
       "sizes": {
         "1000": {
-          "median_ms": 8.996,
-          "min_ms": 8.516,
-          "max_ms": 9.359,
+          "median_ms": 8.795,
+          "min_ms": 8.712,
+          "max_ms": 9.236,
           "reps": 5,
           "net_ms": 0.0
         },
         "10000": {
-          "median_ms": 9.436,
-          "min_ms": 8.327,
-          "max_ms": 9.559,
+          "median_ms": 10.227,
+          "min_ms": 10.202,
+          "max_ms": 10.251,
           "reps": 5,
-          "net_ms": 1.338
+          "net_ms": 0.993
         },
         "100000": {
-          "median_ms": 10.731,
-          "min_ms": 9.781,
-          "max_ms": 11.164,
+          "median_ms": 27.756,
+          "min_ms": 26.469,
+          "max_ms": 28.173,
           "reps": 5,
-          "net_ms": 2.342
+          "net_ms": 3.31
         },
         "1000000": {
-          "median_ms": 24.788,
-          "min_ms": 24.101,
-          "max_ms": 25.504,
+          "median_ms": 188.169,
+          "min_ms": 185.863,
+          "max_ms": 188.945,
           "reps": 5,
-          "net_ms": 11.92
+          "net_ms": 13.411
         }
       }
     },
@@ -144,32 +144,32 @@
       "complexity": "O(N log N)",
       "sizes": {
         "1000": {
-          "median_ms": 9.046,
-          "min_ms": 8.669,
-          "max_ms": 9.709,
+          "median_ms": 10.023,
+          "min_ms": 9.737,
+          "max_ms": 10.297,
           "reps": 5,
           "net_ms": 0.0
         },
         "10000": {
-          "median_ms": 9.965,
-          "min_ms": 9.617,
-          "max_ms": 10.633,
+          "median_ms": 11.594,
+          "min_ms": 11.329,
+          "max_ms": 12.354,
           "reps": 5,
-          "net_ms": 1.867
+          "net_ms": 2.36
         },
         "100000": {
-          "median_ms": 18.83,
-          "min_ms": 18.088,
-          "max_ms": 19.011,
+          "median_ms": 34.0,
+          "min_ms": 33.791,
+          "max_ms": 34.132,
           "reps": 5,
-          "net_ms": 10.441
+          "net_ms": 9.554
         },
         "1000000": {
-          "median_ms": 109.701,
-          "min_ms": 107.505,
-          "max_ms": 110.569,
+          "median_ms": 268.188,
+          "min_ms": 265.689,
+          "max_ms": 284.75,
           "reps": 5,
-          "net_ms": 96.833
+          "net_ms": 93.43
         }
       }
     },
@@ -178,32 +178,32 @@
       "complexity": "O(N)",
       "sizes": {
         "1000": {
-          "median_ms": 9.507,
-          "min_ms": 9.252,
-          "max_ms": 9.697,
+          "median_ms": 10.517,
+          "min_ms": 10.303,
+          "max_ms": 10.612,
           "reps": 5,
           "net_ms": 0.0
         },
         "10000": {
-          "median_ms": 11.337,
-          "min_ms": 10.44,
-          "max_ms": 11.766,
+          "median_ms": 14.077,
+          "min_ms": 13.273,
+          "max_ms": 14.334,
           "reps": 5,
-          "net_ms": 3.239
+          "net_ms": 4.843
         },
         "100000": {
-          "median_ms": 35.393,
-          "min_ms": 32.679,
-          "max_ms": 36.506,
+          "median_ms": 49.959,
+          "min_ms": 49.26,
+          "max_ms": 53.855,
           "reps": 5,
-          "net_ms": 27.004
+          "net_ms": 25.513
         },
         "1000000": {
-          "median_ms": 360.72,
-          "min_ms": 355.728,
-          "max_ms": 370.7,
+          "median_ms": 477.057,
+          "min_ms": 454.328,
+          "max_ms": 509.066,
           "reps": 5,
-          "net_ms": 347.852
+          "net_ms": 302.299
         }
       }
     },
@@ -212,32 +212,32 @@
       "complexity": "O(N)",
       "sizes": {
         "1000": {
-          "median_ms": 16.793,
-          "min_ms": 16.28,
-          "max_ms": 17.784,
+          "median_ms": 17.447,
+          "min_ms": 17.361,
+          "max_ms": 18.029,
           "reps": 5,
-          "net_ms": 5.175
+          "net_ms": 5.879
         },
         "10000": {
-          "median_ms": 22.486,
-          "min_ms": 22.278,
-          "max_ms": 22.666,
+          "median_ms": 23.99,
+          "min_ms": 23.686,
+          "max_ms": 25.226,
           "reps": 5,
-          "net_ms": 14.388
+          "net_ms": 14.756
         },
         "100000": {
-          "median_ms": 81.452,
-          "min_ms": 80.082,
-          "max_ms": 88.567,
+          "median_ms": 97.629,
+          "min_ms": 96.978,
+          "max_ms": 98.355,
           "reps": 5,
-          "net_ms": 73.063
+          "net_ms": 73.183
         },
         "1000000": {
-          "median_ms": 659.574,
-          "min_ms": 658.267,
-          "max_ms": 668.237,
+          "median_ms": 814.825,
+          "min_ms": 811.909,
+          "max_ms": 816.617,
           "reps": 5,
-          "net_ms": 646.706
+          "net_ms": 640.067
         }
       }
     }

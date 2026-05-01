@@ -948,7 +948,7 @@ pub const Transpiler = struct {
 /// Convenience: parse terse source and transpile to WGSL.
 /// Caller owns the returned slice.
 pub fn transpileSource(alloc: std.mem.Allocator, source: []const u8) ![]const u8 {
-    var parser = try ast.Parser.init(alloc);
+    var parser = ast.Parser.init(alloc);
     defer parser.deinit();
 
     const root = try parser.parse(source);

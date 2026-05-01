@@ -323,8 +323,8 @@ fn runCorpusFile(alloc: Alloc, path: []const u8) !void {
   var pass: u32 = 0;
   var fail: u32 = 0;
   for (cases) |tc| {
-    var p = parser.Parser.init(alloc, tc.input);
-    const n = p.parse() catch |err| {
+    var p = parser.Parser.init(alloc);
+    const n = p.parse(tc.input) catch |err| {
       fail += 1;
       std.debug.print("FAIL [{s}]: parse error {s}\n", .{ tc.name, @errorName(err) });
       continue;

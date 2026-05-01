@@ -91,7 +91,7 @@ pub const VM = struct {
     chunk.* = try Chunk.init(alloc);
 
     const parser = try alloc.create(Parser);
-    parser.* = try Parser.init(alloc);
+    parser.* = Parser.init(alloc);
 
     const symbols = Pool.init(alloc);
 

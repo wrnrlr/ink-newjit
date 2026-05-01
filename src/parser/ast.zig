@@ -244,98 +244,11 @@ pub const Node = union(NodeType) {
   }
 };
 
-
-pub const Parser = struct {
-  alloc: std.mem.Allocator,
-
-  pub fn init(allocator: std.mem.Allocator) !Parser {
-    return .{ .alloc = allocator };
-  }
-
-  pub fn deinit(_: *Parser) void {}
-
-  pub fn parse(self: *Parser, src: []const u8) Error!*Node {
-    const zigparser = @import("parser.zig");
-    var p = zigparser.Parser.init(self.alloc, src);
-    return p.parse() catch |err| switch (err) {
-      error.OutOfMemory => return error.OutOfMemory,
-      else => return error.ParseFailed,
-    };
-  }
-
-  pub fn free(self: Parser, n:*Node) void {
-    switch (n.*) {
-      .terse => |t| {
-        for (t.stmts) |s| self.free(s.node);
-        self.alloc.free(t.stmts);
-      },
-      .verb => |v| self.free(v),
-      .stmt_clause => |c| self.free(c),
-      .stmt_adjunct => |a| self.free(a),
-      .right => |r| self.free(r.clause),
-      .@"defer" => |d| self.free(d.adjunct),
-      .bind => |b| { self.free(b.v); if (b.a) |a| self.free(a); },
-      .transit => |t| { self.free(t.a); self.free(t.v); self.free(t.b); },
-      .affix => |a| { self.free(a.a); self.free(a.b); },
-      .apposit => |a| { self.free(a.f); self.free(a.a); },
-      .phrase => |p| self.free(p),
-      .pending => |p| { self.free(p.v); self.free(p.a); },
-      .intrans => |i| { self.free(i.a); self.free(i.v); if (i.z) |z| self.free(z); },
-      .prefix => |p| { self.free(p.a); if (p.z) |z| self.free(z); },
-      .compose => |c| switch (c) {
-        .v => |v| self.free(v),
-        .fz => |fz| {
-          self.free(fz.f);
-          self.free(fz.z);
-        },
-      },
-      .noun => |m| self.free(m),
-      .phrase_verb => |pv| self.free(pv),
-      .apply => |a| {
-        self.free(a.f);
-        if (a.a) |args| self.freeSeq(args);
-      },
-      .group => |g| self.free(g.stmt),
-      .list => |l| if (l.seq) |s| self.freeSeq(s),
-      .lambda => |l| {
-        if (l.a) |a| self.alloc.free(a);
-        if (l.b) |b| self.freeSeq(b);
-      },
-      .cond => |c| {
-        for (c.stmts) |stmt| self.free(stmt);
-        self.alloc.free(c.stmts);
-      },
-      .dict => |d| if (d.items) |items| self.freeItems(items),
-      .table => |t| if (t.items) |items| self.freeItems(items),
-      .utable => |u| {
-        if (u.keys) |keys| self.freeItems(keys);
-        if (u.items) |items| self.freeItems(items);
-      },
-      .literal => |lit| switch (lit) {
-        .B => |b| self.alloc.free(b),
-        .I => |i| self.alloc.free(i),
-        .F => |f| self.alloc.free(f),
-        .S => |s| self.alloc.free(s),
-        else => {},
-      },
-      .term => |t| self.free(t.f),
-      .amend => |seq| self.freeSeq(seq),
-      .dmend => |seq| self.freeSeq(seq),
-      .verb_op, .verb_io, .blank, .command, .monad, .adverb_val => {},
-    }
-    self.alloc.destroy(n);
-  }
-
-  fn freeSeq(self: Parser, seq: Seq) void { for (seq) |n| self.free(n); self.alloc.free(seq); }
-  fn freeArgs(self: Parser, args: Args) void { self.alloc.free(args); }
-  fn freeItems(self: Parser, items:Items) void { for (items) |item| self.free(item.v); self.alloc.free(items); }
-};
+pub const Parser = @import("parser.zig").Parser;
 
 test "Ints" {
-  var parser = try Parser.init(std.heap.c_allocator);
-  defer parser.deinit();
-  const source = "1 2 3";
-  const node = try parser.parse(source);
+  var parser = Parser.init(std.heap.c_allocator);
+  const node = try parser.parse("1 2 3");
   defer parser.free(node);
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
@@ -346,10 +259,8 @@ test "Ints" {
 }
 
 test "Explicit Apply" {
-  var parser = try Parser.init(std.heap.c_allocator);
-  defer parser.deinit();
-  const source = "f[1]";
-  const node = try parser.parse(source);
+  var parser = Parser.init(std.heap.c_allocator);
+  const node = try parser.parse("f[1]");
   defer parser.free(node);
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
@@ -368,10 +279,8 @@ test "Explicit Apply" {
 }
 
 test "Bind" {
-  var parser = try Parser.init(std.heap.c_allocator);
-  defer parser.deinit();
-  const source = "a:1";
-  const node = try parser.parse(source);
+  var parser = Parser.init(std.heap.c_allocator);
+  const node = try parser.parse("a:1");
   defer parser.free(node);
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
@@ -389,10 +298,8 @@ test "Bind" {
 }
 
 test "Lambda" {
-  var parser = try Parser.init(std.heap.c_allocator);
-  defer parser.deinit();
-  const source = "{x+1}";
-  const node = try parser.parse(source);
+  var parser = Parser.init(std.heap.c_allocator);
+  const node = try parser.parse("{x+1}");
   defer parser.free(node);
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
@@ -411,10 +318,8 @@ test "Lambda" {
 }
 
 test "Adverb" {
-  var parser = try Parser.init(std.heap.c_allocator);
-  defer parser.deinit();
-  const source = "+/ 1 2 3";
-  const node = try parser.parse(source);
+  var parser = Parser.init(std.heap.c_allocator);
+  const node = try parser.parse("+/ 1 2 3");
   defer parser.free(node);
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
@@ -431,10 +336,8 @@ test "Adverb" {
 }
 
 test "Implicit Call" {
-  var parser = try Parser.init(std.heap.c_allocator);
-  defer parser.deinit();
-  const source = "f 1";
-  const node = try parser.parse(source);
+  var parser = Parser.init(std.heap.c_allocator);
+  const node = try parser.parse("f 1");
   defer parser.free(node);
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
@@ -450,10 +353,8 @@ test "Implicit Call" {
 }
 
 test "List" {
-  var parser = try Parser.init(std.heap.c_allocator);
-  defer parser.deinit();
-  const source = "(1 2 3; 4 5 6)";
-  const node = try parser.parse(source);
+  var parser = Parser.init(std.heap.c_allocator);
+  const node = try parser.parse("(1 2 3; 4 5 6)");
   defer parser.free(node);
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
@@ -472,10 +373,8 @@ test "List" {
 }
 
 test "String" {
-  var parser = try Parser.init(std.heap.c_allocator);
-  defer parser.deinit();
-  const source = "\"Hello\"";
-  const node = try parser.parse(source);
+  var parser = Parser.init(std.heap.c_allocator);
+  const node = try parser.parse("\"Hello\"");
   defer parser.free(node);
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
@@ -486,10 +385,8 @@ test "String" {
 }
 
 test "Symbol" {
-  var parser = try Parser.init(std.heap.c_allocator);
-  defer parser.deinit();
-  const source = "`abc";
-  const node = try parser.parse(source);
+  var parser = Parser.init(std.heap.c_allocator);
+  const node = try parser.parse("`abc");
   defer parser.free(node);
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
