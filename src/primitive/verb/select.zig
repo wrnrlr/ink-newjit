@@ -21,9 +21,9 @@ pub const TakeKeys = struct {
   _C_m: util.DyadFn = takeKeys,
 };
 
-pub fn takeKeys(vm: *VM, x: V, y: V) !V {
+pub fn takeKeys(vm: *VM, x: V, y: V) V {
   const xlen = x.len();
-  const res_vals = try N(V).init(vm.alloc, xlen);
+  const res_vals = N(V).init(vm.alloc, xlen) catch return V{ .err = .memory };
   const dav = y.m.av();
   const dbv = y.m.bv();
   for (0..xlen) |i| {
@@ -41,7 +41,7 @@ pub fn takeKeys(vm: *VM, x: V, y: V) !V {
     }
     if (!found) res_vals.slice()[i] = .{.i=V.@"0N"};
   }
-  const res = try pair.dict(vm, x, .{ .L = res_vals });
+  const res = pair.dict(vm, x, .{ .L = res_vals });
   res_vals.deinit(vm.alloc);
   return res;
 }

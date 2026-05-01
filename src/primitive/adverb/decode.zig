@@ -8,7 +8,7 @@ const N = value.N;
 
 // I/ — mixed-radix decode (digits to number)
 // 24 60 60/1 2 3 → 3723   2/1 1 0 1 → 13
-pub fn decode(vm: *VM, radix: V, digits: V) !V {
+pub fn decode(vm: *VM, radix: V, digits: V) V {
   const m = digits.len();
   if (m == 0) return .{ .err = .domain };
 

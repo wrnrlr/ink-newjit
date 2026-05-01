@@ -135,31 +135,28 @@ const Alloc = std.mem.Allocator;
 // };
 
 // atom key: single-element dict, value is y as-is
-fn dictAtomKey(vm: *VM, x: V, y: V) !V {
+fn dictAtomKey(vm: *VM, x: V, y: V) V {
   const a2 = x.ref();
   const b2 = y.ref();
-  errdefer { a2.deinit(vm.alloc); b2.deinit(vm.alloc); }
-  return .{ .m = try Dict.init(vm.alloc, a2, b2) };
+  return .{ .m = Dict.init(vm.alloc, a2, b2) catch return V{ .err = .memory } };
 }
 
 // vec/list keys + atom value: broadcast atom to fill all key slots
-fn dictVecAtom(vm: *VM, x: V, y: V) !V {
-  const vals = try broadcast.broadcastAtom(vm, y, x.len());
-  errdefer vals.deinit(vm.alloc);
-  return .{ .m = try Dict.init(vm.alloc, x, vals) };
+fn dictVecAtom(vm: *VM, x: V, y: V) V {
+  const vals = broadcast.broadcastAtom(vm, y, x.len()) catch return V{ .err = .memory };
+  return .{ .m = Dict.init(vm.alloc, x, vals) catch return V{ .err = .memory } };
 }
 
 // vec/list keys + vec/list values: zip (lengths must match)
-fn dictVecVec(vm: *VM, x: V, y: V) !V {
+fn dictVecVec(vm: *VM, x: V, y: V) V {
   if (x.len() != y.len()) return .{ .err = .length };
   const a2 = x.ref();
   const b2 = y.ref();
-  errdefer { a2.deinit(vm.alloc); b2.deinit(vm.alloc); }
-  return .{ .m = try Dict.init(vm.alloc, a2, b2) };
+  return .{ .m = Dict.init(vm.alloc, a2, b2) catch return V{ .err = .memory } };
 }
 
 // generic entry point used by external callers (take, drop_keys, vm)
-pub fn dict(vm: *VM, x: V, y: V) !V {
+pub fn dict(vm: *VM, x: V, y: V) V {
   if (x.isAtom()) return dictAtomKey(vm, x, y);
   if (y.isAtom()) return dictVecAtom(vm, x, y);
   return dictVecVec(vm, x, y);

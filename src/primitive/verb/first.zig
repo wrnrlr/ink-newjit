@@ -64,7 +64,7 @@ pub const Last_Name = struct {
 };
 
 
-pub fn first(alloc: Alloc, x: V) !V {
+pub fn first(alloc: Alloc, x: V) V {
   if (x.len() == 0) return .blank;
   return switch (x) {
     inline .I, .F, .S, .C, .B => |n, yk| V.wrap(K.atom(yk), n.slice()[0]),
@@ -74,7 +74,7 @@ pub fn first(alloc: Alloc, x: V) !V {
   };
 }
 
-pub fn last(alloc: Alloc, x: V) !V {
+pub fn last(alloc: Alloc, x: V) V {
   const l = x.len();
   if (l == 0) return .blank;
   return switch (x) {
@@ -85,13 +85,13 @@ pub fn last(alloc: Alloc, x: V) !V {
   };
 }
 
-fn firstAtom(_: *VM, x: V) !V { return x; }
-fn firstFn(vm: *VM, x: V) !V { return first(vm.alloc, x); }
-fn lastFn(vm: *VM, x: V) !V { return last(vm.alloc, x); }
+fn firstAtom(_: *VM, x: V) V { return x; }
+fn firstFn(vm: *VM, x: V) V { return first(vm.alloc, x); }
+fn lastFn(vm: *VM, x: V) V { return last(vm.alloc, x); }
 
 fn firstVec(comptime yk: K) util.MonadFn {
   return struct {
-    fn f(_: *VM, x: V) !V {
+    fn f(_: *VM, x: V) V {
       const b = @field(x, @tagName(yk));
       if (b.ptr.len == 0) return .blank;
       return V.wrap(comptime K.atom(yk), b.slice()[0]);
@@ -101,7 +101,7 @@ fn firstVec(comptime yk: K) util.MonadFn {
 
 fn lastVec(comptime yk: K) util.MonadFn {
   return struct {
-    fn f(_: *VM, x: V) !V {
+    fn f(_: *VM, x: V) V {
       const b = @field(x, @tagName(yk));
       const n = b.ptr.len;
       if (n == 0) return .blank;

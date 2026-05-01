@@ -21,7 +21,7 @@ pub const Call = struct {
       .func => |ref| try self.applyFn(ref, args, is_bracket),
       .partial => |p| try self.applyPartial(p, args, is_bracket),
       .L, .I, .F, .S, .C, .B, .m => {
-        if (args.len == 1) return try dispatch.dispatch2(self.vm, .@"@", func, args[0]);
+        if (args.len == 1) return dispatch.dispatch2(self.vm, .@"@", func, args[0]);
         return V{ .err = .rank };
       },
       else => V{ .err = .@"type" },
@@ -43,13 +43,13 @@ pub const Call = struct {
         const op = ref.getOp();
         const monad = ref.monad != 0;
         if (monad) {
-          if (args.len == 1) return try dispatch.dispatch1(self.vm, op, args[0]);
+          if (args.len == 1) return dispatch.dispatch1(self.vm, op, args[0]);
           return .{ .err = .rank };
         }
         if (has_gaps or (is_bracket and filled < ref.arity))
           return makePartialFromArgs(self.vm, ref, args);
-        if (args.len == 1) return try dispatch.dispatch1(self.vm, op, args[0]);
-        if (args.len == 2) return try dispatch.dispatch2(self.vm, op, args[0], args[1]);
+        if (args.len == 1) return dispatch.dispatch1(self.vm, op, args[0]);
+        if (args.len == 2) return dispatch.dispatch2(self.vm, op, args[0], args[1]);
         return .{ .err = .rank };
       },
       .lambda => {
@@ -88,16 +88,16 @@ pub const Call = struct {
       },
       .derived_builtin => {
         const base = V{ .func = Fn.makeBuiltin(ref.getOp()) };
-        return try adverb.derived(self.vm, base, ref.getAdverb(), args, wrapper);
+        return adverb.derived(self.vm, base, ref.getAdverb(), args, wrapper);
       },
       .derived_lambda => {
         const lambda_ref = Fn.makeLambda(@intCast(ref.idx), self.vm.fn_tables.lambdaAt(@intCast(ref.idx)).arity);
         const base = V{ .func = lambda_ref };
-        return try adverb.derived(self.vm, base, ref.getAdverb(), args, wrapper);
+        return adverb.derived(self.vm, base, ref.getAdverb(), args, wrapper);
       },
       .derived_table => {
         const entry = self.vm.fn_tables.derivedAt(@intCast(ref.idx));
-        return try adverb.derived(self.vm, entry.base, entry.adverb, args, wrapper);
+        return adverb.derived(self.vm, entry.base, entry.adverb, args, wrapper);
       },
       .train => {
         var buf: [7]u8 = undefined;
@@ -139,16 +139,16 @@ pub const Call = struct {
         res.deinit(self.vm.alloc);
         return .{ .err = .@"type" };
       };
-      const next = try dispatch.dispatch1(self.vm, op, res);
+      const next = dispatch.dispatch1(self.vm, op, res);
       res.deinit(self.vm.alloc);
       res = next;
     }
     return res;
   }
 
-  fn wrapper(vm: *VM, f: V, a: []const V) anyerror!V {
+  fn wrapper(vm: *VM, f: V, a: []const V) V {
     var fc = Call{ .vm = vm };
-    return fc.apply(f, a, false);
+    return fc.apply(f, a, false) catch V{ .err = .memory };
   }
 };
 

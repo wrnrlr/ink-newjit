@@ -8,20 +8,17 @@ const N = value.N;
 
 // window: n': x — sliding windows of size n
 // 3':"abcdef" → ("abc";"bcd";"cde";"def")
-pub fn window(vm: *VM, xn: V, x: V) !V {
+pub fn window(vm: *VM, xn: V, x: V) V {
   std.debug.assert(xn.tag()==.i);
   std.debug.assert(x.isVec() or x.tag()==.L);
   const n:usize = @intCast(xn.i);
   const xlen = x.len();
-  if (xlen < n) return .{ .L = try N(V).init(vm.alloc, 0) };
+  if (xlen < n) return .{ .L = N(V).init(vm.alloc, 0) catch return V{ .err = .memory } };
   const count = xlen - n + 1;
-  var res = try N(V).init(vm.alloc, count);
-  errdefer {
-    for (res.slice()) |*v| v.deinit(vm.alloc);
-    res.deinit(vm.alloc);
-  }
+  var res = N(V).init(vm.alloc, count) catch return V{ .err = .memory };
+  @memset(res.slice(), .blank);
   for (0..count) |i| {
-    var win = try N(V).init(vm.alloc, n);
+    var win = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
     for (0..n) |j| win.slice()[j] = x.at(i + j);
     res.slice()[i] = .{ .L = win };
   }

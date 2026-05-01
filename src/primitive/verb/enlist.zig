@@ -6,7 +6,7 @@ const K = @import("../../noun/class.zig").K;
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
 
-fn enlistListFn(vm: *VM, x: V) anyerror!V { return enlistToL(vm.alloc, x); }
+fn enlistListFn(vm: *VM, x: V) V { return enlistToL(vm.alloc, x); }
 
 pub const Enlist = struct {
   pub const op = .@",";
@@ -33,19 +33,19 @@ fn enlistAtom(comptime k: K) util.MonadFn {
   const ck = comptime k.container();
   const T = comptime K.backing(ck);
   return struct {
-    fn f(vm: *VM, x: V) anyerror!V {
-      const r = try N(T).init(vm.alloc, 1);
+    fn f(vm: *VM, x: V) V {
+      const r = N(T).init(vm.alloc, 1) catch return V{ .err = .memory };
       r.slice()[0] = x.unwrap(k);
       return V.wrap(ck, r);
     }
   }.f;
 }
 
-fn enlistToL(alloc: Alloc, x: V) !V {
-  const res = try N(V).init(alloc, 1);
+fn enlistToL(alloc: Alloc, x: V) V {
+  const res = N(V).init(alloc, 1) catch return V{ .err = .memory };
   res.slice()[0] = x.ref();
   return .{ .L = res };
 }
 
 /// Legacy helper used by flip.zig and pick.zig — always wraps in a generic list.
-pub fn enlist(alloc: Alloc, x: V) !V { return enlistToL(alloc, x); }
+pub fn enlist(alloc: Alloc, x: V) V { return enlistToL(alloc, x); }

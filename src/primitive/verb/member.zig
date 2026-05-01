@@ -8,26 +8,26 @@ const N = value.N;
 const util = @import("../../util.zig");
 
 // Has: x contains y?
-fn has_B_b(_: *VM, x: V, y: V) !V  { return .{ .b = hasBoolAtom(x.B.slice(), y.b) }; }
-fn has_I_i(vm: *VM, x: V, y: V) !V { return .{ .b = containsOrdered(i32, vm.alloc, x.I.slice(), y.i) }; }
-fn has_F_f(_: *VM, x: V, y: V) !V  { return .{ .b = containsF(x.F.slice(), y.f) }; }
-fn has_S_s(vm: *VM, x: V, y: V) !V { return .{ .b = containsOrdered(u32, vm.alloc, x.S.slice(), y.s) }; }
-fn has_C_c(_: *VM, x: V, y: V) !V  { return .{ .b = hasCharAtom(x.C.slice(), y.c) }; }
+fn has_B_b(_: *VM, x: V, y: V) V  { return .{ .b = hasBoolAtom(x.B.slice(), y.b) }; }
+fn has_I_i(vm: *VM, x: V, y: V) V { return .{ .b = containsOrdered(i32, vm.alloc, x.I.slice(), y.i) }; }
+fn has_F_f(_: *VM, x: V, y: V) V  { return .{ .b = containsF(x.F.slice(), y.f) }; }
+fn has_S_s(vm: *VM, x: V, y: V) V { return .{ .b = containsOrdered(u32, vm.alloc, x.S.slice(), y.s) }; }
+fn has_C_c(_: *VM, x: V, y: V) V  { return .{ .b = hasCharAtom(x.C.slice(), y.c) }; }
 
-fn has_B_B(vm: *VM, x: V, y: V) !V { return hasBoolVec(vm.alloc, x.B.slice(), y.B.slice()); }
-fn has_C_C(vm: *VM, x: V, y: V) !V { return hasCharVec(vm.alloc, x.C.slice(), y.C.slice()); }
-fn has_I_I(vm: *VM, x: V, y: V) !V { return lookupOrderedVec(i32, vm.alloc, x.I.slice(), y.I.slice()); }
-fn has_F_F(vm: *VM, x: V, y: V) !V { return lookupFloatVec(vm.alloc, x.F.slice(), y.F.slice()); }
-fn has_S_S(vm: *VM, x: V, y: V) !V { return lookupOrderedVec(u32, vm.alloc, x.S.slice(), y.S.slice()); }
+fn has_B_B(vm: *VM, x: V, y: V) V { return hasBoolVec(vm.alloc, x.B.slice(), y.B.slice()); }
+fn has_C_C(vm: *VM, x: V, y: V) V { return hasCharVec(vm.alloc, x.C.slice(), y.C.slice()); }
+fn has_I_I(vm: *VM, x: V, y: V) V { return lookupOrderedVec(i32, vm.alloc, x.I.slice(), y.I.slice()); }
+fn has_F_F(vm: *VM, x: V, y: V) V { return lookupFloatVec(vm.alloc, x.F.slice(), y.F.slice()); }
+fn has_S_S(vm: *VM, x: V, y: V) V { return lookupOrderedVec(u32, vm.alloc, x.S.slice(), y.S.slice()); }
 
-fn has_B_L(vm: *VM, x: V, y: V) !V { return hasBoolList(vm.alloc, x.B.slice(), y.L.slice()); }
-fn has_I_L(vm: *VM, x: V, y: V) !V { return lookupOrderedList(i32, .i, vm.alloc, x.I.slice(), y.L.slice()); }
-fn has_S_L(vm: *VM, x: V, y: V) !V { return lookupOrderedList(u32, .s, vm.alloc, x.S.slice(), y.L.slice()); }
-fn has_C_L(vm: *VM, x: V, y: V) !V { return hasCharList(vm.alloc, x.C.slice(), y.L.slice()); }
+fn has_B_L(vm: *VM, x: V, y: V) V { return hasBoolList(vm.alloc, x.B.slice(), y.L.slice()); }
+fn has_I_L(vm: *VM, x: V, y: V) V { return lookupOrderedList(i32, .i, vm.alloc, x.I.slice(), y.L.slice()); }
+fn has_S_L(vm: *VM, x: V, y: V) V { return lookupOrderedList(u32, .s, vm.alloc, x.S.slice(), y.L.slice()); }
+fn has_C_L(vm: *VM, x: V, y: V) V { return hasCharList(vm.alloc, x.C.slice(), y.L.slice()); }
 
-fn has_F_L(vm: *VM, x: V, y: V) !V { return lookupFloatList(vm.alloc, x.F.slice(), y.L.slice()); }
-fn has_L_atom(vm: *VM, x: V, y: V) !V { return .{ .b = hasListAtom(vm.alloc, x.L.slice(), y) }; }
-fn has_L_vec(vm: *VM, x: V, y: V) !V  { return hasListVec(vm.alloc, x.L.slice(), y); }
+fn has_F_L(vm: *VM, x: V, y: V) V { return lookupFloatList(vm.alloc, x.F.slice(), y.L.slice()); }
+fn has_L_atom(vm: *VM, x: V, y: V) V { return .{ .b = hasListAtom(vm.alloc, x.L.slice(), y) }; }
+fn has_L_vec(vm: *VM, x: V, y: V) V  { return hasListVec(vm.alloc, x.L.slice(), y); }
 
 pub const Has = struct {
   pub const op = .has;
@@ -60,23 +60,23 @@ pub const Has = struct {
 };
 
 // In: x in y? (x and y swapped relative to Has)
-fn in_b_B(_: *VM, x: V, y: V) !V  { return .{ .b = hasBoolAtom(y.B.slice(), x.b) }; }
-fn in_i_I(vm: *VM, x: V, y: V) !V { return .{ .b = containsOrdered(i32, vm.alloc, y.I.slice(), x.i) }; }
-fn in_s_S(vm: *VM, x: V, y: V) !V { return .{ .b = containsOrdered(u32, vm.alloc, y.S.slice(), x.s) }; }
-fn in_I_I(vm: *VM, x: V, y: V) !V { return lookupOrderedVec(i32, vm.alloc, y.I.slice(), x.I.slice()); }
-fn in_L_I(vm: *VM, x: V, y: V) !V { return lookupOrderedList(i32, .i, vm.alloc, y.I.slice(), x.L.slice()); }
-fn in_S_S(vm: *VM, x: V, y: V) !V { return lookupOrderedVec(u32, vm.alloc, y.S.slice(), x.S.slice()); }
-fn in_L_S(vm: *VM, x: V, y: V) !V { return lookupOrderedList(u32, .s, vm.alloc, y.S.slice(), x.L.slice()); }
-fn in_B_B(vm: *VM, x: V, y: V) !V { return hasBoolVec(vm.alloc, y.B.slice(), x.B.slice()); }
-fn in_L_B(vm: *VM, x: V, y: V) !V { return hasBoolList(vm.alloc, y.B.slice(), x.L.slice()); }
-fn in_c_C(_: *VM, x: V, y: V) !V  { return .{ .b = hasCharAtom(y.C.slice(), x.c) }; }
-fn in_C_C(vm: *VM, x: V, y: V) !V { return hasCharVec(vm.alloc, y.C.slice(), x.C.slice()); }
-fn in_L_C(vm: *VM, x: V, y: V) !V { return hasCharList(vm.alloc, y.C.slice(), x.L.slice()); }
-fn in_f_F(_: *VM, x: V, y: V) !V  { return .{ .b = containsF(y.F.slice(), x.f) }; }
-fn in_F_F(vm: *VM, x: V, y: V) !V { return lookupFloatVec(vm.alloc, y.F.slice(), x.F.slice()); }
-fn in_L_F(vm: *VM, x: V, y: V) !V { return lookupFloatList(vm.alloc, y.F.slice(), x.L.slice()); }
-fn in_atom_L(vm: *VM, x: V, y: V) !V { return .{ .b = hasListAtom(vm.alloc, y.L.slice(), x) }; }
-fn in_vec_L(vm: *VM, x: V, y: V) !V  { return hasListVec(vm.alloc, y.L.slice(), x); }
+fn in_b_B(_: *VM, x: V, y: V) V  { return .{ .b = hasBoolAtom(y.B.slice(), x.b) }; }
+fn in_i_I(vm: *VM, x: V, y: V) V { return .{ .b = containsOrdered(i32, vm.alloc, y.I.slice(), x.i) }; }
+fn in_s_S(vm: *VM, x: V, y: V) V { return .{ .b = containsOrdered(u32, vm.alloc, y.S.slice(), x.s) }; }
+fn in_I_I(vm: *VM, x: V, y: V) V { return lookupOrderedVec(i32, vm.alloc, y.I.slice(), x.I.slice()); }
+fn in_L_I(vm: *VM, x: V, y: V) V { return lookupOrderedList(i32, .i, vm.alloc, y.I.slice(), x.L.slice()); }
+fn in_S_S(vm: *VM, x: V, y: V) V { return lookupOrderedVec(u32, vm.alloc, y.S.slice(), x.S.slice()); }
+fn in_L_S(vm: *VM, x: V, y: V) V { return lookupOrderedList(u32, .s, vm.alloc, y.S.slice(), x.L.slice()); }
+fn in_B_B(vm: *VM, x: V, y: V) V { return hasBoolVec(vm.alloc, y.B.slice(), x.B.slice()); }
+fn in_L_B(vm: *VM, x: V, y: V) V { return hasBoolList(vm.alloc, y.B.slice(), x.L.slice()); }
+fn in_c_C(_: *VM, x: V, y: V) V  { return .{ .b = hasCharAtom(y.C.slice(), x.c) }; }
+fn in_C_C(vm: *VM, x: V, y: V) V { return hasCharVec(vm.alloc, y.C.slice(), x.C.slice()); }
+fn in_L_C(vm: *VM, x: V, y: V) V { return hasCharList(vm.alloc, y.C.slice(), x.L.slice()); }
+fn in_f_F(_: *VM, x: V, y: V) V  { return .{ .b = containsF(y.F.slice(), x.f) }; }
+fn in_F_F(vm: *VM, x: V, y: V) V { return lookupFloatVec(vm.alloc, y.F.slice(), x.F.slice()); }
+fn in_L_F(vm: *VM, x: V, y: V) V { return lookupFloatList(vm.alloc, y.F.slice(), x.L.slice()); }
+fn in_atom_L(vm: *VM, x: V, y: V) V { return .{ .b = hasListAtom(vm.alloc, y.L.slice(), x) }; }
+fn in_vec_L(vm: *VM, x: V, y: V) V  { return hasListVec(vm.alloc, y.L.slice(), x); }
 
 pub const In = struct {
   pub const op = .in;
@@ -126,15 +126,15 @@ fn hasBoolAtom(data: []const bool, v: bool) bool {
   const t = boolTable(data);
   return t[@intFromBool(v)];
 }
-fn hasBoolVec(alloc: Alloc, data: []const bool, ny: []const bool) !V {
+fn hasBoolVec(alloc: Alloc, data: []const bool, ny: []const bool) V {
   const t = boolTable(data);
-  const res = try N(bool).init(alloc, ny.len);
+  const res = N(bool).init(alloc, ny.len) catch return V{ .err = .memory };
   for (ny, res.slice()) |v, *b| b.* = t[@intFromBool(v)];
   return .{ .B = res };
 }
-fn hasBoolList(alloc: Alloc, data: []const bool, ny: []const V) !V {
+fn hasBoolList(alloc: Alloc, data: []const bool, ny: []const V) V {
   const t = boolTable(data);
-  const res = try N(bool).init(alloc, ny.len);
+  const res = N(bool).init(alloc, ny.len) catch return V{ .err = .memory };
   for (ny, res.slice()) |yv, *b| b.* = if (yv == .b) t[@intFromBool(yv.b)] else false;
   return .{ .B = res };
 }
@@ -153,16 +153,16 @@ fn hasCharAtom(data: []const u8, v: u32) bool {
   const table = charTable(data);
   return v < 256 and table[@intCast(v)];
 }
-fn hasCharVec(alloc: Alloc, data: []const u8, ny: []const u8) !V {
+fn hasCharVec(alloc: Alloc, data: []const u8, ny: []const u8) V {
   const table = charTable(data);
   if (ny.len == 1) return .{ .b = table[ny[0]] };
-  const res = try N(bool).init(alloc, ny.len);
+  const res = N(bool).init(alloc, ny.len) catch return V{ .err = .memory };
   for (ny, res.slice()) |c, *b| b.* = table[c];
   return .{ .B = res };
 }
-fn hasCharList(alloc: Alloc, data: []const u8, ny: []const V) !V {
+fn hasCharList(alloc: Alloc, data: []const u8, ny: []const V) V {
   const table = charTable(data);
-  const res = try N(bool).init(alloc, ny.len);
+  const res = N(bool).init(alloc, ny.len) catch return V{ .err = .memory };
   for (ny, res.slice()) |yv, *b| b.* = if (yv == .c) (yv.c < 256 and table[@intCast(yv.c)]) else false;
   return .{ .B = res };
 }
@@ -176,25 +176,25 @@ fn containsOrdered(comptime T: type, alloc: Alloc, data: []const T, v: T) bool {
   return std.mem.indexOfScalar(T, data, v) != null;
 }
 
-fn lookupOrderedVec(comptime T: type, alloc: Alloc, data: []const T, ny: []const T) !V {
-  const res = try N(bool).init(alloc, ny.len);
+fn lookupOrderedVec(comptime T: type, alloc: Alloc, data: []const T, ny: []const T) V {
+  const res = N(bool).init(alloc, ny.len) catch return V{ .err = .memory };
   if (data.len <= so.HAS_THRESHOLD) {
     for (ny, res.slice()) |v, *b| b.* = std.mem.indexOfScalar(T, data, v) != null;
   } else {
-    var set = try so.buildOrderedSet(T, alloc, data);
+    var set = so.buildOrderedSet(T, alloc, data) catch return V{ .err = .memory };
     defer set.deinit(alloc);
     for (ny, res.slice()) |v, *b| b.* = set.contains(v);
   }
   return .{ .B = res };
 }
 
-fn lookupOrderedList(comptime T: type, comptime ak: std.meta.Tag(V), alloc: Alloc, data: []const T, ny: []const V) !V {
-  const res = try N(bool).init(alloc, ny.len);
+fn lookupOrderedList(comptime T: type, comptime ak: std.meta.Tag(V), alloc: Alloc, data: []const T, ny: []const V) V {
+  const res = N(bool).init(alloc, ny.len) catch return V{ .err = .memory };
   if (data.len <= so.HAS_THRESHOLD) {
     for (ny, res.slice()) |yv, *b|
       b.* = if (yv == ak) std.mem.indexOfScalar(T, data, @field(yv, @tagName(ak))) != null else false;
   } else {
-    var set = try so.buildOrderedSet(T, alloc, data);
+    var set = so.buildOrderedSet(T, alloc, data) catch return V{ .err = .memory };
     defer set.deinit(alloc);
     for (ny, res.slice()) |yv, *b|
       b.* = if (yv == ak) set.contains(@field(yv, @tagName(ak))) else false;
@@ -208,29 +208,29 @@ fn lookupOrderedList(comptime T: type, comptime ak: std.meta.Tag(V), alloc: Allo
 
 fn containsF(data: []const f32, v: f32) bool { return so.containsF64(data, v); }
 
-fn lookupFloatVec(alloc: Alloc, data: []const f32, ny: []const f32) !V {
-  const res = try N(bool).init(alloc, ny.len);
+fn lookupFloatVec(alloc: Alloc, data: []const f32, ny: []const f32) V {
+  const res = N(bool).init(alloc, ny.len) catch return V{ .err = .memory };
   if (data.len <= so.HAS_THRESHOLD) {
     for (ny, res.slice()) |v, *b| b.* = so.containsF64(data, v);
   } else {
     var set = std.AutoHashMap(u32, void).init(alloc);
     defer set.deinit();
-    try set.ensureTotalCapacity(@intCast(data.len));
-    for (data) |v| try set.put(@bitCast(v), {});
+    set.ensureTotalCapacity(@intCast(data.len)) catch return V{ .err = .memory };
+    for (data) |v| set.put(@bitCast(v), {}) catch return V{ .err = .memory };
     for (ny, res.slice()) |v, *b| b.* = set.contains(@bitCast(v));
   }
   return .{ .B = res };
 }
 
-fn lookupFloatList(alloc: Alloc, data: []const f32, ny: []const V) !V {
-  const res = try N(bool).init(alloc, ny.len);
+fn lookupFloatList(alloc: Alloc, data: []const f32, ny: []const V) V {
+  const res = N(bool).init(alloc, ny.len) catch return V{ .err = .memory };
   if (data.len <= so.HAS_THRESHOLD) {
     for (ny, res.slice()) |yv, *b| b.* = if (yv == .f) so.containsF64(data, yv.f) else false;
   } else {
     var set = std.AutoHashMap(u32, void).init(alloc);
     defer set.deinit();
-    try set.ensureTotalCapacity(@intCast(data.len));
-    for (data) |v| try set.put(@bitCast(v), {});
+    set.ensureTotalCapacity(@intCast(data.len)) catch return V{ .err = .memory };
+    for (data) |v| set.put(@bitCast(v), {}) catch return V{ .err = .memory };
     for (ny, res.slice()) |yv, *b| b.* = if (yv == .f) set.contains(@bitCast(yv.f)) else false;
   }
   return .{ .B = res };
@@ -245,9 +245,9 @@ fn hasListAtom(_: Alloc, data: []const V, y: V) bool {
   return false;
 }
 
-fn hasListVec(alloc: Alloc, data: []const V, y: V) !V {
+fn hasListVec(alloc: Alloc, data: []const V, y: V) V {
   const ylen = y.len();
-  const res = try N(bool).init(alloc, ylen);
+  const res = N(bool).init(alloc, ylen) catch return V{ .err = .memory };
   for (res.slice(), 0..) |*b, j| {
     const yv = y.at(j);
     defer yv.deinit(alloc);
@@ -274,7 +274,7 @@ test "has integers vector" {
   defer x.deinit(alloc);
   var y = try V.intsFromSlice(alloc, &.{ 3, 9, 1 });
   defer y.deinit(alloc);
-  var res = try lookupOrderedVec(i32, alloc, x.I.slice(), y.I.slice());
+  var res = lookupOrderedVec(i32, alloc, x.I.slice(), y.I.slice());
   defer res.deinit(alloc);
   try std.testing.expectEqualSlices(bool, &.{ true, false, true }, res.B.slice());
 }
@@ -305,7 +305,7 @@ test "has chars vector" {
   defer x.deinit(alloc);
   var y = try V.charsFromSlice(alloc, "azbz");
   defer y.deinit(alloc);
-  var res = try hasCharVec(alloc, x.C.slice(), y.C.slice());
+  var res = hasCharVec(alloc, x.C.slice(), y.C.slice());
   defer res.deinit(alloc);
   try std.testing.expectEqualSlices(bool, &.{ true, false, false, false }, res.B.slice());
 }

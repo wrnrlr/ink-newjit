@@ -28,10 +28,10 @@ fn fillVec(comptime xk: K) util.DyadFn {
   const yk = comptime xk.container();
   const T = comptime K.backing(yk);
   return struct {
-    fn f(vm: *VM, x: V, y: V) !V {
+    fn f(vm: *VM, x: V, y: V) V {
       const fill_val: T = @field(x, @tagName(xk));
       const src = @field(y, @tagName(yk)).slice();
-      const res = try N(T).init(vm.alloc, src.len);
+      const res = N(T).init(vm.alloc, src.len) catch return V{ .err = .memory };
       const isNull = K.isNullFn(yk);
       for (src, res.slice()) |v, *d| d.* = if (isNull(v)) fill_val else v;
       return V.wrap(yk, res);
@@ -43,9 +43,9 @@ fn fillPromote(comptime yk: K) util.DyadFn {
   const T = comptime K.backing(yk);
   const sk: K = comptime if (T == f32) .f else .i;
   return struct {
-    fn f(vm: *VM, x: V, y: V) !V {
+    fn f(vm: *VM, x: V, y: V) V {
       const src = @field(y, @tagName(yk)).slice();
-      const res = try N(V).init(vm.alloc, src.len);
+      const res = N(V).init(vm.alloc, src.len) catch return V{ .err = .memory };
       const isNull = K.isNullFn(yk);
       for (src, res.slice()) |v, *d| d.* = if (isNull(v)) x else V.wrap(sk, v);
       return .{ .L = res };
@@ -53,7 +53,7 @@ fn fillPromote(comptime yk: K) util.DyadFn {
   }.f;
 }
 
-fn fillList(vm: *VM, x: V, y: V) !V {
+fn fillList(vm: *VM, x: V, y: V) V {
   const ylen = y.len();
   const res = y.ref();
   for (0..ylen) |i| {

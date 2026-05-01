@@ -19,7 +19,7 @@ pub const Random = struct {
   _i_L: util.DyadFn = rand,
 };
 
-fn rand(vm: *VM, x: V, y: V) !V {
+fn rand(vm: *VM, x: V, y: V) V {
   const n = y.len();
   const count_abs = @abs(x.i);
   const count: usize = @intCast(count_abs);
@@ -27,18 +27,18 @@ fn rand(vm: *VM, x: V, y: V) !V {
   if (x.i >= 0) {
     // Roll: i random selections from y (with replacement)
     if (n == 0) return .{ .err = .length };
-    const res = try N(V).init(vm.alloc, count);
+    const res = N(V).init(vm.alloc, count) catch return V{ .err = .memory };
     const random = vm.prng.random();
     for (res.slice()) |*val| {
       const idx = random.uintLessThan(usize, n);
       val.* = y.at(idx);
     }
-    return try promote(vm.alloc, res);
+    return promote(vm.alloc, res);
   } else {
     // Deal: |i| unique selections from y (without replacement)
     if (count > n) return .{ .err = .length };
 
-    var indices = try vm.alloc.alloc(usize, n);
+    var indices = vm.alloc.alloc(usize, n) catch return V{ .err = .memory };
     defer vm.alloc.free(indices);
     for (indices, 0..) |*idx, j| idx.* = j;
 
@@ -50,10 +50,10 @@ fn rand(vm: *VM, x: V, y: V) !V {
       indices[swap_idx] = tmp;
     }
 
-    const res = try N(V).init(vm.alloc, count);
+    const res = N(V).init(vm.alloc, count) catch return V{ .err = .memory };
     for (res.slice(), 0..) |*v, j| {
       v.* = y.at(indices[j]);
     }
-    return try promote(vm.alloc, res);
+    return promote(vm.alloc, res);
   }
 }

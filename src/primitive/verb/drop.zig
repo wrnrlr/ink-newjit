@@ -18,7 +18,7 @@ pub const Drop = struct {
 
 fn dropVec(comptime yk: K) util.DyadFn {
   return struct {
-    fn f(vm: *VM, x: V, y: V) !V {
+    fn f(vm: *VM, x: V, y: V) V {
       const b = @field(y, @tagName(yk));
       const drop_count: usize = @intCast(@abs(x.i));
       const old_len = b.ptr.len;
@@ -31,7 +31,7 @@ fn dropVec(comptime yk: K) util.DyadFn {
       } else {
         new_len = old_len;
       }
-      const result = try N(K.backing(yk)).init(vm.alloc, new_len);
+      const result = N(K.backing(yk)).init(vm.alloc, new_len) catch return V{ .err = .memory };
       if (new_len > 0) @memcpy(result.slice(), b.slice()[start_offset .. start_offset + new_len]);
       return @unionInit(V, @tagName(yk), result);
     }
@@ -45,7 +45,7 @@ test "drop positive" {
   defer vm.deinit();
   var y = try V.intsFromSlice(vm.alloc, &.{ 1, 2, 3, 4, 5 });
   defer y.deinit(vm.alloc);
-  const res = try dropVec(.I)(vm, .{ .i = 2 }, y);
+  const res = dropVec(.I)(vm, .{ .i = 2 }, y);
   defer res.deinit(vm.alloc);
   try testing.expectEqualSlices(i32, &.{ 3, 4, 5 }, res.I.slice());
 }
@@ -55,7 +55,7 @@ test "drop negative" {
   defer vm.deinit();
   var y = try V.intsFromSlice(vm.alloc, &.{ 1, 2, 3, 4, 5 });
   defer y.deinit(vm.alloc);
-  const res = try dropVec(.I)(vm, .{ .i = -2 }, y);
+  const res = dropVec(.I)(vm, .{ .i = -2 }, y);
   defer res.deinit(vm.alloc);
   try testing.expectEqualSlices(i32, &.{ 1, 2, 3 }, res.I.slice());
 }
@@ -65,7 +65,7 @@ test "drop zero" {
   defer vm.deinit();
   var y = try V.intsFromSlice(vm.alloc, &.{ 1, 2, 3 });
   defer y.deinit(vm.alloc);
-  const res = try dropVec(.I)(vm, .{ .i = 0 }, y);
+  const res = dropVec(.I)(vm, .{ .i = 0 }, y);
   defer res.deinit(vm.alloc);
   try testing.expectEqualSlices(i32, &.{ 1, 2, 3 }, res.I.slice());
 }
@@ -75,7 +75,7 @@ test "drop all" {
   defer vm.deinit();
   var y = try V.intsFromSlice(vm.alloc, &.{ 1, 2, 3 });
   defer y.deinit(vm.alloc);
-  const res = try dropVec(.I)(vm, .{ .i = 10 }, y);
+  const res = dropVec(.I)(vm, .{ .i = 10 }, y);
   defer res.deinit(vm.alloc);
   try testing.expectEqual(@as(usize, 0), res.I.slice().len);
 }
@@ -85,7 +85,7 @@ test "drop chars" {
   defer vm.deinit();
   var y = try V.charsFromSlice(vm.alloc, "hello");
   defer y.deinit(vm.alloc);
-  const res = try dropVec(.C)(vm, .{ .i = 2 }, y);
+  const res = dropVec(.C)(vm, .{ .i = 2 }, y);
   defer res.deinit(vm.alloc);
   try testing.expectEqualSlices(u8, "llo", res.C.slice());
 }

@@ -16,14 +16,14 @@ pub const Floor = struct {
   _F: util.MonadFn = floor_F,
 };
 
-fn identity(_: *VM, x: V) !V { return x; }
+fn identity(_: *VM, x: V) V { return x; }
 
-fn floor_f(_: *VM, x: V) !V {
+fn floor_f(_: *VM, x: V) V {
   return .{ .i = @intFromFloat(std.math.floor(x.f)) };
 }
 
-fn floor_F(vm: *VM, x: V) !V {
-  const res = try N(i32).init(vm.alloc, x.F.ptr.len);
+fn floor_F(vm: *VM, x: V) V {
+  const res = N(i32).init(vm.alloc, x.F.ptr.len) catch return V{ .err = .memory };
   for (x.F.slice(), res.slice()) |v, *r| r.* = @intFromFloat(std.math.floor(v));
   return .{ .I = res };
 }

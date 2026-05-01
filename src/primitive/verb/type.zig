@@ -25,6 +25,6 @@ pub const Type = struct {
 
 fn ktype(comptime s: []const u8) util.MonadFn {
   return struct {
-    fn f(vm: *VM, _: V) !V { return .{ .s = try vm.intern(s) }; }
+    fn f(vm: *VM, _: V) V { return .{ .s = vm.intern(s) catch return V{ .err = .memory } }; }
   }.f;
 }

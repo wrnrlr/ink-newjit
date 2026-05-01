@@ -19,19 +19,18 @@ pub const Flip = struct {
 };
 
 // 1D vector → list of single-element vectors, e.g. +1 2 3 → (,1;,2;,3)
-fn flipVector(vm: *VM, x: V) !V {
+fn flipVector(vm: *VM, x: V) V {
   const n = x.len();
-  const res = try N(V).init(vm.alloc, n);
+  const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
   @memset(res.slice(), .blank);
-  errdefer (V{ .L = res }).deinit(vm.alloc);
   for (res.slice(), 0..) |*r, i| {
-    r.* = try enlist(vm.alloc, x.at(i)); // TODO why are we calling the generic enlist here we should know the type
+    r.* = enlist(vm.alloc, x.at(i)); // TODO why are we calling the generic enlist here we should know the type
   }
   return V{ .L = res };
 }
 
 // Dict → Table (values must be equal-length vectors)
-fn flipDict(vm: *VM, x: V) !V {
+fn flipDict(vm: *VM, x: V) V {
   const alloc = vm.alloc;
   const keys = x.m.av();
   const vals = x.m.bv();
@@ -51,28 +50,29 @@ fn flipDict(vm: *VM, x: V) !V {
   var rv = vals.ref();
   if (keys.len() == 1 and !keys.tag().isVec()) {
     rk.deinit(alloc); rv.deinit(alloc);
-    rk = try enlist(alloc, keys);
-    rv = try enlist(alloc, vals);
+    rk = enlist(alloc, keys);
+    rv = enlist(alloc, vals);
   }
-  return V{ .M = try Dict.init(alloc, rk, rv) };
+  return V{ .M = Dict.init(alloc, rk, rv) catch return V{ .err = .memory } };
 }
 
 // Table → Dict of columns
-fn flipTable(vm: *VM, x: V) !V {
-  return V{ .m = try Dict.init(vm.alloc, x.M.av().ref(), x.M.bv().ref()) };
+fn flipTable(vm: *VM, x: V) V {
+  const dict = Dict.init(vm.alloc, x.M.av().ref(), x.M.bv().ref()) catch return V{ .err = .memory };
+  return V{ .m = dict };
 }
 
 // List of lists/dicts → transpose
-fn flipList(vm: *VM, x: V) !V {
+fn flipList(vm: *VM, x: V) V {
   return flipListAlloc(vm.alloc, x);
 }
 
 /// Public helper used by vm.zig and pick.zig — callers always pass .L.
-pub fn flip(alloc: Alloc, x: V) !V {
+pub fn flip(alloc: Alloc, x: V) V {
   return flipListAlloc(alloc, x);
 }
 
-fn flipListAlloc(alloc: Alloc, x: V) !V {
+fn flipListAlloc(alloc: Alloc, x: V) V {
   const slice = x.L.slice();
   if (slice.len == 0) return x.ref();
   if (slice[0].isDict()) {
@@ -81,9 +81,9 @@ fn flipListAlloc(alloc: Alloc, x: V) !V {
     };
     const num_cols = keys.len();
     const row_count = slice.len;
-    const res_vals_n = try N(V).init(alloc, num_cols);
+    const res_vals_n = N(V).init(alloc, num_cols) catch return V{ .err = .memory };
     for (0..num_cols) |j| {
-      const col = try N(V).init(alloc, row_count);
+      const col = N(V).init(alloc, row_count) catch return V{ .err = .memory };
       for (0..row_count) |i| {
         const item = slice[i];
         if (!item.isDict()) return V{ .err = .@"type" };
@@ -96,21 +96,21 @@ fn flipListAlloc(alloc: Alloc, x: V) !V {
         };
         col.slice()[i] = if (num_cols == 1 and !keys.tag().isVec()) item_vals.ref() else item_vals.at(j);
       }
-      res_vals_n.slice()[j] = try promote(alloc, col);
+      res_vals_n.slice()[j] = promote(alloc, col);
     }
     var rk = keys.ref();
-    const rv = try promote(alloc, res_vals_n);
-    if (num_cols == 1 and !keys.tag().isVec()) { rk.deinit(alloc); rk = try enlist(alloc, keys); }
-    return V{ .M = try Dict.init(alloc, rk, rv) };
+    const rv = promote(alloc, res_vals_n);
+    if (num_cols == 1 and !keys.tag().isVec()) { rk.deinit(alloc); rk = enlist(alloc, keys); }
+    return V{ .M = Dict.init(alloc, rk, rv) catch return V{ .err = .memory } };
   }
   const row_count = slice.len;
   const first_row_len = slice[0].len();
   for (slice[1..]) |row| if (row.len() != first_row_len) return V{ .err = .length };
-  const res = try N(V).init(alloc, first_row_len);
+  const res = N(V).init(alloc, first_row_len) catch return V{ .err = .memory };
   for (0..first_row_len) |j| {
-    const col = try N(V).init(alloc, row_count);
+    const col = N(V).init(alloc, row_count) catch return V{ .err = .memory };
     for (0..row_count) |i| col.slice()[i] = slice[i].at(j);
-    res.slice()[j] = try promote(alloc, col);
+    res.slice()[j] = promote(alloc, col);
   }
-  return try promote(alloc, res);
+  return promote(alloc, res);
 }

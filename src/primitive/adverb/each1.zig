@@ -5,7 +5,7 @@ const Op = @import("../../runtime/tape.zig").Op;
 const VM = @import("../../runtime/vm.zig").VM;
 const value = @import("../../noun/value.zig");
 const gpu = @import("../../gpu/gpu.zig");
-const MonadFn = @import("../../util.zig").MonadFn;
+const util = @import("../../util.zig");
 const V = value.V;
 const N = value.N;
 
@@ -20,7 +20,7 @@ fn monadOpForOp(op: Op) ?gpu.MonadOp {
 }
 
 // Apply f to each element in x
-pub fn each1(vm: *VM, base: V, x: V, f: anytype) !V {
+pub fn each1(vm: *VM, base: V, x: V, f: util.ApplyFn) V {
   // GPU shortcut: builtin element-wise monad on a GPU-resident I/F vector.
   if (vm.gpu) |g| {
     if (base.tag() == .func and base.func.getKind() == .builtin) {
@@ -28,31 +28,27 @@ pub fn each1(vm: *VM, base: V, x: V, f: anytype) !V {
         const xt = x.tag();
         if (xt == .I and x.I.isGpu() and x.I.ptr.len >= EACH_GPU_THRESHOLD) {
           const n: u32 = @intCast(x.I.ptr.len);
-          const out_range = try g.allocRange(n * @sizeOf(i32));
-          try g.monadI32(m_op, out_range, x.I.gpuRange(), n);
-          return .{ .I = try N(i32).initGpu(g, out_range, n) };
+          const out_range = g.allocRange(n * @sizeOf(i32)) catch return V{ .err = .memory };
+          g.monadI32(m_op, out_range, x.I.gpuRange(), n) catch return V{ .err = .memory };
+          return .{ .I = N(i32).initGpu(g, out_range, n) catch return V{ .err = .memory } };
         }
         if (xt == .F and x.F.isGpu() and x.F.ptr.len >= EACH_GPU_THRESHOLD) {
           const n: u32 = @intCast(x.F.ptr.len);
-          const out_range = try g.allocRange(n * @sizeOf(f32));
-          try g.monadF32(m_op, out_range, x.F.gpuRange(), n);
-          return .{ .F = try N(f32).initGpu(g, out_range, n) };
+          const out_range = g.allocRange(n * @sizeOf(f32)) catch return V{ .err = .memory };
+          g.monadF32(m_op, out_range, x.F.gpuRange(), n) catch return V{ .err = .memory };
+          return .{ .F = N(f32).initGpu(g, out_range, n) catch return V{ .err = .memory } };
         }
       }
     }
   }
 
   const n = x.len();
-  var res = try N(V).init(vm.alloc, n);
-  errdefer {
-    for (res.slice()) |*v| v.deinit(vm.alloc);
-    res.deinit(vm.alloc);
-  }
+  var res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
   for (0..n) |i| {
     const item = x.at(i);
     defer item.deinit(vm.alloc);
     const args = [_]V{item};
-    res.slice()[i] = try f(vm, base, &args);
+    res.slice()[i] = f(vm, base, &args);
   }
   return .{ .L = res };
 }

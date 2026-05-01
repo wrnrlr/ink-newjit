@@ -15,15 +15,15 @@ pub const DictMerge = struct {
   _m_m: util.DyadFn = merge,
 };
 
-fn merge(vm: *VM, x: V, y: V) !V {
-  var keys = try std.ArrayList(V).initCapacity(vm.alloc, 0);
-  var vals = try std.ArrayList(V).initCapacity(vm.alloc, 0);
+fn merge(vm: *VM, x: V, y: V) V {
+  var keys = std.ArrayList(V).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
+  var vals = std.ArrayList(V).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
   defer { keys.deinit(vm.alloc); vals.deinit(vm.alloc); }
   const d1k = x.m.av();
   const d1v = x.m.bv();
   for (0..d1k.len()) |i| {
-    try keys.append(vm.alloc, d1k.at(i));
-    try vals.append(vm.alloc, d1v.at(i));
+    keys.append(vm.alloc, d1k.at(i)) catch return V{ .err = .memory };
+    vals.append(vm.alloc, d1v.at(i)) catch return V{ .err = .memory };
   }
   const d2k = y.m.av();
   const d2v = y.m.bv();
@@ -40,15 +40,15 @@ fn merge(vm: *VM, x: V, y: V) !V {
       }
     }
     if (!found) {
-      try keys.append(vm.alloc, k2);
-      try vals.append(vm.alloc, d2v.at(i));
+      keys.append(vm.alloc, k2) catch return V{ .err = .memory };
+      vals.append(vm.alloc, d2v.at(i)) catch return V{ .err = .memory };
     }
   }
-  const rk = try N(V).init(vm.alloc, keys.items.len);
+  const rk = N(V).init(vm.alloc, keys.items.len) catch return V{ .err = .memory };
   @memcpy(rk.slice(), keys.items);
-  const rv = try N(V).init(vm.alloc, vals.items.len);
+  const rv = N(V).init(vm.alloc, vals.items.len) catch return V{ .err = .memory };
   @memcpy(rv.slice(), vals.items);
-  const res = try pair.dict(vm, .{ .L = rk }, .{ .L = rv });
+  const res = pair.dict(vm, .{ .L = rk }, .{ .L = rv });
   rk.deinit(vm.alloc);
   rv.deinit(vm.alloc);
   return res;

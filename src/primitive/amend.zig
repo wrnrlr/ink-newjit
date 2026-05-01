@@ -176,8 +176,8 @@ pub fn setAt(vm: *VM, target: *V, key: V, val: V) !void {
     } else {
       try d.avPtr().cow(vm.alloc);
       try d.bvPtr().cow(vm.alloc);
-      const new_a = try concat.concat(vm.alloc, d.av(), key);
-      const new_b = try concat.concat(vm.alloc, d.bv(), val);
+      const new_a = concat.concat(vm.alloc, d.av(), key);
+      const new_b = concat.concat(vm.alloc, d.bv(), val);
       d.avPtr().deinit(vm.alloc);
       d.bvPtr().deinit(vm.alloc);
       d.avPtr().* = new_a;

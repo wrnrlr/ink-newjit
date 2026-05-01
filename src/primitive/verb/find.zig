@@ -46,21 +46,21 @@ pub const Find = struct {
 
 fn find_vec_atom() util.DyadFn {
   return struct {
-    fn f(_: *VM, _: V, _: V) !V {
+    fn f(_: *VM, _: V, _: V) V {
     }
   }.f;
 }
 
 fn find_vec_vec() util.DyadFn {
   return struct {
-    fn f(_: *VM, _: V, _: V) !V {
+    fn f(_: *VM, _: V, _: V) V {
     }
   }.f;
 }
 
 fn find_list() util.DyadFn {
   return struct {
-    fn f(_: *VM, _: V, _: V) !V {
+    fn f(_: *VM, _: V, _: V) V {
     }
   }.f;
 }
@@ -77,22 +77,22 @@ fn boolLookup(data: []const bool) [2]i32 {
   return .{ idx_f, idx_t };
 }
 
-fn findB_b(vm: *VM, x: V, y: V) !V {
+fn findB_b(vm: *VM, x: V, y: V) V {
   _ = vm;
   const lut = boolLookup(x.B.slice());
   return .{ .i = lut[@intFromBool(y.b)] };
 }
 
-fn findB_B(vm: *VM, x: V, y: V) !V {
+fn findB_B(vm: *VM, x: V, y: V) V {
   const lut = boolLookup(x.B.slice());
-  const res = try N(i32).init(vm.alloc, y.B.ptr.len);
+  const res = N(i32).init(vm.alloc, y.B.ptr.len) catch return V{ .err = .memory };
   for (y.B.slice(), res.slice()) |v, *r| r.* = lut[@intFromBool(v)];
   return .{ .I = res };
 }
 
-fn findB_L(vm: *VM, x: V, y: V) !V {
+fn findB_L(vm: *VM, x: V, y: V) V {
   const lut = boolLookup(x.B.slice());
-  const res = try N(i32).init(vm.alloc, y.L.ptr.len);
+  const res = N(i32).init(vm.alloc, y.L.ptr.len) catch return V{ .err = .memory };
   for (y.L.slice(), res.slice()) |yv, *r|
     r.* = switch (yv) { .b => |v| lut[@intFromBool(v)], else => V.@"0N" };
   return .{ .I = res };
@@ -106,55 +106,55 @@ fn charTable(data: []const u8) [256]i32 {
   return table;
 }
 
-fn findC_c(vm: *VM, x: V, y: V) !V {
+fn findC_c(vm: *VM, x: V, y: V) V {
   _ = vm;
   const table = charTable(x.C.slice());
   return .{ .i = if (y.c < 256) table[@intCast(y.c)] else V.@"0N" };
 }
 
-fn findC_C(vm: *VM, x: V, y: V) !V {
+fn findC_C(vm: *VM, x: V, y: V) V {
   const table = charTable(x.C.slice());
   if (y.C.ptr.len == 1) return .{ .i = table[y.C.slice()[0]] };
-  const res = try N(i32).init(vm.alloc, y.C.ptr.len);
+  const res = N(i32).init(vm.alloc, y.C.ptr.len) catch return V{ .err = .memory };
   for (y.C.slice(), res.slice()) |c, *r| r.* = table[c];
   return .{ .I = res };
 }
 
-fn findC_L(vm: *VM, x: V, y: V) !V {
+fn findC_L(vm: *VM, x: V, y: V) V {
   const table = charTable(x.C.slice());
-  const res = try N(i32).init(vm.alloc, y.L.ptr.len);
+  const res = N(i32).init(vm.alloc, y.L.ptr.len) catch return V{ .err = .memory };
   for (y.L.slice(), res.slice()) |yv, *r|
     r.* = switch (yv) { .c => |v| (if (v < 256) table[@intCast(v)] else V.@"0N"), else => V.@"0N" };
   return .{ .I = res };
 }
 
 // Integer — linear (≤ FIND_THRESHOLD) or hash map
-fn findI_i(vm: *VM, x: V, y: V) !V {
+fn findI_i(vm: *VM, x: V, y: V) V {
   const data = x.I.slice();
   if (data.len <= so.FIND_THRESHOLD)
     return .{ .i = if (std.mem.indexOfScalar(i32, data, y.i)) |i| @intCast(i) else V.@"0N" };
-  var map = try so.buildIndexMap(i32, vm.alloc, data);
+  var map = so.buildIndexMap(i32, vm.alloc, data) catch return V{ .err = .memory };
   defer map.deinit();
   return .{ .i = map.get(y.i) orelse V.@"0N" };
 }
 
-fn findI_I(vm: *VM, x: V, y: V) !V {
+fn findI_I(vm: *VM, x: V, y: V) V {
   const data = x.I.slice();
-  const res = try N(i32).init(vm.alloc, y.I.ptr.len);
+  const res = N(i32).init(vm.alloc, y.I.ptr.len) catch return V{ .err = .memory };
   if (data.len <= so.FIND_THRESHOLD) {
     for (y.I.slice(), res.slice()) |v, *r|
       r.* = if (std.mem.indexOfScalar(i32, data, v)) |i| @intCast(i) else V.@"0N";
     return .{ .I = res };
   }
-  var map = try so.buildIndexMap(i32, vm.alloc, data);
+  var map = so.buildIndexMap(i32, vm.alloc, data) catch return V{ .err = .memory };
   defer map.deinit();
   for (y.I.slice(), res.slice()) |v, *r| r.* = map.get(v) orelse V.@"0N";
   return .{ .I = res };
 }
 
-fn findI_L(vm: *VM, x: V, y: V) !V {
+fn findI_L(vm: *VM, x: V, y: V) V {
   const data = x.I.slice();
-  const res = try N(i32).init(vm.alloc, y.L.ptr.len);
+  const res = N(i32).init(vm.alloc, y.L.ptr.len) catch return V{ .err = .memory };
   if (data.len <= so.FIND_THRESHOLD) {
     for (y.L.slice(), res.slice()) |yv, *r|
       r.* = switch (yv) {
@@ -163,7 +163,7 @@ fn findI_L(vm: *VM, x: V, y: V) !V {
       };
     return .{ .I = res };
   }
-  var map = try so.buildIndexMap(i32, vm.alloc, data);
+  var map = so.buildIndexMap(i32, vm.alloc, data) catch return V{ .err = .memory };
   defer map.deinit();
   for (y.L.slice(), res.slice()) |yv, *r|
     r.* = switch (yv) { .i => |v| map.get(v) orelse V.@"0N", else => V.@"0N" };
@@ -171,32 +171,32 @@ fn findI_L(vm: *VM, x: V, y: V) !V {
 }
 
 // Symbol — same structure as Integer but u32
-fn findS_s(vm: *VM, x: V, y: V) !V {
+fn findS_s(vm: *VM, x: V, y: V) V {
   const data = x.S.slice();
   if (data.len <= so.FIND_THRESHOLD)
     return .{ .i = if (std.mem.indexOfScalar(u32, data, y.s)) |i| @intCast(i) else V.@"0N" };
-  var map = try so.buildIndexMap(u32, vm.alloc, data);
+  var map = so.buildIndexMap(u32, vm.alloc, data) catch return V{ .err = .memory };
   defer map.deinit();
   return .{ .i = map.get(y.s) orelse V.@"0N" };
 }
 
-fn findS_S(vm: *VM, x: V, y: V) !V {
+fn findS_S(vm: *VM, x: V, y: V) V {
   const data = x.S.slice();
-  const res = try N(i32).init(vm.alloc, y.S.ptr.len);
+  const res = N(i32).init(vm.alloc, y.S.ptr.len) catch return V{ .err = .memory };
   if (data.len <= so.FIND_THRESHOLD) {
     for (y.S.slice(), res.slice()) |v, *r|
       r.* = if (std.mem.indexOfScalar(u32, data, v)) |i| @intCast(i) else V.@"0N";
     return .{ .I = res };
   }
-  var map = try so.buildIndexMap(u32, vm.alloc, data);
+  var map = so.buildIndexMap(u32, vm.alloc, data) catch return V{ .err = .memory };
   defer map.deinit();
   for (y.S.slice(), res.slice()) |v, *r| r.* = map.get(v) orelse V.@"0N";
   return .{ .I = res };
 }
 
-fn findS_L(vm: *VM, x: V, y: V) !V {
+fn findS_L(vm: *VM, x: V, y: V) V {
   const data = x.S.slice();
-  const res = try N(i32).init(vm.alloc, y.L.ptr.len);
+  const res = N(i32).init(vm.alloc, y.L.ptr.len) catch return V{ .err = .memory };
   if (data.len <= so.FIND_THRESHOLD) {
     for (y.L.slice(), res.slice()) |yv, *r|
       r.* = switch (yv) {
@@ -205,7 +205,7 @@ fn findS_L(vm: *VM, x: V, y: V) !V {
       };
     return .{ .I = res };
   }
-  var map = try so.buildIndexMap(u32, vm.alloc, data);
+  var map = so.buildIndexMap(u32, vm.alloc, data) catch return V{ .err = .memory };
   defer map.deinit();
   for (y.L.slice(), res.slice()) |yv, *r|
     r.* = switch (yv) { .s => |v| map.get(v) orelse V.@"0N", else => V.@"0N" };
@@ -223,32 +223,32 @@ fn buildFloatMap(vm: *VM, data: []const f32) !std.AutoHashMap(u32, i32) {
   return map;
 }
 
-fn findF_f(vm: *VM, x: V, y: V) !V {
+fn findF_f(vm: *VM, x: V, y: V) V {
   const data = x.F.slice();
   if (data.len <= so.FIND_THRESHOLD)
     return .{ .i = if (so.indexOfF64(data, y.f)) |i| @intCast(i) else V.@"0N" };
-  var map = try buildFloatMap(vm, data);
+  var map = buildFloatMap(vm, data) catch return V{ .err = .memory };
   defer map.deinit();
   return .{ .i = map.get(@bitCast(y.f)) orelse V.@"0N" };
 }
 
-fn findF_F(vm: *VM, x: V, y: V) !V {
+fn findF_F(vm: *VM, x: V, y: V) V {
   const data = x.F.slice();
-  const res = try N(i32).init(vm.alloc, y.F.ptr.len);
+  const res = N(i32).init(vm.alloc, y.F.ptr.len) catch return V{ .err = .memory };
   if (data.len <= so.FIND_THRESHOLD) {
     for (y.F.slice(), res.slice()) |v, *r|
       r.* = if (so.indexOfF64(data, v)) |i| @intCast(i) else V.@"0N";
     return .{ .I = res };
   }
-  var map = try buildFloatMap(vm, data);
+  var map = buildFloatMap(vm, data) catch return V{ .err = .memory };
   defer map.deinit();
   for (y.F.slice(), res.slice()) |v, *r| r.* = map.get(@bitCast(v)) orelse V.@"0N";
   return .{ .I = res };
 }
 
-fn findF_L(vm: *VM, x: V, y: V) !V {
+fn findF_L(vm: *VM, x: V, y: V) V {
   const data = x.F.slice();
-  const res = try N(i32).init(vm.alloc, y.L.ptr.len);
+  const res = N(i32).init(vm.alloc, y.L.ptr.len) catch return V{ .err = .memory };
   if (data.len <= so.FIND_THRESHOLD) {
     for (y.L.slice(), res.slice()) |yv, *r|
       r.* = switch (yv) {
@@ -257,7 +257,7 @@ fn findF_L(vm: *VM, x: V, y: V) !V {
       };
     return .{ .I = res };
   }
-  var map = try buildFloatMap(vm, data);
+  var map = buildFloatMap(vm, data) catch return V{ .err = .memory };
   defer map.deinit();
   for (y.L.slice(), res.slice()) |yv, *r|
     r.* = switch (yv) { .f => |v| map.get(@bitCast(v)) orelse V.@"0N", else => V.@"0N" };
@@ -265,7 +265,7 @@ fn findF_L(vm: *VM, x: V, y: V) !V {
 }
 
 // Fallback for heterogeneous lists and other types — O(n×m)
-fn findFallback(vm: *VM, x: V, y: V) !V {
+fn findFallback(vm: *VM, x: V, y: V) V {
   const alloc = vm.alloc;
   const xlen = x.len();
   if (y.isAtom()) {
@@ -277,7 +277,7 @@ fn findFallback(vm: *VM, x: V, y: V) !V {
     return .{ .i = V.@"0N" };
   }
   const ylen = y.len();
-  const res = try N(i32).init(alloc, ylen);
+  const res = N(i32).init(alloc, ylen) catch return V{ .err = .memory };
   for (res.slice(), 0..) |*r, j| {
     const yv = y.at(j);
     defer yv.deinit(alloc);
@@ -297,9 +297,9 @@ test "find integers atom" {
   defer vm.deinit();
   var x = try V.intsFromSlice(vm.alloc, &.{ 3, 1, 4, 1, 5 });
   defer x.deinit(vm.alloc);
-  try std.testing.expectEqual(@as(i32, 0), (try findI_i(vm, x, .{ .i = 3 })).i);
-  try std.testing.expectEqual(@as(i32, 1), (try findI_i(vm, x, .{ .i = 1 })).i); // first of two 1s
-  try std.testing.expectEqual(V.@"0N",     (try findI_i(vm, x, .{ .i = 9 })).i);
+  try std.testing.expectEqual(@as(i32, 0), findI_i(vm, x, .{ .i = 3 }).i);
+  try std.testing.expectEqual(@as(i32, 1), findI_i(vm, x, .{ .i = 1 }).i); // first of two 1s
+  try std.testing.expectEqual(V.@"0N",     findI_i(vm, x, .{ .i = 9 }).i);
 }
 
 test "find integers vector" {
@@ -309,7 +309,7 @@ test "find integers vector" {
   defer x.deinit(vm.alloc);
   var y = try V.intsFromSlice(vm.alloc, &.{ 4, 9, 3 });
   defer y.deinit(vm.alloc);
-  var res = try findI_I(vm, x, y);
+  var res = findI_I(vm, x, y);
   defer res.deinit(vm.alloc);
   try std.testing.expectEqualSlices(i32, &.{ 2, V.@"0N", 0 }, res.I.slice());
 }
@@ -321,9 +321,9 @@ test "find integers large (hash path)" {
   for (&buf, 0..) |*v, i| v.* = @intCast(i * 2); // even numbers 0,2,4,...
   var x = try V.intsFromSlice(vm.alloc, &buf);
   defer x.deinit(vm.alloc);
-  try std.testing.expectEqual(@as(i32, 0), (try findI_i(vm, x, .{ .i = 0 })).i);
-  try std.testing.expectEqual(@as(i32, 1), (try findI_i(vm, x, .{ .i = 2 })).i);
-  try std.testing.expectEqual(V.@"0N",     (try findI_i(vm, x, .{ .i = 1 })).i);
+  try std.testing.expectEqual(@as(i32, 0), findI_i(vm, x, .{ .i = 0 }).i);
+  try std.testing.expectEqual(@as(i32, 1), findI_i(vm, x, .{ .i = 2 }).i);
+  try std.testing.expectEqual(V.@"0N",     findI_i(vm, x, .{ .i = 1 }).i);
 }
 
 test "find chars atom" {
@@ -331,8 +331,8 @@ test "find chars atom" {
   defer vm.deinit();
   var x = try V.charsFromSlice(vm.alloc, "abcba");
   defer x.deinit(vm.alloc);
-  try std.testing.expectEqual(@as(i32, 1), (try findC_c(vm, x, .{ .c = 'b' })).i); // first b
-  try std.testing.expectEqual(V.@"0N",     (try findC_c(vm, x, .{ .c = 'z' })).i);
+  try std.testing.expectEqual(@as(i32, 1), findC_c(vm, x, .{ .c = 'b' }).i); // first b
+  try std.testing.expectEqual(V.@"0N",     findC_c(vm, x, .{ .c = 'z' }).i);
 }
 
 test "find chars vector" {
@@ -342,7 +342,7 @@ test "find chars vector" {
   defer x.deinit(vm.alloc);
   var y = try V.charsFromSlice(vm.alloc, "bza");
   defer y.deinit(vm.alloc);
-  var res = try findC_C(vm, x, y);
+  var res = findC_C(vm, x, y);
   defer res.deinit(vm.alloc);
   try std.testing.expectEqualSlices(i32, &.{ 1, V.@"0N", 0 }, res.I.slice());
 }
@@ -354,8 +354,8 @@ test "find booleans" {
   bv.slice()[0] = true; bv.slice()[1] = false; bv.slice()[2] = true;
   var x = V{ .B = bv };
   defer x.deinit(vm.alloc);
-  try std.testing.expectEqual(@as(i32, 0), (try findB_b(vm, x, .{ .b = true })).i);
-  try std.testing.expectEqual(@as(i32, 1), (try findB_b(vm, x, .{ .b = false })).i);
+  try std.testing.expectEqual(@as(i32, 0), findB_b(vm, x, .{ .b = true }).i);
+  try std.testing.expectEqual(@as(i32, 1), findB_b(vm, x, .{ .b = false }).i);
 }
 
 test "find floats with NaN" {
@@ -364,7 +364,7 @@ test "find floats with NaN" {
   const nan = std.math.nan(f32);
   var x = try V.floatsFromSlice(vm.alloc, &.{ 1.0, nan, 3.0 });
   defer x.deinit(vm.alloc);
-  try std.testing.expectEqual(@as(i32, 0), (try findF_f(vm, x, .{ .f = 1.0 })).i);
-  try std.testing.expectEqual(@as(i32, 1), (try findF_f(vm, x, .{ .f = nan })).i);
-  try std.testing.expectEqual(V.@"0N",     (try findF_f(vm, x, .{ .f = 9.9 })).i);
+  try std.testing.expectEqual(@as(i32, 0), findF_f(vm, x, .{ .f = 1.0 }).i);
+  try std.testing.expectEqual(@as(i32, 1), findF_f(vm, x, .{ .f = nan }).i);
+  try std.testing.expectEqual(V.@"0N",     findF_f(vm, x, .{ .f = 9.9 }).i);
 }

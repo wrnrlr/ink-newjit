@@ -321,7 +321,7 @@ pub fn parseDbf(alloc: Alloc, pool: *Pool, data: []const u8) !V {
   const sv_n = try N(V).init(alloc, num_fields);
   for (0..num_fields) |i| {
     const col_raw = try V.valuesFromSlice(alloc, col_lists[i].items);
-    sv_n.slice()[i] = try promote(alloc, col_raw.L);
+    sv_n.slice()[i] = promote(alloc, col_raw.L);
   }
 
   return V{ .M = try value.Dict.init(alloc, .{ .S = sk_n }, .{.L = sv_n}) };

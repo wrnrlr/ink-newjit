@@ -28,9 +28,9 @@ pub const Tally = struct {
   _M: util.MonadFn = tally,
 };
 
-fn tallyAtom(_: *VM, _: V) !V { return .{ .i = 1 }; }
+fn tallyAtom(_: *VM, _: V) V { return .{ .i = 1 }; }
 
-fn tally(_: *VM, x: V) !V {
+fn tally(_: *VM, x: V) V {
   return .{ .i = @intCast(x.len()) };
 }
 

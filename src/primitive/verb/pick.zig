@@ -58,28 +58,28 @@ pub const Pick = struct {
 };
 
 
-fn pickBoolFn(_: *VM, x: V, y: V) !V  { return x.at(if (y.b) 1 else 0); }
-fn pickMaskFn(vm: *VM, x: V, y: V) !V { return pickMask(vm.alloc, x, y.B.slice()); }
-fn pickAtomFn(_: *VM, x: V, y: V) !V  { return pickAtom(x, y.i); }
-fn pickVecFn(vm: *VM, x: V, y: V) !V  { return pickVec(vm.alloc, x, y.I.slice()); }
-fn pickSymAtomFn(_: *VM, x: V, y: V) !V  { return pickSymAtom(x, y.s); }
-fn pickSymVecFn(vm: *VM, x: V, y: V) !V  { return pickSymVec(vm.alloc, x, y.S.slice()); }
-fn pickDictSymFn(_: *VM, x: V, y: V) !V  { return pickDictSym(x.m, y.s); }
-fn pickDictSymVecFn(vm: *VM, x: V, y: V) !V { return pickDictSymVec(vm.alloc, x.m, y.S.slice()); }
-fn pickTableRowFn(vm: *VM, x: V, y: V) !V  { return pickTableRow(vm.alloc, x.M, y.i); }
-fn pickTableRowVecFn(vm: *VM, x: V, y: V) !V { return pickTableRowVec(vm.alloc, x, y.I.slice()); }
-fn pickTableColFn(_: *VM, x: V, y: V) !V  { return pickTableCol(x.M, y.s); }
-fn pickTableColVecFn(vm: *VM, x: V, y: V) !V { return pickTableColVec(vm.alloc, x, y.S.slice()); }
+fn pickBoolFn(_: *VM, x: V, y: V) V  { return x.at(if (y.b) 1 else 0); }
+fn pickMaskFn(vm: *VM, x: V, y: V) V { return pickMask(vm.alloc, x, y.B.slice()); }
+fn pickAtomFn(_: *VM, x: V, y: V) V  { return pickAtom(x, y.i); }
+fn pickVecFn(vm: *VM, x: V, y: V) V  { return pickVec(vm.alloc, x, y.I.slice()); }
+fn pickSymAtomFn(_: *VM, x: V, y: V) V  { return pickSymAtom(x, y.s); }
+fn pickSymVecFn(vm: *VM, x: V, y: V) V  { return pickSymVec(vm.alloc, x, y.S.slice()); }
+fn pickDictSymFn(_: *VM, x: V, y: V) V  { return pickDictSym(x.m, y.s); }
+fn pickDictSymVecFn(vm: *VM, x: V, y: V) V { return pickDictSymVec(vm.alloc, x.m, y.S.slice()); }
+fn pickTableRowFn(vm: *VM, x: V, y: V) V  { return pickTableRow(vm.alloc, x.M, y.i); }
+fn pickTableRowVecFn(vm: *VM, x: V, y: V) V { return pickTableRowVec(vm.alloc, x, y.I.slice()); }
+fn pickTableColFn(_: *VM, x: V, y: V) V  { return pickTableCol(x.M, y.s); }
+fn pickTableColVecFn(vm: *VM, x: V, y: V) V { return pickTableColVec(vm.alloc, x, y.S.slice()); }
 
 
-fn pickAtom(x: V, idx: i32) !V {
+fn pickAtom(x: V, idx: i32) V {
   if (idx < 0 or idx >= @as(i32, @intCast(x.len()))) return .{ .err = .length };
   return x.at(@intCast(idx));
 }
 
-fn pickVec(alloc: Alloc, x: V, indices: []const i32) !V {
+fn pickVec(alloc: Alloc, x: V, indices: []const i32) V {
   const length = x.len();
-  const res = try N(V).init(alloc, indices.len);
+  const res = N(V).init(alloc, indices.len) catch return V{ .err = .memory };
   for (indices, 0..) |idx, k| {
     if (idx < 0 or idx >= @as(i32, @intCast(length))) {
       for (res.slice()[0..k]) |*v| v.deinit(alloc);
@@ -88,25 +88,25 @@ fn pickVec(alloc: Alloc, x: V, indices: []const i32) !V {
     }
     res.slice()[k] = x.at(@intCast(idx));
   }
-  return try promote(alloc, res);
+  return promote(alloc, res);
 }
 
-fn pickMask(alloc: Alloc, x: V, mask: []const bool) !V {
+fn pickMask(alloc: Alloc, x: V, mask: []const bool) V {
   const length = x.len();
   if (length == 2) {
-    const res = try N(V).init(alloc, mask.len);
+    const res = N(V).init(alloc, mask.len) catch return V{ .err = .memory };
     for (mask, 0..) |m, k| res.slice()[k] = x.at(@as(usize, if (m) 1 else 0));
-    return try promote(alloc, res);
+    return promote(alloc, res);
   }
   if (mask.len != length) return .{ .err = .length };
   var res_list: std.ArrayList(V) = .empty;
   defer res_list.deinit(alloc);
-  try res_list.ensureTotalCapacity(alloc, mask.len);
+  res_list.ensureTotalCapacity(alloc, mask.len) catch return V{ .err = .memory };
   for (mask, 0..) |m, k| if (m) res_list.appendAssumeCapacity(x.at(k));
-  const res = try N(V).init(alloc, res_list.items.len);
+  const res = N(V).init(alloc, res_list.items.len) catch return V{ .err = .memory };
   @memcpy(res.slice(), res_list.items);
   res_list.items.len = 0;
-  return try promote(alloc, res);
+  return promote(alloc, res);
 }
 
 fn pickSymAtom(x: V, s: u32) V {
@@ -114,10 +114,10 @@ fn pickSymAtom(x: V, s: u32) V {
   return .blank;
 }
 
-fn pickSymVec(alloc: Alloc, x: V, keys: []const u32) !V {
-  const res = try N(V).init(alloc, keys.len);
+fn pickSymVec(alloc: Alloc, x: V, keys: []const u32) V {
+  const res = N(V).init(alloc, keys.len) catch return V{ .err = .memory };
   for (keys, 0..) |s, k| res.slice()[k] = pickSymAtom(x, s);
-  return try promote(alloc, res);
+  return promote(alloc, res);
 }
 
 fn pickDictSym(m: Dict, s: u32) V {
@@ -129,31 +129,32 @@ fn pickDictSym(m: Dict, s: u32) V {
   return .blank;
 }
 
-fn pickDictSymVec(alloc: Alloc, m: Dict, keys: []const u32) !V {
-  const res = try N(V).init(alloc, keys.len);
+fn pickDictSymVec(alloc: Alloc, m: Dict, keys: []const u32) V {
+  const res = N(V).init(alloc, keys.len) catch return V{ .err = .memory };
   for (keys, 0..) |s, k| res.slice()[k] = pickDictSym(m, s);
-  return try promote(alloc, res);
+  return promote(alloc, res);
 }
 
-fn pickTableRow(alloc: Alloc, t: Dict, idx: i32) !V {
+fn pickTableRow(alloc: Alloc, t: Dict, idx: i32) V {
   const keys = t.av();
   const vals = t.bv();
   const length = keys.len();
   if (idx < 0 or idx >= @as(i32, @intCast(length))) return .{ .err = .length };
-  const row_vals = try N(V).init(alloc, keys.len());
+  const row_vals = N(V).init(alloc, keys.len()) catch return V{ .err = .memory };
   for (0..keys.len()) |j| {
     const col = vals.at(j);
     defer col.deinit(alloc);
     row_vals.slice()[j] = col.at(@intCast(idx));
   }
-  return V{ .m = try Dict.init(alloc, keys.ref(), .{ .L = row_vals }) };
+  const dict = Dict.init(alloc, keys.ref(), .{ .L = row_vals }) catch return V{ .err = .memory };
+  return V{ .m = dict };
 }
 
-fn pickTableRowVec(alloc: Alloc, x: V, indices: []const i32) !V {
+fn pickTableRowVec(alloc: Alloc, x: V, indices: []const i32) V {
   const n = indices.len;
-  const res = try N(V).init(alloc, n);
-  for (indices, 0..) |idx, k| res.slice()[k] = try pickTableRow(alloc, x.M, idx);
-  return try flip(alloc, .{ .L = res });
+  const res = N(V).init(alloc, n) catch return V{ .err = .memory };
+  for (indices, 0..) |idx, k| res.slice()[k] = pickTableRow(alloc, x.M, idx);
+  return flip(alloc, .{ .L = res });
 }
 
 fn pickTableCol(t: Dict, s: u32) V {
@@ -165,18 +166,19 @@ fn pickTableCol(t: Dict, s: u32) V {
   return .blank;
 }
 
-fn pickTableColVec(alloc: Alloc, x: V, keys: []const u32) !V {
+fn pickTableColVec(alloc: Alloc, x: V, keys: []const u32) V {
   const n = keys.len;
-  const res_keys = try N(u32).init(alloc, n);
-  const res_vals = try N(V).init(alloc, n);
+  const res_keys = N(u32).init(alloc, n) catch return V{ .err = .memory };
+  const res_vals = N(V).init(alloc, n) catch return V{ .err = .memory };
   for (keys, 0..) |s, k| {
     res_keys.slice()[k] = s;
     res_vals.slice()[k] = pickTableCol(x.M, s);
   }
-  return V{ .M = try Dict.init(alloc, .{ .S = res_keys }, try promote(alloc, res_vals)) };
+  const dict = Dict.init(alloc, .{ .S = res_keys }, promote(alloc, res_vals)) catch return V{ .err = .memory };
+  return V{ .M = dict };
 }
 
-pub fn pick(alloc: Alloc, x: V, i: V) !V {
+pub fn pick(alloc: Alloc, x: V, i: V) V {
   return switch (x) {
     .M => |t| switch (i) {
       .i => |idx| pickTableRow(alloc, t, idx),

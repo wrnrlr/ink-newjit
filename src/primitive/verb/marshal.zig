@@ -44,19 +44,19 @@ pub const Unmarshal = struct {
   _s_i: util.DyadFn = unmarshal_s_i,
 };
 
-fn marshal_s_C(vm: *VM, x: V, y: V) !V {
+fn marshal_s_C(vm: *VM, x: V, y: V) V {
   const s = vm.getSymbol(x.s);
-  if (std.mem.eql(u8, s, "bin")) return binary.serialize(vm.alloc, &vm.symbols, y);
+  if (std.mem.eql(u8, s, "bin")) return binary.serialize(vm.alloc, &vm.symbols, y) catch return V{ .err = .memory };
   return .{ .err = .domain };
 }
-fn marshal_s_B(vm: *VM, x: V, y: V) !V {
+fn marshal_s_B(vm: *VM, x: V, y: V) V {
   const s = vm.getSymbol(x.s);
-  if (std.mem.eql(u8, s, "") or std.mem.eql(u8, s, "bin")) return binary.serialize(vm.alloc, &vm.symbols, y);
+  if (std.mem.eql(u8, s, "") or std.mem.eql(u8, s, "bin")) return binary.serialize(vm.alloc, &vm.symbols, y) catch return V{ .err = .memory };
   return .{ .err = .domain };
 }
-fn marshal_bin_only(vm: *VM, x: V, y: V) !V {
+fn marshal_bin_only(vm: *VM, x: V, y: V) V {
   const s = vm.getSymbol(x.s);
-  if (std.mem.eql(u8, s, "bin")) return binary.serialize(vm.alloc, &vm.symbols, y);
+  if (std.mem.eql(u8, s, "bin")) return binary.serialize(vm.alloc, &vm.symbols, y) catch return V{ .err = .memory };
   return .{ .err = .domain };
 }
 
@@ -65,35 +65,35 @@ fn loadFile(alloc: Alloc, path: []const u8) ![]u8 {
   return try std.Io.Dir.cwd().readFileAlloc(io, path, alloc, std.Io.Limit.limited(1024 * 1024 * 100));
 }
 
-fn unmarshal_s_C(vm: *VM, x: V, y: V) !V {
+fn unmarshal_s_C(vm: *VM, x: V, y: V) V {
   return unmarshalDispatch(vm, vm.getSymbol(x.s), y.C.slice());
 }
 
-fn unmarshal_s_B(vm: *VM, x: V, y: V) !V {
+fn unmarshal_s_B(vm: *VM, x: V, y: V) V {
   return unmarshalDispatch(vm, vm.getSymbol(x.s), std.mem.sliceAsBytes(y.B.slice()));
 }
 
-fn unmarshal_s_s(vm: *VM, x: V, y: V) !V {
+fn unmarshal_s_s(vm: *VM, x: V, y: V) V {
   const data = loadFile(vm.alloc, vm.getSymbol(y.s)) catch return .{ .err = .io };
   defer vm.alloc.free(data);
   return unmarshalDispatch(vm, vm.getSymbol(x.s), data);
 }
 
-fn unmarshal_s_i(vm: *VM, x: V, y: V) !V {
+fn unmarshal_s_i(vm: *VM, x: V, y: V) V {
   return unmarshalDispatch(vm, vm.getSymbol(x.s), vm.registry.getFileText(@intCast(y.i)));
 }
 
-fn unmarshalDispatch(vm: *VM, s: []const u8, data: []const u8) !V {
+fn unmarshalDispatch(vm: *VM, s: []const u8, data: []const u8) V {
   const eql = std.mem.eql;
-  if (eql(u8, s, "bin"))  return binary.deserialize(vm.alloc, &vm.symbols, data);
-  if (eql(u8, s, "font")) return font.parse(vm.alloc, &vm.symbols, data);
-  if (eql(u8, s, "csv"))  return csv.parse(vm.alloc, &vm.symbols, data);
-  if (eql(u8, s, "json")) return json.parse(vm.alloc, &vm.symbols, data);
-  if (eql(u8, s, "xml"))  return xml.parse(vm.alloc, &vm.symbols, data);
-  if (eql(u8, s, "shp"))  return shp.parseShp(vm.alloc, &vm.symbols, data);
-  if (eql(u8, s, "shx"))  return shp.parseShx(vm.alloc, &vm.symbols, data);
-  if (eql(u8, s, "dbf"))  return shp.parseDbf(vm.alloc, &vm.symbols, data);
-  if (eql(u8, s, "prj"))  return shp.parsePrj(vm.alloc, &vm.symbols, data);
-  if (eql(u8, s, "cpg"))  return shp.parseCpg(vm.alloc, &vm.symbols, data);
+  if (eql(u8, s, "bin"))  return binary.deserialize(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
+  if (eql(u8, s, "font")) return font.parse(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
+  if (eql(u8, s, "csv"))  return csv.parse(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
+  if (eql(u8, s, "json")) return json.parse(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
+  if (eql(u8, s, "xml"))  return xml.parse(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
+  if (eql(u8, s, "shp"))  return shp.parseShp(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
+  if (eql(u8, s, "shx"))  return shp.parseShx(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
+  if (eql(u8, s, "dbf"))  return shp.parseDbf(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
+  if (eql(u8, s, "prj"))  return shp.parsePrj(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
+  if (eql(u8, s, "cpg"))  return shp.parseCpg(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
   return .{ .err = .domain };
 }

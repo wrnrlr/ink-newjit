@@ -11,7 +11,7 @@ pub const Open = struct {
   _s: util.MonadFn = open,
 };
 
-fn open(vm: *VM, x: V) !V {
+fn open(vm: *VM, x: V) V {
   const path = vm.getSymbol(x.s);
   const id = vm.mapFile(path) catch return V{ .err = .io };
   return V{ .i = @intCast(id) };

@@ -16,11 +16,11 @@ pub const Pad = struct {
   _i_C: util.DyadFn = pad,
 };
 
-fn pad(vm: *VM, x: V, y: V) !V {
+fn pad(vm: *VM, x: V, y: V) V {
   const i = x.i;
   const s = y.C.slice();
   const target_len: usize = @intCast(@abs(i));
-  const res = try N(u8).init(vm.alloc, target_len);
+  const res = N(u8).init(vm.alloc, target_len) catch return V{ .err = .memory };
   const slice = res.slice();
   @memset(slice, ' ');
 

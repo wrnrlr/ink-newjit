@@ -6,7 +6,7 @@ const K = @import("../noun/class.zig").K;
 const V = value.V;
 const N = value.N;
 
-pub fn promote(alloc: Alloc, n: N(V)) !V {
+pub fn promote(alloc: Alloc, n: N(V)) V {
   const slice = n.slice();
   if (slice.len == 0) return V{ .L = n };
   var target: ?K = null;
@@ -29,16 +29,15 @@ pub fn promote(alloc: Alloc, n: N(V)) !V {
       } else return V{ .L = n };
     }
   }
-  errdefer n.deinit(alloc);
   switch (target.?) {
     .b => {
-      var res = try N(bool).init(alloc, slice.len);
+      var res = N(bool).init(alloc, slice.len) catch { n.deinit(alloc); return V{ .err = .memory }; };
       for (slice, 0..) |v, i| res.slice()[i] = v.b;
       n.deinit(alloc);
       return .{ .B = res };
     },
     .i => {
-      var res = try N(i32).init(alloc, slice.len);
+      var res = N(i32).init(alloc, slice.len) catch { n.deinit(alloc); return V{ .err = .memory }; };
       for (slice, 0..) |v, i| {
         const tag = v.tag();
         res.slice()[i] = if (tag == .i) v.i else if (tag == .b) @intFromBool(v.b) else 0;
@@ -47,7 +46,7 @@ pub fn promote(alloc: Alloc, n: N(V)) !V {
       return .{ .I = res };
     },
     .f => {
-      var res = try N(f32).init(alloc, slice.len);
+      var res = N(f32).init(alloc, slice.len) catch { n.deinit(alloc); return V{ .err = .memory }; };
       for (slice, 0..) |v, i| {
         const tag = v.tag();
         res.slice()[i] = if (tag == .f) v.f else if (tag == .i) @as(f32, @floatFromInt(v.i)) else @as(f32, if (v.b) 1 else 0);
@@ -56,13 +55,13 @@ pub fn promote(alloc: Alloc, n: N(V)) !V {
       return .{ .F = res };
     },
     .s => {
-      var res = try N(u32).init(alloc, slice.len);
+      var res = N(u32).init(alloc, slice.len) catch { n.deinit(alloc); return V{ .err = .memory }; };
       for (slice, 0..) |v, i| res.slice()[i] = v.s;
       n.deinit(alloc);
       return .{ .S = res };
     },
     .c => {
-      var res = try N(u8).init(alloc, slice.len);
+      var res = N(u8).init(alloc, slice.len) catch { n.deinit(alloc); return V{ .err = .memory }; };
       for (slice, 0..) |v, i| res.slice()[i] = @intCast(v.c);
       n.deinit(alloc);
       return .{ .C = res };

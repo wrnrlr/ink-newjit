@@ -19,21 +19,24 @@ fn writeFile(vm: *VM, id: u32, content: []const u8) !void {
 // ReadLines  0: (monad)
 // ---------------------------------------------------------------------------
 
-fn readLinesBySymbol(vm: *VM, x: V) !V {
+fn readLinesBySymbol(vm: *VM, x: V) V {
   const id = vm.mapFile(vm.getSymbol(x.s)) catch return V{ .err = .io };
   return readLinesById(vm, V{ .i = @intCast(id) });
 }
-fn readLinesByChars(vm: *VM, x: V) !V {
+fn readLinesByChars(vm: *VM, x: V) V {
   const id = vm.mapFile(x.C.slice()) catch return V{ .err = .io };
   return readLinesById(vm, V{ .i = @intCast(id) });
 }
-fn readLinesById(vm: *VM, x: V) !V {
+fn readLinesById(vm: *VM, x: V) V {
   const text = vm.registry.getFileText(@as(u32, @intCast(x.i)));
-  var list = try std.ArrayList(V).initCapacity(vm.alloc, 0);
+  var list = std.ArrayList(V).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
   defer list.deinit(vm.alloc);
   var iter = std.mem.splitScalar(u8, text, '\n');
-  while (iter.next()) |line| try list.append(vm.alloc, try V.charsFromSlice(vm.alloc, line));
-  return try V.valuesFromSlice(vm.alloc, list.items);
+  while (iter.next()) |line| {
+    const s = V.charsFromSlice(vm.alloc, line) catch return V{ .err = .memory };
+    list.append(vm.alloc, s) catch return V{ .err = .memory };
+  }
+  return V.valuesFromSlice(vm.alloc, list.items) catch return V{ .err = .memory };
 }
 
 pub const ReadLines = struct {
@@ -47,7 +50,7 @@ pub const ReadLines = struct {
 // WriteLines  0: (dyad)
 // ---------------------------------------------------------------------------
 
-fn writeLinesConsole(vm: *VM, _: V, y: V) !V {
+fn writeLinesConsole(vm: *VM, _: V, y: V) V {
   if (y.tag() == .C) {
     vm.print("{s}\n", .{y.C.slice()});
     return y.ref();
@@ -67,35 +70,35 @@ fn writeLinesConsole(vm: *VM, _: V, y: V) !V {
   }
   return V{ .err = .@"type" };
 }
-fn writeLinesBySymbol(vm: *VM, x: V, y: V) !V {
+fn writeLinesBySymbol(vm: *VM, x: V, y: V) V {
   const path = vm.getSymbol(x.s);
   if (path.len == 0 or std.mem.eql(u8, path, "0")) return writeLinesConsole(vm, x, y);
   const id = vm.mapFile(path) catch return V{ .err = .io };
   return writeLinesById(vm, V{ .i = @intCast(id) }, y);
 }
-fn writeLinesByChars(vm: *VM, x: V, y: V) !V {
+fn writeLinesByChars(vm: *VM, x: V, y: V) V {
   const id = vm.mapFile(x.C.slice()) catch return V{ .err = .io };
   return writeLinesById(vm, V{ .i = @intCast(id) }, y);
 }
-fn writeLinesById_L(vm: *VM, x: V, y: V) !V { return writeLinesById(vm, x, y); }
-fn writeLinesById_C(vm: *VM, x: V, y: V) !V { return writeLinesById(vm, x, y); }
-fn writeLinesById_s(vm: *VM, x: V, y: V) !V { return writeLinesById(vm, x, y); }
-fn writeLinesById(vm: *VM, x: V, y: V) !V {
+fn writeLinesById_L(vm: *VM, x: V, y: V) V { return writeLinesById(vm, x, y); }
+fn writeLinesById_C(vm: *VM, x: V, y: V) V { return writeLinesById(vm, x, y); }
+fn writeLinesById_s(vm: *VM, x: V, y: V) V { return writeLinesById(vm, x, y); }
+fn writeLinesById(vm: *VM, x: V, y: V) V {
   const id = @as(u32, @intCast(x.i));
-  var out = try std.ArrayList(u8).initCapacity(vm.alloc, 0);
+  var out = std.ArrayList(u8).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
   defer out.deinit(vm.alloc);
   switch (y) {
     .L => for (y.L.slice(), 0..) |item, i| {
-      if (i > 0) try out.append(vm.alloc, '\n');
-      if (item.tag() == .C) try out.appendSlice(vm.alloc, item.C.slice())
-      else if (item.tag() == .s) try out.appendSlice(vm.alloc, vm.getSymbol(item.s));
+      if (i > 0) out.append(vm.alloc, '\n') catch return V{ .err = .memory };
+      if (item.tag() == .C) out.appendSlice(vm.alloc, item.C.slice()) catch return V{ .err = .memory }
+      else if (item.tag() == .s) out.appendSlice(vm.alloc, vm.getSymbol(item.s)) catch return V{ .err = .memory };
     },
-    .C => try out.appendSlice(vm.alloc, y.C.slice()),
-    .s => try out.appendSlice(vm.alloc, vm.getSymbol(y.s)),
+    .C => out.appendSlice(vm.alloc, y.C.slice()) catch return V{ .err = .memory },
+    .s => out.appendSlice(vm.alloc, vm.getSymbol(y.s)) catch return V{ .err = .memory },
     else => return V{ .err = .@"type" },
   }
-  try out.append(vm.alloc, '\n');
-  try writeFile(vm, id, out.items);
+  out.append(vm.alloc, '\n') catch return V{ .err = .memory };
+  writeFile(vm, id, out.items) catch return V{ .err = .io };
   return y.ref();
 }
 
@@ -117,16 +120,16 @@ pub const WriteLines = struct {
 // ReadBytes  1: (monad)
 // ---------------------------------------------------------------------------
 
-fn readBytesBySymbol(vm: *VM, x: V) !V {
+fn readBytesBySymbol(vm: *VM, x: V) V {
   const id = vm.mapFile(vm.getSymbol(x.s)) catch return V{ .err = .io };
   return readBytesById(vm, V{ .i = @intCast(id) });
 }
-fn readBytesByChars(vm: *VM, x: V) !V {
+fn readBytesByChars(vm: *VM, x: V) V {
   const id = vm.mapFile(x.C.slice()) catch return V{ .err = .io };
   return readBytesById(vm, V{ .i = @intCast(id) });
 }
-fn readBytesById(vm: *VM, x: V) !V {
-  return try V.charsFromSlice(vm.alloc, vm.registry.getFileText(@as(u32, @intCast(x.i))));
+fn readBytesById(vm: *VM, x: V) V {
+  return V.charsFromSlice(vm.alloc, vm.registry.getFileText(@as(u32, @intCast(x.i)))) catch return V{ .err = .memory };
 }
 
 pub const ReadBytes = struct {
@@ -140,16 +143,16 @@ pub const ReadBytes = struct {
 // WriteBytes  1: (dyad)
 // ---------------------------------------------------------------------------
 
-fn writeBytesBySymbol(vm: *VM, x: V, y: V) !V {
+fn writeBytesBySymbol(vm: *VM, x: V, y: V) V {
   const id = vm.mapFile(vm.getSymbol(x.s)) catch return V{ .err = .io };
   return writeBytesByHandle(vm, V{ .i = @intCast(id) }, y);
 }
-fn writeBytesByChars(vm: *VM, x: V, y: V) !V {
+fn writeBytesByChars(vm: *VM, x: V, y: V) V {
   const id = vm.mapFile(x.C.slice()) catch return V{ .err = .io };
   return writeBytesByHandle(vm, V{ .i = @intCast(id) }, y);
 }
-fn writeBytesByHandle(vm: *VM, x: V, y: V) !V {
-  try writeFile(vm, @as(u32, @intCast(x.i)), y.C.slice());
+fn writeBytesByHandle(vm: *VM, x: V, y: V) V {
+  writeFile(vm, @as(u32, @intCast(x.i)), y.C.slice()) catch return V{ .err = .io };
   return y.ref();
 }
 
@@ -164,16 +167,16 @@ pub const WriteBytes = struct {
 // ReadData  2: (monad)
 // ---------------------------------------------------------------------------
 
-fn readDataBySymbol(vm: *VM, x: V) !V {
+fn readDataBySymbol(vm: *VM, x: V) V {
   const id = vm.mapFile(vm.getSymbol(x.s)) catch return V{ .err = .io };
   return readDataById(vm, V{ .i = @intCast(id) });
 }
-fn readDataByChars(vm: *VM, x: V) !V {
+fn readDataByChars(vm: *VM, x: V) V {
   const id = vm.mapFile(x.C.slice()) catch return V{ .err = .io };
   return readDataById(vm, V{ .i = @intCast(id) });
 }
-fn readDataById(vm: *VM, x: V) !V {
-  return try vm.eval(vm.registry.getFileText(@as(u32, @intCast(x.i))));
+fn readDataById(vm: *VM, x: V) V {
+  return vm.eval(vm.registry.getFileText(@as(u32, @intCast(x.i)))) catch return V{ .err = .io };
 }
 
 pub const ReadData = struct {
@@ -187,11 +190,11 @@ pub const ReadData = struct {
 // WriteData  2: (dyad)
 // ---------------------------------------------------------------------------
 
-fn writeDataBySymbol(vm: *VM, x: V, y: V) !V {
+fn writeDataBySymbol(vm: *VM, x: V, y: V) V {
   const id = vm.mapFile(vm.getSymbol(x.s)) catch return V{ .err = .io };
   return writeDataFallback(vm, V{ .i = @intCast(id) }, y);
 }
-fn writeDataByChars(vm: *VM, x: V, y: V) !V {
+fn writeDataByChars(vm: *VM, x: V, y: V) V {
   const id = vm.mapFile(x.C.slice()) catch return V{ .err = .io };
   return writeDataFallback(vm, V{ .i = @intCast(id) }, y);
 }
@@ -227,13 +230,13 @@ pub const WriteData = struct {
   _i_a: util.DyadFn = writeDataFallback,
 };
 
-pub fn writeDataFallback(vm: *VM, x: V, y: V) !V {
+pub fn writeDataFallback(vm: *VM, x: V, y: V) V {
   const id = @as(u32, @intCast(x.i));
-  var mock = try util.MockWriter.init(vm.alloc);
+  var mock = util.MockWriter.init(vm.alloc) catch return V{ .err = .memory };
   defer mock.deinit();
   var formatter = format.TerseFormatter.init(vm, vm.alloc, .Text);
   var w = mock.writer();
-  try formatter.formatter().format(y, &w.interface);
-  try writeFile(vm, id, mock.getText());
+  formatter.formatter().format(y, &w.interface) catch return V{ .err = .io };
+  writeFile(vm, id, mock.getText()) catch return V{ .err = .io };
   return y.ref();
 }

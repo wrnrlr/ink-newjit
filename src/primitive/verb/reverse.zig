@@ -16,10 +16,10 @@ pub const Reverse = struct {
 
 fn reverse(comptime yk: K) util.MonadFn {
   return struct {
-    fn f(vm: *VM, x: V) !V {
+    fn f(vm: *VM, x: V) V {
       const T = K.backing(yk);
       const b = @field(x, @tagName(yk));
-      const res = try N(T).init(vm.alloc, b.ptr.len);
+      const res = N(T).init(vm.alloc, b.ptr.len) catch return V{ .err = .memory };
       const src = b.slice();
       const dst = res.slice();
       for (src, 0..) |v, i| dst[src.len - 1 - i] = if (yk == .L) v.ref() else v;

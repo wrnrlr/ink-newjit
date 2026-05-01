@@ -12,12 +12,12 @@ pub const Lowercase = struct {
   // TODO lowercase of symbol?
 };
 
-fn lowercase_c(_: *VM, x: V) !V {
+fn lowercase_c(_: *VM, x: V) V {
   return .{ .c = std.ascii.toLower(@intCast(x.c)) };
 }
 
-fn lowercase_C(vm: *VM, x: V) !V {
-  const res = try N(u8).init(vm.alloc, x.C.ptr.len);
+fn lowercase_C(vm: *VM, x: V) V {
+  const res = N(u8).init(vm.alloc, x.C.ptr.len) catch return V{ .err = .memory };
   for (x.C.slice(), res.slice()) |v, *r| r.* = std.ascii.toLower(v);
   return .{ .C = res };
 }

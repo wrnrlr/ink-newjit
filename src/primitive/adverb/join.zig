@@ -8,11 +8,11 @@ const N = value.N;
 
 // join: C/ — join strings with separator
 // "ra"/("ab";"cadab";"") → "abracadabra"
-pub fn join(vm: *VM, sep: V, parts: V) !V {
+pub fn join(vm: *VM, sep: V, parts: V) V {
   if (parts != .L) return .{ .err = .rank };
   const sep_chars = if (sep == .C) sep.C.slice() else &[_]u8{sep.c};
   const n = parts.len();
-  if (n == 0) return V.charsFromSlice(vm.alloc, "");
+  if (n == 0) return V.charsFromSlice(vm.alloc, "") catch return V{ .err = .memory };
 
   // Calculate total length
   var total: usize = 0;
@@ -23,7 +23,7 @@ pub fn join(vm: *VM, sep: V, parts: V) !V {
   }
   total += sep_chars.len * (if (n > 0) n - 1 else 0);
 
-  var buf = try vm.alloc.alloc(u8, total);
+  var buf = vm.alloc.alloc(u8, total) catch return V{ .err = .memory };
   defer vm.alloc.free(buf);
   var pos: usize = 0;
   for (0..n) |i| {
@@ -37,5 +37,5 @@ pub fn join(vm: *VM, sep: V, parts: V) !V {
     @memcpy(buf[pos..pos + pchars.len], pchars);
     pos += pchars.len;
   }
-  return V.charsFromSlice(vm.alloc, buf);
+  return V.charsFromSlice(vm.alloc, buf) catch return V{ .err = .memory };
 }

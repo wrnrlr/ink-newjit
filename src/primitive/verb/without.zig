@@ -32,9 +32,9 @@ pub const Without = struct {
   _L_L: util.DyadFn = without,
 };
 
-pub fn without(vm: *VM, x: V, y: V) !V {
+pub fn without(vm: *VM, x: V, y: V) V {
   const ylen = y.len();
-  var res_list = try std.ArrayList(V).initCapacity(vm.alloc, 0);
+  var res_list = std.ArrayList(V).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
   defer res_list.deinit(vm.alloc);
   for (0..ylen) |i| {
     const val = y.at(i);
@@ -44,9 +44,9 @@ pub fn without(vm: *VM, x: V, y: V) !V {
       defer xv.deinit(vm.alloc);
       if (val.eq(xv)) { found = true; break; }
     }
-    if (!found) try res_list.append(vm.alloc, val) else val.deinit(vm.alloc);
+    if (!found) res_list.append(vm.alloc, val) catch return V{ .err = .memory } else val.deinit(vm.alloc);
   }
-  const res = try N(V).init(vm.alloc, res_list.items.len);
+  const res = N(V).init(vm.alloc, res_list.items.len) catch return V{ .err = .memory };
   @memcpy(res.slice(), res_list.items);
-  return try promote(vm.alloc, res);
+  return promote(vm.alloc, res);
 }

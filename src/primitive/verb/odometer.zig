@@ -5,7 +5,7 @@ const V = @import("../../noun/value.zig").V;
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
 
-fn odometerFn(vm: *VM, x: V) !V { return .{ .L = try odometer(vm.alloc, x.I) }; }
+fn odometerFn(vm: *VM, x: V) V { return .{ .L = odometer(vm.alloc, x.I) catch return V{ .err = .memory } }; }
 
 pub const Odometer = struct {
   pub const op = .@"!";

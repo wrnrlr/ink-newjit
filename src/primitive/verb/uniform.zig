@@ -12,11 +12,11 @@ pub const Uniform = struct {
   _i: util.MonadFn = uniform,
 };
 
-fn uniform(vm: *VM, x: V) !V {
+fn uniform(vm: *VM, x: V) V {
   const i = x.i;
   if (i < 0) return .{ .err = .domain };
   const size: usize = @intCast(i);
-  const res = try N(f32).init(vm.alloc, size);
+  const res = N(f32).init(vm.alloc, size) catch return V{ .err = .memory };
   const random = vm.prng.random();
   for (res.slice()) |*val| {
     val.* = random.float(f32);

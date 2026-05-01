@@ -15,10 +15,11 @@ pub fn clamp(x: anytype, min_val: @TypeOf(x), max_val: @TypeOf(x)) @TypeOf(x) {
   return @min(@max(x, min_val), max_val);
 }
 
-pub const MonadFn = *const fn (*VM, V) anyerror!V;
-pub const DyadFn = *const fn (*VM, V, V) anyerror!V;
-pub const TriadFn = *const fn (*VM, V, V, V) anyerror!V;
-pub const TetradFn = *const fn (*VM, V, V, V, V) anyerror!V;
+pub const MonadFn = *const fn (*VM, V) V;
+pub const DyadFn = *const fn (*VM, V, V) V;
+pub const TriadFn = *const fn (*VM, V, V, V) V;
+pub const TetradFn = *const fn (*VM, V, V, V, V) V;
+pub const ApplyFn = *const fn (*VM, V, []const V) V;
 
 pub fn EnumFieldMap(comptime T: type) std.StaticStringMap(T) {
   const fields = @typeInfo(T).@"enum".fields;

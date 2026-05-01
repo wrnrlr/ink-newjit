@@ -21,7 +21,7 @@ pub const Delete = struct {
 
 fn deleteVec(comptime xk: K) util.DyadFn {
   return struct {
-    fn f(vm: *VM, x: V, y: V) anyerror!V {
+    fn f(vm: *VM, x: V, y: V) V {
       const n = @field(x, @tagName(xk));
       const i = toIdx(y.i, n.ptr.len) orelse return .{ .err = .length };
       return deleteTyped(xk, vm.alloc, n.slice(), i);
@@ -29,7 +29,7 @@ fn deleteVec(comptime xk: K) util.DyadFn {
   }.f;
 }
 
-fn deleteList(vm: *VM, x: V, y: V) anyerror!V {
+fn deleteList(vm: *VM, x: V, y: V) V {
   const i = toIdx(y.i, x.L.ptr.len) orelse return .{ .err = .length };
   return deleteGeneric(vm.alloc, x, x.L.ptr.len, i);
 }
@@ -40,17 +40,17 @@ inline fn toIdx(i: i32, len: usize) ?usize {
 }
 
 /// Delete element at idx using two @memcpy calls (no per-element loop).
-pub fn deleteTyped(comptime k: K, alloc: Alloc, data: []const K.backing(k), idx: usize) !V {
-  const res = try N(K.backing(k)).init(alloc, data.len - 1);
+pub fn deleteTyped(comptime k: K, alloc: Alloc, data: []const K.backing(k), idx: usize) V {
+  const res = N(K.backing(k)).init(alloc, data.len - 1) catch return V{ .err = .memory };
   @memcpy(res.slice()[0..idx], data[0..idx]);
   @memcpy(res.slice()[idx..], data[idx + 1 ..]);
   return @unionInit(V, @tagName(k), res);
 }
 
 /// Generic fallback for L and other types.
-fn deleteGeneric(alloc: Alloc, x: V, n: usize, idx: usize) !V {
+fn deleteGeneric(alloc: Alloc, x: V, n: usize, idx: usize) V {
   const len = n;
-  const res = try N(V).init(alloc, len - 1);
+  const res = N(V).init(alloc, len - 1) catch return V{ .err = .memory };
   var j: usize = 0;
   for (0..len) |k| {
     if (k == idx) continue;
@@ -77,7 +77,7 @@ test "delete at start" {
   const alloc = testing.allocator;
   const data = try makeN(alloc, &.{ 1, 2, 3, 4 });
   defer data.deinit(alloc);
-  const res = try deleteTyped(.I, alloc, data.slice(), 0);
+  const res = deleteTyped(.I, alloc, data.slice(), 0);
   defer res.deinit(alloc);
   try testing.expectEqualSlices(i32, &.{ 2, 3, 4 }, res.I.slice());
 }
@@ -86,7 +86,7 @@ test "delete at middle" {
   const alloc = testing.allocator;
   const data = try makeN(alloc, &.{ 1, 2, 3, 4 });
   defer data.deinit(alloc);
-  const res = try deleteTyped(.I, alloc, data.slice(), 2);
+  const res = deleteTyped(.I, alloc, data.slice(), 2);
   defer res.deinit(alloc);
   try testing.expectEqualSlices(i32, &.{ 1, 2, 4 }, res.I.slice());
 }
@@ -95,7 +95,7 @@ test "delete at end" {
   const alloc = testing.allocator;
   const data = try makeN(alloc, &.{ 1, 2, 3, 4 });
   defer data.deinit(alloc);
-  const res = try deleteTyped(.I, alloc, data.slice(), 3);
+  const res = deleteTyped(.I, alloc, data.slice(), 3);
   defer res.deinit(alloc);
   try testing.expectEqualSlices(i32, &.{ 1, 2, 3 }, res.I.slice());
 }
@@ -112,7 +112,7 @@ test "delete char" {
   // "abcde" _ 2 -> "abde"
   const data = try makeC(alloc, "abcde");
   defer data.deinit(alloc);
-  const res = try deleteTyped(.C, alloc, data.slice(), 2);
+  const res = deleteTyped(.C, alloc, data.slice(), 2);
   defer res.deinit(alloc);
   try testing.expectEqualSlices(u8, "abde", res.C.slice());
 }

@@ -112,7 +112,7 @@ pub fn parse(alloc: Alloc, pool: *Pool, text: []const u8) !V {
   const sv = V{ .L = sv_n };
   for (0..num_cols) |i| {
     const col_raw = try V.valuesFromSlice(alloc, col_lists[i].items);
-    sv_n.slice()[i] = try promote(alloc, col_raw.L);
+    sv_n.slice()[i] = promote(alloc, col_raw.L);
   }
 
   return V{ .M = try value.Dict.init(alloc, .{ .S = sk_n }, sv) };

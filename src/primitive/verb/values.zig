@@ -13,7 +13,7 @@ pub const GetSymbol = struct {
   _s: util.MonadFn = get_symbol,
 };
 
-fn get_symbol(vm: *VM, x: V) !V {
+fn get_symbol(vm: *VM, x: V) V {
   const sname = vm.getSymbol(x.s);
   if (vm.globals_names.get(sname)) |idx| {
     // assert (idx < vm.globals.items.len)
@@ -25,8 +25,8 @@ fn get_symbol(vm: *VM, x: V) !V {
 pub const Values = struct {
   pub const op = .@".";
   _m: util.MonadFn = values_dict
-  // pub fn _A(vm: *VM, x: V) !V { _ = vm; return x.A.bv().retain(); }
-  // pub fn _a(vm: *VM, x: V) !V { _ = vm; return x.a.bv().retain(); }
+  // pub fn _A(vm: *VM, x: V) V { _ = vm; return x.A.bv().retain(); }
+  // pub fn _a(vm: *VM, x: V) V { _ = vm; return x.a.bv().retain(); }
 };
 
-fn values_dict(vm: *VM, x: V) !V { _ = vm; return x.m.bv().ref(); }
+fn values_dict(vm: *VM, x: V) V { _ = vm; return x.m.bv().ref(); }

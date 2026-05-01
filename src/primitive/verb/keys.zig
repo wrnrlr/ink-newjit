@@ -8,5 +8,5 @@ pub const Keys = struct {
   _M: util.MonadFn = keysTable,
 };
 
-fn keysDict(_: *VM, x: V) !V { return x.m.av().ref(); }
-fn keysTable(_: *VM, x: V) !V { return x.M.av().ref(); }
+fn keysDict(_: *VM, x: V) V { return x.m.av().ref(); }
+fn keysTable(_: *VM, x: V) V { return x.M.av().ref(); }

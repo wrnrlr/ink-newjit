@@ -23,7 +23,7 @@ pub const Nulls = struct {
 fn nullsAtom(comptime k: K) util.MonadFn {
   const isNull = k.isNullFn();
   return struct {
-    fn f(_: *VM, x: V) anyerror!V {
+    fn f(_: *VM, x: V) V {
       const n = @field(x, @tagName(k));
       return .{ .b = isNull(n) };
     }
@@ -33,17 +33,17 @@ fn nullsAtom(comptime k: K) util.MonadFn {
 fn nullsVec(comptime k: K) util.MonadFn {
   const isNull = k.isNullFn();
   return struct {
-    fn f(vm: *VM, x: V) anyerror!V {
+    fn f(vm: *VM, x: V) V {
       const n = @field(x, @tagName(k));
-      const res = try N(bool).init(vm.alloc, n.ptr.len);
+      const res = N(bool).init(vm.alloc, n.ptr.len) catch return V{ .err = .memory };
       for (n.slice(), res.slice()) |v, *r| r.* = isNull(v);
       return .{ .B = res };
     }
   }.f;
 }
 
-fn nullsListFn(vm: *VM, x: V) anyerror!V {
-  const res = try N(bool).init(vm.alloc, x.L.ptr.len);
+fn nullsListFn(vm: *VM, x: V) V {
+  const res = N(bool).init(vm.alloc, x.L.ptr.len) catch return V{ .err = .memory };
   for (x.L.slice(), res.slice()) |v, *r| r.* = v.isNull();
   return .{ .B = res };
 }

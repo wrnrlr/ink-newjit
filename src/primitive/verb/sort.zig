@@ -10,8 +10,8 @@ const mergesort = @import("sort/mergesort.zig");
 const timsort = @import("sort/timsort.zig");
 const radixsort = @import("sort/radixsort.zig");
 
-fn asc(vm: *VM, x: V) !V { return sortIndices(vm.alloc, x, false); }
-fn dsc(vm: *VM, x: V) !V { return sortIndices(vm.alloc, x, true); }
+fn asc(vm: *VM, x: V) V { return sortIndices(vm.alloc, x, false); }
+fn dsc(vm: *VM, x: V) V { return sortIndices(vm.alloc, x, true); }
 
 pub const Ascend = struct {
   pub const op = .@"<";
@@ -67,43 +67,45 @@ fn Context(comptime T: type) type {
   };
 }
 
-pub fn sortIndices(alloc: Alloc, v: V, desc: bool) !V {
+pub fn sortIndices(alloc: Alloc, v: V, desc: bool) V {
   const length = v.len();
 
   if (v.isAtom()) {
-    const res = try N(i32).init(alloc, 1);
+    const res = N(i32).init(alloc, 1) catch return V{ .err = .memory };
     res.slice()[0] = 0;
     return .{ .I = res };
   }
 
   if (v.tag() == .L) return .{ .err = .nyi };
 
-  var indices = try N(i32).init(alloc, length);
-  errdefer indices.deinit(alloc);
+  var indices = N(i32).init(alloc, length) catch return V{ .err = .memory };
 
-  var idx_buffer = try alloc.alloc(usize, length);
+  var idx_buffer = alloc.alloc(usize, length) catch {
+    (V{ .I = indices }).deinit(alloc);
+    return V{ .err = .memory };
+  };
   defer alloc.free(idx_buffer);
 
   for (0..length) |i| idx_buffer[i] = i;
 
   switch (v) {
     // Integer: LSD radix sort — O(8n), no per-element allocations, fastest for large n
-    .I => |n| try radixsort.sortI64(alloc, idx_buffer, n.slice(), desc),
+    .I => |n| radixsort.sortI64(alloc, idx_buffer, n.slice(), desc) catch return V{ .err = .memory },
     // Symbol hashes (u32): LSD radix sort
-    .S => |n| try radixsort.sortU64(alloc, idx_buffer, n.slice(), desc),
+    .S => |n| radixsort.sortU64(alloc, idx_buffer, n.slice(), desc) catch return V{ .err = .memory },
     // Char (u8): LSD radix sort, single pass
-    .C => |n| try radixsort.sortU8(alloc, idx_buffer, n.slice(), desc),
+    .C => |n| radixsort.sortU8(alloc, idx_buffer, n.slice(), desc) catch return V{ .err = .memory },
     // Float: timsort — handles NaN via cmp, great cache behaviour on real data
     .F => |n| {
       const Ctx = Context([]const f32);
       const ctx = Ctx{ .data = n.slice(), .desc = desc };
-      try timsort.sort(alloc, idx_buffer, ctx, Ctx.cmp);
+      timsort.sort(alloc, idx_buffer, ctx, Ctx.cmp) catch return V{ .err = .memory };
     },
     // Bool: timsort
     .B => |n| {
       const Ctx = Context([]const bool);
       const ctx = Ctx{ .data = n.slice(), .desc = desc };
-      try timsort.sort(alloc, idx_buffer, ctx, Ctx.cmp);
+      timsort.sort(alloc, idx_buffer, ctx, Ctx.cmp) catch return V{ .err = .memory };
     },
     else => return .{ .err = .@"type" },
   }
@@ -121,7 +123,7 @@ test "ascend integers" {
   var i_vals = [_]i32{ 3, 1, 4, 1, 5, 9, 2 };
   var v_i = try V.intsFromSlice(alloc, &i_vals);
   defer v_i.deinit(alloc);
-  var res = try sortIndices(alloc, v_i, false);
+  var res = sortIndices(alloc, v_i, false);
   defer res.deinit(alloc);
   try std.testing.expectEqualSlices(i32, &.{ 1, 3, 6, 0, 2, 4, 5 }, res.I.slice());
 }
@@ -131,7 +133,7 @@ test "descend integers" {
   var i_vals = [_]i32{ 3, 1, 4, 2 };
   var v_i = try V.intsFromSlice(alloc, &i_vals);
   defer v_i.deinit(alloc);
-  var res = try sortIndices(alloc, v_i, true);
+  var res = sortIndices(alloc, v_i, true);
   defer res.deinit(alloc);
   try std.testing.expectEqualSlices(i32, &.{ 2, 0, 3, 1 }, res.I.slice());
 }
@@ -141,7 +143,7 @@ test "ascend floats with NaN" {
   var f_vals = [_]f32{ 1.1, std.math.nan(f32), 0.5 };
   var v_f = try V.floatsFromSlice(alloc, &f_vals);
   defer v_f.deinit(alloc);
-  var res = try sortIndices(alloc, v_f, false);
+  var res = sortIndices(alloc, v_f, false);
   defer res.deinit(alloc);
   // NaN sorts first in ascending
   try std.testing.expectEqualSlices(i32, &.{ 1, 2, 0 }, res.I.slice());
@@ -152,7 +154,7 @@ test "ascend chars" {
   var c_vals = [_]u8{ 'c', 'a', 'b' };
   var v_c = try V.charsFromSlice(alloc, &c_vals);
   defer v_c.deinit(alloc);
-  var res = try sortIndices(alloc, v_c, false);
+  var res = sortIndices(alloc, v_c, false);
   defer res.deinit(alloc);
   try std.testing.expectEqualSlices(i32, &.{ 1, 2, 0 }, res.I.slice());
 }
@@ -160,7 +162,7 @@ test "ascend chars" {
 test "ascend atom" {
   const alloc = std.testing.allocator;
   const v = V{ .i = 42 };
-  var res = try sortIndices(alloc, v, false);
+  var res = sortIndices(alloc, v, false);
   defer res.deinit(alloc);
   try std.testing.expectEqual(@as(usize, 1), res.I.ptr.len);
   try std.testing.expectEqual(@as(i32, 0), res.I.slice()[0]);

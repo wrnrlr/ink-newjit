@@ -15,7 +15,7 @@ pub const Iota = struct {
 // enough to amortize launch + arena alloc cost.
 const GPU_THRESHOLD: i32 = 4096;
 
-pub fn iota(vm: *VM, x: V) !V {
+pub fn iota(vm: *VM, x: V) V {
   const n = x.i;
   if (n > 0 and n <= IOTA_MAX) {
     // Return a view into the static pool — zero allocation.
@@ -23,14 +23,14 @@ pub fn iota(vm: *VM, x: V) !V {
   }
   if (vm.gpu) |g| if (n >= GPU_THRESHOLD) {
     const count: u32 = @intCast(n);
-    const range = try g.allocRange(count * @sizeOf(i32));
-    try g.iotaI32(range, count);
-    return .{ .I = try N(i32).initGpu(g, range, count) };
+    const range = g.allocRange(count * @sizeOf(i32)) catch return V{ .err = .memory };
+    g.iotaI32(range, count) catch return V{ .err = .memory };
+    return .{ .I = N(i32).initGpu(g, range, count) catch return V{ .err = .memory } };
   };
   return if (x.i > 0)
-    .{.I=try N(i32).fromRange(vm.alloc, 0, 1, @intCast(x.i))}
+    .{.I=N(i32).fromRange(vm.alloc, 0, 1, @as(usize, @intCast(x.i))) catch return V{ .err = .memory }}
   else
-    .{.I=try N(i32).fromRange(vm.alloc, x.i, 1, @intCast(-x.i))};
+    .{.I=N(i32).fromRange(vm.alloc, x.i, 1, @as(usize, @intCast(-x.i))) catch return V{ .err = .memory }};
 }
 
 pub const IOTA_MAX: usize = 256;

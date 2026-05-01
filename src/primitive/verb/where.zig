@@ -11,20 +11,20 @@ pub const Where = struct {
   _I: util.MonadFn = whereIVec,
 };
 
-fn whereB(vm: *VM, x: V) !V {
-  return if (x.b) .{ .i = 1 } else .{ .I = try N(i32).zeros(vm.alloc, 0) };
+fn whereB(vm: *VM, x: V) V {
+  return if (x.b) .{ .i = 1 } else .{ .I = N(i32).zeros(vm.alloc, 0) catch return V{ .err = .memory } };
 }
 
-fn whereI(vm: *VM, x: V) !V {
+fn whereI(vm: *VM, x: V) V {
   if (x.i < 0) return .{ .err = .domain };
-  return .{ .I = try N(i32).zeros(vm.alloc, @intCast(x.i)) };
+  return .{ .I = N(i32).zeros(vm.alloc, @intCast(x.i)) catch return V{ .err = .memory } };
 }
 
-fn whereBVec(vm: *VM, x: V) !V {
+fn whereBVec(vm: *VM, x: V) V {
   const x_slice = x.B.slice();
   var total: usize = 0;
   for (x_slice) |e| total += @intFromBool(e);
-  const res = try N(i32).init(vm.alloc, total);
+  const res = N(i32).init(vm.alloc, total) catch return V{ .err = .memory };
   var idx: usize = 0;
   for (x_slice) |elem| {
     if (elem) {
@@ -35,12 +35,12 @@ fn whereBVec(vm: *VM, x: V) !V {
   return .{ .I = res };
 }
 
-fn whereIVec(vm: *VM, x: V) !V {
+fn whereIVec(vm: *VM, x: V) V {
   const x_slice = x.I.slice();
   for (x_slice) |n| if (n < 0) return .{ .err = .domain };
   var total: usize = 0;
   for (x_slice) |e| total += @intCast(e);
-  const res = try N(i32).init(vm.alloc, total);
+  const res = N(i32).init(vm.alloc, total) catch return V{ .err = .memory };
   var idx: usize = 0;
   for (x_slice, 0..) |elem, i| {
     const count: usize = @intCast(elem);

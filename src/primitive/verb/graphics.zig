@@ -5,41 +5,37 @@ const util = @import("../../util.zig");
 const V = value.V;
 
 // Monad handler: 9: cmd_list → {render:`gfx; cmds:L}
-fn drawMonad(vm: *VM, x: V) !V {
-  const keys = try V.symbolsFromSlice(vm.alloc, &[_]u32{
-    try vm.intern("render"),
-    try vm.intern("cmds"),
-  });
-  errdefer keys.deinit(vm.alloc);
-  const vals = try V.valuesFromSlice(vm.alloc, &[_]V{
-    V{ .s = try vm.intern("gfx") },
+fn drawMonad(vm: *VM, x: V) V {
+  const keys = V.symbolsFromSlice(vm.alloc, &[_]u32{
+    vm.intern("render") catch return V{ .err = .memory },
+    vm.intern("cmds") catch return V{ .err = .memory },
+  }) catch return V{ .err = .memory };
+  const vals = V.valuesFromSlice(vm.alloc, &[_]V{
+    V{ .s = vm.intern("gfx") catch return V{ .err = .memory } },
     x,
-  });
-  errdefer vals.deinit(vm.alloc);
-  return V{ .m = try value.Dict.init(vm.alloc, keys, vals) };
+  }) catch return V{ .err = .memory };
+  return V{ .m = value.Dict.init(vm.alloc, keys, vals) catch return V{ .err = .memory } };
 }
 
 // Dyad handler: h 9: cmds — integer window handle, ignores x → same as monad
-fn drawDyad(vm: *VM, x: V, y: V) !V {
+fn drawDyad(vm: *VM, x: V, y: V) V {
   _ = x;
   return drawMonad(vm, y);
 }
 
 // Dyad fallback: data 9: spec → {render:`plot; data:x; spec:y}
-fn drawPlot(vm: *VM, x: V, y: V) !V {
-  const keys = try V.symbolsFromSlice(vm.alloc, &[_]u32{
-    try vm.intern("render"),
-    try vm.intern("data"),
-    try vm.intern("spec"),
-  });
-  errdefer keys.deinit(vm.alloc);
-  const vals = try V.valuesFromSlice(vm.alloc, &[_]V{
-    V{ .s = try vm.intern("plot") },
+fn drawPlot(vm: *VM, x: V, y: V) V {
+  const keys = V.symbolsFromSlice(vm.alloc, &[_]u32{
+    vm.intern("render") catch return V{ .err = .memory },
+    vm.intern("data") catch return V{ .err = .memory },
+    vm.intern("spec") catch return V{ .err = .memory },
+  }) catch return V{ .err = .memory };
+  const vals = V.valuesFromSlice(vm.alloc, &[_]V{
+    V{ .s = vm.intern("plot") catch return V{ .err = .memory } },
     x,
     y,
-  });
-  errdefer vals.deinit(vm.alloc);
-  return V{ .m = try value.Dict.init(vm.alloc, keys, vals) };
+  }) catch return V{ .err = .memory };
+  return V{ .m = value.Dict.init(vm.alloc, keys, vals) catch return V{ .err = .memory } };
 }
 
 // Monad dispatch table entry: 9: L  and  9: m

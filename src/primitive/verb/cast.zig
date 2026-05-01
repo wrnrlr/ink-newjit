@@ -23,7 +23,7 @@ pub const Cast = struct {
   // _s_L: util.DyadFn = castFloats,
 };
 
-fn castChar(vm: *VM, x: V, y: V) anyerror!V {
+fn castChar(vm: *VM, x: V, y: V) V {
   const type_name = vm.getSymbol(x.s);
   return if (eql(u8, type_name, "c")) y
          else if (eql(u8, type_name, "i")) .{ .i = @intCast(y.c) }
@@ -31,7 +31,7 @@ fn castChar(vm: *VM, x: V, y: V) anyerror!V {
          else .{ .err = .domain };
 }
 
-fn castInt(vm: *VM, x: V, y: V) anyerror!V {
+fn castInt(vm: *VM, x: V, y: V) V {
   const type_name = vm.getSymbol(x.s);
   return if (eql(u8, type_name, "c")) .{ .c = @intCast(y.i) }
          else if (eql(u8, type_name, "i")) y
@@ -40,7 +40,7 @@ fn castInt(vm: *VM, x: V, y: V) anyerror!V {
 }
 
 
-fn castFloat(vm: *VM, x: V, y: V) anyerror!V {
+fn castFloat(vm: *VM, x: V, y: V) V {
   const type_name = vm.getSymbol(x.s);
   return if (eql(u8, type_name, "c")) .{ .c = @intFromFloat(y.f) }
          else if (eql(u8, type_name, "i")) .{ .i = @intFromFloat(y.f) }
@@ -48,49 +48,49 @@ fn castFloat(vm: *VM, x: V, y: V) anyerror!V {
          else .{ .err = .domain };
 }
 
-fn castChars(vm: *VM, x: V, y: V) !V {
+fn castChars(vm: *VM, x: V, y: V) V {
   const type_name = vm.getSymbol(x.s);
   const src = y.C.slice();
   if (eql(u8, type_name, "c")) {
     return y;
   } else if (eql(u8, type_name, "i")) {
-    const res = try N(i32).init(vm.alloc, src.len);
+    const res = N(i32).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @intCast(v);
     return .{ .I = res };
   } else if (eql(u8, type_name, "f")) {
-    const res = try N(f32).init(vm.alloc, src.len);
+    const res = N(f32).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @floatFromInt(v);
     return .{ .F = res };
   } else if (eql(u8, type_name, "s") or eql(u8, type_name, "")) {
-    return .{ .s = try vm.intern(src) };
+    return .{ .s = vm.intern(src) catch return V{ .err = .memory } };
   } else return .{ .err = .domain };
 }
 
-fn castInts(vm: *VM, x: V, y: V) !V {
+fn castInts(vm: *VM, x: V, y: V) V {
   const type_name = vm.getSymbol(x.s);
   const src = y.I.slice();
   if (eql(u8, type_name, "c")) {
-    const res = try N(u8).init(vm.alloc, src.len);
+    const res = N(u8).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @intCast(v);
     return .{ .C = res };
   } else if (eql(u8, type_name, "i")) {
     return y;
   } else if (eql(u8, type_name, "f")) {
-    const res = try N(f32).init(vm.alloc, src.len);
+    const res = N(f32).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @floatFromInt(v);
     return .{ .F = res };
   } else return .{ .err = .domain };
 }
 
-fn castFloats(vm: *VM, x: V, y: V) !V {
+fn castFloats(vm: *VM, x: V, y: V) V {
   const type_name = vm.getSymbol(x.s);
   const src = y.F.slice();
   if (eql(u8, type_name, "c")) {
-    const res = try N(u8).init(vm.alloc, src.len);
+    const res = N(u8).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @intFromFloat(v);
     return .{ .C = res };
   } else if (eql(u8, type_name, "i")) {
-    const res = try N(i32).init(vm.alloc, src.len);
+    const res = N(i32).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @intFromFloat(v);
     return .{ .I = res };
   } else if (eql(u8, type_name, "f")) {
@@ -98,6 +98,6 @@ fn castFloats(vm: *VM, x: V, y: V) !V {
   } else return .{ .err = .domain };
 }
 
-// fn castDict(vm: *VM, x: V, y: V) !V {
+// fn castDict(vm: *VM, x: V, y: V) V {
   
 // }

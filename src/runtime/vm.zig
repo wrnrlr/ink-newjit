@@ -428,7 +428,7 @@ pub const VM = struct {
     const op: Op = @enumFromInt(vm.readByte());
     const a = vm.pop();
     defer a.deinit(vm.alloc);
-    try vm.push(try dispatch.dispatch1(vm, op, a));
+    try vm.push(dispatch.dispatch1(vm, op, a));
   }
 
   fn doApply2(vm: *VM) !void {
@@ -437,7 +437,7 @@ pub const VM = struct {
     defer b.deinit(vm.alloc);
     const a = vm.pop();
     defer a.deinit(vm.alloc);
-    try vm.push(try dispatch.dispatch2(vm, op, a, b));
+    try vm.push(dispatch.dispatch2(vm, op, a, b));
   }
 
   fn doAmend(vm: *VM) !void {
@@ -551,7 +551,7 @@ pub const VM = struct {
           }
         }
         if (all_match) {
-          const table = try verb_flip.flip(vm.alloc, list_val);
+          const table = verb_flip.flip(vm.alloc, list_val);
           list_val.deinit(vm.alloc);
           list_val = table;
         }
@@ -567,15 +567,15 @@ pub const VM = struct {
     const n = vm.readByte();
     const start = vm.stack_len - 2 * n;
     const keys = if (n == 1) vm.stack[start].ref()
-                 else try promote(vm.alloc, (try V.valuesFromSlice(vm.alloc, vm.stack[start .. start + n])).L);
+                 else promote(vm.alloc, (try V.valuesFromSlice(vm.alloc, vm.stack[start .. start + n])).L);
     var keys_live = n > 1;
     errdefer { if (keys_live) keys.deinit(vm.alloc); }
     const vals = if (n == 1) vm.stack[start + 1].ref()
-                 else try promote(vm.alloc, (try V.valuesFromSlice(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
+                 else promote(vm.alloc, (try V.valuesFromSlice(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
     var vals_live = n > 1;
     errdefer { if (vals_live) vals.deinit(vm.alloc); }
     const res = if (n == 1) V{ .m = try value.Dict.init(vm.alloc, keys, vals) }
-                else try pair.dict(vm, keys, vals);
+                else pair.dict(vm, keys, vals);
     errdefer res.deinit(vm.alloc);
     if (n > 1) { keys.deinit(vm.alloc); keys_live = false; vals.deinit(vm.alloc); vals_live = false; }
     for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
@@ -586,10 +586,10 @@ pub const VM = struct {
   fn doMakeTable(vm: *VM) !void {
     const n = vm.readByte();
     const start = vm.stack_len - 2 * n;
-    const keys = if (n == 1) try verb_enlist.enlist(vm.alloc, vm.stack[start])
-                 else try promote(vm.alloc, (try V.valuesFromSlice(vm.alloc, vm.stack[start .. start + n])).L);
-    const vals = if (n == 1) try verb_enlist.enlist(vm.alloc, vm.stack[start + 1])
-                 else try promote(vm.alloc, (try V.valuesFromSlice(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
+    const keys = if (n == 1) verb_enlist.enlist(vm.alloc, vm.stack[start])
+                 else promote(vm.alloc, (try V.valuesFromSlice(vm.alloc, vm.stack[start .. start + n])).L);
+    const vals = if (n == 1) verb_enlist.enlist(vm.alloc, vm.stack[start + 1])
+                 else promote(vm.alloc, (try V.valuesFromSlice(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
     const res = V{ .M = try value.Dict.init(vm.alloc, keys, vals) };
     for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
@@ -767,14 +767,12 @@ const JitImpl = if (jit_enabled) struct {
     }
     fn jhApply1(vm: *VM, op: u8) callconv(.c) void {
         const a = vm.pop(); defer a.deinit(vm.alloc);
-        const r: V = dispatch.dispatch1(vm, @enumFromInt(op), a) catch V{ .err = .@"type" };
-        vm.push(r) catch {};
+        vm.push(dispatch.dispatch1(vm, @enumFromInt(op), a)) catch {};
     }
     fn jhApply2(vm: *VM, op: u8) callconv(.c) void {
         const b = vm.pop(); defer b.deinit(vm.alloc);
         const a = vm.pop(); defer a.deinit(vm.alloc);
-        const r: V = dispatch.dispatch2(vm, @enumFromInt(op), a, b) catch V{ .err = .@"type" };
-        vm.push(r) catch {};
+        vm.push(dispatch.dispatch2(vm, @enumFromInt(op), a, b)) catch {};
     }
     fn jhJump(vm: *VM, offset: u16) callconv(.c) void { vm.currentFrame().ip += offset; }
     fn jhJumpFalse(vm: *VM, offset: u16) callconv(.c) void {
@@ -793,11 +791,7 @@ const JitImpl = if (jit_enabled) struct {
     fn apply2Worker(vm: *VM, op: u8) callconv(.c) void {
         const b = vm.pop(); defer b.deinit(vm.alloc);
         const a = vm.pop(); defer a.deinit(vm.alloc);
-        const r: V = dispatch.dispatch2(vm, @enumFromInt(op), a, b) catch |e| blk: {
-            vm.jit_err = e;
-            break :blk V{ .err = .@"type" };
-        };
-        vm.push(r) catch {};
+        vm.push(dispatch.dispatch2(vm, @enumFromInt(op), a, b)) catch {};
     }
 
     // ── CPS stencil functions ────────────────────────────────────────────────

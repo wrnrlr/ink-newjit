@@ -32,12 +32,12 @@ pub const Format = struct {
 };
 
 // TODO: Move Formatter to VM
-fn fmt(vm: *VM, x: V) !V {
-  var mock = try MockWriter.init(vm.alloc);
+fn fmt(vm: *VM, x: V) V {
+  var mock = MockWriter.init(vm.alloc) catch return V{ .err = .memory };
   defer mock.deinit();
   var tf = TerseFormatter.init(vm, vm.alloc, .Text);
   var f = tf.formatter();
   var w = mock.writer();
-  try f.format(x, &w.interface);
-  return V.charsFromSlice(vm.alloc, mock.getText());
+  f.format(x, &w.interface) catch return V{ .err = .io };
+  return V.charsFromSlice(vm.alloc, mock.getText()) catch return V{ .err = .memory };
 }

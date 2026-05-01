@@ -20,38 +20,37 @@ pub const WeedOut = struct {
   _B_M: util.DyadFn = weedOutA,
 };
 
-fn weedOutI(vm: *VM, x: V, y: V) !V { return filterTyped(.I, i32,  vm.alloc, x.B.slice(), y.I.slice()); }
-fn weedOutF(vm: *VM, x: V, y: V) !V { return filterTyped(.F, f32,  vm.alloc, x.B.slice(), y.F.slice()); }
-fn weedOutS(vm: *VM, x: V, y: V) !V { return filterTyped(.S, u32,  vm.alloc, x.B.slice(), y.S.slice()); }
-fn weedOutC(vm: *VM, x: V, y: V) !V { return filterTyped(.C, u8,   vm.alloc, x.B.slice(), y.C.slice()); }
-fn weedOutB(vm: *VM, x: V, y: V) !V { return filterTyped(.B, bool, vm.alloc, x.B.slice(), y.B.slice()); }
-fn weedOutL(vm: *VM, x: V, y: V) !V { return filterGeneric(vm.alloc, x.B.slice(), y); }
-fn weedOutA(vm: *VM, x: V, y: V) !V { return filterTable(vm.alloc, x.B.slice(), y.M); }
+fn weedOutI(vm: *VM, x: V, y: V) V { return filterTyped(.I, i32,  vm.alloc, x.B.slice(), y.I.slice()); }
+fn weedOutF(vm: *VM, x: V, y: V) V { return filterTyped(.F, f32,  vm.alloc, x.B.slice(), y.F.slice()); }
+fn weedOutS(vm: *VM, x: V, y: V) V { return filterTyped(.S, u32,  vm.alloc, x.B.slice(), y.S.slice()); }
+fn weedOutC(vm: *VM, x: V, y: V) V { return filterTyped(.C, u8,   vm.alloc, x.B.slice(), y.C.slice()); }
+fn weedOutB(vm: *VM, x: V, y: V) V { return filterTyped(.B, bool, vm.alloc, x.B.slice(), y.B.slice()); }
+fn weedOutL(vm: *VM, x: V, y: V) V { return filterGeneric(vm.alloc, x.B.slice(), y); }
+fn weedOutA(vm: *VM, x: V, y: V) V { return filterTable(vm.alloc, x.B.slice(), y.M); }
 
 /// Keep data[i] where mask[i] is false. Returns a typed V.
 fn filterTyped(
   comptime k: K, comptime T: type,
   alloc: Alloc, mask: []const bool, data: []const T,
-) !V {
+) V {
   var count: usize = 0;
   for (mask) |keep| if (!keep) { count += 1; };
-  const res = try N(T).init(alloc, count);
+  const res = N(T).init(alloc, count) catch return V{ .err = .memory };
   var j: usize = 0;
   for (mask, data) |keep, v| if (!keep) { res.slice()[j] = v; j += 1; };
   return @unionInit(V, @tagName(k), res);
 }
 
-fn filterTable(alloc: Alloc, mask: []const bool, t: Dict) !V {
+fn filterTable(alloc: Alloc, mask: []const bool, t: Dict) V {
   const keys = t.av();
   const vals = t.bv();
   const n_cols = keys.len();
-  const res_vals_n = try N(V).init(alloc, n_cols);
+  const res_vals_n = N(V).init(alloc, n_cols) catch return V{ .err = .memory };
   @memset(res_vals_n.slice(), .blank);
-  errdefer (V{ .L = res_vals_n }).deinit(alloc);
   for (0..n_cols) |i| {
     const col = vals.at(i);
     defer col.deinit(alloc);
-    res_vals_n.slice()[i] = try switch (col) {
+    res_vals_n.slice()[i] = switch (col) {
       .I => |n| filterTyped(.I, i32,  alloc, mask, n.slice()),
       .F => |n| filterTyped(.F, f32,  alloc, mask, n.slice()),
       .S => |n| filterTyped(.S, u32,  alloc, mask, n.slice()),
@@ -60,23 +59,23 @@ fn filterTable(alloc: Alloc, mask: []const bool, t: Dict) !V {
       else => filterGeneric(alloc, mask, col),
     };
   }
-  return V{ .M = try Dict.init(alloc, keys.ref(), .{ .L = res_vals_n }) };
+  return V{ .M = Dict.init(alloc, keys.ref(), .{ .L = res_vals_n }) catch return V{ .err = .memory } };
 }
 
 /// Generic fallback: works for any f/y combination (L, integer mask, etc.)
-fn filterGeneric(alloc: Alloc, mask: []const bool, y: V) !V {
+fn filterGeneric(alloc: Alloc, mask: []const bool, y: V) V {
   const ylen = y.len();
   var res_list: std.ArrayList(V) = .empty;
   defer res_list.deinit(alloc);
-  errdefer for (res_list.items) |v| v.deinit(alloc);
-  try res_list.ensureTotalCapacity(alloc, ylen);
+  res_list.ensureTotalCapacity(alloc, ylen) catch return V{ .err = .memory };
   for (mask, 0..) |keep, i| {
     if (!keep) res_list.appendAssumeCapacity(y.at(i));
   }
-  const res = try N(V).init(alloc, res_list.items.len);
+  const res = N(V).init(alloc, res_list.items.len) catch return V{ .err = .memory };
   @memcpy(res.slice(), res_list.items);
   res_list.items.len = 0;
   return promote(alloc, res);
+
 }
 
 const testing = std.testing;
@@ -88,7 +87,7 @@ test "weedout int array" {
   defer mask.deinit(vm.alloc);
   const data = try V.make(.I, i32, vm.alloc, &.{ 10, 20, 30 });
   defer data.deinit(vm.alloc);
-  const res = try weedOutI(vm, mask, data);
+  const res = weedOutI(vm, mask, data);
   defer res.deinit(vm.alloc);
   try testing.expectEqual(K.I, res.tag());
   try testing.expectEqualSlices(i32, &.{ 10, 30 }, res.I.slice());
@@ -101,7 +100,7 @@ test "weedout char array" {
   defer mask.deinit(vm.alloc);
   const data = try V.make(.C, u8, vm.alloc, "aeiou");
   defer data.deinit(vm.alloc);
-  const res = try weedOutC(vm, mask, data);
+  const res = weedOutC(vm, mask, data);
   defer res.deinit(vm.alloc);
   try testing.expectEqual(K.C, res.tag());
   try testing.expectEqualSlices(u8, "eo", res.C.slice());
@@ -114,7 +113,7 @@ test "weedout float array" {
   defer mask.deinit(vm.alloc);
   const data = try V.make(.F, f32, vm.alloc, &.{ 1.1, 2.2, 3.3 });
   defer data.deinit(vm.alloc);
-  const res = try weedOutF(vm, mask, data);
+  const res = weedOutF(vm, mask, data);
   defer res.deinit(vm.alloc);
   try testing.expectEqual(K.F, res.tag());
   try testing.expectEqualSlices(f32, &.{ 1.1, 2.2 }, res.F.slice());
@@ -127,7 +126,7 @@ test "weedout keep all" {
   defer mask.deinit(vm.alloc);
   const data = try V.make(.I, i32, vm.alloc, &.{ 1, 2, 3 });
   defer data.deinit(vm.alloc);
-  const res = try weedOutI(vm, mask, data);
+  const res = weedOutI(vm, mask, data);
   defer res.deinit(vm.alloc);
   try testing.expectEqualSlices(i32, &.{ 1, 2, 3 }, res.I.slice());
 }
@@ -139,7 +138,7 @@ test "weedout remove all" {
   defer mask.deinit(vm.alloc);
   const data = try V.make(.I, i32, vm.alloc, &.{ 1, 2, 3 });
   defer data.deinit(vm.alloc);
-  const res = try weedOutI(vm, mask, data);
+  const res = weedOutI(vm, mask, data);
   defer res.deinit(vm.alloc);
   try testing.expectEqual(@as(usize, 0), res.I.slice().len);
 }

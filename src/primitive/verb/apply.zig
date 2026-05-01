@@ -65,14 +65,14 @@ pub const ApplyN = struct {
   // _m_L: util.DyadFn = dotPath,
 };
 
-fn applyAtom(vm: *VM, x: V, y: V) !V {
+fn applyAtom(vm: *VM, x: V, y: V) V {
   const res = x.ref();
-  const next = try pick.pick(vm.alloc, res, y);
+  const next = pick.pick(vm.alloc, res, y);
   res.deinit(vm.alloc);
   return next;
 }
 
-fn dotPath(vm: *VM, x: V, y: V) !V {
+fn dotPath(vm: *VM, x: V, y: V) V {
   var res = x.ref();
   for (0..y.len()) |i| {
     const idx = y.at(i);
