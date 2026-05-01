@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const shape = @import("shape.zig");
-const impl = @import("impl.zig");
+const impl = @import("font.zig");
 
 fn handleText(ctx: *shape.ShapeContext, text: []const u8, lang: shape.Language) void {
   impl.shapeBegin(ctx, .dont_know, lang);
