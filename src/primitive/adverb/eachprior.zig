@@ -6,6 +6,7 @@ const util = @import("../../util.zig");
 const value = @import("../../noun/value.zig");
 const V = value.V;
 const N = value.N;
+const promote = @import("../promote.zig").promote;
 
 // eachPrior: apply f to each adjacent pair (f': in ngn/k)
 // monadic: -':1 2 3 4 → first element unchanged, rest f(cur, prev)
@@ -41,5 +42,5 @@ pub fn eachprior(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
       res.slice()[i] = f(vm, base, &args);
     }
   }
-  return .{ .L = res };
+  return promote(vm.alloc, res);
 }

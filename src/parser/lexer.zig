@@ -48,6 +48,7 @@ fn isStringCloseChar(c: u8) bool {
     '(', ')', '[', ']', '{', '}' => true,
     '`' => true,
     '0'...'9' => true,
+    '\\' => true,
     else => std.mem.indexOfScalar(u8, "%!&+*|<>=~,^#_$?@./-:", c) != null,
   };
 }
@@ -151,7 +152,14 @@ pub const Lexer = struct {
 
     // Backslash
     if (c == '\\') {
-      // Command: \letter...
+      // Adverb \: or \ takes priority when immediately after a noun or verb
+      if ((self.after_noun or self.after_verb) and !had_space) {
+        self.adv();
+        if (self.ch() == ':') self.adv();
+        self.setVerb();
+        return .{ .tt = .adverb, .start = start, .end = self.pos };
+      }
+      // Command: \letter... (only at start of expression, not after noun/verb)
       if (self.ch1()) |n| {
         if (std.ascii.isAlphabetic(n)) {
           self.adv(); // skip '\'
@@ -160,13 +168,6 @@ pub const Lexer = struct {
           self.setNeither();
           return .{ .tt = .command, .start = start, .end = self.pos };
         }
-      }
-      // Adverb \: or \ (immediate after noun or verb)
-      if ((self.after_noun or self.after_verb) and !had_space) {
-        self.adv();
-        if (self.ch() == ':') self.adv();
-        self.setVerb();
-        return .{ .tt = .adverb, .start = start, .end = self.pos };
       }
       // adverb_val: \ as noun value
       self.adv();

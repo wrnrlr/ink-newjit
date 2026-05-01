@@ -33,7 +33,8 @@ fn readLinesById(vm: *VM, x: V) V {
   defer list.deinit(vm.alloc);
   var iter = std.mem.splitScalar(u8, text, '\n');
   while (iter.next()) |line| {
-    const s = V.charsFromSlice(vm.alloc, line) catch return V{ .err = .memory };
+    const stripped = std.mem.trimEnd(u8, line, &[_]u8{'\r'});
+    const s = V.charsFromSlice(vm.alloc, stripped) catch return V{ .err = .memory };
     list.append(vm.alloc, s) catch return V{ .err = .memory };
   }
   return V.valuesFromSlice(vm.alloc, list.items) catch return V{ .err = .memory };

@@ -17,7 +17,23 @@ pub const Take = struct {
   _i_S: util.DyadFn = takeVec(.S),
   _i_C: util.DyadFn = takeVec(.C),
   _i_L: util.DyadFn = takeList,
+  _i_i: util.DyadFn = takeScalarInt,
+  _i_f: util.DyadFn = takeScalarFloat,
 };
+
+fn takeScalarInt(vm: *VM, x: V, y: V) V {
+  const count: usize = @intCast(@abs(x.i));
+  const res = N(i32).init(vm.alloc, count) catch return V{ .err = .memory };
+  for (res.slice()) |*v| v.* = y.i;
+  return .{ .I = res };
+}
+
+fn takeScalarFloat(vm: *VM, x: V, y: V) V {
+  const count: usize = @intCast(@abs(x.i));
+  const res = N(f32).init(vm.alloc, count) catch return V{ .err = .memory };
+  for (res.slice()) |*v| v.* = y.f;
+  return .{ .F = res };
+}
 
 /// Public entry point used by pair.zig for atom broadcasting.
 pub fn take(vm: *VM, x: V, y: V) V {

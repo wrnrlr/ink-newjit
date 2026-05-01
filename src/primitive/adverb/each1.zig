@@ -6,6 +6,7 @@ const VM = @import("../../runtime/vm.zig").VM;
 const value = @import("../../noun/value.zig");
 const gpu = @import("../../gpu/gpu.zig");
 const util = @import("../../util.zig");
+const promote = @import("../promote.zig").promote;
 const V = value.V;
 const N = value.N;
 
@@ -52,5 +53,5 @@ pub fn each1(vm: *VM, base: V, x: V, f: util.ApplyFn) V {
     res.slice()[i] = if (is_lambda) vm.callLambdaAndRun(lambda_ref, &args) else f(vm, base, &args);
     item.deinit(vm.alloc);
   }
-  return .{ .L = res };
+  return promote(vm.alloc, res);
 }

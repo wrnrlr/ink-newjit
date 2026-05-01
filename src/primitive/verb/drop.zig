@@ -13,8 +13,26 @@ pub const Drop = struct {
   _i_S: util.DyadFn = dropVec(.S),
   _i_C: util.DyadFn = dropVec(.C),
   _i_B: util.DyadFn = dropVec(.B),
-  // _i_L: util.DyadFn = genDrop(.L), // TODO fix drop list
+  _i_L: util.DyadFn = dropList,
 };
+
+fn dropList(vm: *VM, x: V, y: V) V {
+  const items = y.L.slice();
+  const drop_count: usize = @intCast(@abs(x.i));
+  const old_len = items.len;
+  var start: usize = 0;
+  var new_len: usize = 0;
+  if (x.i > 0) {
+    if (drop_count < old_len) { start = drop_count; new_len = old_len - drop_count; }
+  } else if (x.i < 0) {
+    if (drop_count < old_len) new_len = old_len - drop_count;
+  } else {
+    new_len = old_len;
+  }
+  const result = N(V).init(vm.alloc, new_len) catch return V{ .err = .memory };
+  for (result.slice(), items[start .. start + new_len]) |*dst, src| dst.* = src.ref();
+  return .{ .L = result };
+}
 
 fn dropVec(comptime yk: K) util.DyadFn {
   return struct {

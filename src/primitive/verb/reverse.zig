@@ -11,8 +11,15 @@ pub const Reverse = struct {
   _F: util.MonadFn = reverse(.F),
   _S: util.MonadFn = reverse(.S),
   _C: util.MonadFn = reverse(.C),
-  // _L: util.MonadFn = reverse(.L), // TODO fix L
+  _L: util.MonadFn = reverseList,
 };
+
+fn reverseList(vm: *VM, x: V) V {
+  const src = x.L.slice();
+  const res = N(V).init(vm.alloc, src.len) catch return V{ .err = .memory };
+  for (src, 0..) |v, i| res.slice()[src.len - 1 - i] = v.ref();
+  return .{ .L = res };
+}
 
 fn reverse(comptime yk: K) util.MonadFn {
   return struct {
