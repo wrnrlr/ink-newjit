@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) !void {
 
   // --- "ink" module: graphics rendering library (exposed to downstream packages) ---
   const ink_lib_mod = b.addModule("ink", .{
-    .root_source_file = b.path("src/graphics/ink.zig"),
+    .root_source_file = b.path("src/graphics/draw.zig"),
     .target = target,
     .optimize = optimize,
   });

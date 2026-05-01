@@ -3,8 +3,8 @@ const Alloc = std.mem.Allocator;
 
 pub const colors = @import("color.zig");
 pub const Lch = colors.Lch;
-pub const Gx = @import("gx.zig").Gx;
-pub const Renderer = @import("gx.zig").Renderer;
+pub const Gx = @import("paint.zig").Gx;
+pub const Renderer = @import("paint.zig").Renderer;
 
 // pub const Lab = struct { l: f32 = 0, a: f32 = 0, b: f32 = 0 };
 // pub const Lch = struct { l: f32 = 0, c: f32 = 0, h: f32 = 0, a: f32 = 1.0 };

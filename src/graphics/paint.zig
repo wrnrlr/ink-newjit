@@ -1,5 +1,5 @@
 const std = @import("std");
-const ink = @import("ink.zig");
+const ink = @import("draw.zig");
 const shape = @import("shape.zig");
 const impl = @import("impl.zig");
 const tatfi = @import("tatfi");
