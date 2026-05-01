@@ -1,5 +1,7 @@
-zig-out/
+.claude
+.zed
 .zig-cache/
+zig-out/
 zig-pkg/
 patches/**/.zig-cache/
 patches/**/zig-pkg/

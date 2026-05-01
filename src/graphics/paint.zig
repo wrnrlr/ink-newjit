@@ -1,5 +1,6 @@
 const std = @import("std");
 const ink = @import("draw.zig");
+const colors = @import("color.zig");
 const render = @import("render.zig");
 const shape = @import("shape.zig");
 const impl = @import("font.zig");
@@ -124,11 +125,10 @@ pub fn xformMultiply(res: *[6]f32, t: [6]f32) void {
   res[4] = t4; res[5] = t5;
 }
 
-
 pub const Cmd = enum(i32) {
-  move_to = 0,
-  line_to = 1,
-  bezier_to = 2,
+  move = 0,
+  line = 1,
+  bezier = 2,
   close = 3,
   winding = 4,
 };
@@ -222,7 +222,7 @@ pub const Gx = struct {
   }
 
   pub fn moveTo(self: *Gx, x: f32, y: f32) !void {
-    try self.commands.append(self.allocator, @floatFromInt(@intFromEnum(Cmd.move_to)));
+    try self.commands.append(self.allocator, @floatFromInt(@intFromEnum(Cmd.move)));
     try self.commands.append(self.allocator, x);
     try self.commands.append(self.allocator, y);
     self.commandx = x;
@@ -230,7 +230,7 @@ pub const Gx = struct {
   }
 
   pub fn lineTo(self: *Gx, x: f32, y: f32) !void {
-    try self.commands.append(self.allocator, @floatFromInt(@intFromEnum(Cmd.line_to)));
+    try self.commands.append(self.allocator, @floatFromInt(@intFromEnum(Cmd.line)));
     try self.commands.append(self.allocator, x);
     try self.commands.append(self.allocator, y);
     self.commandx = x;
@@ -238,7 +238,7 @@ pub const Gx = struct {
   }
 
   pub fn bezierTo(self: *Gx, cp1x: f32, cp1y: f32, cp2x: f32, cp2y: f32, x: f32, y: f32) !void {
-    try self.commands.append(self.allocator, @floatFromInt(@intFromEnum(Cmd.bezier_to)));
+    try self.commands.append(self.allocator, @floatFromInt(@intFromEnum(Cmd.bezier)));
     try self.commands.append(self.allocator, cp1x);
     try self.commands.append(self.allocator, cp1y);
     try self.commands.append(self.allocator, cp2x);
@@ -319,7 +319,7 @@ pub const Gx = struct {
 
   // --- State Setup ---
 
-  pub fn fillColor(self: *Gx, color: ink.Lch) void {
+  pub fn fillColor(self: *Gx, color: colors.Lch) void {
     var state = self.getState();
     state.fill.inner = color;
     state.fill.outer = color;
@@ -331,7 +331,7 @@ pub const Gx = struct {
     state.fill = paint;
   }
 
-  pub fn strokeColor(self: *Gx, color: ink.Lch) void {
+  pub fn strokeColor(self: *Gx, color: colors.Lch) void {
     var state = self.getState();
     state.stroke.inner = color;
     state.stroke.outer = color;
@@ -360,7 +360,7 @@ pub const Gx = struct {
     xformMultiply(&self.getState().xform, t);
   }
 
-  pub fn linearGradient(self: *Gx, sx: f32, sy: f32, ex: f32, ey: f32, icol: ink.Lch, ocol: ink.Lch) ink.Paint {
+  pub fn linearGradient(self: *Gx, sx: f32, sy: f32, ex: f32, ey: f32, icol: colors.Lch, ocol: colors.Lch) ink.Paint {
     const large: f32 = 1e5;
     var p = ink.Paint{};
     const dx = ex - sx;
@@ -388,7 +388,7 @@ pub const Gx = struct {
     return p;
   }
 
-  pub fn radialGradient(self: *Gx, cx: f32, cy: f32, inr: f32, outr: f32, icol: ink.Lch, ocol: ink.Lch) ink.Paint {
+  pub fn radialGradient(self: *Gx, cx: f32, cy: f32, inr: f32, outr: f32, icol: colors.Lch, ocol: colors.Lch) ink.Paint {
     var p = ink.Paint{};
     const r = (inr + outr) * 0.5;
     const f = outr - inr;
@@ -404,7 +404,7 @@ pub const Gx = struct {
     return p;
   }
 
-  pub fn boxGradient(self: *Gx, x: f32, y: f32, w: f32, h: f32, r: f32, f: f32, icol: ink.Lch, ocol: ink.Lch) ink.Paint {
+  pub fn boxGradient(self: *Gx, x: f32, y: f32, w: f32, h: f32, r: f32, f: f32, icol: colors.Lch, ocol: colors.Lch) ink.Paint {
     var p = ink.Paint{};
     xformIdentity(&p.xform);
     p.xform[4] = (x + w * 0.5) * self.dpr;
@@ -883,20 +883,20 @@ pub const Gx = struct {
       const cmd = @as(Cmd, @enumFromInt(@as(i32, @intFromFloat(self.commands.items[i]))));
       i += 1;
       switch (cmd) {
-        .move_to => {
+        .move => {
           last_x = self.commands.items[i];
           last_y = self.commands.items[i+1];
           try self.addPath();
           try self.addPoint(last_x, last_y, 0);
           i += 2;
         },
-        .line_to => {
+        .line => {
           last_x = self.commands.items[i];
           last_y = self.commands.items[i+1];
           try self.addPoint(last_x, last_y, 0);
           i += 2;
         },
-        .bezier_to => {
+        .bezier => {
           try self.flattenBezier(last_x, last_y, self.commands.items[i], self.commands.items[i+1], self.commands.items[i+2], self.commands.items[i+3], self.commands.items[i+4], self.commands.items[i+5], 0);
           last_x = self.commands.items[i+4];
           last_y = self.commands.items[i+5];
@@ -1185,6 +1185,3 @@ const LineKey = struct {
   font_id: i32,
   dpr_bits: u32,  // @bitCast(dpr)
 };
-
-
-

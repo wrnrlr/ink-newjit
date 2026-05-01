@@ -196,7 +196,7 @@ fn renderDictKV(vm: *VM, ks: []const u32, vs: []const V) void {
     } else if (std.mem.eql(u8, kname, "rect")) {
       if (n >= 4) ink.rect(buf[0], buf[1], buf[2], buf[3]);
     } else if (std.mem.eql(u8, kname, "rrect")) {
-      if (n >= 5) ink.roundedRect(buf[0], buf[1], buf[2], buf[3], buf[4]);
+      if (n >= 5) ink.rrect(buf[0], buf[1], buf[2], buf[3], buf[4]);
     } else if (std.mem.eql(u8, kname, "circle")) {
       if (n >= 3) ink.circle(buf[0], buf[1], buf[2]);
     } else if (std.mem.eql(u8, kname, "ellipse")) {
