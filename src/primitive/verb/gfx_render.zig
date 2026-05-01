@@ -2,6 +2,7 @@
 /// Used by both the standalone runner (runner.zig) and the inline notebook widget.
 const std = @import("std");
 const ink = @import("ink");
+const color = ink.colors;
 const VM = @import("../../runtime/vm.zig").VM;
 const value = @import("../../noun/value.zig");
 const V = value.V;
@@ -29,8 +30,8 @@ fn rgbToLch(r: f32, g: f32, b: f32) ink.Lch {
 }
 
 fn resolveColorName(name: []const u8) ?ink.Lch {
-  if (std.mem.eql(u8, name, "white") or std.mem.eql(u8, name, "White")) return ink.White;
-  if (std.mem.eql(u8, name, "black") or std.mem.eql(u8, name, "Black")) return ink.Black;
+  if (std.mem.eql(u8, name, "white") or std.mem.eql(u8, name, "White")) return color.White;
+  if (std.mem.eql(u8, name, "black") or std.mem.eql(u8, name, "Black")) return color.Black;
   if (std.mem.eql(u8, name, "transparent") or std.mem.eql(u8, name, "Transparent")) return .{ .l = 0, .c = 0, .h = 0, .a = 0 };
   inline for (@typeInfo(ink).@"struct".decls) |decl| {
     if (@TypeOf(@field(ink, decl.name)) == ink.Lch)
@@ -96,8 +97,8 @@ fn resolveGradientKV(vm: *VM, ks: []const u32, vs: []const V) ?ink.Paint {
     if (val.tag() != .L) continue;
     const sl = val.L.slice();
     if (sl.len < 3) continue;
-    const c0 = resolveColorV(vm, sl[1]) orelse ink.Black;
-    const c1 = resolveColorV(vm, sl[2]) orelse ink.White;
+    const c0 = resolveColorV(vm, sl[1]) orelse color.Black;
+    const c1 = resolveColorV(vm, sl[2]) orelse color.White;
     if (std.mem.eql(u8, kname, "linear")) {
       var coords: [4]f32 = .{ 0, 0, 100, 0 };
       _ = extractFloats(sl[0], &coords);

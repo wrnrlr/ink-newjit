@@ -209,6 +209,13 @@ The language parser, compiler and runtime are all written in Zig 0.16.
 
 # Project Overview
 - `src`
+  - `graphics`
+    - `color.zig` Oklch color 
+    - `data.zig` Unicode data (very big, 14K lines of data tables)
+    - `shape.zig` Text shaping for glyphs
+    - `ink.zig` Vector graphics API and named colors
+    - `triangulate.zig` Triangulate bezier curve using earcutting
+    - `window.zig` Window screen
   - `noun` Basic buildings blocks of the language
     - `class.zig` Class enum `K`
     - `value.zig` Value struct `V`

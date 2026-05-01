@@ -30,9 +30,7 @@ pub const Error = error{
   TypeMismatch,
 };
 
-// ---------------------------------------------------------------------------
 // WGSL types
-// ---------------------------------------------------------------------------
 
 pub const WgslType = enum {
   void,
@@ -127,9 +125,7 @@ const ListWriter = struct {
   }
 };
 
-// ---------------------------------------------------------------------------
 // Colour lookup
-// ---------------------------------------------------------------------------
 
 /// Returns RGBA for a terse colour symbol name (e.g. "red400", "teal200").
 /// Symbol names are lowercase; color field names are PascalCase — compare case-insensitively.
@@ -143,9 +139,7 @@ fn colorFromName(name: []const u8) ?color.Rgba {
     return null;
 }
 
-// ---------------------------------------------------------------------------
 // Verb mappings
-// ---------------------------------------------------------------------------
 
 /// Map a k verb string to a WGSL infix operator for dyadic use.
 fn dyadicInfix(verb: []const u8) ?[]const u8 {
@@ -213,9 +207,7 @@ fn isBuiltin(name: []const u8) bool {
     return false;
 }
 
-// ---------------------------------------------------------------------------
 // Transpiler
-// ---------------------------------------------------------------------------
 
 pub const Transpiler = struct {
     alloc: std.mem.Allocator,
