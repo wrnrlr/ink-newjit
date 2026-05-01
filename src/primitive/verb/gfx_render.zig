@@ -7,27 +7,6 @@ const VM = @import("../../runtime/vm.zig").VM;
 const value = @import("../../noun/value.zig");
 const V = value.V;
 
-// ── Color helpers ─────────────────────────────────────────────────────────────
-
-fn srgbToLinear(x: f32) f32 {
-  return if (x <= 0.04045) x / 12.92
-         else std.math.pow(f32, (x + 0.055) / 1.055, 2.4);
-}
-
-fn rgbToLch(r: f32, g: f32, b: f32) ink.Lch {
-  const rl = srgbToLinear(r);
-  const gl = srgbToLinear(g);
-  const bl = srgbToLinear(b);
-  const lm = std.math.cbrt(0.4122214708 * rl + 0.5363325363 * gl + 0.0514459929 * bl);
-  const mm = std.math.cbrt(0.2119034982 * rl + 0.6806995451 * gl + 0.1073969566 * bl);
-  const sm = std.math.cbrt(0.0883024619 * rl + 0.2817188376 * gl + 0.6299787005 * bl);
-  const L  = 0.2104542553 * lm + 0.7936177850 * mm - 0.0040720468 * sm;
-  const a  = 1.9779984951 * lm - 2.4285922050 * mm + 0.4505937099 * sm;
-  const bv = 0.0259040371 * lm + 0.7827717662 * mm - 0.8086757660 * sm;
-  const c  = @sqrt(a * a + bv * bv);
-  const h  = std.math.atan2(bv, a) * (180.0 / std.math.pi);
-  return .{ .l = L, .c = c, .h = if (h < 0) h + 360.0 else h };
-}
 
 fn resolveColorName(name: []const u8) ?ink.Lch {
   if (std.mem.eql(u8, name, "white") or std.mem.eql(u8, name, "White")) return color.White;
@@ -46,7 +25,7 @@ pub fn resolveColorV(vm: *VM, v: V) ?ink.Lch {
     .I => blk: {
       const sl = v.I.slice();
       if (sl.len < 3) break :blk null;
-      var col = rgbToLch(
+      var col = color.rgbToLch(
         @as(f32, @floatFromInt(sl[0])) / 255.0,
         @as(f32, @floatFromInt(sl[1])) / 255.0,
         @as(f32, @floatFromInt(sl[2])) / 255.0,
@@ -57,7 +36,7 @@ pub fn resolveColorV(vm: *VM, v: V) ?ink.Lch {
     .F => blk: {
       const sl = v.F.slice();
       if (sl.len < 3) break :blk null;
-      var col = rgbToLch(@floatCast(sl[0]), @floatCast(sl[1]), @floatCast(sl[2]));
+      var col = color.rgbToLch(@floatCast(sl[0]), @floatCast(sl[1]), @floatCast(sl[2]));
       if (sl.len >= 4) col.a = @floatCast(sl[3]);
       break :blk col;
     },

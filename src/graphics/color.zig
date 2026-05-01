@@ -40,18 +40,53 @@ pub const Lch = struct {
       .a = 255,
     };
   }
+
+  pub fn toF32x4(self: Lch) [4]f32 {
+    const h_rad = std.math.degreesToRadians(self.h);
+    const a_lab = self.c * std.math.cos(h_rad);
+    const b_lab = self.c * std.math.sin(h_rad);
+    const L = self.l;
+    const l_m = L + 0.3963377774 * a_lab + 0.2158037573 * b_lab;
+    const m_m = L - 0.1055613458 * a_lab - 0.0638541728 * b_lab;
+    const s_m = L - 0.0894841775 * a_lab - 1.2914855480 * b_lab;
+    const l_c = l_m * l_m * l_m;
+    const m_c = m_m * m_m * m_m;
+    const s_c = s_m * s_m * s_m;
+    var r_lin = clamp(4.0767416621 * l_c - 3.3077115913 * m_c + 0.2309699292 * s_c);
+    var g_lin = clamp(-1.2684380046 * l_c + 2.6097574011 * m_c - 0.3413193965 * s_c);
+    var b_lin = clamp(-0.0041960863 * l_c - 0.7034186147 * m_c + 1.7076147010 * s_c);
+    _ = &r_lin; _ = &g_lin; _ = &b_lin;
+    return .{ srgbGamma(r_lin), srgbGamma(g_lin), srgbGamma(b_lin), self.a };
+  }
 }; 
 
 pub const Rgba = struct { r: u8 = 0, g: u8 = 0, b: u8 = 0, a: u8 = 0 };
 
 fn clamp(x: f32) f32 { return @max(0.0, @min(1.0, x)); }
 
-fn srgbGamma(x: f32) f32 {
-  if (x <= 0.0031308) {
-    return 12.92 * x;
-  } else {
-    return 1.055 * std.math.pow(f32, x, 1.0 / 2.4) - 0.055;
-  }
+pub fn srgbGamma(x: f32) f32 {
+  if (x <= 0.0031308) return 12.92 * x;
+  return 1.055 * std.math.pow(f32, x, 1.0 / 2.4) - 0.055;
+}
+
+pub fn srgbToLinear(x: f32) f32 {
+  return if (x <= 0.04045) x / 12.92
+         else std.math.pow(f32, (x + 0.055) / 1.055, 2.4);
+}
+
+pub fn rgbToLch(r: f32, g: f32, b: f32) Lch {
+  const rl = srgbToLinear(r);
+  const gl = srgbToLinear(g);
+  const bl = srgbToLinear(b);
+  const lm = std.math.cbrt(0.4122214708 * rl + 0.5363325363 * gl + 0.0514459929 * bl);
+  const mm = std.math.cbrt(0.2119034982 * rl + 0.6806995451 * gl + 0.1073969566 * bl);
+  const sm = std.math.cbrt(0.0883024619 * rl + 0.2817188376 * gl + 0.6299787005 * bl);
+  const L  = 0.2104542553 * lm + 0.7936177850 * mm - 0.0040720468 * sm;
+  const a  = 1.9779984951 * lm - 2.4285922050 * mm + 0.4505937099 * sm;
+  const bv = 0.0259040371 * lm + 0.7827717662 * mm - 0.8086757660 * sm;
+  const c  = @sqrt(a * a + bv * bv);
+  const h  = std.math.atan2(bv, a) * (180.0 / std.math.pi);
+  return .{ .l = L, .c = c, .h = if (h < 0) h + 360.0 else h };
 }
 
 pub const TransparentRgba: Rgba = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
