@@ -80,6 +80,10 @@ pub const VM = struct {
   jit:        if (jit_enabled) ?jit_mod.JitCache                    else void = if (jit_enabled) null      else {},
   jit_err:    if (jit_enabled) ?anyerror                             else void = if (jit_enabled) null      else {},
   jit_apply2: if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
+  // Monomorphic inline cache: last successfully JIT-compiled lambda.
+  // Avoids a hash-map lookup on every call in hot adverb loops.
+  jit_ic_key: if (jit_enabled) u24                                       else void = if (jit_enabled) NO_LAMBDA else {},
+  jit_ic_jf:  if (jit_enabled) ?jit_mod.JitFn                           else void = if (jit_enabled) null      else {},
 
   pub fn create(alloc: Alloc) !*VM {
     const vm = try alloc.create(VM);
@@ -233,6 +237,48 @@ pub const VM = struct {
       return e;
     }
     return true;
+  }
+
+  // Direct lambda call without wrapper→apply overhead. Used by hot adverb loops.
+  // Uses a monomorphic inline cache to skip the JIT hash-map lookup on repeat calls.
+  pub fn callLambdaAndRun(vm: *VM, ref: value.Fn, args: []const V) V {
+    const prev_frames = vm.frames_len;
+    const res_slot = vm.stack_len;
+    vm.push(.blank) catch return V{ .err = .memory };
+    for (args) |arg| vm.push(arg.ref()) catch {
+      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
+      vm.stack_len = res_slot;
+      return V{ .err = .memory };
+    };
+    vm.callLambda(ref, args.len, res_slot) catch {
+      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
+      vm.stack_len = res_slot;
+      return V{ .err = .memory };
+    };
+    if (comptime jit_enabled) {
+      if (vm.jit != null) {
+        const lambda_idx = @as(u24, @intCast(ref.idx));
+        const jf = if (vm.jit_ic_key == lambda_idx) vm.jit_ic_jf else blk: {
+          const entry = vm.fn_tables.lambdaAt(lambda_idx);
+          const f = vm.jit.?.getOrCompile(lambda_idx, entry.chunk) catch null;
+          vm.jit_ic_key = lambda_idx;
+          vm.jit_ic_jf = f;
+          break :blk f;
+        };
+        if (jf) |j| {
+          vm.currentFrame().ip = j.stop_ip;
+          j.code(@ptrCast(vm));
+          if (vm.jit_err != null) vm.jit_err = null;
+          return vm.pop();
+        }
+      }
+    }
+    while (vm.frames_len > prev_frames) {
+      if (vm.tryJit() catch false) continue;
+      const b = vm.readByte();
+      vm.runOp(@enumFromInt(b)) catch {};
+    }
+    return vm.pop();
   }
 
   fn run(vm: *VM) !void {

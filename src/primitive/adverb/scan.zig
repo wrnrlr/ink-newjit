@@ -61,11 +61,13 @@ pub fn scan(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
   if (init == null) res.slice()[0] = accum.ref();
 
   var ri: usize = if (init != null) 0 else 1;
+  const is_lambda = base.tag() == .func and base.func.getKind() == .lambda;
+  const lambda_ref = if (is_lambda) base.func else undefined;
   for (start..n) |i| {
     const item = x.at(i);
-    defer item.deinit(vm.alloc);
     const args = [_]V{ accum, item };
-    const next = f(vm, base, &args);
+    const next = if (is_lambda) vm.callLambdaAndRun(lambda_ref, &args) else f(vm, base, &args);
+    item.deinit(vm.alloc);
     accum.deinit(vm.alloc);
     accum = next;
     res.slice()[ri] = accum.ref();

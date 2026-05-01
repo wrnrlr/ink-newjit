@@ -44,11 +44,13 @@ pub fn each1(vm: *VM, base: V, x: V, f: util.ApplyFn) V {
 
   const n = x.len();
   var res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
+  const is_lambda = base.tag() == .func and base.func.getKind() == .lambda;
+  const lambda_ref = if (is_lambda) base.func else undefined;
   for (0..n) |i| {
     const item = x.at(i);
-    defer item.deinit(vm.alloc);
     const args = [_]V{item};
-    res.slice()[i] = f(vm, base, &args);
+    res.slice()[i] = if (is_lambda) vm.callLambdaAndRun(lambda_ref, &args) else f(vm, base, &args);
+    item.deinit(vm.alloc);
   }
   return .{ .L = res };
 }

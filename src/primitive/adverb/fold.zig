@@ -65,6 +65,20 @@ pub fn fold(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
   };
 
   const start: usize = if (init != null) 0 else 1;
+
+  if (base.tag() == .func and base.func.getKind() == .lambda) {
+    const ref = base.func;
+    for (start..n) |i| {
+      const item = x.at(i);
+      const args = [_]V{ accum, item };
+      const next = vm.callLambdaAndRun(ref, &args);
+      item.deinit(vm.alloc);
+      accum.deinit(vm.alloc);
+      accum = next;
+    }
+    return accum;
+  }
+
   for (start..n) |i| {
     const item = x.at(i);
     defer item.deinit(vm.alloc);
