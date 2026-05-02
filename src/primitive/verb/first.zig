@@ -10,11 +10,11 @@ const N = value.N;
 
 pub const First = struct {
   pub const op = .@"*";
-  _b: util.MonadFn = firstAtom,
-  _i: util.MonadFn = firstAtom,
-  _f: util.MonadFn = firstAtom,
-  _s: util.MonadFn = firstAtom,
-  _c: util.MonadFn = firstAtom,
+  _b: util.MonadFn = identity,
+  _i: util.MonadFn = identity,
+  _f: util.MonadFn = identity,
+  _s: util.MonadFn = identity,
+  _c: util.MonadFn = identity,
   _B: util.MonadFn = firstVec(.B),
   _I: util.MonadFn = firstVec(.I),
   _F: util.MonadFn = firstVec(.F),
@@ -27,11 +27,11 @@ pub const First = struct {
 
 pub const First_Name = struct {
   pub const op = .first;
-  _b: util.MonadFn = firstAtom,
-  _i: util.MonadFn = firstAtom,
-  _f: util.MonadFn = firstAtom,
-  _s: util.MonadFn = firstAtom,
-  _c: util.MonadFn = firstAtom,
+  _b: util.MonadFn = identity,
+  _i: util.MonadFn = identity,
+  _f: util.MonadFn = identity,
+  _s: util.MonadFn = identity,
+  _c: util.MonadFn = identity,
   _B: util.MonadFn = firstVec(.B),
   _I: util.MonadFn = firstVec(.I),
   _F: util.MonadFn = firstVec(.F),
@@ -44,11 +44,11 @@ pub const First_Name = struct {
 
 pub const Last_Name = struct {
   pub const op = .last;
-  _b: util.MonadFn = firstAtom,
-  _i: util.MonadFn = firstAtom,
-  _f: util.MonadFn = firstAtom,
-  _s: util.MonadFn = firstAtom,
-  _c: util.MonadFn = firstAtom,
+  _b: util.MonadFn = identity,
+  _i: util.MonadFn = identity,
+  _f: util.MonadFn = identity,
+  _s: util.MonadFn = identity,
+  _c: util.MonadFn = identity,
   _B: util.MonadFn = lastVec(.B),
   _I: util.MonadFn = lastVec(.I),
   _F: util.MonadFn = lastVec(.F),
@@ -67,7 +67,7 @@ pub const Last_Name = struct {
 pub fn first(alloc: Alloc, x: V) V {
   if (x.len() == 0) return .blank;
   return switch (x) {
-    inline .I, .F, .S, .C, .B => |n, yk| V.wrap(K.atom(yk), n.slice()[0]),
+    inline .I, .F, .S, .C, .B => |n, yk| V.wrap(yk.atom(), n.slice()[0]),
     .L => |n| n.slice()[0].ref(),
     .m => |m| first(alloc, m.bv()),
     else => x.ref(),
@@ -85,7 +85,7 @@ pub fn last(alloc: Alloc, x: V) V {
   };
 }
 
-fn firstAtom(_: *VM, x: V) V { return x; }
+fn identity(_: *VM, x: V) V { return x; }
 fn firstFn(vm: *VM, x: V) V { return first(vm.alloc, x); }
 fn lastFn(vm: *VM, x: V) V { return last(vm.alloc, x); }
 

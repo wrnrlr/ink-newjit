@@ -24,22 +24,33 @@ const N = value.N;
 pub const monad_table = makeMonadArray(Monads);
 pub const dyad_table  = makeDyadArray(Dyads);
 
+const h = @import("helper.zig");
+const at = h.arithmetic_types;
+pub fn _B(comptime op: Op, comptime F: type) type { return h.makeMonad(op, h.Upcast1, h.Bool1,   F, &at); }
+pub fn _N(comptime op: Op, comptime F: type) type { return h.makeMonad(op, h.Upcast1, h.Upcast1, F, &at); }
+pub fn _F(comptime op: Op, comptime F: type) type { return h.makeMonad(op, h.Float1,  h.Float1,  F, &at); }
+pub fn _B_B(comptime op: Op, comptime f: type) type { return h.makeDyad(op, h.Bool2,   h.Bool2,   f, &at); }
+pub fn _N_N(comptime op: Op, comptime f: type) type { return h.makeDyad(op, h.Upcast2, h.Upcast2, f, &at); }
+pub fn _F_F(comptime op: Op, comptime f: type) type { return h.makeDyad(op, h.Float2,  h.Float2,  f, &at); }
+pub fn _X(comptime op: Op, comptime Impl: type) type { return h._X(op, Impl); }
+pub fn _I_A(comptime op: Op, comptime Impl: type) type { return h._X(op, Impl); }
+
 const Monads = struct {
   // Monadic Primitives
   pub const Draw     = @import("graphics.zig").Draw;
-  pub const Sqrt = calc.Sqrt;
-  pub const Sqr = calc.Sqr;
-  pub const Exp = calc.Exp;
-  pub const Log = calc.Log;
-  pub const Sin = calc.Sin;
-  pub const Cos = calc.Cos;
-  pub const Neg = calc.Neg;
-  pub const Abs = calc.Abs;
-  pub const Not = logic.Not;
+  pub const Sqrt = _F(.sqrt, calc.SqrtOp);
+  pub const Sqr  = _N(.sqr,  calc.SqrOp);
+  pub const Exp  = _F(.exp,  calc.ExpOp);
+  pub const Log  = _F(.log,  calc.LogOp);
+  pub const Sin  = _F(.sin,  calc.SinOp);
+  pub const Cos  = _F(.cos,  calc.CosOp);
+  pub const Neg  = _N(.@"-", calc.NegOp);
+  pub const Abs  = _N(.abs,  calc.AbsOp);
+  pub const Not  = _B(.@"~", logic.NotOp);
   pub const Floor = @import("floor.zig").Floor;
   pub const Lowercase = @import("lowercase.zig").Lowercase;
   pub const First = selection.First;
-  pub const Uniform = @import("uniform.zig").Uniform;
+  pub const Uniform = _X(.@"?", @import("uniform.zig").UniformOp);
   pub const Tally = @import("tally.zig").Tally;
   pub const Format = string.Format;
   pub const Keys = @import("keys.zig").Keys;
@@ -66,19 +77,19 @@ const Monads = struct {
 
 const Dyads = struct {
   // Dyadic Primitives
-  pub const Add = calc.Add;
-  pub const Sub = calc.Sub;
-  pub const Mul = calc.Mul;
-  pub const Div = calc.Div;
-  pub const Min = calc.Min;
-  pub const Max = calc.Max;
+  pub const Add = _N_N(.@"+", calc.AddOp);
+  pub const Sub =  _N_N(.@"-", calc.SubOp);
+  pub const Mul =  _N_N(.@"*", calc.MulOp);
+  pub const Div =  _F_F(.@"%", calc.DivOp);
+  pub const Min =  _N_N(.@"&", calc.MinOp);
+  pub const Max =  _N_N(.@"|", calc.MaxOp);
   pub const Equal = logic.Equal;
   pub const Less = logic.Less;
   pub const More = logic.More;
   // pub const Pair = @import("pair.zig").Pair;
   pub const Drop = @import("drop.zig").Drop;
   pub const DropKeys = @import("drop_keys.zig").DropKeys;
-  pub const Cut = @import("cut.zig").Cut;
+  pub const Cut = _I_A(.@"_", @import("cut.zig").Cut);
   pub const WeedOut = @import("weedout.zig").WeedOut;
   pub const Delete = @import("delete.zig").Delete;
   pub const DictMerge = @import("merge.zig").DictMerge;

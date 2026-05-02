@@ -40,6 +40,7 @@ pub const Attr = std.builtin.Type.StructField.Attributes;
 
 pub const numeric_types    = [_]K{ .b, .i, .f, .B, .I, .F };
 pub const arithmetic_types = [_]K{ .b, .i, .f, .B, .I, .F }; //, .L, .m, .M };
+pub const cut_types = [_]K{ .b, .i, .f, .B, .I, .F };
 
 pub fn makeMonad(
   comptime operator: Op,
@@ -110,13 +111,13 @@ pub fn Upcast2(comptime T1: type, comptime T2: type) type {
   if (T1 == f32 or T2 == f32) return f32;
   return i32;
 }
-pub fn AlwaysFloat2(comptime _: type, comptime _: type) type { return f32; }
-pub fn AlwaysBool2(comptime _: type, comptime _: type) type { return bool; }
+pub fn Float2(comptime _: type, comptime _: type) type { return f32; }
+pub fn Bool2(comptime _: type, comptime _: type) type { return bool; }
 
 pub fn Upcast1(comptime T: type) type { return if (T == f32) f32 else i32; }
-pub fn AlwaysFloat1(comptime _: type) type { return f32; }
-pub fn AlwaysInt1(comptime _: type) type { return i32; }
-pub fn AlwaysBool1(comptime _: type) type { return bool; }
+pub fn Float1(comptime _: type) type { return f32; }
+pub fn Int1(comptime _: type) type { return i32; }
+pub fn Bool1(comptime _: type) type { return bool; }
 
 // ── Result-kind helpers ───────────────────────────────────────────────────────
 

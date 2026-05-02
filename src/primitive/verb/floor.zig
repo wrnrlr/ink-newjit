@@ -9,10 +9,11 @@ pub const Floor = struct {
   pub const op = .@"_";
   _b: util.MonadFn = identity,
   _i: util.MonadFn = identity,
-  _f: util.MonadFn = floor_f,
   
   _B: util.MonadFn = identity,
   _I: util.MonadFn = identity,
+  
+  _f: util.MonadFn = floor_f,
   _F: util.MonadFn = floor_F,
 };
 

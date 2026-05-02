@@ -9,7 +9,6 @@ const promote = @import("../promote.zig").promote;
 
 /// I_Y: cut y into segments at the given indices.
 pub const Cut = struct {
-  pub const op = .@"_";
   _I_I: util.DyadFn = cutVec(.I),
   _I_F: util.DyadFn = cutVec(.F),
   _I_S: util.DyadFn = cutVec(.S),

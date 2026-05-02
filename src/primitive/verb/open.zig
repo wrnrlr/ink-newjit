@@ -13,6 +13,6 @@ pub const Open = struct {
 
 fn open(vm: *VM, x: V) V {
   const path = vm.getSymbol(x.s);
-  const id = vm.mapFile(path) catch return V{ .err = .io };
-  return V{ .i = @intCast(id) };
+  const id = vm.mapFile(path) catch return .{ .err = .io };
+  return .{ .i = @intCast(id) };
 }
