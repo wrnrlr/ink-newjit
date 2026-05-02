@@ -42,6 +42,26 @@ pub const numeric_types    = [_]K{ .b, .i, .f, .B, .I, .F };
 pub const arithmetic_types = [_]K{ .b, .i, .f, .B, .I, .F }; //, .L, .m, .M };
 pub const cut_types = [_]K{ .b, .i, .f, .B, .I, .F };
 
+/// Wrap a hand-written handler struct (one that already contains _* fields
+/// with default MonadFn/DyadFn values) by injecting the `op` field so the
+/// dispatch-table builder can key it correctly.
+pub fn _X(comptime op: Op, comptime Impl: type) type {
+  const op_default: Op = op;
+  comptime var names:       []const []const u8 = &.{ "op" };
+  comptime var field_types: []const type       = &.{ Op };
+  comptime var attrs:       []const Attr       = &.{
+    .{ .default_value_ptr = @ptrCast(&op_default) },
+  };
+  inline for (std.meta.fields(Impl)) |f| {
+    const attr: Attr = .{ .default_value_ptr = f.default_value_ptr.? };
+    names       = names       ++ .{f.name};
+    field_types = field_types ++ .{f.type};
+    attrs       = attrs       ++ .{attr};
+  }
+  const n = names.len;
+  return @Struct(.auto, null, names[0..n], &(field_types[0..n].*), &(attrs[0..n].*));
+}
+
 pub fn makeMonad(
   comptime operator: Op,
   comptime CastType: fn (type) type,

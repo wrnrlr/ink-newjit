@@ -269,7 +269,7 @@ pub const VM = struct {
           vm.currentFrame().ip = j.stop_ip;
           j.code(@ptrCast(vm));
           if (vm.jit_err != null) vm.jit_err = null;
-          return vm.pop();
+          if (j.complete) return vm.pop();
         }
       }
     }

@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ink vs the Field: An Honest Array Language Benchmark — May 2026</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:        #0f1117;
+  --bg2:       #1e2130;
+  --bg3:       #252840;
+  --border:    #2d3148;
+  --text:      #e2e8f0;
+  --muted:     #64748b;
+  --subtle:    #94a3b8;
+  --ink:       #a78bfa;
+  --ngnk:      #34d399;
+  --goal:      #f59e0b;
+  --q:         #60a5fa;
+  --red:       #f87171;
+  --green:     #4ade80;
+  --blue:      #38bdf8;
+}
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Menlo','Monaco','Consolas',monospace;
+  background: var(--bg);
+  color: var(--text);
+  padding: 2rem max(2rem, calc(50vw - 38rem));
+  line-height: 1.7;
+  font-size: .875rem;
+}
+
+/* ── Typography ── */
+h1 { font-size: 1.75rem; color: var(--ink); margin-bottom: .4rem; line-height:1.2; }
+h2 { font-size: 1.2rem;  color: var(--subtle); margin: 3rem 0 .75rem;
+     border-bottom: 1px solid var(--border); padding-bottom: .4rem; }
+h3 { font-size: .95rem;  color: var(--blue);   margin: 1.75rem 0 .5rem; }
+h4 { font-size: .82rem;  color: var(--subtle);  margin: 1.2rem 0 .3rem; }
+p  { margin-bottom: 1rem; max-width: 72ch; color: #cbd5e1; }
+a  { color: var(--ink); text-decoration:none; }
+a:hover { text-decoration: underline; }
+.meta   { font-size: .72rem; color: var(--muted); margin-bottom: 2.5rem; }
+.lead   { font-size:1rem; color:#cbd5e1; margin-bottom:1.5rem; line-height:1.8; }
+
+/* ── Code ── */
+code { background:#1a1f35; color:#c4b5fd; padding:.1em .35em; border-radius:3px; font-size:.85em; }
+pre  { background:#1a1f35; border:1px solid var(--border); border-radius:6px;
+       padding:1rem 1.25rem; overflow-x:auto; margin:1rem 0 1.5rem; }
+pre code { background:none; padding:0; color:#c4b5fd; font-size:.8rem; line-height:1.6; }
+
+/* ── Layout ── */
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin:1.5rem 0; }
+.grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; margin:1.5rem 0; }
+@media(max-width:900px){ .grid-2,.grid-3{ grid-template-columns:1fr; } }
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem;
+}
+.full { grid-column: 1/-1; }
+canvas { max-height: 300px; }
+.note { font-size:.71rem; color:var(--muted); margin-top:.6rem; }
+
+/* ── Table ── */
+table  { width:100%; border-collapse:collapse; font-size:.77rem; margin:.75rem 0; }
+th     { color:var(--muted); text-align:right; padding:.35rem .7rem;
+         border-bottom:1px solid var(--border); white-space:nowrap; }
+th:first-child, th:nth-child(2) { text-align:left; }
+td     { padding:.3rem .7rem; text-align:right; border-bottom:1px solid #1a1d2e; }
+td:first-child { text-align:left; color:var(--ink); }
+td:nth-child(2){ text-align:left; color:var(--subtle); }
+tr:hover td    { background:var(--bg3); }
+.best  { color: var(--green); font-weight:bold; }
+.worst { color: var(--red); }
+.badge { display:inline-block; font-size:.6rem; padding:1px 5px; border-radius:3px;
+         background:#1a2540; color:var(--q); margin-left:.3rem; vertical-align:middle; }
+
+/* ── Callouts ── */
+.callout {
+  background:#1a2540; border-left:3px solid var(--ink);
+  border-radius:0 6px 6px 0; padding:.75rem 1rem;
+  margin:1.25rem 0; font-size:.82rem; color:#cbd5e1;
+}
+.callout.warn { border-color:var(--goal); background:#1e1a10; }
+.callout.good { border-color:var(--green); background:#0f1e14; }
+
+/* ── Language pills ── */
+.lang { display:inline-block; padding:.15em .6em; border-radius:4px; font-weight:bold;
+        font-size:.75rem; margin:0 .15rem; }
+.lang-ink  { background:#2d1f5e; color:var(--ink); }
+.lang-ngnk { background:#0f3025; color:var(--ngnk); }
+.lang-goal { background:#3a2600; color:var(--goal); }
+.lang-q    { background:#0f2040; color:var(--q); }
+
+/* ── TOC ── */
+nav { background:var(--bg2); border:1px solid var(--border); border-radius:8px;
+      padding:1.25rem 1.5rem; margin:2rem 0; display:inline-block; min-width:260px; }
+nav h4 { margin-bottom:.6rem; color:var(--subtle); }
+nav ol { padding-left:1.25rem; }
+nav li { margin:.2rem 0; }
+nav a  { color:var(--subtle); }
+nav a:hover { color:var(--text); }
+</style>
+</head>
+<body>
+
+<h1>ink vs the Field: An Honest Array Language Benchmark</h1>
+<div class="meta">Werner Almansa · May 2026 · ink v0.x (dev) · Apple M-series · macOS 14</div>
+
+<p class="lead">
+ink is a new array programming language written in Zig. It speaks K—the
+dense, verb-oriented notation used by ngn/k, kdb+/q, and a constellation of
+open-source dialects. This post benchmarks ink against three well-established
+implementations across a spectrum of workloads: basic array verbs, heavy math,
+and a real-world quantitative-finance application.
+</p>
+
+<div class="callout warn">
+  <strong>Honest framing:</strong> ink is under active development.
+  The numbers below show where ink stands today, not where it is headed.
+  Several performance gaps are already understood and tracked.
+</div>
+
+<nav>
+  <h4>Contents</h4>
+  <ol>
+    <li><a href="#contenders">The contenders</a></li>
+    <li><a href="#methodology">Methodology</a></li>
+    <li><a href="#startup">Startup overhead</a></li>
+    <li><a href="#basic">Basic array verbs</a></li>
+    <li><a href="#math">Heavy math</a></li>
+    <li><a href="#strategies">Trading strategy sweeps</a></li>
+    <li><a href="#analysis">Analysis</a></li>
+    <li><a href="#roadmap">What comes next</a></li>
+  </ol>
+</nav>
+
+<!-- ───────────────────────────── CONTENDERS ──────────────────────────────── -->
+<h2 id="contenders">The Contenders</h2>
+
+<div class="grid-2">
+  <div class="card">
+    <h4><span class="lang lang-ink">ink</span></h4>
+    <p style="margin:0">New array language written in Zig. K-dialect with
+    first-class graphics. Compiles to a single ~4 MB binary.
+    <em>Tested build: <code>zig-out/bin/ink</code>.</em></p>
+  </div>
+  <div class="card">
+    <h4><span class="lang lang-ngnk">ngn/k</span></h4>
+    <p style="margin:0">Arthur Whitney–inspired K6 implementation by ngn.
+    C source compiled to a tiny native binary. Legendary for startup speed
+    and raw throughput. Installed at <code>~/.k/k</code>.</p>
+  </div>
+  <div class="card">
+    <h4><span class="lang lang-goal">goal</span></h4>
+    <p style="margin:0">Goal is a K-inspired array language by Olivier Lauzanne,
+    implemented in Go. Ships with a clean REPL and good stdlib.
+    Binary at <code>~/Code/goal/goal</code>.</p>
+  </div>
+  <div class="card">
+    <h4><span class="lang lang-q">q / kdb+</span></h4>
+    <p style="margin:0">Kx Systems' commercial vector database language.
+    The industry standard in HFT and quantitative finance. Free 32-bit
+    version at <code>~/.kx/bin/q</code>, run with <code>-q</code> (quiet mode).</p>
+  </div>
+</div>
+
+<p>
+  <strong>BQN (CBQN) was planned</strong> but not found on this system.
+  It would be a natural fit given CBQN's JIT-compiled performance; I'll add it
+  in a follow-up post.
+</p>
+
+<!-- ───────────────────────────── METHODOLOGY ─────────────────────────────── -->
+<h2 id="methodology">Methodology</h2>
+
+<p>
+All benchmarks run on an Apple M-series Mac (macOS 14, single core, no
+parallelism exploited by any runtime). Each backend is invoked as a
+<strong>fresh process per measurement</strong>—stdin for ink, ngn/k, and goal;
+stdin with a <code>\</code> exit command for q. Results therefore include
+startup time and any JIT/warm-up cost. Five repetitions per cell; we report the
+<strong>median</strong>.
+</p>
+
+<p>
+The benchmark runner is <code>tool/bench_multi.py</code> in the ink repo.
+Micro-benchmarks parameterise on <code>N ∈ {1 k, 10 k, 100 k, 1 M}</code>.
+Strategy benchmarks run entire script files end-to-end, three reps each.
+</p>
+
+<div class="callout">
+  <strong>Note on "net" times:</strong> Charts show <em>net</em> time—total
+  median minus the <em>baseline</em> median at the same N. The baseline
+  allocates a plain integer range (<code>!N</code> / <code>til N</code>),
+  isolating operation cost from startup + allocation overhead.
+  Where net is negative or zero (faster than baseline) we floor at 0.
+</div>
+
+<!-- ───────────────────────────── STARTUP ─────────────────────────────── -->
+<h2 id="startup">Startup Overhead</h2>
+
+<p>
+The baseline benchmark—allocate and discard an integer range—measures the
+interpreter's <em>cold-start tax</em>. It sets the floor below which no
+single-expression script can go.
+</p>
+
+<div class="card" style="margin:1.5rem 0">
+  <h4>Baseline: allocate range !N (total process time, ms)</h4>
+  <canvas id="chartBaseline" style="max-height:260px"></canvas>
+  <div class="note">Lower is better. ngn/k stays flat at ~3.5 ms regardless of N—extraordinary.</div>
+</div>
+
+<table>
+  <thead><tr><th>Backend</th><th>N = 1 k</th><th>10 k</th><th>100 k</th><th>1 M</th></tr></thead>
+  <tbody>
+    <tr><td><span class="lang lang-ink">ink</span></td><td>7.3</td><td>8.8</td><td>24.6</td><td class="worst">179</td></tr>
+    <tr><td><span class="lang lang-ngnk">ngn/k</span></td><td class="best">3.4</td><td class="best">3.5</td><td class="best">3.3</td><td class="best">3.5</td></tr>
+    <tr><td><span class="lang lang-goal">goal</span></td><td>4.7</td><td>4.9</td><td>6.9</td><td>25.5</td></tr>
+    <tr><td><span class="lang lang-q">q</span></td><td>16.9</td><td>17.1</td><td>16.9</td><td>18.3</td></tr>
+  </tbody>
+</table>
+
+<p>
+ngn/k's near-flat ~3.5 ms across all sizes is remarkable—it prints the array to
+stdout and still beats everyone. q pays a constant ~17 ms runtime tax but
+compensates with extremely efficient per-operation code. goal's Go runtime warms
+up quickly and scales cleanly. ink's baseline grows with N: 7 ms → 179 ms at
+1 M, pointing to per-element allocation overhead in the current Zig
+implementation.
+</p>
+
+<!-- ───────────────────────────── BASIC VERBS ─────────────────────────────── -->
+<h2 id="basic">Basic Array Verbs</h2>
+
+<p>
+Seven core primitives tested at four scales. Charts show net time
+(startup subtracted) so you see computation cost, not cold-start.
+</p>
+
+<div class="grid-2" id="charts-basic"></div>
+
+<h4>Net times at N = 1 M (ms) — basic verbs</h4>
+<table id="table-basic">
+  <thead><tr>
+    <th>Benchmark</th><th>Description</th>
+    <th><span class="lang lang-ink">ink</span></th>
+    <th><span class="lang lang-ngnk">ngn/k</span></th>
+    <th><span class="lang lang-goal">goal</span></th>
+    <th><span class="lang lang-q">q</span></th>
+  </tr></thead>
+  <tbody>
+    <tr>
+      <td>sum <span class="badge">O(N)</span></td><td>+/ fold</td>
+      <td>0</td><td class="best">0</td><td class="best">0</td><td>2.1</td>
+    </tr>
+    <tr>
+      <td>max <span class="badge">O(N)</span></td><td>|/ fold</td>
+      <td>0</td><td class="best">0</td><td class="best">0</td><td>0</td>
+    </tr>
+    <tr>
+      <td>reverse <span class="badge">O(N)</span></td><td>|| round-trip</td>
+      <td>11.9</td><td class="best">0</td><td>0</td><td>1.4</td>
+    </tr>
+    <tr>
+      <td>grade <span class="badge">O(N log N)</span></td><td>&lt;| sort-indices</td>
+      <td class="worst">97.8</td><td class="best">0</td><td>18.3</td><td>3.8</td>
+    </tr>
+    <tr>
+      <td>distinct <span class="badge">O(N)</span></td><td>? deduplicate</td>
+      <td class="worst">116</td><td class="best">0</td><td>0</td><td>9.1</td>
+    </tr>
+    <tr>
+      <td>group <span class="badge">O(N)</span></td><td>= partition</td>
+      <td class="worst">651</td><td class="best">0</td><td>0</td><td>12.5</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <strong>ink's group operation is 651 ms net at N=1 M</strong>, against
+  ngn/k's unmeasurable ~0 ms and goal's ~0 ms. The dictionary-backed grouping
+  in the current ink implementation visits every element individually, creating
+  a new allocation per bucket update. This is the single biggest regression and
+  is being actively addressed.
+</div>
+
+<!-- ───────────────────────────── MATH ─────────────────────────────── -->
+<h2 id="math">Heavy Math</h2>
+
+<p>
+Element-wise transcendentals (<code>sqrt</code>, <code>exp</code>,
+<code>log</code>), prefix scan, and inner product. These stress the
+floating-point dispatch path.
+</p>
+
+<div class="grid-2" id="charts-math"></div>
+
+<h4>Net times at N = 1 M (ms) — math</h4>
+<table>
+  <thead><tr>
+    <th>Benchmark</th><th>Description</th>
+    <th><span class="lang lang-ink">ink</span></th>
+    <th><span class="lang lang-ngnk">ngn/k</span></th>
+    <th><span class="lang lang-goal">goal</span></th>
+    <th><span class="lang lang-q">q</span></th>
+  </tr></thead>
+  <tbody>
+    <tr>
+      <td>sqrt <span class="badge">O(N)</span></td><td>element-wise √</td>
+      <td class="worst">416</td><td class="best">0</td><td>73</td><td>4.2</td>
+    </tr>
+    <tr>
+      <td>exp <span class="badge">O(N)</span></td><td>element-wise eˣ</td>
+      <td class="worst">−66 (0)</td><td class="best">0</td><td>0</td><td>6.5</td>
+    </tr>
+    <tr>
+      <td>log <span class="badge">O(N)</span></td><td>element-wise ln</td>
+      <td class="worst">443</td><td class="best">0</td><td>83</td><td>5.6</td>
+    </tr>
+    <tr>
+      <td>scan_sum <span class="badge">O(N)</span></td><td>+\ prefix sum</td>
+      <td class="worst">596</td><td class="best">0</td><td>81</td><td>4.0</td>
+    </tr>
+    <tr>
+      <td>inner_product <span class="badge">O(N)</span></td><td>+/x*x</td>
+      <td>0</td><td class="best">0</td><td class="best">0</td><td>4.0</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>
+ngn/k once again returns near-zero net times for all math ops—its float
+pipeline is exceptionally tight. The picture for ink is split: <code>exp</code>
+and <code>inner_product</code> finish near-baseline (likely because the
+allocation cost dominates and the math itself is negligible), while
+<code>sqrt</code>, <code>log</code>, and <code>+\</code> show 400–600 ms net
+overhead. The latter group all require producing a new N-element float array per
+element—the current implementation allocates individually rather than in a
+contiguous slab.
+</p>
+
+<!-- ───────────────────────────── STRATEGIES ─────────────────────────────── -->
+<h2 id="strategies">Real-World: Trading Strategy Parameter Sweeps</h2>
+
+<p>
+The true stress test: three quantitative trading strategies, each performing a
+parameter grid search over 1,249 days of AAPL price history. The strategies
+were designed to showcase K's strength—O(N) vectorised moving averages via
+prefix sums, boolean masking instead of branches, and zero explicit loops.
+These scripts are run <strong>end-to-end</strong> from a cold process.
+</p>
+
+<div class="grid-3">
+  <div class="card">
+    <h4>MA Crossover</h4>
+    <p style="margin:.5rem 0;font-size:.8rem;">2D sweep: all (slow, fast)
+    window pairs up to 25 → <strong>300 independent backtests</strong>,
+    ~2.4 M ops.</p>
+    <table>
+      <tr><td><span class="lang lang-ink">ink</span></td><td class="worst" style="text-align:right">6,388 ms</td></tr>
+      <tr><td><span class="lang lang-ngnk">ngn/k</span></td><td class="best"  style="text-align:right">100 ms</td></tr>
+    </table>
+    <div class="note">64× faster in ngn/k</div>
+  </div>
+  <div class="card">
+    <h4>Z-Score Arb</h4>
+    <p style="margin:.5rem 0;font-size:.8rem;">1D sweep: 99 windows,
+    fixed threshold=2 → <strong>99 backtests</strong>, ~12 M ops.</p>
+    <table>
+      <tr><td><span class="lang lang-ink">ink</span></td><td class="worst" style="text-align:right">5,711 ms</td></tr>
+      <tr><td><span class="lang lang-ngnk">ngn/k</span></td><td class="best"  style="text-align:right">54 ms</td></tr>
+    </table>
+    <div class="note">106× faster in ngn/k</div>
+  </div>
+  <div class="card">
+    <h4>RSI Momentum</h4>
+    <p style="margin:.5rem 0;font-size:.8rem;">1D sweep: 38 windows,
+    threshold=30 → <strong>38 backtests</strong>, ~5 M ops.</p>
+    <table>
+      <tr><td><span class="lang lang-ink">ink</span></td><td class="worst" style="text-align:right">5,175 ms</td></tr>
+      <tr><td><span class="lang lang-ngnk">ngn/k</span></td><td class="best"  style="text-align:right">24 ms</td></tr>
+    </table>
+    <div class="note">218× faster in ngn/k</div>
+  </div>
+</div>
+
+<p>
+The gap widens as the sweep has more inner iterations: 64× for MA (many
+large-array ops), 218× for RSI (many smaller ops but more function calls).
+This pattern confirms that ink's overhead is per-<em>call</em> rather than
+per-<em>element</em>—the <code>'</code> (each) operator is creating a new
+closure frame and allocating on every iteration.
+</p>
+
+<div class="card" style="margin:1.5rem 0">
+  <h4>Strategy benchmark — total process time (ms, lower = better)</h4>
+  <canvas id="chartStrategy" style="max-height:240px"></canvas>
+</div>
+
+<!-- ───────────────────────────── ANALYSIS ─────────────────────────────── -->
+<h2 id="analysis">Analysis</h2>
+
+<h3>Where ink is competitive today</h3>
+
+<p>
+For small N (≤ 10 k) and aggregation verbs (sum, max) ink is already in the
+same bracket as goal and q once startup is accounted for. The absolute times—
+under 15 ms for most ops at N=10 k—are workable for interactive exploration.
+</p>
+
+<h3>The three performance gaps</h3>
+
+<h4>1. Per-element allocation in element-wise ops</h4>
+<p>
+<code>sqrt</code>, <code>log</code>, and <code>+\</code> all build a new
+float array element-by-element. The current Zig allocator path creates one
+allocation per element in the output; at N=1 M that is 1 M
+<code>alloc</code>/<code>free</code> calls. The fix is a
+<em>map-in-place</em> or <em>map-to-preallocated-slab</em> path. This alone
+should bring ink within 2–5× of ngn/k on transcendentals.
+</p>
+
+<h4>2. Dictionary-backed group (=)</h4>
+<p>
+ink's group implementation uses a general-purpose hash map that resizes
+and reallocates on every insert. ngn/k and goal use fixed-size compact
+representations for small key ranges. For the 100-bucket case at N=1 M,
+ink does ~1 M hash-map inserts with re-hash events;
+the expected fix is a two-pass counting approach (histogram + scatter),
+achieving O(N) with a single allocation.
+</p>
+
+<h4>3. Per-iteration frame cost in each (')</h4>
+<p>
+The strategy benchmarks reveal that ink's performance degrades roughly
+proportionally to the <em>number of each-iterations</em> rather than the
+<em>total element count</em>. The MA crossover has 300 iterations of an
+array operation on 1,249 elements: ~375 k total element-ops, yet takes
+6.4 seconds—17 μs per iteration just in overhead. This overhead likely
+comes from closure capture, frame allocation, and garbage-pressure from
+intermediate arrays that are not freed eagerly.
+</p>
+
+<h3>The ngn/k ceiling</h3>
+
+<p>
+ngn/k is genuinely extraordinary: sub-4 ms for <em>any</em> micro-benchmark
+regardless of N up to 1 M, and 24–100 ms for full strategy sweeps that ink
+takes seconds to finish. This is what happens when a language runtime is
+hand-crafted in C by someone who has been optimising K interpreters for
+decades. It is an aspirational target, not a realistic near-term parity goal.
+</p>
+
+<p>
+goal and q both sit in a reasonable middle ground—10–100 ms for large
+micro-benchmarks—and provide a more realistic competitive target for ink in
+the next few months.
+</p>
+
+<!-- ───────────────────────────── ROADMAP ─────────────────────────────── -->
+<h2 id="roadmap">What Comes Next</h2>
+
+<div class="grid-2">
+  <div class="card">
+    <h4>Near-term (next 1–2 months)</h4>
+    <ul style="padding-left:1.2rem;font-size:.82rem;color:#cbd5e1;line-height:1.9">
+      <li>Slab-allocate output arrays for map-like verbs (sqrt, log, exp, scan)</li>
+      <li>Two-pass histogram group (=) for integer key ranges</li>
+      <li>Eager reclaim of intermediate values inside each (')</li>
+      <li>Re-run this benchmark suite as a regression guard in CI</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>Medium-term</h4>
+    <ul style="padding-left:1.2rem;font-size:.82rem;color:#cbd5e1;line-height:1.9">
+      <li>SIMD paths for float reductions (sum, max, dot)</li>
+      <li>Add CBQN to the benchmark suite</li>
+      <li>Benchmark ink's graphics pipeline (the unique differentiator)</li>
+      <li>Publish updated numbers with each milestone</li>
+    </ul>
+  </div>
+</div>
+
+<p>
+The benchmark runner, strategy scripts, and all data are in the
+<code>tool/bench_multi.py</code> and <code>test/KStrategies/</code> directories
+of the ink repository. Raw JSON results live at
+<code>bench/multi.json</code>.
+</p>
+
+<div class="callout good">
+  <strong>Interactive report:</strong> the auto-generated
+  <a href="../bench/multi.html"><code>bench/multi.html</code></a> file has
+  per-size line charts for every benchmark with all four backends overlaid.
+</div>
+
+<hr style="border:none;border-top:1px solid var(--border);margin:3rem 0">
+<p style="font-size:.72rem;color:var(--muted)">
+  Benchmarks run on Apple M-series, macOS 14.6, May 2026.
+  ink binary: <code>zig-out/bin/ink</code> built with <code>zig build</code>.
+  ngn/k: <code>~/.k/k</code> (growler build).
+  goal: <code>~/Code/goal/goal</code>.
+  q/kdb+: 32-bit free version <code>~/.kx/bin/q -q</code>.
+  Source: <a href="https://github.com/wrnrlr/ink">github.com/wrnrlr/ink</a>.
+</p>
+
+<!-- ─────────────────────────── CHARTS ─────────────────────────────────────── -->
+<script>
+const COLORS = { "ink":"#a78bfa", "ngn/k":"#34d399", "goal":"#f59e0b", "q":"#60a5fa" };
+const SIZES  = [1000,10000,100000,1000000];
+const LABELS = ["1k","10k","100k","1M"];
+
+// Benchmark data — generated from bench/multi.json (2026-05-02)
+const MICRO = {
+  baseline: {
+    ink: [7.283, 8.843, 24.571, 179.296],
+    "ngn/k": [3.382, 3.481, 3.343, 3.496],
+    goal: [4.683, 4.903, 6.879, 25.506],
+    q: [16.872, 17.115, 16.87, 18.259],
+  },
+  sum: {
+    ink: [2.453, 1.09, 0.0, 0.0],
+    "ngn/k": [0.676, 0.414, 0.355, 0.325],
+    goal: [0.548, 0.205, 0.0, 0.0],
+    q: [0.0, 0.0, 0.423, 2.116],
+  },
+  max: {
+    ink: [1.613, 0.0, 0.0, 0.0],
+    "ngn/k": [0.555, 0.524, 0.265, 0.262],
+    goal: [0.05, 0.0, 0.0, 0.0],
+    q: [0.212, 0.0, 0.387, 0.0],
+  },
+  reverse: {
+    ink: [2.018, 1.956, 2.911, 11.888],
+    "ngn/k": [0.673, 0.111, 0.34, 0.109],
+    goal: [0.786, 0.434, 0.401, 0.0],
+    q: [0.0, 0.0, 0.586, 1.376],
+  },
+  grade: {
+    ink: [2.955, 3.468, 10.901, 97.822],
+    "ngn/k": [0.493, 0.213, 0.439, 0.438],
+    goal: [0.448, 0.417, 2.415, 18.28],
+    q: [1.027, 0.0, 0.781, 3.76],
+  },
+  distinct: {
+    ink: [3.31, 4.014, 14.783, 116.327],
+    "ngn/k": [0.979, 0.483, 0.628, 0.417],
+    goal: [0.842, 1.206, 0.0, 0.0],
+    q: [0.7, 0.0, 1.066, 9.133],
+  },
+  group: {
+    ink: [11.038, 16.335, 74.488, 651.52],
+    "ngn/k": [0.855, 0.221, 0.622, 0.425],
+    goal: [0.83, 0.522, 0.0, 0.0],
+    q: [0.006, 0.0, 1.422, 12.483],
+  },
+  sqrt: {
+    ink: [3.256, 7.51, 46.383, 415.724],
+    "ngn/k": [0.666, 0.541, 0.336, 0.477],
+    goal: [0.889, 1.543, 9.115, 72.941],
+    q: [0.147, 0.464, 1.101, 4.229],
+  },
+  exp: {
+    ink: [2.934, 1.878, 0.0, 0.0],
+    "ngn/k": [0.886, 0.549, 0.456, 0.303],
+    goal: [1.045, 1.299, 0.396, 0.0],
+    q: [0.773, 0.0, 0.955, 6.541],
+  },
+  log: {
+    ink: [4.037, 7.483, 45.839, 443.282],
+    "ngn/k": [0.208, 0.0, 0.0, 0.0],
+    goal: [0.058, 1.017, 10.025, 82.837],
+    q: [0.53, 0.0, 1.013, 5.592],
+  },
+  scan_sum: {
+    ink: [3.62, 8.943, 61.067, 595.941],
+    "ngn/k": [0.0, 0.572, 0.436, 0.0],
+    goal: [0.423, 2.27, 8.987, 80.763],
+    q: [0.065, 0.0, 0.616, 4.011],
+  },
+  inner_product: {
+    ink: [5.063, 3.961, 0.0, 0.0],
+    "ngn/k": [1.159, 0.023, 0.929, 0.0],
+    goal: [1.801, 0.176, 0.0, 0.0],
+    q: [0.095, 0.0, 1.104, 3.863],
+  },
+};
+
+const STRATEGY_DATA = {
+  labels: ["MA Crossover","Z-Score Arb","RSI Momentum"],
+  ink:    [6388, 5711, 5175],
+  "ngn/k":[100,  54,   24],
+};
+
+function makeLineChart(id, datasets) {
+  const ctx = document.getElementById(id);
+  if (!ctx) return;
+  new Chart(ctx, {
+    type:"line",
+    data:{ labels:LABELS, datasets },
+    options:{
+      responsive:true,
+      interaction:{mode:"index",intersect:false},
+      scales:{
+        x:{ grid:{color:"#1e2130"}, ticks:{color:"#64748b"} },
+        y:{ grid:{color:"#1e2130"}, ticks:{color:"#64748b", callback:v=>v.toFixed(1)+"ms"},
+            beginAtZero:true },
+      },
+      plugins:{
+        legend:{labels:{color:"#94a3b8",boxWidth:12,font:{size:11}}},
+        tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y?.toFixed(2)} ms`}},
+      },
+    },
+  });
+}
+
+function datasetsFor(keys) {
+  return Object.entries(COLORS)
+    .filter(([b])=>keys.some(k=>MICRO[k]?.[b]))
+    .map(([b,c])=>{
+      // average across the given keys (for combined charts)
+      return null; // placeholder
+    });
+}
+
+function singleDatasets(key) {
+  return Object.entries(COLORS).map(([b,c])=>({
+    label: b,
+    data: MICRO[key]?.[b] ?? [],
+    borderColor: c,
+    backgroundColor: c+"22",
+    tension:.3, pointRadius:4, pointHoverRadius:6,
+  }));
+}
+
+// Baseline chart
+makeLineChart("chartBaseline",
+  Object.entries(COLORS).map(([b,c])=>({
+    label:b, data:MICRO.baseline[b],
+    borderColor:c, backgroundColor:c+"22", tension:.3, pointRadius:4,
+  }))
+);
+
+// Basic verb charts
+const basicKeys = ["sum","max","reverse","grade","distinct","group"];
+const basicDesc = {
+  sum:"Sum fold +/", max:"Max fold |/", reverse:"Double-reverse",
+  grade:"Grade-up <|", distinct:"Distinct ?", group:"Group ="
+};
+const basicC = document.getElementById("charts-basic");
+for (const key of basicKeys) {
+  const div = document.createElement("div");
+  div.className = "card";
+  div.innerHTML = `<h4>${key} — ${basicDesc[key]} (net ms)</h4><canvas id="bc_${key}"></canvas>`;
+  basicC.appendChild(div);
+  makeLineChart("bc_"+key, singleDatasets(key));
+}
+
+// Math charts
+const mathKeys = ["sqrt","exp","log","scan_sum","inner_product"];
+const mathDesc = {
+  sqrt:"sqrt element-wise", exp:"exp element-wise", log:"log element-wise",
+  scan_sum:"Prefix sum +\\", inner_product:"Inner product +/x*x"
+};
+const mathC = document.getElementById("charts-math");
+for (const key of mathKeys) {
+  const div = document.createElement("div");
+  div.className = "card";
+  div.innerHTML = `<h4>${key} — ${mathDesc[key]} (net ms)</h4><canvas id="mc_${key}"></canvas>`;
+  mathC.appendChild(div);
+  makeLineChart("mc_"+key, singleDatasets(key));
+}
+
+// Strategy bar chart
+new Chart(document.getElementById("chartStrategy"), {
+  type:"bar",
+  data:{
+    labels: STRATEGY_DATA.labels,
+    datasets: [
+      { label:"ink",   data:STRATEGY_DATA["ink"],   backgroundColor:"#a78bfa88", borderColor:"#a78bfa", borderWidth:2 },
+      { label:"ngn/k", data:STRATEGY_DATA["ngn/k"], backgroundColor:"#34d39988", borderColor:"#34d399", borderWidth:2 },
+    ],
+  },
+  options:{
+    responsive:true,
+    scales:{
+      x:{ grid:{color:"#1e2130"}, ticks:{color:"#64748b"} },
+      y:{ grid:{color:"#1e2130"}, ticks:{color:"#64748b", callback:v=>v+"ms"}, beginAtZero:true },
+    },
+    plugins:{
+      legend:{labels:{color:"#94a3b8",boxWidth:14,font:{size:11}}},
+      tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y?.toFixed(0)} ms`}},
+    },
+  },
+});
+</script>
+</body>
+</html>
