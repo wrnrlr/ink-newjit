@@ -5,16 +5,16 @@ const value = @import("noun/value.zig");
 const disasm = @import("runtime/disasm.zig");
 
 const build_options = @import("build_options");
-const enable_ui = build_options.enable_ui;
+const enable_ui  = build_options.enable_ui;
+const enable_gpu = build_options.enable_gpu;
+const gpu_compute = if (enable_gpu) @import("gpu_compute") else void;
 
 const V = value.V;
 const K = @import("noun/class.zig").K;
 
 // ── REPL / stdin eval ─────────────────────────────────────────────────────────
 
-fn runRepl(allocator: std.mem.Allocator) !void {
-  const vm = try VM.create(allocator);
-  defer vm.deinit();
+fn runRepl(allocator: std.mem.Allocator, vm: *VM) !void {
   var repl = Repl.init(allocator, vm);
   var buf = try std.ArrayList(u8).initCapacity(allocator, 64);
   defer buf.deinit(allocator);
@@ -47,7 +47,7 @@ fn runRepl(allocator: std.mem.Allocator) !void {
   }
 }
 
-fn evalStdin(allocator: std.mem.Allocator) !void {
+fn evalStdin(allocator: std.mem.Allocator, vm: *VM) !void {
   const io = std.Io.Threaded.global_single_threaded.io();
   var read_buf: [4096]u8 = undefined;
   var reader = std.Io.File.stdin().reader(io, &read_buf);
@@ -55,8 +55,6 @@ fn evalStdin(allocator: std.mem.Allocator) !void {
   defer content_list.deinit(allocator);
   try reader.interface.appendRemainingUnlimited(allocator, &content_list);
   const content = content_list.items;
-  const vm = try VM.create(allocator);
-  defer vm.deinit();
   var repl = Repl.init(allocator, vm);
   const res = try repl.eval(std.mem.trim(u8, content, " \t\r\n"));
   defer res.deinit(allocator);
@@ -77,10 +75,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
   _ = args_iter.next(); // skip exe name
 
   var disasm_mode = false;
+  var gpu_flag    = false;
   var script_path: ?[]const u8 = null;
   while (args_iter.next()) |arg| {
     if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--disasm")) {
       disasm_mode = true;
+    } else if (std.mem.eql(u8, arg, "--gpu")) {
+      gpu_flag = true;
     } else {
       script_path = arg;
     }
@@ -89,13 +90,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
   const io = std.Io.Threaded.global_single_threaded.io();
   const stdin_is_tty = (std.Io.File.stdin().isTty(io) catch false);
 
-  if (script_path == null and stdin_is_tty) return runRepl(allocator);
-  if (script_path == null) return evalStdin(allocator);
+  // Create VM once; GPU backend (if requested) is attached before any eval.
+  const vm = try VM.create(allocator);
+  defer vm.deinit();
 
   // Disassemble mode: compile without running, print bytecode, exit.
-  if (disasm_mode) {
-    const vm = try VM.create(allocator);
-    defer vm.deinit();
+  if (disasm_mode and script_path != null) {
     var d = disasm.Disassembler.init(vm.compiler);
     d.compileFile(vm.parser.?, script_path.?) catch |err| {
       std.debug.print("error compiling {s}: {}\n", .{ script_path.?, err });
@@ -107,9 +107,29 @@ pub fn main(init: std.process.Init.Minimal) !void {
     return;
   }
 
-  // Load VM and script
-  const vm = try VM.create(allocator);
-  defer vm.deinit();
+  // Attach GPU compute backend when --gpu flag is present and the binary
+  // was compiled with -Dgpu=true (or -Dui=true which implies GPU support).
+  // The comptime branches ensure dead GPU code is never type-checked in
+  // non-GPU builds (gpu_compute == void when enable_gpu == false).
+  const GpuBackendT = comptime if (enable_gpu) *gpu_compute.WgpuBackend else void;
+  var gpu_backend: ?GpuBackendT = null;
+  if (comptime enable_gpu) {
+    if (gpu_flag) {
+      if (gpu_compute.WgpuBackend.create(allocator)) |b| {
+        gpu_backend = b;
+        vm.gpu = &b.ctx;
+      } else |err| {
+        std.debug.print("warning: GPU backend unavailable ({s}), running on CPU\n",
+          .{@errorName(err)});
+      }
+    }
+  }
+  defer if (comptime enable_gpu) {
+    if (gpu_backend) |b| b.destroy();
+  };
+
+  if (script_path == null and stdin_is_tty) return runRepl(allocator, vm);
+  if (script_path == null) return evalStdin(allocator, vm);
 
   var stdout_buf: [4096]u8 = undefined;
   var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);

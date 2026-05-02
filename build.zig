@@ -63,9 +63,19 @@ pub fn build(b: *std.Build) !void {
   corpus_step.dependOn(&corpus_run.step);
 
   // --- ink runner (repl / file / stdin eval) ---
-  const enable_ui = b.option(bool, "ui", "Enable UI/graphics support (GLFW + WebGPU window)") orelse false;
+  const enable_ui  = b.option(bool, "ui",  "Enable UI/graphics support (GLFW + WebGPU window)") orelse false;
+  const enable_gpu = b.option(bool, "gpu", "Enable GPU compute support (WebGPU, no window)") orelse enable_ui;
+
+  // GPU compute module — shared by runner (--gpu flag) and gpu tests.
+  const gpu_compute_mod = b.createModule(.{
+    .root_source_file = b.path("src/gpu/gpu_wgpu_test.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+  });
+  gpu_compute_mod.addImport("zgpu", zgpu_mod);
+
   const runner_options = b.addOptions();
   runner_options.addOption(bool, "enable_ui",  enable_ui);
+  runner_options.addOption(bool, "enable_gpu", enable_gpu);
   runner_options.addOption(bool, "enable_jit", enable_jit);
 
   const runner_mod = b.createModule(.{
@@ -76,12 +86,8 @@ pub fn build(b: *std.Build) !void {
   runner_mod.addOptions("build_options", runner_options);
   runner_mod.addIncludePath(b.path("src"));
 
-  if (enable_ui) {
-    runner_mod.addImport("ink",   ink_lib_mod);
-    runner_mod.addImport("zgpu",  zgpu_mod);
-    runner_mod.addImport("zglfw", zglfw_dep.module("glfw"));
-    runner_mod.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
-    runner_mod.linkSystemLibrary("glfw", .{});
+  if (enable_gpu) {
+    runner_mod.addImport("gpu_compute", gpu_compute_mod);
     runner_mod.addLibraryPath(dawn_dep.path(""));
     if (target.result.os.tag == .macos) {
       runner_mod.linkSystemLibrary("objc", .{});
@@ -96,6 +102,14 @@ pub fn build(b: *std.Build) !void {
       runner_mod.linkLibrary(zdawn_lib);
       runner_mod.linkSystemLibrary("dawn", .{});
     }
+  }
+
+  if (enable_ui) {
+    runner_mod.addImport("ink",   ink_lib_mod);
+    runner_mod.addImport("zgpu",  zgpu_mod);
+    runner_mod.addImport("zglfw", zglfw_dep.module("glfw"));
+    runner_mod.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
+    runner_mod.linkSystemLibrary("glfw", .{});
   }
 
   b.installArtifact(runner_exe);

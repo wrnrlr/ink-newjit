@@ -3,7 +3,14 @@
 Array-language benchmark runner for the `ink` binary.
 
 Usage:
-  python3 tool/bench.py [--ink PATH] [--out bench/results.json] [--open]
+  python3 tool/bench.py [--ink PATH] [--out bench/results.json] [--open] [--build]
+
+  --build   Compile with ReleaseFast before running (recommended for accurate
+            numbers; without this the default Debug build dominates timings).
+
+Methodology: each (benchmark, size) pair runs INNER_REPS copies of the
+expression in a *single* subprocess to amortise the ~5-10 ms startup cost.
+The reported time is (total_subprocess_ms - baseline_startup_ms) / INNER_REPS.
 """
 
 import argparse
@@ -26,23 +33,50 @@ HTML_OUT = ROOT / "bench" / "index.html"
 # Use {N} as size placeholder — replaced with str.replace, not .format().
 # ------------------------------------------------------------------
 BENCHMARKS = [
-    ("baseline", "Allocate range !N",    "!{N}; 0",              "O(N)"),
-    ("sum",      "Fold sum +/",          "+/0.0+!{N}; 0",        "O(N)"),
-    ("max",      "Fold max |/",          "|/!{N}; 0",            "O(N)"),
-    ("reverse",  "Reverse |",           "||!{N}; 0",            "O(N)"),
-    ("sort",     "Sort < (worst-case)", "<|!{N}; 0",            "O(N log N)"),
-    ("distinct", "Distinct ?",          "?|!{N}; 0",            "O(N)"),
+    ("baseline", "Allocate range !N",    "!{N}",              "O(N)"),
+    ("sum",      "Fold sum +/",          "+/0.0+!{N}",        "O(N)"),
+    ("max",      "Fold max |/",          "|/!{N}",            "O(N)"),
+    ("reverse",  "Reverse |",           "||!{N}",            "O(N)"),
+    ("sort",     "Sort < (worst-case)", "<|!{N}",            "O(N log N)"),
+    ("distinct", "Distinct ?",          "?|!{N}",            "O(N)"),
     # Group 100 buckets: N random draws from 0..99 — tests hash-map scaling
-    ("group",    "Group = (100 keys)",  "={N}?!100; 0",         "O(N)"),
+    ("group",    "Group = (100 keys)",  "={N}?!100",         "O(N)"),
 ]
 
-SIZES     = [1_000, 10_000, 100_000, 1_000_000]
-REPS      = 5
-TIMEOUT_S = 10   # skip a (bench, N) pair if a single run takes longer
+SIZES      = [1_000, 10_000, 100_000, 1_000_000]
+REPS       = 5       # outer subprocess repetitions (for median)
+INNER_REPS = 20      # iterations per subprocess — amortises startup cost
+TIMEOUT_S  = 30      # skip a (bench, N) pair if a single run takes longer
+
+
+def build_release(root: pathlib.Path) -> None:
+    """Compile ink with ReleaseFast optimisation."""
+    print("Building ink with -Doptimize=ReleaseFast …")
+    r = subprocess.run(
+        ["zig", "build", "-Doptimize=ReleaseFast"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        sys.exit(f"Build failed:\n{r.stderr}")
+    print("Build OK\n")
+
+
+def make_expr(tmpl: str, N: int, inner: int) -> str:
+    """Return an ink expression that runs `tmpl` `inner` times then returns 0.
+
+    Each repetition is separated by '; ' so the result of the previous
+    expression is dropped before the next one runs.  The trailing '; 0'
+    gives the subprocess a stable exit value regardless of the benchmark
+    result type.
+    """
+    single = tmpl.replace("{N}", str(N))
+    return "; ".join([single] * inner) + "; 0"
 
 
 def run_one(ink: str, expr: str) -> float | None:
-    """Return elapsed ms, or None on error/timeout."""
+    """Return elapsed ms for the whole subprocess, or None on error/timeout."""
     t0 = time.perf_counter()
     try:
         r = subprocess.run(
@@ -73,7 +107,7 @@ def bench_all(ink: str) -> dict:
             "sizes": {},
         }
         for N in SIZES:
-            expr = tmpl.replace("{N}", str(N))
+            expr = make_expr(tmpl, N, INNER_REPS)
             times = []
             for _ in range(REPS):
                 ms = run_one(ink, expr)
@@ -84,12 +118,14 @@ def bench_all(ink: str) -> dict:
             pct = done * 100 // total
             label = f"{name}(N={N:,})"
             if times:
-                med = statistics.median(times)
-                print(f"  [{pct:3d}%] {label:<30} {med:7.2f} ms")
+                # Divide by INNER_REPS to get per-iteration time.
+                per = [t / INNER_REPS for t in times]
+                med = statistics.median(per)
+                print(f"  [{pct:3d}%] {label:<30} {med:7.3f} ms/iter")
                 results[name]["sizes"][N] = {
-                    "median_ms": round(med, 3),
-                    "min_ms":    round(min(times), 3),
-                    "max_ms":    round(max(times), 3),
+                    "median_ms": round(med, 4),
+                    "min_ms":    round(min(per), 4),
+                    "max_ms":    round(max(per), 4),
                     "reps":      len(times),
                 }
                 if name == "baseline":
@@ -98,7 +134,7 @@ def bench_all(ink: str) -> dict:
                 print(f"  [{pct:3d}%] {label:<30}   ERROR")
                 results[name]["sizes"][N] = None
 
-    # Compute net (subtract baseline startup cost)
+    # net = per-iteration time minus baseline allocation cost
     for name, data in results.items():
         if name == "baseline":
             continue
@@ -106,7 +142,7 @@ def bench_all(ink: str) -> dict:
             if entry is None:
                 continue
             base = baseline_times.get(N, 0.0)
-            entry["net_ms"] = round(max(entry["median_ms"] - base, 0.0), 3)
+            entry["net_ms"] = round(max(entry["median_ms"] - base, 0.0), 4)
 
     return results
 
@@ -298,17 +334,24 @@ def emit_html(results: dict, json_path: pathlib.Path) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="ink array-language benchmarks")
-    p.add_argument("--ink",  default=str(DEFAULT_INK), help="path to ink binary")
-    p.add_argument("--out",  default=str(DEFAULT_OUT), help="JSON output path")
-    p.add_argument("--open", action="store_true",      help="open HTML report after run")
+    p.add_argument("--ink",   default=str(DEFAULT_INK), help="path to ink binary")
+    p.add_argument("--out",   default=str(DEFAULT_OUT), help="JSON output path")
+    p.add_argument("--open",  action="store_true", help="open HTML report after run")
+    p.add_argument("--build", action="store_true",
+                   help="compile with -Doptimize=ReleaseFast before benchmarking "
+                        "(strongly recommended for accurate measurements)")
     args = p.parse_args()
+
+    if args.build:
+        build_release(ROOT)
 
     ink = args.ink
     if not os.path.isfile(ink):
-        sys.exit(f"ink binary not found: {ink}\nRun `zig build` first.")
+        sys.exit(f"ink binary not found: {ink}\nRun `zig build -Doptimize=ReleaseFast` first.")
 
-    print(f"ink:  {ink}")
-    print(f"reps: {REPS}  sizes: {[f'{n:,}' for n in SIZES]}\n")
+    print(f"ink:        {ink}")
+    print(f"reps:       {REPS} outer × {INNER_REPS} inner = {REPS * INNER_REPS} total iterations")
+    print(f"sizes:      {[f'{n:,}' for n in SIZES]}\n")
 
     results = bench_all(ink)
     emit_json(results, pathlib.Path(args.out))
