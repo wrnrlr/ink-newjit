@@ -1,3 +1,4 @@
 [
   { "label": "test", "command": "zig", "args": ["build", "test"]},
+  { "label": "build", "command": "time", "args": ["zig", "build", "-Dui=true", "-Djit=true"]},
 ]

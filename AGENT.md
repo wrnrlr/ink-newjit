@@ -153,31 +153,36 @@ Adverbs are polysemic just like verbs.
 - `\:` [EachLeft]()
 
 ### each1 `f'`
-#'("abc";3 4 5 6) -> 3 4
+Apply f to each item (unary map)
+Ex, Length of each element in a list:  `` #'("abc";3 4 5 6) `` -> `` 3 4 ``
 ### each2 `x F'`
-2 3#'"ab" -> ("aa";"bbb")
+Apply rhs array elementwise on rhs dyad.
+Ex. Reshape each element in a list:  `` 2 3#'"ab" `` -> `` ("aa";"bbb") ``
 ### binsearch `X'`
 1 3 5 7 9'8 9 0 -> 3 4 -1
 ### fold `F/`
-+/1 2 3 -> 6
+Reduce list with F (left fold)
+Ex. `+/1 2 3` -> `6`
 ### scan `F\`
-+\1 2 3 -> 1 3 6
+`+\1 2 3 -> 1 3 6`
 ### seeded `x F/ /`
-10+/1 2 3 -> 16
+`10+/1 2 3 -> 16`
 ### seeded `x F\ \`
-10+\1 2 3 -> 11 13 16
+`10+\1 2 3 -> 11 13 16`
 ### n-do i f/
-5(2*)/1 -> 32
+`5(2*)/1 -> 32`
 ### n-dos i f\
 5(2*)\1 -> 1 2 4 8 16 32
 ### while `f f/`
-(1<){:[2!x;1+3*x;-2!x]}/3 -> 1
+`(1<){:[2!x;1+3*x;-2!x]}/3 -> 1`
 ### whiles `f f\`
-(1<){:[2!x;1+3*x;-2!x]}\3 -> 3 10 5 16 8 4 2 1
+`(1<){:[2!x;1+3*x;-2!x]}\3 -> 3 10 5 16 8 4 2 1`
 ### converge `f/`
-{1+1.0%x}/1 -> 1.618033988749895
+Iterate f until result stops changing
+`` ~{1+1.0%x}/1 `` -> `` 1.618033988749895 ``
 ### converges `f\`
-(-2!)\100 -> 100 50 25 12 6 3 1 0
+list successive results until convergence
+`(-2!)\100 -> 100 50 25 12 6 3 1 0`
 ### join `C/`
 "ra"/("ab";"cadab";"") -> "abracadabra"
 ### split `C\`
@@ -187,9 +192,11 @@ Adverbs are polysemic just like verbs.
 ### encode `I\`
 24 60 60\3723 -> 1 2 3   2\13 -> 1 1 0 1
 ### window `i'`
-3':"abcdef" -> ("abc";"bcd";"cde";"def")
+sliding windows of size i
+`3':"abcdef" -> ("abc";"bcd";"cde";"def")`
 ### stencil `i f'`
-3{x,"."}':"abcde" -> ("abc.";"bcd.";"cde.")
+Apply f to each sliding window
+`3{x,"."}':"abcde" -> ("abc.";"bcd.";"cde.")`
 ### eachprior `F'`
 -':12 13 11 17 14 -> 12 1 -2 6 -3
 ### seeded `x F'`
@@ -209,23 +216,46 @@ The language parser, compiler and runtime are all written in Zig 0.16.
 
 # Project Overview
 - `src`
+  - `encoding`
+  - `gpu`
+    - `gpu.zig`
+    - `gpu_wgpu.zig` Implements `WgpuBackend`, the WGPU backend for gpu interface
   - `graphics`
-    - `color.zig` Oklch color 
+    - `shaders/fill.wgsl` Fragment shader 
+    - `color.zig` Oklch color space
     - `data.zig` Unicode data (very big, 14K lines of data tables)
+    - `render.zig` `Renderer` 
     - `shape.zig` Text shaping for glyphs
     - `ink.zig` Vector graphics API and named colors
     - `triangulate.zig` Triangulate bezier curve using earcutting
     - `window.zig` Window screen
   - `noun` Basic buildings blocks of the language
     - `class.zig` Class enum `K`
-    - `value.zig` Value struct `V`
+    - `value.zig` Value struct `V`, array struct `N`
     - `symbol.zig` Symbols interned in `Pool`
-  - `parser`
-    - `ast.zig`
+  - `parser` Parser ink code to `IR`
+    - `ast.zig` 
     - `lexer.zig`
     - `parser.zig`
   - `primitive`
-    - `adverb` Implementation of adverbs
+    - `adverb` Implementation of around 15 adverbs 
+      - `converge.zig` NYI
+      - `converges.zig` NYI
+      - `decodes.zig`
+      - `dispatch.zig`
+      - `each1.zig`
+      - `each2.zig`
+      - `eachleft.zig`
+      - `eachprior.zig`
+      - `eachright.zig`
+      - `encode.zig`
+      - `fold.zig`
+      - `join.zig`
+      - `lib.zig`
+      - `scan.zig`
+      - `split.zig`
+      - `stencil.zig`
+      - `window.zig`
     - `verb` Implementation of 60 verbs
       - `calc.zig` Arithmetic `+ - * %`, numeric: `sin abs ...`
       - `logic.zig` Logic verbs `< > = ~`
@@ -242,6 +272,7 @@ The language parser, compiler and runtime are all written in Zig 0.16.
   - `runner_ui.zig`
   - `test.zig`
 - `test`
+  - `bench` Compare throughput of different algos in ink, ngnk, bqn, q
   - `corpus` Parser tests in TxtTest format
   - `data`
   - `demo` Example of k code with cool visuals

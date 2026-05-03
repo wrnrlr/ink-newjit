@@ -26,9 +26,9 @@ fn whereBVec(vm: *VM, x: V) V {
   for (x_slice) |e| total += @intFromBool(e);
   const res = N(i32).init(vm.alloc, total) catch return V{ .err = .memory };
   var idx: usize = 0;
-  for (x_slice) |elem| {
+  for (x_slice, 0..) |elem, i| {
     if (elem) {
-      res.slice()[idx] = @intFromBool(elem);
+      res.slice()[idx] = @intCast(i);
       idx += 1;
     }
   }

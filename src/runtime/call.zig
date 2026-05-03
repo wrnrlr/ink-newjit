@@ -10,6 +10,7 @@ const chunk = @import("tape.zig");
 const Op = chunk.Op;
 const dispatch = @import("../primitive/dispatch.zig");
 const adverb = @import("../primitive/adverb/lib.zig");
+const syms = @import("syms.zig");
 
 pub const CallMode = enum { sync, bracket };
 
@@ -20,6 +21,7 @@ pub const Call = struct {
     return switch (func) {
       .func => |ref| try self.applyFn(ref, args, is_bracket),
       .partial => |p| try self.applyPartial(p, args, is_bracket),
+      .s => |sym_idx| return try syms.apply(self.vm, sym_idx, args),
       .L, .I, .F, .S, .C, .B, .m => {
         if (args.len == 1) return dispatch.dispatch2(self.vm, .@"@", func, args[0]);
         return V{ .err = .rank };

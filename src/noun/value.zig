@@ -322,7 +322,7 @@ pub const V = union(K) {
   }
 };
 
-const gpu = @import("../gpu/gpu.zig");
+const gpu = @import("gpu");
 pub const Loc = gpu.Loc;
 pub const GpuCtx = gpu.GpuCtx;
 pub const GpuRange = gpu.GpuRange;

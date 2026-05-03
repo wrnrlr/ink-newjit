@@ -10,7 +10,8 @@
 const std = @import("std");
 const zgpu = @import("zgpu");
 const wgpu = zgpu.wgpu;
-const gpu = @import("gpu.zig");
+const gpu = @import("gpu");
+
 
 const Alloc = std.mem.Allocator;
 

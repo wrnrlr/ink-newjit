@@ -5,7 +5,7 @@ const util = @import("../../util.zig");
 const Op = @import("../../runtime/tape.zig").Op;
 const dispatch = @import("../dispatch.zig");
 const promote = @import("../promote.zig").promote;
-const gpu = @import("../../gpu/gpu.zig");
+const gpu = @import("gpu");
 
 // Threshold at which (.I, .I) elementwise dyads dispatch to the GPU
 // when a backend is attached. Below this the kernel-launch + arena

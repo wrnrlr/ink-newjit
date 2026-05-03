@@ -1,6 +1,7 @@
 const value = @import("../noun/value.zig");
-const gpu_mod = @import("../gpu/gpu.zig");
+const gpu_mod = @import("gpu");
 const Op = @import("../runtime/tape.zig").Op;
+const syms = @import("../runtime/syms.zig");
 const K = @import("../noun/class.zig").K;
 const util = @import("../util.zig");
 const verbs = @import("verb/verbs.zig");
@@ -95,6 +96,7 @@ pub fn dispatch2(vm: *VM, op: Op, x: V, y: V) V {
   if (op == .@"!") return pair.dict(vm, x, y);
   if (op == .@"~") return .{ .b = x.eq(y) };
   if (xt == .L or yt == .L or x.isDict() or y.isDict()) return listDyad(vm, op, x, y);
+  if (op == .@"@" and xt == .s) return syms.apply(vm, x.s, &.{y}) catch V{ .err = .memory };
   return .{ .err = .@"type" };
 }
 

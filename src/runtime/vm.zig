@@ -77,6 +77,7 @@ pub const VM = struct {
   ext: ext_mod.ExtRegistry,
   out: ?*std.Io.Writer = null,
   prng: std.Random.DefaultPrng,
+  argv: V = .blank,
   jit:        if (jit_enabled) ?jit_mod.JitCache                    else void = if (jit_enabled) null      else {},
   jit_err:    if (jit_enabled) ?anyerror                             else void = if (jit_enabled) null      else {},
   jit_apply2: if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
@@ -124,6 +125,7 @@ pub const VM = struct {
   }
 
   pub fn deinit(vm: *VM) void {
+    vm.argv.deinit(vm.alloc);
     for (vm.stack[0..vm.stack_len]) |*v| v.deinit(vm.alloc);
 
     vm.compiler.deinit();

@@ -1,12 +1,12 @@
 VERSION := 0.0.1
 
-.PHONY: test vm ink bench bench-sort bench-view
+INK  := zig-out/bin/ink
+NGNK := $(HOME)/.k/k
+
+.PHONY: test bench bench-sort bench-view bench-langs bench-report
 
 test:
 	time zig build test
-
-vm:
-	timeout 10s time zig test src/vm.zig
 
 build:
 	time zig build
@@ -18,10 +18,22 @@ bench: build
 	python3 tool/bench.py --open
 
 bench-view:
-	python3 tool/bench.py --open --ink zig-out/bin/ink
+	python3 tool/bench.py --open --ink $(INK)
 
-ide:
-	time zig build ide
+# Cross-language benchmarks: ink vs ngnk
+# Runs test/bench/ink/*.k and test/bench/ngnk/*.k, writes bench/langs.csv
+bench-langs: build
+	python3 tool/bench_langs.py --ink $(INK) --ngnk $(NGNK)
+
+# Open the benchmark chart (requires bench-langs to have been run first)
+bench-report:
+	$(INK) test/bench/report.k
+
+info: build
+	@echo "Total lines:" && \
+	find src -name '*.zig' | xargs wc -l | tail -n 1
+	@echo "Binary size:" && \
+	du -h zig-out/bin/*
 
 clean:
 	rm -rf zig-out

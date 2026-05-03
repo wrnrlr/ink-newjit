@@ -12,6 +12,13 @@ pub fn build(b: *std.Build) !void {
   const dawn_dep  = b.dependency("dawn_aarch64_macos", .{});
   const tatfi_dep = b.dependency("tatfi", .{});
 
+  // --- GPU interface (shared types, no wgpu dependency) ---
+  const gpu_iface_mod = b.createModule(.{
+    .root_source_file = b.path("src/gpu/gpu.zig"),
+    .target = target,
+    .optimize = optimize,
+  });
+
   // --- GPU/graphics stack ---
   const zgpu_mod = zgpu_dep.module("root");
   zgpu_mod.addImport("zpool", zpool_dep.module("root"));
@@ -46,6 +53,7 @@ pub fn build(b: *std.Build) !void {
   test_options.addOption(bool, "enable_jit", enable_jit);
   test_mod.addOptions("build_options", test_options);
   test_mod.addIncludePath(b.path("src"));
+  test_mod.addImport("gpu", gpu_iface_mod);
   const test_exe = b.addTest(.{ .root_module = test_mod });
   const test_run = b.addRunArtifact(test_exe);
   const test_step = b.step("test", "Run unit tests");
@@ -68,10 +76,11 @@ pub fn build(b: *std.Build) !void {
 
   // GPU compute module — shared by runner (--gpu flag) and gpu tests.
   const gpu_compute_mod = b.createModule(.{
-    .root_source_file = b.path("src/gpu/gpu_wgpu_test.zig"),
+    .root_source_file = b.path("src/gpu/gpu_wgpu.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
   gpu_compute_mod.addImport("zgpu", zgpu_mod);
+  gpu_compute_mod.addImport("gpu", gpu_iface_mod);
 
   const runner_options = b.addOptions();
   runner_options.addOption(bool, "enable_ui",  enable_ui);
@@ -85,6 +94,7 @@ pub fn build(b: *std.Build) !void {
   const runner_exe = b.addExecutable(.{ .name = "ink", .root_module = runner_mod });
   runner_mod.addOptions("build_options", runner_options);
   runner_mod.addIncludePath(b.path("src"));
+  runner_mod.addImport("gpu", gpu_iface_mod);
 
   if (enable_gpu) {
     runner_mod.addImport("gpu_compute", gpu_compute_mod);
@@ -129,10 +139,11 @@ pub fn build(b: *std.Build) !void {
 
   // --- GPU backend test ---
   const gpu_test_mod = b.createModule(.{
-    .root_source_file = b.path("src/gpu/gpu_wgpu_test.zig"),
+    .root_source_file = b.path("src/gpu/gpu_wgpu.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
   gpu_test_mod.addImport("zgpu", zgpu_mod);
+  gpu_test_mod.addImport("gpu", gpu_iface_mod);
   gpu_test_mod.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
   gpu_test_mod.addLibraryPath(dawn_dep.path(""));
   if (target.result.os.tag == .macos) {

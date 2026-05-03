@@ -77,13 +77,17 @@ pub fn main(init: std.process.Init.Minimal) !void {
   var disasm_mode = false;
   var gpu_flag    = false;
   var script_path: ?[]const u8 = null;
+  var extra_args: std.ArrayList([]const u8) = .empty;
+  defer extra_args.deinit(allocator);
   while (args_iter.next()) |arg| {
     if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--disasm")) {
       disasm_mode = true;
     } else if (std.mem.eql(u8, arg, "--gpu")) {
       gpu_flag = true;
-    } else {
+    } else if (script_path == null) {
       script_path = arg;
+    } else {
+      try extra_args.append(allocator, arg);
     }
   }
 
@@ -127,6 +131,23 @@ pub fn main(init: std.process.Init.Minimal) !void {
   defer if (comptime enable_gpu) {
     if (gpu_backend) |b| b.destroy();
   };
+
+  // Build argv list and pre-register global x before loading any script.
+  if (extra_args.items.len > 0) {
+    const n = extra_args.items.len;
+    const argv_items_n = try value.N(V).init(allocator, n);
+    errdefer (V{ .L = argv_items_n }).deinit(allocator);
+    @memset(argv_items_n.slice(), .blank);
+    for (extra_args.items, argv_items_n.slice()) |arg, *slot| {
+      slot.* = try V.charsFromSlice(allocator, arg);
+    }
+    vm.argv = V{ .L = argv_items_n };
+    const key = try vm.alloc.dupe(u8, "x");
+    errdefer vm.alloc.free(key);
+    const idx: u8 = @intCast(vm.globals.items.len);
+    try vm.globals_names.put(key, idx);
+    try vm.globals.append(vm.alloc, vm.argv.ref());
+  }
 
   if (script_path == null and stdin_is_tty) return runRepl(allocator, vm);
   if (script_path == null) return evalStdin(allocator, vm);
