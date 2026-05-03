@@ -275,11 +275,38 @@ pub const Parser = struct {
       return term;
     }
 
-    // Noun followed by another noun/verb-start → apposit (function application)
-    if (self.isNounStart() or self.isVerbStart()) {
-      const a = try self.parseStmt();
+    // Noun followed by another noun → check for digram transit (left verb-noun adverb right)
+    // vs regular apposit. Parse just the inner noun first, then peek for an adverb.
+    if (self.isNounStart()) {
+      var inner = try self.parseNoun();
+      // Allow bracket applications on the inner noun before checking for adverb.
+      while (self.is(.lbracket)) inner = try self.parseApply(inner);
+      if (self.is(.adverb)) {
+        // Digram: noun noun adverb [rhs] → transit(noun, term(noun, adverb), rhs)
+        var verb = inner;
+        while (self.is(.adverb)) {
+          const adv_tok = self.tok;
+          self.advance();
+          verb = try self.makeTerm(verb, adv_tok);
+        }
+        if (self.is(.lbracket)) {
+          const applied = try self.parseApply(verb);
+          return self.parseAfterNoun(applied);
+        }
+        if (self.isStmtEnd() or self.is(.comment)) {
+          const m = try self.alloc.create(Node);
+          m.* = .{ .intrans = .{ .a = noun, .v = verb, .z = null } };
+          return m;
+        }
+        const b = try self.parseStmt();
+        const m = try self.alloc.create(Node);
+        m.* = .{ .transit = .{ .a = noun, .v = verb, .b = b } };
+        return m;
+      }
+      // No adverb: finish parsing the inner expression normally, then apposit.
+      const rest = try self.parseAfterNoun(inner);
       const m = try self.alloc.create(Node);
-      m.* = .{ .apposit = .{ .f = noun, .a = a } };
+      m.* = .{ .apposit = .{ .f = noun, .a = rest } };
       return m;
     }
 

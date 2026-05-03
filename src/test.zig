@@ -7,7 +7,7 @@ const MockWriter = @import("./util.zig").MockWriter;
 
 const testing = std.testing;
 
-const Tester = struct {
+pub const Tester = struct {
   vm: *VM, fmt: TerseFormatter, w: MockWriter,
   out: *MockWriter, out_w: *MockWriter.Writer,
   const alloc = std.testing.allocator;
@@ -453,18 +453,34 @@ test "fold with init" {
 //   var t = try Tester.init(); defer t.deinit();
 //   try t.check("2 3#'\"ab\"", "(\"aa\";\"bbb\")");
 // }
-test "fold addition adverb" {
+test "fold" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("+/ 1 2 3", "6");
+  try t.check("10+/1 2 3", "16");
+  try t.check("f:{x+y}\n10 f/1 2 3", "16");
 }
-test "scan addition adverb" {
+test "scan" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("+\\1 2 3", "1 3 6");
+  try t.check("10+\\1 2 3", "11 13 16");
 }
-// test "seeded scan" {
-//   var t = try Tester.init(); defer t.deinit();
-//   try t.check("10+\\1 2 3", "11 13 16");
-// }
+test "ndo" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("5{2*x}/1", "32");
+  try t.check("0{2*x}/1", "1");
+  try t.check("3{x+1}/10", "13");
+}
+test "ndos" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("5{2*x}\\1", "1 2 4 8 16 32");
+  try t.check("0{2*x}\\1", ",1");
+  try t.check("3{x+1}\\10", "10 11 12 13");
+}
+test "stencil" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("3{x,\".\"}' \"abcde\"", "(\"abc.\";\"bcd.\";\"cde.\")");
+  try t.check("2{+/x}' 1 2 3 4", "3 5 7");
+}
 test "eachprior monadic" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("-':12 13 11 17 14", "12 1 -2 6 -3");

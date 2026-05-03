@@ -249,11 +249,11 @@ Running fold (prefix results)
 `+\1 2 3 -> 1 3 6`
 
 ### Seeded Fold `x F/ /`
-Fold with initial seed x
-`10+/1 2 3 -> 16`
+Reduce list with F starting with x.
+`` f:{x+y}; 10 f/1 2 3 ``, `` 10+/1 2 3 `` -> `` 16 ``
 
 ### Seeded Scan `x F\ \`
-Scan with initial seed x
+Running fold over F starting with x.
 `10+\1 2 3 -> 11 13 16`
 
 ### N-Do `i f/`
