@@ -24,6 +24,11 @@ INNER  = 20    # iterations baked into each .k file
 REPS   = 5     # outer subprocess repetitions for median
 TIMEOUT = 60   # seconds per subprocess call
 
+DEFAULT_N = 1_000_000
+BENCHMARK_N = {
+    "each": 100_000,
+}
+
 BENCHMARKS = [
     "baseline",
     "sum",
@@ -41,12 +46,12 @@ BENCHMARKS = [
 ]
 
 
-def run_file(binary: str, k_file: pathlib.Path) -> float | None:
+def run_file(binary: str, k_file: pathlib.Path, n: int) -> float | None:
     """Return wall-clock ms for one subprocess run, or None on error/timeout."""
     t0 = time.perf_counter()
     try:
         r = subprocess.run(
-            [binary, str(k_file)],
+            [binary, str(k_file), str(n)],
             capture_output=True,
             timeout=TIMEOUT,
         )
@@ -65,7 +70,8 @@ def bench_lang(binary: str, bench_dir: pathlib.Path, label: str) -> dict[str, fl
             print(f"  {name:<12}  (no file)")
             results[name] = None
             continue
-        raw = [run_file(binary, k_file) for _ in range(REPS)]
+        n = BENCHMARK_N.get(name, DEFAULT_N)
+        raw = [run_file(binary, k_file, n) for _ in range(REPS)]
         valid = [t / INNER for t in raw if t is not None]
         if valid:
             med = statistics.median(valid)

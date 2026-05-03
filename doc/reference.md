@@ -204,6 +204,8 @@ Pads string y to length |x|.
 
 #### Cast `x$y`
 Casts y to type represented by symbol x.
+String to int `` `I$"-12" `` --> `` -12 ``
+String to float `` `F$"-12.3" `` --> `` -12.3 `` 
 
 #### Find `x?y`
 Returns first index of y in x (null if not found).
@@ -311,3 +313,19 @@ apply F with fixed right arg to each left item
 ### Eachleft `x F\`
 apply F with fixed left arg to each right item
 ` 1 2*\:3 4 -> (3 4;6 8) `
+
+## Special Symbols
+
+ ### Arguments `` `argv[] ``
+ list of cmd line args (also in global variable x)
+
+ ### Enviroment Variables `` `env[] ``
+ dict of env variables
+
+ ### Random Number `` `prng[] ``
+ The `` `prng@I `` get/set pseudo-random number generator internal state
+ 
+                      s:`prng[];r:9?0;`prng s;r~9?0 -> 1
+         `prng@0 use current time to set state
+ `exit@i exit
+ 

@@ -61,6 +61,12 @@ fn castChars(vm: *VM, x: V, y: V) V {
     const res = N(f32).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @floatFromInt(v);
     return .{ .F = res };
+  } else if (eql(u8, type_name, "I")) {
+    const n = std.fmt.parseInt(i32, std.mem.trim(u8, src, " "), 10) catch return .{ .i = V.@"0N" };
+    return .{ .i = n };
+  } else if (eql(u8, type_name, "F")) {
+    const f = std.fmt.parseFloat(f32, std.mem.trim(u8, src, " ")) catch return .{ .f = std.math.nan(f32) };
+    return .{ .f = f };
   } else if (eql(u8, type_name, "s") or eql(u8, type_name, "")) {
     return .{ .s = vm.intern(src) catch return V{ .err = .memory } };
   } else return .{ .err = .domain };

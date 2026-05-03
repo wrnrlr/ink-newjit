@@ -1,4 +1,5 @@
-N:1000000
-a:!N; +/a*a+a; a:!N; +/a*a+a; a:!N; +/a*a+a; a:!N; +/a*a+a; a:!N; +/a*a+a
-a:!N; +/a*a+a; a:!N; +/a*a+a; a:!N; +/a*a+a; a:!N; +/a*a+a; a:!N; +/a*a+a
-0
+N:`I$*`argv[]
+t0:`t[]
+a:0.0+!N; +/a*a+a; a:0.0+!N; +/a*a+a; a:0.0+!N; +/a*a+a; a:0.0+!N; +/a*a+a; a:0.0+!N; +/a*a+a
+a:0.0+!N; +/a*a+a; a:0.0+!N; +/a*a+a; a:0.0+!N; +/a*a+a; a:0.0+!N; +/a*a+a; a:0.0+!N; +/a*a+a
+`0 0: $(`t[]-t0)
