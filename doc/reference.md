@@ -50,7 +50,7 @@ User defined function.
 
 ### Partial `` `p ``
 
-### 
+### Composition/Train
 
 ### Error `` `! ``
 
@@ -199,13 +199,16 @@ Replaces nulls in y with x.
 #### Without `X^y`
 Removes occurrences of elements in X from list y.
 
-#### Pad `x$y`
+#### Pad `i$C`
 Pads string y to length |x|.
 
 #### Cast `x$y`
 Casts y to type represented by symbol x.
 String to int `` `I$"-12" `` --> `` -12 ``
 String to float `` `F$"-12.3" `` --> `` -12.3 `` 
+
+#### Parse `` `p@C ``
+Parse ink, return AST ast list.
 
 #### Find `x?y`
 Returns first index of y in x (null if not found).
@@ -215,6 +218,9 @@ Returns first index of y in x (null if not found).
 - `s?x` (Marchal/Serialize): 
 - `x@y` (At/Apply): Indices into x at y; Applies function x to y.
 - `x.y` (Dot/ApplyN): Deep indexing or multi-argument function application.
+
+#### Apply1 `x@y`
+
 
 ## Amend 
 
@@ -250,11 +256,11 @@ Fold with initial seed x
 Scan with initial seed x
 `10+\1 2 3 -> 11 13 16`
 
-### N-Do i f/
+### N-Do `i f/`
 apply f repeatedly i times (iterate)
-`5(2*)/1 -> 32`
+Multiply 5 times the double function starting with 1 `` 5(2*)/1 `` -> `` 32 ``
 
-### N-Dos i f\
+### N-Dos `i f\`
 list all intermediate results of i iterations
 5(2*)\1 -> 1 2 4 8 16 32
 
@@ -278,15 +284,15 @@ list successive results until convergence
 join list with separator C
 "ra"/("ab";"cadab";"") -> "abracadabra"
 
-### split `C\`
+### Split `C\`
 split data by separator C
 "ra"\"abracadabra" -> ("ab";"cadab";"")
 
-### decode `I/`
+### Decode `I/`
 interpret digits in mixed base I → number
 24 60 60/1 2 3 -> 3723   2/1 1 0 1 -> 13
 
-### encode `I\`
+### Encode `I\`
 express number in mixed base I
 24 60 60\3723 -> 1 2 3   2\13 -> 1 1 0 1
 
@@ -296,7 +302,7 @@ sliding windows of size i
 
 ### Stencil `i f'`
 Apply f to each sliding window
-`3{x,"."}':"abcde" -> ("abc.";"bcd.";"cde.")`
+`` 3{x,"."}':"abcde" `` -> `` ("abc.";"bcd.";"cde.") ``
 
 ### Eachprior `F'`
 apply F between each item and its predecessor
@@ -326,6 +332,5 @@ apply F with fixed left arg to each right item
  The `` `prng@I `` get/set pseudo-random number generator internal state
  
                       s:`prng[];r:9?0;`prng s;r~9?0 -> 1
-         `prng@0 use current time to set state
- `exit@i exit
- 
+`prng@0 use current time to set state
+ ### Exit `` `exit@i ``

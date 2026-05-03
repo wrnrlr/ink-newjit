@@ -9,6 +9,8 @@ const util = @import("../../util.zig");
 // pub const converge = @import("converge.zig").converge;
 // pub const converges = @import("converges.zig").converges;
 const decode = @import("decode.zig").decode;
+const ndo = @import("ndo.zig").ndo;
+const ndos = @import("ndos.zig").ndos;
 const each1 = @import("each1.zig").each1;
 const each2 = @import("each2.zig").each2;
 const eachleft = @import("eachleft.zig").eachleft;
@@ -19,10 +21,14 @@ const fold = @import("fold.zig").fold;
 const join = @import("join.zig").join;
 const scan = @import("scan.zig").scan;
 const split = @import("split.zig").split;
-const stencil = @import("stencil.zig").stencil;
+const stencil  = @import("stencil.zig").stencil;
 const window = @import("window.zig").window;
 
 pub fn derived(vm: *VM, base: V, adv: Adverb, args: []const V, f: util.ApplyFn) V {
+  // Stencil: f'[n;x] — integer n means window size, not each2 broadcast
+  if (adv == .@"'" and args.len == 2 and args[0].tag() == .i
+      and base.tag() == .func and base.func.getRealArity() == 1)
+    return stencil(vm, args[0], base, args[1], f);
   // Multi-arg each: f'[x;y;...] → apply base to element-wise tuples
   if (adv == .@"'" and args.len >= 2)
     return each2(vm, base, args, f);
@@ -65,16 +71,15 @@ fn derived2(vm: *VM, adv: Adverb, x: V, y: V, f: util.ApplyFn) V {
 
 fn derived3(vm: *VM, adv: Adverb, x: V, y: V, z: V, f: util.ApplyFn) V {
   return switch (adv) {
-    .@"'" => {
-      // if (xt==.i) return stencil(vm, y, x, z, f);
-      return .{.err=.nyi};
-    },
+    .@"'" => return .{.err=.nyi},
     .@"/" => {
-      // seeded fold: x F/ y → fold y with seed x
+      if (y.tag() == .i and x.tag() == .func and x.func.getRealArity() == 1)
+        return ndo(vm, x, y.i, z, f);
       return fold(vm, x, y, z, f);
     },
     .@"\\" => {
-      // seeded scan: x F\ y → scan y with seed x
+      if (y.tag() == .i and x.tag() == .func and x.func.getRealArity() == 1)
+        return ndos(vm, x, y.i, z, f);
       return scan(vm, x, y, z, f);
     },
     .@"':" => eachprior(vm, x, y, z, f),

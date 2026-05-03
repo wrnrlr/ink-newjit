@@ -1,33 +1,58 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
 const value = @import("../../noun/value.zig");
-const K = @import("../../noun/class.zig").K;
 const VM = @import("../../runtime/vm.zig").VM;
 const V = value.V;
 const N = value.N;
 
-// stencil: n f': x — apply f to each window of size n
-// 3{x,"."}':"abcde" → ("abc.";"bcd.";"cde.")
+// stencil: f'[n;x] — apply f to each sliding window of size n
+// {x,"."}'[3;"abcde"] → ("abc.";"bcd.";"cde.")
 pub fn stencil(vm: *VM, xn: V, base: V, x: V, callFn: anytype) V {
-  std.debug.assert(xn.tag()==.i);
-  std.debug.assert(base.tag()==.func);
-  std.debug.assert(x.isVec() or x.tag()==.L);
-  const n = xn.i;
+  if (xn.i <= 0) return .{ .err = .domain };
+  const n: usize = @intCast(xn.i);
   const xlen = x.len();
   if (xlen < n) return .{ .L = N(V).init(vm.alloc, 0) catch return V{ .err = .memory } };
   const count = xlen - n + 1;
   var res = N(V).init(vm.alloc, count) catch return V{ .err = .memory };
   @memset(res.slice(), .blank);
   for (0..count) |i| {
-    var win = N(V).init(vm.alloc, n) catch {
+    const win_v = makeWindow(vm.alloc, x, i, n) catch {
       (V{ .L = res }).deinit(vm.alloc);
       return V{ .err = .memory };
     };
-    for (0..n) |j| win.slice()[j] = x.at(i + j);
-    const win_v = V{ .L = win };
     defer win_v.deinit(vm.alloc);
     const args = [_]V{win_v};
     res.slice()[i] = callFn(vm, base, &args);
   }
   return .{ .L = res };
+}
+
+fn makeWindow(alloc: Alloc, x: V, start: usize, n: usize) !V {
+  switch (x.tag()) {
+    .C => {
+      const out = try N(u8).init(alloc, n);
+      @memcpy(out.slice(), x.C.slice()[start .. start + n]);
+      return .{ .C = out };
+    },
+    .I => {
+      const out = try N(i32).init(alloc, n);
+      @memcpy(out.slice(), x.I.slice()[start .. start + n]);
+      return .{ .I = out };
+    },
+    .F => {
+      const out = try N(f32).init(alloc, n);
+      @memcpy(out.slice(), x.F.slice()[start .. start + n]);
+      return .{ .F = out };
+    },
+    .B => {
+      const out = try N(bool).init(alloc, n);
+      @memcpy(out.slice(), x.B.slice()[start .. start + n]);
+      return .{ .B = out };
+    },
+    else => {
+      const out = try N(V).init(alloc, n);
+      for (0..n) |j| out.slice()[j] = x.at(start + j);
+      return .{ .L = out };
+    },
+  }
 }
