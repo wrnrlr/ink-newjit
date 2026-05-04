@@ -25,7 +25,8 @@ import time
 ROOT = pathlib.Path(__file__).parent.parent
 DEFAULT_INK = ROOT / "zig-out" / "bin" / "ink"
 DEFAULT_OUT = ROOT / "bench" / "results.json"
-HTML_OUT = ROOT / "bench" / "index.html"
+HTML_OUT    = ROOT / "bench" / "index.html"
+MEASURE_OUT = ROOT / "bench" / "measure.csv"
 
 # ------------------------------------------------------------------
 # Benchmark definitions
@@ -33,14 +34,16 @@ HTML_OUT = ROOT / "bench" / "index.html"
 # Use {N} as size placeholder — replaced with str.replace, not .format().
 # ------------------------------------------------------------------
 BENCHMARKS = [
-    ("baseline", "Allocate range !N",    "!{N}",              "O(N)"),
-    ("sum",      "Fold sum +/",          "+/0.0+!{N}",        "O(N)"),
-    ("max",      "Fold max |/",          "|/!{N}",            "O(N)"),
-    ("reverse",  "Reverse |",           "||!{N}",            "O(N)"),
-    ("sort",     "Sort < (worst-case)", "<|!{N}",            "O(N log N)"),
-    ("distinct", "Distinct ?",          "?|!{N}",            "O(N)"),
+    # (name, description, k_expr, complexity, bytes_fn)
+    # bytes_fn(N) estimates memory traffic per iteration for GB/s calculation
+    ("baseline", "Allocate range !N",    "!{N}",              "O(N)",       lambda N: N * 4),
+    ("sum",      "Fold sum +/",          "+/0.0+!{N}",        "O(N)",       lambda N: N * 8),
+    ("max",      "Fold max |/",          "|/!{N}",            "O(N)",       lambda N: N * 4),
+    ("reverse",  "Reverse |",           "||!{N}",            "O(N)",       lambda N: N * 8),
+    ("sort",     "Sort < (worst-case)", "<|!{N}",            "O(N log N)", lambda N: N * 8),
+    ("distinct", "Distinct ?",          "?|!{N}",            "O(N)",       lambda N: N * 4),
     # Group 100 buckets: N random draws from 0..99 — tests hash-map scaling
-    ("group",    "Group = (100 keys)",  "={N}?!100",         "O(N)"),
+    ("group",    "Group = (100 keys)",  "={N}?!100",         "O(N)",       lambda N: N * 4),
 ]
 
 SIZES      = [1_000, 10_000, 100_000, 1_000_000]
@@ -100,7 +103,7 @@ def bench_all(ink: str) -> dict:
     total = len(BENCHMARKS) * len(SIZES)
     done = 0
 
-    for name, desc, tmpl, complexity in BENCHMARKS:
+    for name, desc, tmpl, complexity, bytes_fn in BENCHMARKS:
         results[name] = {
             "description": desc,
             "complexity": complexity,
@@ -121,12 +124,19 @@ def bench_all(ink: str) -> dict:
                 # Divide by INNER_REPS to get per-iteration time.
                 per = [t / INNER_REPS for t in times]
                 med = statistics.median(per)
-                print(f"  [{pct:3d}%] {label:<30} {med:7.3f} ms/iter")
+                gb_preview = ""
+                base = baseline_times.get(N, 0.0)
+                net = max(med - base, 0.0)
+                if net > 0 and name != "baseline":
+                    gb_s = bytes_fn(N) / (net / 1000) / 1e9
+                    gb_preview = f"  {gb_s:6.2f} GB/s"
+                print(f"  [{pct:3d}%] {label:<30} {med:7.3f} ms/iter{gb_preview}")
                 results[name]["sizes"][N] = {
                     "median_ms": round(med, 4),
                     "min_ms":    round(min(per), 4),
                     "max_ms":    round(max(per), 4),
                     "reps":      len(times),
+                    "bytes":     bytes_fn(N),
                 }
                 if name == "baseline":
                     baseline_times[N] = med
@@ -142,9 +152,25 @@ def bench_all(ink: str) -> dict:
             if entry is None:
                 continue
             base = baseline_times.get(N, 0.0)
-            entry["net_ms"] = round(max(entry["median_ms"] - base, 0.0), 4)
+            net = max(entry["median_ms"] - base, 0.0)
+            entry["net_ms"] = round(net, 4)
+            if net > 0:
+                entry["gb_s"] = round(entry["bytes"] / (net / 1000) / 1e9, 3)
 
     return results
+
+
+def emit_measure_csv(results: dict, out: pathlib.Path) -> None:
+    """Write long-form CSV: one row per (benchmark, size) measurement."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    rows = ["lang,benchmark,args,time"]
+    for name, data in results.items():
+        for N, entry in data["sizes"].items():
+            if entry is None:
+                continue
+            rows.append(f"ink,{name},{N},{round(entry['median_ms'] * 1000)}")
+    out.write_text("\n".join(rows) + "\n")
+    print(f"Measure → {out}")
 
 
 def emit_json(results: dict, out: pathlib.Path) -> None:
@@ -308,7 +334,8 @@ for (const name of names) {
       const e = b.sizes[n];
       if (!e) return '<span class="err">err</span>';
       const net = e.net_ms !== undefined ? ` <span style="color:#64748b">(${e.net_ms})</span>` : '';
-      return `${e.median_ms.toFixed(1)}${net}`;
+      const gbs = e.gb_s !== undefined ? ` <span style="color:#34d399">${e.gb_s} GB/s</span>` : '';
+      return `${e.median_ms.toFixed(1)}${net}${gbs}`;
     }),
   ];
   tbody.innerHTML += '<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>';
@@ -356,6 +383,7 @@ def main() -> None:
     results = bench_all(ink)
     emit_json(results, pathlib.Path(args.out))
     emit_html(results, pathlib.Path(args.out))
+    emit_measure_csv(results, MEASURE_OUT)
 
     if args.open:
         import webbrowser

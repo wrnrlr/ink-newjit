@@ -2,9 +2,30 @@
 / Run after: make bench-langs
 / Usage:     make bench-report
 
-2:"bench/langs.k"
+/ Load bench/measure.csv: lang,benchmark,args,time (time in µs per iteration)
+lines: 1_ "\n" \ 1:"bench/measure.csv"
+lines: lines @ & {0<#x}'lines
+rows:  {","\ x}'lines
 
-/ bench/langs.k sets: names, ink_ms, ngnk_ms
+lang_col:  {*x}'rows
+bench_col: {x[1]}'rows
+args_col:  `I$ {x[2]}'rows
+time_us:   `I$ {x[3]}'rows
+
+/ Build per-language views
+ink_i:  & lang_col = "ink"
+ngnk_i: & lang_col = "ngnk"
+
+names:   bench_col @ ink_i
+N_args:  args_col  @ ink_i
+ink_ms:  (0.0 + time_us @ ink_i) % 1000.0
+ngnk_ms: :[0 = # ngnk_i; 0.0 * ink_ms; (0.0 + time_us @ ngnk_i) % 1000.0]
+
+/ Throughput: bytes processed per iteration per benchmark
+/ gb_s = bytes / (time_us * 1e-6) / 1e9  =  bytes / (time_us * 1000)
+bpn: ("baseline";"sum";"max";"scan";"reverse";"sort";"distinct";"group";"dot";"count";"filter";"each";"fusion") ! 4 8 4 8 8 8 4 4 16 4 8 8 8
+ink_bytes: (bpn @ names) * N_args
+ink_gb_s:  (0.0 + ink_bytes) % (1000.0 * time_us @ ink_i)
 
 Bar: {[x;y;w;h;clr]
   [rect: x, y, w, h; fill: clr]
@@ -45,14 +66,16 @@ loop: {[window; props; events]
     (`path; [move: gx, padT]; [line: gx, (H-padB)]; [stroke: `Zinc800; width: 1]; `stroke)
   }'!5;
 
-  / One benchmark row: name label + two bars
+  / One benchmark row: name label + two bars + GB/s annotation
   drawRow: {[i]
     y:   posY[i];
     bw1: scaleW[ink_ms[i]];
     bw2: scaleW[ngnk_ms[i]];
+    gbs: $`i$ ink_gb_s[i];
     (
       [text: names[i]; at: (padL-6), (y+barH+1); size: 10; fill: `Zinc400; align: `right];
       Bar[padL; y;           bw1; barH; `Blue500];
+      [text: gbs," GB/s"; at: (padL+bw1+4), (y+barH-1); size: 8; fill: `Blue300];
       Bar[padL; (y+barH+2); bw2; barH; `Emerald500]
     )
   };
@@ -67,7 +90,7 @@ loop: {[window; props; events]
     gridX;
     drawRow'!n;
     yaxis;
-    [text: "Array Language Benchmarks — ms per iteration (N=1M, 20 reps)";
+    [text: "Array Language Benchmarks — ms per iteration (N=",$*N_args,", 20 reps)";
      at: W%2, 28; size: 14; fill: `Zinc200; align: `center];
     / Legend
     [rect: (padL+10), (H-padB+8), 10, 10; fill: `Blue500];

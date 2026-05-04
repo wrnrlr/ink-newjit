@@ -1,7 +1,7 @@
 Pitagoras: {sqrt (x*x)+y*y}
 Fib: {x{x,+/ -2#x}/0 1}          / Iterative: generates x Fibonacci numbers
 FibN: {*(x-1){x,+/ -2#x}/0 1}    / Returns specifically the Nth Fib number
-Factorial: {*/1+!x}                   / Factorial: product of 1 to x
+Fact: {*/1+!x}                   / Factorial: product of 1 to x
 Comb: {(Fact x)%(Fact[y]*Fact[x-y])} / Combination: nCr
 Catalan: {(Comb[2*x;x])%1+x}     / Nth Catalan number
 / Generates triples using Euclid's formula for y > x

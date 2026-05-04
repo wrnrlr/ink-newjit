@@ -53,6 +53,7 @@ const Monads = struct {
   pub const Uniform = _X(.@"?", @import("uniform.zig").UniformOp);
   pub const Tally = @import("tally.zig").Tally;
   pub const Format = string.Format;
+  pub const Parse = @import("parse.zig").Parse;
   pub const Keys = @import("keys.zig").Keys;
   pub const Nulls = @import("nulls.zig").Nulls;
   pub const Flip = @import("flip.zig").Flip;

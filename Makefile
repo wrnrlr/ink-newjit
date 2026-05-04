@@ -21,7 +21,7 @@ bench-view:
 	python3 tool/bench.py --open --ink $(INK)
 
 # Cross-language benchmarks: ink vs ngnk
-# Runs test/bench/ink/*.k and test/bench/ngnk/*.k, writes bench/langs.csv
+# Runs test/bench/ink/*.k and test/bench/ngnk/*.k, writes bench/measure.csv
 bench-langs: build
 	python3 tool/bench_langs.py --ink $(INK) --ngnk $(NGNK)
 

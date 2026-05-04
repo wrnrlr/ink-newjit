@@ -2,6 +2,11 @@
 
 ## Grammar
 
+Nouns can be combined into an expression using verbs and adverbs.
+
+Expressions are evaluated from right-to-left. There are no special priority rules for operators.
+
+
 ## Types
 
 The types are organized in different classes:
@@ -50,7 +55,7 @@ User defined function.
 
 ### Partial `` `p ``
 
-### Composition/Train
+### Composition/Train `` `q ``
 
 ### Error `` `! ``
 
@@ -221,19 +226,38 @@ Returns first index of y in x (null if not found).
 
 #### Apply1 `x@y`
 
+#### Special Symbol 
+Some special symbols can be called with apply `s@` or call `s "Abc"` .
+- Parse ink as AST: `` `p@"1+2" `` --> `` (`terse;(`transit;(`literal;`int);`op;(`literal;`int))) ``
 
 ## Amend 
 
 ## Drill
 
-## Adverbs `` ' / \ ': /: \: ``
+## Adverbs
+An adverb is written using any of these plyph(s) `` ' / \ ': /: \: ``.
+Adverbs are polysemic, there precise meaning depends on the type of the operand(s).
+
+- `'`: Each, Zip
+- `/`: Fold, Decode, Join
+- `\`: Scan, Encode, Split
+- `':`
+- `
+
+An adverb with only character or integer operands, the string utilities `C/` Join & `C\` Split, or the `I/` Decode & `I\` Encode, behave like verbs.
+
+A digram is an adverb is written with 2 values on the left hand side:
+Zip `x F'`
+N-Do `i f/`
+N-Dos `i f\`
 
 ### Each `f'`
 Apply f to each item (unary map)
 Ex, Length of each element in a list:  `` #'("abc";3 4 5 6) `` -> `` 3 4 ``
 
-### Zip (each2) `x F'`
+### Zip `x F'`
 Apply rhs array elementwise on rhs dyad.
+aka each2
 Ex. Reshape each element in a list:  `` 2 3#'"ab" `` -> `` ("aa";"bbb") ``
 
 ### binsearch `X'` (NYI)

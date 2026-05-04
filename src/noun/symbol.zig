@@ -1,6 +1,18 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
 
+const SpecialSymbol = enum {
+  blank, err,
+  b, i, f, s, c, m, x,// scalars types
+  B, I, F, S, C, M, L,
+  p, // parse
+  j, // json
+  argc, // arguments
+  env, 
+  t, // current time
+  
+};
+
 pub const Pool = struct {
   alloc: Alloc,
   table: std.StringHashMap(u32),
