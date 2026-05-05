@@ -1,35 +1,4 @@
 
-### 6. Closures do not capture outer scope
-
-**Severity:** High — higher-order functions broken
-
-Nested lambdas return a function value of the correct type (`` `func ``) but applying it produces no result. The outer scope variable is not captured:
-
-```k
-
-adder: {[n]{x+n}}
-add5: adder[5]
-@add5   / → `func  (correct type)
-add5 10 / → (no output, should be 15)
-```
-
-**Fix:** Lambda construction must snapshot captured variables from the enclosing scope into the closure value.
-
----
-
-## Medium Severity Bugs
-
-### 7. Window on strings returns list of single chars instead of strings
-
-`src/primitive/adverb/window.zig` always creates `N(V)` (generic list) windows regardless of input type. For char vectors (`C`), each window should be a `C` (string):
-
-```k
-3':"abcde"   / → ("a" "b" "c";"b" "c" "d";"c" "d" "e")
-             /   (expected ("abc";"bcd";"cde"))
-```
-
-Integer windows work correctly (`3':(1 2 3 4 5)` → `(1 2 3;2 3 4;3 4 5)`).
-
 **Fix:** Mirror the type dispatch in `stencil.zig`'s `makeWindow` — use `N(u8)` and return `.C` for char input.
 
 ---
