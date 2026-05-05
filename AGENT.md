@@ -236,10 +236,10 @@ The language parser, compiler and runtime are all written in Zig 0.16.
     - `parser.zig`
   - `primitive`
     - `adverb` Implementation of around 15 adverbs 
+      - `adverbs.zig`
       - `converge.zig` NYI
       - `converges.zig` NYI
       - `decodes.zig`
-      - `derived.zig` Derive value from an adverb phrase with
       - `each.zig`
       - `zip.zig`
       - `eachleft.zig`
@@ -248,7 +248,6 @@ The language parser, compiler and runtime are all written in Zig 0.16.
       - `encode.zig`
       - `fold.zig`
       - `join.zig`
-      - `lib.zig`
       - `scan.zig`
       - `split.zig`
       - `stencil.zig`
@@ -260,7 +259,8 @@ The language parser, compiler and runtime are all written in Zig 0.16.
       - `verbs.zig` Overview of all monadic and dyadic verbs used in jump table.
     - `amend.zig` Implement amend and drill
     - `broadcast.zig`
-    - `dispatch.zig`
+    - `dispatch.zig` Dispatch to kernel based on operator and type of the operand(s)
+    - `derived.zig` Derive value from an adverb phrase
     - `promote.zig` Promote between scalars, vectors and lists.
   - `runtime`
     - `jit`

@@ -10,6 +10,7 @@ const promote = @import("../promote.zig").promote;
 
 pub const Flip = struct {
   pub const op = .@"+";
+// TODO flip scalar
   _I: util.MonadFn = flipVector,
   _F: util.MonadFn = flipVector,
   _B: util.MonadFn = flipVector,
@@ -18,15 +19,13 @@ pub const Flip = struct {
   _L: util.MonadFn = flipList,
 };
 
-// 1D vector → list of single-element vectors, e.g. +1 2 3 → (,1;,2;,3)
+pub const FlipOp = struct {
+  pub fn f(x: anytype, y: @TypeOf(x)) @TypeOf(x) { return x / y; }
+};
+
+// 1D vector → enlist, e.g. +1 2 3 → ,1 2 3
 fn flipVector(vm: *VM, x: V) V {
-  const n = x.len();
-  const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
-  @memset(res.slice(), .blank);
-  for (res.slice(), 0..) |*r, i| {
-    r.* = enlist(vm.alloc, x.at(i)); // TODO why are we calling the generic enlist here we should know the type
-  }
-  return V{ .L = res };
+  return enlist(vm.alloc, x);
 }
 
 // Dict → Table (values must be equal-length vectors)

@@ -305,7 +305,7 @@ test "#x tally" {
 }
 test "+X flip" {
   var t = try Tester.init(); defer t.deinit();
-  // try t.check("+1 2 3", ",1 2 3");
+  try t.check("+1 2 3", ",1 2 3");
   try t.check("+(\"ab\";\"cd\")", "(\"ac\";\"bd\")");
   try t.check("+(1 2; 4 5)", "(1 4;2 5)");
   try t.check("+(1 2; 4.5 5.5)", "(1.0 4.5;2.0 5.5)");
@@ -521,7 +521,7 @@ test "inline function" {
 test "monadic verb type" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("*:1 2 3", "1");
-  try t.check("+:1 2 3", "(,1;,2;,3)");
+  try t.check("+:1 2 3", ",1 2 3");
 }
 
 // Assignment

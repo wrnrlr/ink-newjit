@@ -9,7 +9,7 @@ const VM = @import("vm.zig").VM;
 const chunk = @import("tape.zig");
 const Op = chunk.Op;
 const dispatch = @import("../primitive/dispatch.zig");
-const adverb = @import("../primitive/adverb/lib.zig");
+const derived = @import("../primitive/derived.zig").derived;
 const syms = @import("syms.zig");
 
 pub const CallMode = enum { sync, bracket };
@@ -90,16 +90,16 @@ pub const Call = struct {
       },
       .derived_builtin => {
         const base = V{ .func = Fn.makeBuiltin(ref.getOp()) };
-        return adverb.derived(self.vm, base, ref.getAdverb(), args, wrapper);
+        return derived(self.vm, base, ref.getAdverb(), args, wrapper);
       },
       .derived_lambda => {
         const lambda_ref = Fn.makeLambda(@intCast(ref.idx), self.vm.fn_tables.lambdaAt(@intCast(ref.idx)).arity);
         const base = V{ .func = lambda_ref };
-        return adverb.derived(self.vm, base, ref.getAdverb(), args, wrapper);
+        return derived(self.vm, base, ref.getAdverb(), args, wrapper);
       },
       .derived_table => {
         const entry = self.vm.fn_tables.derivedAt(@intCast(ref.idx));
-        return adverb.derived(self.vm, entry.base, entry.adverb, args, wrapper);
+        return derived(self.vm, entry.base, entry.adverb, args, wrapper);
       },
       .train => {
         var buf: [7]u8 = undefined;

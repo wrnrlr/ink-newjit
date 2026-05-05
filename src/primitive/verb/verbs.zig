@@ -56,25 +56,25 @@ const Monads = struct {
   pub const @"#x" = @import("tally.zig").Tally;
   pub const @"_c" = @import("lowercase.zig").Lowercase;
   pub const @"_n" = @import("floor.zig").Floor;
-  pub const Draw     = @import("graphics.zig").Draw;
-  pub const Sqrt = _F(.sqrt, calc.SqrtOp);
-  pub const Sqr  = _N(.sqr,  calc.SqrOp);
-  pub const Exp  = _F(.exp,  calc.ExpOp);
-  pub const Log  = _F(.log,  calc.LogOp);
-  pub const Sin  = _F(.sin,  calc.SinOp);
-  pub const Cos  = _F(.cos,  calc.CosOp);
-  pub const Abs  = _N(.abs,  calc.AbsOp);
-  pub const Format = string.Format;
-  pub const Parse = @import("parse.zig").Parse;
-  pub const @"@x" = @import("type.zig").Type;
+  pub const @"9:x"   = @import("graphics.zig").Draw;
+  pub const @"sqrt"  = _F(.sqrt, calc.SqrtOp);
+  pub const @"sqr"   = _N(.sqr,  calc.SqrOp);
+  pub const @"exp"   = _F(.exp,  calc.ExpOp);
+  pub const @"log"   = _F(.log,  calc.LogOp);
+  pub const @"sin"   = _F(.sin,  calc.SinOp);
+  pub const @"cos"   = _F(.cos,  calc.CosOp);
+  pub const @"abs"   = _N(.abs,  calc.AbsOp);
+  pub const @"$x"    = string.Format;
+  pub const @"parse" = @import("parse.zig").Parse;
+  pub const @"@x"    = @import("type.zig").Type;
 
-  pub const Unitary = @import("unitary.zig").Unitary;
-  pub const Distinct = @import("distinct.zig").Distinct;
-  pub const ReadLines = io.ReadLines;
-  pub const ReadBytes = io.ReadBytes;
-  pub const ReadData = io.ReadData;
-  pub const Values = @import("values.zig").Values;
-  pub const GetSymbol = @import("get.zig").GetSymbol;
+  pub const @"=u"  = @import("unitary.zig").Unitary;
+  pub const @"?X"  = @import("distinct.zig").Distinct;
+  pub const @"0:x" = io.ReadLines;
+  pub const @"1:x" = io.ReadBytes;
+  pub const @"2:x" = io.ReadData;
+  pub const @".m"  = @import("values.zig").Values;
+  pub const @".s"  = @import("get.zig").GetSymbol;
 };
 
 const Dyads = struct {
@@ -85,41 +85,44 @@ const Dyads = struct {
   pub const @"N%N" =  _F_F(.@"%", calc.DivOp);
   pub const @"N&N" =  _N_N(.@"&", calc.MinOp);
   pub const @"N|N" =  _N_N(.@"|", calc.MaxOp);
-  pub const @"X=X" = logic.Equal;
-  pub const Less = logic.Less;
-  pub const More = logic.More;
-  // pub const Pair = @import("pair.zig").Pair;
-  pub const Drop = @import("drop.zig").Drop;
-  pub const DropKeys = @import("drop_keys.zig").DropKeys;
-  pub const Cut = _I_A(.@"_", @import("cut.zig").Cut);
-  pub const WeedOut = @import("weedout.zig").WeedOut;
-  pub const Delete = @import("delete.zig").Delete;
-  pub const DictMerge = @import("merge.zig").DictMerge;
-  pub const TakeKeys = @import("select.zig").TakeKeys;
-  pub const Take = @import("take.zig").Take;
-  pub const Reshape = @import("reshape.zig").Reshape;
-  pub const Fill = @import("fill.zig").Fill;
-  pub const Without = @import("without.zig").Without;
-  pub const Pad = @import("pad.zig").Pad;
-  pub const Cast = @import("cast.zig").Cast;
-  pub const Find = @import("find.zig").Find;
-  pub const Random = @import("random.zig").Random;
-  pub const Pick = @import("pick.zig").Pick;
-  pub const Marshal = @import("marshal.zig").Marshal;
-  pub const Unmarshal = @import("marshal.zig").Unmarshal;
-  // pub const ApplyN = @import("apply.zig").ApplyN; // TODO re-enable
-  pub const Has = member.Has;
-  pub const In = member.In;
-  pub const WriteLines = io.WriteLines;
-  pub const WriteBytes = io.WriteBytes;
-  pub const WriteData = io.WriteData;
-  pub const Insert = @import("insert.zig").Insert;
-  // pub const Upsert = @import("insert.zig").Upsert;
-  // pub const UnionJoin = @import("join.zig").UnionJoin;
-  // pub const LeftJoin = @import("join.zig").LeftJoin;
-  // pub const OuterJoin = dict.OuterJoin;
-  pub const Draw     = @import("graphics.zig").Draw;
-  pub const DrawDyad = @import("graphics.zig").DrawDyad;
+  pub const @"X=X"  = logic.Equal;
+  pub const @"X<X"  = logic.Less;
+  pub const @"X>X"  = logic.More;
+  // pub const @"x,x" = @import("pair.zig").Pair;
+  pub const @"i_X"  = @import("drop.zig").Drop;
+  pub const @"I_X"  = _I_A(.@"_", @import("cut.zig").Cut);
+  pub const @"B_X"  = @import("weedout.zig").WeedOut;
+  pub const @"X_i"  = @import("delete.zig").Delete;
+
+  pub const @"x_m"  = @import("drop_keys.zig").DropKeys;
+  pub const @"m,m"  = @import("merge.zig").DictMerge;
+  pub const @"x#m"  = @import("select.zig").TakeKeys;
+  pub const @"M,m"  = @import("insert.zig").Insert;
+  // pub const @"M,m2" = @import("insert.zig").Upsert;
+  // pub const @"m|m"  = @import("join.zig").UnionJoin;
+  // pub const @"m,m2" = @import("join.zig").LeftJoin;
+  // pub const @"m^m"  = dict.OuterJoin;
+
+  pub const @"i#X"  = @import("take.zig").Take;
+  pub const @"I#X"  = @import("reshape.zig").Reshape;
+  pub const @"x^X"  = @import("fill.zig").Fill;
+  pub const @"X^X"  = @import("without.zig").Without;
+  pub const @"i$C"  = @import("pad.zig").Pad;
+  pub const @"s$x"  = @import("cast.zig").Cast;
+  pub const @"X?x"  = @import("find.zig").Find;
+  pub const @"i?X"  = @import("random.zig").Random;
+  pub const @"X@X"  = @import("pick.zig").Pick;
+  pub const @"s?x"  = @import("marshal.zig").Marshal;
+  pub const @"s@x"  = @import("marshal.zig").Unmarshal;
+  // pub const @"x@x" = @import("apply.zig").ApplyN; // TODO re-enable
+  pub const @"has"  = member.Has;
+  pub const @"in"   = member.In;
+  pub const @"x0:x" = io.WriteLines;
+  pub const @"x1:x" = io.WriteBytes;
+  pub const @"x2:x" = io.WriteData;
+
+  pub const @"9:x"  = @import("graphics.zig").Draw;
+  pub const @"x9:x" = @import("graphics.zig").DrawDyad;
 };
 
 fn makeMonadArray(comptime Defs: type) [Op.COUNT * K.COUNT]?util.MonadFn {
