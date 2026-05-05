@@ -219,6 +219,11 @@ test "monadic verb" {
   // try t.check("*:", "*:"); // should be parsed as a monadic verb
   // try t.check("first: *:; first 1 2 3", "3");
 }
+test "train assignment" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("h: *|; h 1 2 3", "3"); // *| stored as train: max then first
+  try t.check("g: -|; g 1 2 3", "-3 -2 -1"); // -| stored as train: reverse then negate
+}
 test "function application" {
   var t = try Tester.init(); defer t.deinit();
   _ = try t.eval("f:{x+1}");

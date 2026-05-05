@@ -478,10 +478,34 @@ pub const Compiler = struct {
   }
 
   fn compileApposit(self: *Compiler, ap: ast.Apposit, is_tail: bool) anyerror!ir.ValueId {
+    // When both sides are single-char verb ops, build a train (composition) constant.
+    var ops_buf: [7]u8 = undefined;
+    var ops_len: usize = 0;
+    if (collectVerbOps(ap.f, &ops_buf, &ops_len) and collectVerbOps(ap.a, &ops_buf, &ops_len)) {
+      const v = V{ .func = value.Fn.makeTrain(ops_buf[0..ops_len]) };
+      return try self.emitConst(v);
+    }
     var inputs: [2]ir.ValueId = undefined;
     inputs[0] = try self.compileNode(ap.f, false);
     inputs[1] = try self.compileNode(ap.a, false);
     return try self.emitOpWithArg(if (is_tail) .TailCall else .Call, 1, &inputs);
+  }
+
+  // Collects single-char op bytes from a verb_op node or nested apposit of verb_ops.
+  // Returns true if the entire subtree consists of single-char verb ops, false otherwise.
+  fn collectVerbOps(node: *ast.Node, buf: []u8, pos: *usize) bool {
+    switch (node.*) {
+      .verb_op => |op| {
+        if (op.len == 1 and pos.* < buf.len) {
+          buf[pos.*] = op[0];
+          pos.* += 1;
+          return true;
+        }
+        return false;
+      },
+      .apposit => |ap| return collectVerbOps(ap.f, buf, pos) and collectVerbOps(ap.a, buf, pos),
+      else => return false,
+    }
   }
 
   fn adverbFromString(a: []const u8) value.Adverb {

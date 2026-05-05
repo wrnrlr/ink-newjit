@@ -1,7 +1,4 @@
 
-**Fix:** Mirror the type dispatch in `stencil.zig`'s `makeWindow` — use `N(u8)` and return `.C` for char input.
-
----
 
 ### 8. Function composition/train cannot be stored in a variable
 
