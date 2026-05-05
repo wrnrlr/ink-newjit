@@ -13,8 +13,8 @@ const whilescan = @import("whiledo.zig").whilescan;
 const decode = @import("decode.zig").decode;
 const ndo = @import("ndo.zig").ndo;
 const ndos = @import("ndos.zig").ndos;
-const each1 = @import("each1.zig").each1;
-const each2 = @import("each2.zig").each2;
+const each = @import("each.zig").each;
+const zip = @import("zip.zig").each2;
 const eachleft = @import("eachleft.zig").eachleft;
 const eachprior = @import("eachprior.zig").eachprior;
 const eachright = @import("eachright.zig").eachright;
@@ -33,7 +33,7 @@ pub fn derived(vm: *VM, base: V, adv: Adverb, args: []const V, f: util.ApplyFn) 
     return stencil(vm, args[0], base, args[1], f);
   // Multi-arg each: f'[x;y;...] → apply base to element-wise tuples
   if (adv == .@"'" and args.len >= 2)
-    return each2(vm, base, args, f);
+    return zip(vm, base, args, f);
   if (args.len == 1)
     return derived2(vm, adv, base, args[0], f);
   if (args.len == 2)
@@ -49,17 +49,19 @@ fn derived2(vm: *VM, adv: Adverb, x: V, y: V, f: util.ApplyFn) V {
   switch (adv) {
     .@"'" => {
       if (xt==.i) return window(vm, x, y);
-      return each1(vm, x, y, f);
+      return each(vm, x, y, f);
     },
     .@"/" => {
       if (base_is_radix) return decode(vm, x, y);
       if (base_is_char) return join(vm, x, y);
-      return converge(vm, x, y, f);
+      if (x.arity() == 1) return converge(vm, x, y, f);
+      return fold(vm, x, null, y, f);
     },
     .@"\\" => {
       if (base_is_radix) return encode(vm, x, y);
       if (base_is_char) return split(vm, x, y);
-      return converges(vm, x, y, f);
+      if (x.arity() == 1) return converges(vm, x, y, f);
+      return scan(vm, x, null, y, f);
     },
     .@"':" => {
       if (xt == .i) return window(vm, x, y);

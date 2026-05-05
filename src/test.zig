@@ -481,6 +481,11 @@ test "stencil" {
   try t.check("3{x,\".\"}' \"abcde\"", "(\"abc.\";\"bcd.\";\"cde.\")");
   try t.check("2{+/x}' 1 2 3 4", "3 5 7");
 }
+test "window" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("3'\"abcde\"", "(\"abc\";\"bcd\";\"cde\")");
+  try t.check("3':1 2 3 4 5", "(1 2 3;2 3 4;3 4 5)");
+}
 test "eachprior monadic" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("-':12 13 11 17 14", "12 1 -2 6 -3");

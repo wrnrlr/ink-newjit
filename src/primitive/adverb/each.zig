@@ -21,7 +21,7 @@ fn monadOpForOp(op: Op) ?gpu.MonadOp {
 }
 
 // Apply f to each element in x
-pub fn each1(vm: *VM, base: V, x: V, f: util.ApplyFn) V {
+pub fn each(vm: *VM, base: V, x: V, f: util.ApplyFn) V {
   // GPU shortcut: builtin element-wise monad on a GPU-resident I/F vector.
   if (vm.gpu) |g| {
     if (base.tag() == .func and base.func.getKind() == .builtin) {

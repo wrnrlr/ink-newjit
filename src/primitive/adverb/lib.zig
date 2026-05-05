@@ -1,8 +1,8 @@
 // pub const converge = @import("converge.zig").converge;
 // pub const converges = @import("converges.zig").converges;
 pub const decode = @import("decode.zig").decode;
-pub const each1 = @import("each1.zig").each1;
-pub const each2 = @import("each2.zig").each2;
+pub const each = @import("each.zig").each;
+pub const zip = @import("zip.zig").each2;
 pub const eachleft = @import("eachleft.zig").eachleft;
 pub const eachprior = @import("eachprior.zig").eachprior;
 pub const eachright = @import("eachright.zig").eachright;
@@ -15,4 +15,4 @@ pub const scan = @import("scan.zig").scan;
 pub const split = @import("split.zig").split;
 pub const stencil = @import("stencil.zig").stencil;
 pub const window = @import("window.zig").window;
-pub const derived = @import("dispatch.zig").derived;
+pub const derived = @import("derived.zig").derived;

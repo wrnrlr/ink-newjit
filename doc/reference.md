@@ -253,7 +253,8 @@ Adverbs are polysemic, there precise meaning depends on the type of the operand(
 - `/`: Fold, Decode, Join
 - `\`: Scan, Encode, Split
 - `':`
-- `
+- `/:`
+- `\:` EachLeft
 
 An adverb with only character or integer operands, the string utilities `C/` Join & `C\` Split, or the `I/` Decode & `I\` Encode, behave like verbs.
 

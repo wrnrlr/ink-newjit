@@ -6,7 +6,6 @@
 - Use zig version 0.16
 - Don't use `zig fmt` on code.
 - Cast ints and floats in Zig like this: `@as(f64, @floatFromInt(a))`.
-- Run a single test `zig test myfile.zig --test-filter "parses header"`
 - Add debug statements to verify your thinking.
 
 # Ink language Overview
@@ -206,8 +205,6 @@ Apply f to each sliding window
 ### eachleft `x F\`
 1 2*\:3 4 -> (3 4;6 8)
 
-
-
 # About the Ink array programming language
 Ink is a array programming language for high performance computing.
 It is based on the k array programming languages ngn/k and k9.
@@ -242,9 +239,9 @@ The language parser, compiler and runtime are all written in Zig 0.16.
       - `converge.zig` NYI
       - `converges.zig` NYI
       - `decodes.zig`
-      - `dispatch.zig`
-      - `each1.zig`
-      - `each2.zig`
+      - `derived.zig` Derive value from an adverb phrase with
+      - `each.zig`
+      - `zip.zig`
       - `eachleft.zig`
       - `eachprior.zig`
       - `eachright.zig`

@@ -6,6 +6,7 @@
 Nested lambdas return a function value of the correct type (`` `func ``) but applying it produces no result. The outer scope variable is not captured:
 
 ```k
+
 adder: {[n]{x+n}}
 add5: adder[5]
 @add5   / → `func  (correct type)
