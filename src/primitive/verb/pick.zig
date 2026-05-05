@@ -138,10 +138,14 @@ fn pickDictSymVec(alloc: Alloc, m: Dict, keys: []const u32) V {
 fn pickTableRow(alloc: Alloc, t: Dict, idx: i32) V {
   const keys = t.av();
   const vals = t.bv();
-  const length = keys.len();
-  if (idx < 0 or idx >= @as(i32, @intCast(length))) return .{ .err = .length };
-  const row_vals = N(V).init(alloc, keys.len()) catch return V{ .err = .memory };
-  for (0..keys.len()) |j| {
+  const ncols = keys.len();
+  if (ncols == 0) return .{ .err = .length };
+  const first_col = vals.at(0);
+  const nrows: i32 = @intCast(first_col.len());
+  first_col.deinit(alloc);
+  if (idx < 0 or idx >= nrows) return .{ .err = .length };
+  const row_vals = N(V).init(alloc, ncols) catch return V{ .err = .memory };
+  for (0..ncols) |j| {
     const col = vals.at(j);
     defer col.deinit(alloc);
     row_vals.slice()[j] = col.at(@intCast(idx));

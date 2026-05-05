@@ -37,6 +37,25 @@ pub fn _I_A(comptime op: Op, comptime Impl: type) type { return h._X(op, Impl); 
 
 const Monads = struct {
   // Monadic Primitives
+  pub const @"+x" = @import("flip.zig").Flip;
+  pub const @"-N" = _N(.@"-", calc.NegOp);
+  pub const @"*x" = selection.First;
+  pub const @"!i" = @import("iota.zig").Iota;
+  pub const @"!I" = @import("odometer.zig").Odometer;
+  pub const @"!d" = @import("keys.zig").Keys;
+  pub const @"&x" = @import("where.zig").Where;
+  pub const @"|x" = @import("reverse.zig").Reverse;
+  pub const @"<s" =  @import("open.zig").Open;
+  pub const @"<X" = sort.Ascend;
+  pub const @">X" = sort.Descend;
+  pub const @"=X" = @import("group.zig").Group;
+  pub const @"=i" = _X(.@"?", @import("uniform.zig").UniformOp);
+  pub const @"~x" = _B(.@"~", logic.NotOp);
+  pub const @",x" = @import("enlist.zig").Enlist;
+  pub const @"^x" = @import("nulls.zig").Nulls;
+  pub const @"#x" = @import("tally.zig").Tally;
+  pub const @"_c" = @import("lowercase.zig").Lowercase;
+  pub const @"_n" = @import("floor.zig").Floor;
   pub const Draw     = @import("graphics.zig").Draw;
   pub const Sqrt = _F(.sqrt, calc.SqrtOp);
   pub const Sqr  = _N(.sqr,  calc.SqrOp);
@@ -44,31 +63,13 @@ const Monads = struct {
   pub const Log  = _F(.log,  calc.LogOp);
   pub const Sin  = _F(.sin,  calc.SinOp);
   pub const Cos  = _F(.cos,  calc.CosOp);
-  pub const Neg  = _N(.@"-", calc.NegOp);
   pub const Abs  = _N(.abs,  calc.AbsOp);
-  pub const Not  = _B(.@"~", logic.NotOp);
-  pub const Floor = @import("floor.zig").Floor;
-  pub const Lowercase = @import("lowercase.zig").Lowercase;
-  pub const First = selection.First;
-  pub const Uniform = _X(.@"?", @import("uniform.zig").UniformOp);
-  pub const Tally = @import("tally.zig").Tally;
   pub const Format = string.Format;
   pub const Parse = @import("parse.zig").Parse;
-  pub const Keys = @import("keys.zig").Keys;
-  pub const Nulls = @import("nulls.zig").Nulls;
-  pub const Flip = @import("flip.zig").Flip;
-  pub const Iota = @import("iota.zig").Iota;
-  pub const Odometer = @import("odometer.zig").Odometer;
-  pub const Type = @import("type.zig").Type;
-  pub const Where = @import("where.zig").Where;
-  pub const Reverse = @import("reverse.zig").Reverse;
-  pub const Open =  @import("open.zig").Open;
-  pub const Ascend = sort.Ascend;
-  pub const Descend = sort.Descend;
+  pub const @"@x" = @import("type.zig").Type;
+
   pub const Unitary = @import("unitary.zig").Unitary;
-  pub const Group = @import("group.zig").Group;
   pub const Distinct = @import("distinct.zig").Distinct;
-  pub const Enlist = @import("enlist.zig").Enlist;
   pub const ReadLines = io.ReadLines;
   pub const ReadBytes = io.ReadBytes;
   pub const ReadData = io.ReadData;
@@ -78,13 +79,13 @@ const Monads = struct {
 
 const Dyads = struct {
   // Dyadic Primitives
-  pub const Add = _N_N(.@"+", calc.AddOp);
-  pub const Sub =  _N_N(.@"-", calc.SubOp);
-  pub const Mul =  _N_N(.@"*", calc.MulOp);
-  pub const Div =  _F_F(.@"%", calc.DivOp);
-  pub const Min =  _N_N(.@"&", calc.MinOp);
-  pub const Max =  _N_N(.@"|", calc.MaxOp);
-  pub const Equal = logic.Equal;
+  pub const @"N+N" = _N_N(.@"+", calc.AddOp);
+  pub const @"N-N" =  _N_N(.@"-", calc.SubOp);
+  pub const @"N*N" =  _N_N(.@"*", calc.MulOp);
+  pub const @"N%N" =  _F_F(.@"%", calc.DivOp);
+  pub const @"N&N" =  _N_N(.@"&", calc.MinOp);
+  pub const @"N|N" =  _N_N(.@"|", calc.MaxOp);
+  pub const @"X=X" = logic.Equal;
   pub const Less = logic.Less;
   pub const More = logic.More;
   // pub const Pair = @import("pair.zig").Pair;

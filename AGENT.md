@@ -285,3 +285,8 @@ The language parser, compiler and runtime are all written in Zig 0.16.
 - Optional GPU accelorator with`--gpu` flag.  `zig build -Dgpu=true && ink --gpu yourscript.ink
 - Static allocated array for `!N` with N<256.
 - Ref counting, copy on write.
+
+# Artifacts
+- `zig-out/bin/ink`
+
+echo "1+2" | ink

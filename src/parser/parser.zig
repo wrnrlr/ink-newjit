@@ -445,22 +445,26 @@ pub const Parser = struct {
     switch (tok.tt) {
       .int => {
         // Collect ints, interleaving positive and negative (0 1 -2 0N forms a vector).
-        // A '-' is only a vector element if it's ADJACENT to the following int (no space).
-        // "0 1 -2" → vector [-2 is adjacent], "10 20 - 1 2" → transit (space around -).
+        // A '-' is a vector element only when BOTH:
+        //   • there is whitespace before it (gap from preceding element, so 10-3 is subtraction)
+        //   • it is immediately adjacent to the following int (no space, so "- 3" is not negation)
         var ints = try std.ArrayList(i32).initCapacity(self.alloc, 0);
         try ints.append(self.alloc, try parseIntLit(tok.slice(self.src)));
+        var last_end = tok.end;
         outer: while (true) {
           while (self.tok.tt == .int) {
             try ints.append(self.alloc, try parseIntLit(self.tok.slice(self.src)));
+            last_end = self.tok.end;
             self.advance();
           }
-          // op(-) immediately followed by int (no whitespace gap) → negative element
           if (self.tok.tt == .op and eql(u8, self.tok.slice(self.src), "-")) {
+            const minus_start = self.tok.start;
             const minus_end = self.tok.end;
             const next_tok = self.lex.peekNext();
-            if (next_tok.tt == .int and next_tok.start == minus_end) {
+            if (next_tok.tt == .int and next_tok.start == minus_end and minus_start > last_end) {
               self.advance(); // consume '-'
               const neg_val = try parseIntLit(self.tok.slice(self.src));
+              last_end = self.tok.end;
               self.advance();
               try ints.append(self.alloc, -neg_val);
             } else break :outer;
@@ -479,6 +483,7 @@ pub const Parser = struct {
       .float => {
         var floats = try std.ArrayList(f32).initCapacity(self.alloc, 0);
         try floats.append(self.alloc, try parseFloatLit(tok.slice(self.src)));
+        var last_end = tok.end;
         outer: while (true) {
           // Collect floats and ints (ints coerced to float in float context).
           while (self.tok.tt == .float or self.tok.tt == .int) {
@@ -488,19 +493,23 @@ pub const Parser = struct {
               const iv = try parseIntLit(self.tok.slice(self.src));
               try floats.append(self.alloc, @floatFromInt(iv));
             }
+            last_end = self.tok.end;
             self.advance();
           }
           if (self.tok.tt == .op and eql(u8, self.tok.slice(self.src), "-")) {
+            const minus_start = self.tok.start;
             const minus_end = self.tok.end;
             const next_tok = self.lex.peekNext();
-            if ((next_tok.tt == .float or next_tok.tt == .int) and next_tok.start == minus_end) {
+            if ((next_tok.tt == .float or next_tok.tt == .int) and next_tok.start == minus_end and minus_start > last_end) {
               self.advance();
               if (self.tok.tt == .float) {
                 const neg_val = try parseFloatLit(self.tok.slice(self.src));
+                last_end = self.tok.end;
                 self.advance();
                 try floats.append(self.alloc, -neg_val);
               } else {
                 const neg_val = try parseIntLit(self.tok.slice(self.src));
+                last_end = self.tok.end;
                 self.advance();
                 try floats.append(self.alloc, -@as(f32, @floatFromInt(neg_val)));
               }

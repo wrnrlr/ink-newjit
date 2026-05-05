@@ -109,7 +109,7 @@ pub const Optimizer = struct {
     if (x == .i) {
       return switch (op) {
         .@"+" => x.ref(),
-        .@"-" => V{ .i = -x.i },
+        .@"-" => V{ .i = 0 -% x.i },
         .@"~" => V{ .b = (x.i == 0) },
         else => null,
       };
@@ -123,9 +123,9 @@ pub const Optimizer = struct {
       const xv = x.i;
       const yv = y.i;
       return switch (op) {
-        .@"+" => V{ .i = xv + yv },
-        .@"-" => V{ .i = xv - yv },
-        .@"*" => V{ .i = xv * yv },
+        .@"+" => V{ .i = xv +% yv },
+        .@"-" => V{ .i = xv -% yv },
+        .@"*" => V{ .i = xv *% yv },
         .@"=" => V{ .b = xv == yv },
         .@"~" => V{ .b = xv == yv },
         else => null,

@@ -2,6 +2,7 @@
 
 ## Grammar
 
+At it most basic 
 Nouns can be combined into an expression using verbs and adverbs.
 
 Expressions are evaluated from right-to-left. There are no special priority rules for operators.
@@ -44,14 +45,24 @@ String of characters encoding text in `[]u8`. Empty quoted string is interpreted
 ### List `` `L ``
 Empty list is written as `` ,() ``.
 
-### Dict `` `m ``
-Dict can be written with bracket syntax `` [a:1:b:2] `` or
-using the dict operator to pair 2 equal length array `` `a`b!1 2 ``.
+### Dict
+Dict can be written with bracket syntax `` [a:1:b:2] ``.
+The dict operator `!` can pair 2 equal length array `` `a`b!1 2 ``.
+A dict has the type symbol `` `m ``.
 
 ### Table `` `M ``
+Dict can be written with bracket syntax `` [[]a:1 2;b:"ab"] ``.
+A table can be created from a dict with thee following phrase `` +`a`b!(1 2;"ab") ``.
+Constructing a table from mismatching length results in a length error.
+A dict has the type symbol `` `M ``.
 
-### Lambda `` `o ``
-User defined function. 
+### Lambda
+A lambdas is user defined function. They have their own local scope.
+A lambda is written between curly backeds: `` { a+b*c } ``.
+A lambda can have up to 8 arguments, arguments are either implicit in the lambda body or specified in the square bracked header `[]`.
+Unless otherwise specified a lambda hasThey have default arguments `` a b c d e f g h ``.epper
+
+A lambda has the type symbol `` `o ``.
 
 ### Partial `` `p ``
 

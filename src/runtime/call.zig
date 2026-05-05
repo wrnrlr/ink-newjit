@@ -22,7 +22,7 @@ pub const Call = struct {
       .func => |ref| try self.applyFn(ref, args, is_bracket),
       .partial => |p| try self.applyPartial(p, args, is_bracket),
       .s => |sym_idx| return try syms.apply(self.vm, sym_idx, args),
-      .L, .I, .F, .S, .C, .B, .m => {
+      .L, .I, .F, .S, .C, .B, .m, .M => {
         if (args.len == 1) return dispatch.dispatch2(self.vm, .@"@", func, args[0]);
         return V{ .err = .rank };
       },

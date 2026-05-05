@@ -6,8 +6,10 @@ const V = value.V;
 const Adverb = value.Adverb;
 const util = @import("../../util.zig");
 
-// pub const converge = @import("converge.zig").converge;
-// pub const converges = @import("converges.zig").converges;
+pub const converge = @import("converge.zig").converge;
+pub const converges = @import("converges.zig").converges;
+const whiledo = @import("whiledo.zig").whiledo;
+const whilescan = @import("whiledo.zig").whilescan;
 const decode = @import("decode.zig").decode;
 const ndo = @import("ndo.zig").ndo;
 const ndos = @import("ndos.zig").ndos;
@@ -52,14 +54,12 @@ fn derived2(vm: *VM, adv: Adverb, x: V, y: V, f: util.ApplyFn) V {
     .@"/" => {
       if (base_is_radix) return decode(vm, x, y);
       if (base_is_char) return join(vm, x, y);
-      // converge
-      return fold(vm, x, null, y, f);
+      return converge(vm, x, y, f);
     },
     .@"\\" => {
       if (base_is_radix) return encode(vm, x, y);
       if (base_is_char) return split(vm, x, y);
-      // converges
-      return scan(vm, x, null, y, f);
+      return converges(vm, x, y, f);
     },
     .@"':" => {
       if (xt == .i) return window(vm, x, y);
@@ -75,11 +75,15 @@ fn derived3(vm: *VM, adv: Adverb, x: V, y: V, z: V, f: util.ApplyFn) V {
     .@"/" => {
       if (y.tag() == .i and x.tag() == .func and x.func.getRealArity() == 1)
         return ndo(vm, x, y.i, z, f);
+      if ((y.tag() == .func or y.tag() == .partial) and x.tag() == .func)
+        return whiledo(vm, y, x, z, f);
       return fold(vm, x, y, z, f);
     },
     .@"\\" => {
       if (y.tag() == .i and x.tag() == .func and x.func.getRealArity() == 1)
         return ndos(vm, x, y.i, z, f);
+      if ((y.tag() == .func or y.tag() == .partial) and x.tag() == .func)
+        return whilescan(vm, y, x, z, f);
       return scan(vm, x, y, z, f);
     },
     .@"':" => eachprior(vm, x, y, z, f),

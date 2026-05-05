@@ -5,8 +5,14 @@ lines: 0: "test/KStrategies/HistDataAPPLE.csv"
 prc: 0.0+|{. 1_ (","\ x)[1]}'-1_ 1_ lines
 n: #prc
 
-/ O(N) moving average via prefix-sum (pads warmup with 0.0, shifts by 1 day)
-ma: {[w;x] s:0.0,+\x; nn:1+(#x)-w; ((w-1)#0.0),-1_(s[w+!nn]-s[!nn])%w}
+/ Moving avarage with window size w over x elements computed via prefix-sum (pads warmup with 0.0, shifts by 1 day)
+ma: {[w;x]
+  s: 0.0,+\x;   / prefix sum, shifted by 1 day
+  nn: 1+(#x)-w; / window count
+  begin: s[w+!nn];
+  end: s[!nn]
+  ((w-1)#0.0),-1_(s[begin]-s[end])%w
+}
 
 / Return % for (slow=h1, fast=h2) MA crossover on prices p
 maStr: {[h1;h2;p]

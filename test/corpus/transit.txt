@@ -75,3 +75,31 @@ I +I
 ---
 (terse
   (transit (literal (ints)) (op) (literal (ints))))
+=================
+i-i nospace
+=================
+2-3
+---
+(terse
+  (transit (literal (int)) (op) (literal (int))))
+=================
+i-i large
+=================
+10-3
+---
+(terse
+  (transit (literal (int)) (op) (literal (int))))
+=================
+I-i nospace
+=================
+1 2-3
+---
+(terse
+  (transit (literal (ints)) (op) (literal (int))))
+=================
+f-f nospace
+=================
+3.0-1.0
+---
+(terse
+  (transit (literal (float)) (op) (literal (float))))
