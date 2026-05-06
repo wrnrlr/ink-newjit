@@ -33,6 +33,7 @@ pub const Op = enum(u8) {
   first, last, count, in, has, parse,
   @"0:", @"1:", @"2:", @"9:",
   @":",
+  exec,
   
   // special
   // amend, drill, splice,

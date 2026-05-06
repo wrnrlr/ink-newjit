@@ -75,6 +75,7 @@ const Monads = struct {
   pub const @"2:x" = io.ReadData;
   pub const @".m"  = @import("values.zig").Values;
   pub const @".s"  = @import("get.zig").GetSymbol;
+  pub const exec   = @import("exec.zig").Exec;
 };
 
 const Dyads = struct {
@@ -121,8 +122,9 @@ const Dyads = struct {
   pub const @"x1:x" = io.WriteBytes;
   pub const @"x2:x" = io.WriteData;
 
-  pub const @"9:x"  = @import("graphics.zig").Draw;
-  pub const @"x9:x" = @import("graphics.zig").DrawDyad;
+  pub const @"9:x"    = @import("graphics.zig").Draw;
+  pub const @"x9:x"  = @import("graphics.zig").DrawDyad;
+  pub const @"x exec" = @import("exec.zig").ExecDyad;
 };
 
 fn makeMonadArray(comptime Defs: type) [Op.COUNT * K.COUNT]?util.MonadFn {

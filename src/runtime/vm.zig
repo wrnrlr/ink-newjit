@@ -122,6 +122,8 @@ pub const VM = struct {
         vm.jit = jit_mod.JitCache.init(alloc, JitImpl.buildHandlers(), JitImpl.buildStencils(), @intFromPtr(&JitImpl.jhApply2)) catch null;
     }
 
+    std.Io.Threaded.global_single_threaded.allocator = alloc;
+
     // Initial frame for top-level code
     vm.pushFrame(.{ .base = 0, .result_slot = 0, .lambda_idx = NO_LAMBDA });
 

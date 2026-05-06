@@ -7,6 +7,7 @@
 - Don't use `zig fmt` on code.
 - Cast ints and floats in Zig like this: `@as(f64, @floatFromInt(a))`.
 - Add debug statements to verify your thinking.
+- Report issues and bugs with the ink language or runtime, and that are not stricktly related to the current task to `report.md`
 
 # Ink language Overview
 Ink (sometimes called terse) is an array programming language based on k.
@@ -212,6 +213,8 @@ The language parser, compiler and runtime are all written in Zig 0.16.
 
 
 # Project Overview
+- `doc`
+  - `report.md` Known issues & bug reports
 - `src`
   - `encoding`
   - `gpu`

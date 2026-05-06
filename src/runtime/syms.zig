@@ -3,6 +3,7 @@ const value = @import("../noun/value.zig");
 const V = value.V;
 const N = value.N;
 const VM = @import("vm.zig").VM;
+const exec_mod = @import("../primitive/verb/exec.zig");
 
 pub fn apply(vm: *VM, sym_idx: u32, args: []const V) anyerror!V {
     const name = vm.getSymbol(sym_idx);
@@ -25,7 +26,8 @@ pub fn apply(vm: *VM, sym_idx: u32, args: []const V) anyerror!V {
         return setPrngState(vm, args[0]);
     }
     if (std.mem.eql(u8, name, "x")) {
-        if (args.len == 1 and args[0] != .blank) return forkExec(vm, args[0]);
+        if (args.len == 1 and args[0] != .blank) return forkExec(vm, args[0], null);
+        if (args.len == 2 and args[0] != .blank) return forkExec(vm, args[0], args[1]);
         return V{ .err = .rank };
     }
     return V{ .err = .@"type" };
@@ -83,6 +85,6 @@ fn getEnv(vm: *VM) anyerror!V {
     return V{ .m = try value.Dict.init(vm.alloc, keys_v, V{ .L = vals_n }) };
 }
 
-fn forkExec(_: *VM, _: V) anyerror!V {
-    return V{ .err = .nyi };
+fn forkExec(vm: *VM, cmd: V, stdin_v: ?V) anyerror!V {
+    return exec_mod.execFromV(vm, cmd, stdin_v);
 }
