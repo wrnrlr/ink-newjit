@@ -201,20 +201,6 @@ fn nodeToV(vm: *VM, node: *Node) anyerror!V {
       for (c.stmts) |s| try list.append(alloc, try nodeToV(vm, s));
       return transfer(alloc, &list);
     },
-    .amend => |seq| {
-      var list = try std.ArrayList(V).initCapacity(alloc, 2);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "amend"));
-      try list.append(alloc, try seqToV(vm, "seq", seq));
-      return transfer(alloc, &list);
-    },
-    .dmend => |seq| {
-      var list = try std.ArrayList(V).initCapacity(alloc, 2);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "dmend"));
-      try list.append(alloc, try seqToV(vm, "seq", seq));
-      return transfer(alloc, &list);
-    },
     .intrans => |it| {
       var list = try std.ArrayList(V).initCapacity(alloc, 3);
       errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }

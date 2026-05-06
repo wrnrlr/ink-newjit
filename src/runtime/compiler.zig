@@ -137,8 +137,6 @@ pub const Compiler = struct {
       .apply => |ap| try self.compileApply(ap, is_tail),
       .term => |t| try self.compileTerm(t),
       .cond => |c| try self.compileCond(c, is_tail),
-      .amend => |seq| try self.compileAmend(seq, .Amend),
-      .dmend => |seq| try self.compileAmend(seq, .Dmend),
       .right => |r| try self.compileNode(r.clause, is_tail),
       .list => |l| try self.compileList(l),
       .dict => |d| try self.compileDict(d, .MakeDict),
@@ -207,22 +205,29 @@ pub const Compiler = struct {
     @panic("utable not implemented in compiler");
   }
 
-  // TODO combine apply & list (very similar)
   fn compileApply(self: *Compiler, ap: ast.Apply, is_tail: bool) anyerror!ir.ValueId {
-    var inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, 0);
+    const seq = if (ap.a) |s| s else &[_]*ast.Node{};
+    const n: u8 = @intCast(seq.len);
+
+    // @[x;y;f] and .[x;y;f] with 3+ args compile to Amend/Dmend (no function arg on stack).
+    if (ap.f.* == .verb_op and seq.len >= 3) {
+      const op_str = ap.f.verb_op;
+      const opcode: ?OpCode = if (std.mem.eql(u8, op_str, "@")) .Amend
+                              else if (std.mem.eql(u8, op_str, ".")) .Dmend
+                              else null;
+      if (opcode) |opc| {
+        var inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, seq.len);
+        defer inputs.deinit(self.alloc);
+        for (seq) |x| try inputs.append(self.alloc, try self.compileNode(x, false));
+        return try self.emitOpWithArg(opc, n, inputs.items);
+      }
+    }
+
+    var inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, seq.len + 1);
     defer inputs.deinit(self.alloc);
     try inputs.append(self.alloc, try self.compileNode(ap.f, false));
-    if (ap.a) |seq|
-      for (seq) |x| try inputs.append(self.alloc, try self.compileNode(x, false));
-    const n = if (ap.a) |seq| @as(u8, @intCast(seq.len)) else 0;
+    for (seq) |x| try inputs.append(self.alloc, try self.compileNode(x, false));
     return try self.emitOpWithArg(if (is_tail) .TailCall else .Apply, n, inputs.items);
-  }
-
-  fn compileAmend(self: *Compiler, seq: ast.Seq, op: OpCode) anyerror!ir.ValueId {
-    var inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, 0);
-    defer inputs.deinit(self.alloc);
-    for (seq) |node| try inputs.append(self.alloc, try self.compileNode(node, false));
-    return try self.emitOpWithArg(op, @intCast(seq.len), inputs.items);
   }
 
   fn compileLiteral(self: *Compiler, lit: ast.Literal) anyerror!ir.ValueId {

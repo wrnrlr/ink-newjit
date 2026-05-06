@@ -184,24 +184,6 @@ pub fn formatSexp(n: *Node, w: W) !void {
       }
       try w.writeAll(")");
     },
-    .amend => |seq| {
-      try w.writeAll("(amend (seq");
-      for (seq, 0..) |item, i| {
-        if (i > 0) try w.writeAll(" (div)");
-        try w.writeAll(" ");
-        try formatSexp(item, w);
-      }
-      try w.writeAll("))");
-    },
-    .dmend => |seq| {
-      try w.writeAll("(dmend (seq");
-      for (seq, 0..) |item, i| {
-        if (i > 0) try w.writeAll(" (div)");
-        try w.writeAll(" ");
-        try formatSexp(item, w);
-      }
-      try w.writeAll("))");
-    },
     .intrans => |it| {
       try w.writeAll("(intrans ");
       try formatSexp(it.a, w);

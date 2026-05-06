@@ -12,8 +12,6 @@ pub const TT = enum {
   @"{", @"}",
   @"[", @"]",
   @"$[",
-  @"@[",
-  @".[",
   @"[[]", @"[[",
   sep,
   comment,
@@ -188,16 +186,6 @@ pub const Lexer = struct {
       self.pos += 2;
       self.setNeither();
       return .{ .tt = .@"$[", .start = start, .end = self.pos };
-    }
-    if (c == '@' and self.ch1() == '[') {
-      self.pos += 2;
-      self.setNeither();
-      return .{ .tt = .@"@[", .start = start, .end = self.pos };
-    }
-    if (c == '.' and self.ch1() == '[') {
-      self.pos += 2;
-      self.setNeither();
-      return .{ .tt = .@".[", .start = start, .end = self.pos };
     }
     if (c == '[' and self.ch1() == '[' and self.ch2() == ']') {
       self.pos += 3;
@@ -420,36 +408,25 @@ pub const Lexer = struct {
       }
     }
 
-    // Check for date: YYYY.MM.DD
-    // if (self.ch() == '.') {
-    //   const after_first_dot = self.pos + 1;
-    //   // Peek: need exactly 2 digits then another dot
-    //   var pp = after_first_dot;
-    //   var cnt: u32 = 0;
-    //   while (pp < self.src.len and std.ascii.isDigit(self.src[pp])) { pp += 1; cnt += 1; }
-    //   if (cnt >= 1 and pp < self.src.len and self.src[pp] == '.') {
-    //     // Looks like date YYYY.MM.DD
-    //     self.adv(); // consume first '.'
-    //     while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
-    //     if (self.ch() == '.') {
-    //       self.adv();
-    //       while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
-    //     }
-    //     self.setNoun();
-    //     return .{ .tt = .date, .start = start, .end = self.pos };
-    //   }
-    //   // Float: digits . digits?
-    //   self.adv(); // consume '.'
-    //   while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
-    //   // Scientific notation
-    //   if (self.ch() == 'e' or self.ch() == 'E') {
-    //     self.adv();
-    //     if (self.ch() == '+' or self.ch() == '-') self.adv();
-    //     while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
-    //   }
-    //   self.setNoun();
-    //   return .{ .tt = .float, .start = start, .end = self.pos };
-    // }
+    // Float: digits.digits or digits. (trailing dot)
+    // Consume dot when next char is a digit, or when it's not alphanumeric/bracket
+    // (so `2.3` and `2.` are floats but `2.[` and `2.a` keep the dot as a separate op).
+    if (self.ch() == '.') {
+      const after_dot = self.ch1() orelse 0;
+      if (std.ascii.isDigit(after_dot) or
+          (!std.ascii.isAlphanumeric(after_dot) and after_dot != '['))
+      {
+        self.adv(); // consume '.'
+        while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
+        if (self.ch() == 'e' or self.ch() == 'E') {
+          self.adv();
+          if (self.ch() == '+' or self.ch() == '-') self.adv();
+          while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
+        }
+        self.setNoun();
+        return .{ .tt = .float, .start = start, .end = self.pos };
+      }
+    }
 
     // Scientific notation for floats starting as integers
     if (self.ch() == 'e' or self.ch() == 'E') {

@@ -72,7 +72,7 @@ pub const Parser = struct {
       .int, .float, .bit, .bits,
       .string, .symbol, .var_,
       .@"(", .@"{", .@"[",
-      .@"$[", .@"@[", .@".[",
+      .@"$[",
       .@"[[]", .@"[[",
       .adverb_val,
       => true,
@@ -418,8 +418,6 @@ pub const Parser = struct {
       .@"[[]" => return self.parseTable(),
       .@"[[" => return self.parseUTable(),
       .@"$[" => return self.parseCond(),
-      .@"@[" => return self.parseAmend(),
-      .@".[" => return self.parseDmend(),
       .adverb_val => {
         const adv = tok.slice(self.src);
         self.advance();
@@ -829,26 +827,6 @@ pub const Parser = struct {
     return m;
   }
 
-  fn parseAmend(self: *Parser) ParseError!*Node {
-    std.debug.assert(self.is(.@"@["));
-    self.advance();
-    const seq = try self.parseSeq(.@"]");
-    _ = self.eat(.@"]");
-    const m = try self.alloc.create(Node);
-    m.* = .{ .amend = seq };
-    return m;
-  }
-
-  fn parseDmend(self: *Parser) ParseError!*Node {
-    std.debug.assert(self.is(.@".["));
-    self.advance();
-    const seq = try self.parseSeq(.@"]");
-    _ = self.eat(.@"]");
-    const m = try self.alloc.create(Node);
-    m.* = .{ .dmend = seq };
-    return m;
-  }
-
   // ---- Literal helpers ----
 
   fn parseIntLit(s: []const u8) ParseError!i32 {
@@ -930,8 +908,6 @@ pub fn freeNode(alloc: Alloc, n: *Node) void {
       else => {},
     },
     .term => |t| freeNode(alloc, t.f),
-    .amend => |seq| freeSeq(alloc, seq),
-    .dmend => |seq| freeSeq(alloc, seq),
     .verb_op, .verb_io, .blank, .command, .monad, .adverb_val => {},
   }
   alloc.destroy(n);

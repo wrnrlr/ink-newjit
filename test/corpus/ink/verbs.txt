@@ -101,6 +101,18 @@ dict
 ---
 (terse (dict (item (var) (literal (int))) (item (var) (literal (int)))))
 ==================
+amend
+==================
+@[x;y;f]
+---
+(terse (apply (op) (seq (literal (var)) (div) (literal (var)) (div) (literal (var)))))
+==================
+dmend
+==================
+.[f;x;e;d]
+---
+(terse (apply (op) (seq (literal (var)) (div) (literal (var)) (div) (literal (var)) (div) (literal (var)))))
+==================
 multi-statement
 ==================
 a:1;b:2
