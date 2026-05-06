@@ -76,10 +76,6 @@ pub fn makeMonad(
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
   inline for (types) |xk| {
-    // const maybe: ?util.MonadFn = if (comptime xk.isNumeric())
-    //   monadKernel(xk, CastType, ResultType, Impl)
-    // else
-    //   monadContainerKernel(xk, operator);
     const maybe: ?util.MonadFn = monadKernel(operator, xk, CastType, ResultType, Impl);
     if (maybe) |handler| {
       names = names ++ .{"_" ++ @tagName(xk)};
@@ -107,10 +103,6 @@ pub fn makeDyad(
   };
   inline for (types) |xk| {
     inline for (types) |yk| {
-      // const maybe: ?util.DyadFn = if (comptime xk.isNumeric() and yk.isNumeric())
-      //   dyadKernel(xk, yk, CastType, ResultType, Impl)
-      // else
-      //   dyadContainerKernel(xk, yk, operator);
       const maybe: ?util.DyadFn = dyadKernel(operator, xk, yk, CastType, ResultType, Impl);
       if (maybe) |handler| {
         names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
@@ -156,7 +148,7 @@ pub fn resultKind2(comptime xk: K, comptime yk: K, comptime RT: fn (type, type) 
 // ── Numeric kernel generators ─────────────────────────────────────────────────
 
 fn monadKernel(
-  comptime operator: Op,
+  comptime op: Op,
   comptime xk: K,
   comptime CastType: fn (type) type,
   comptime ResultType: fn (type) type,
@@ -167,6 +159,16 @@ fn monadKernel(
   const R  = ResultType(XT);
   const rk = resultKind1(xk, ResultType);
   return &struct {
+    fn kernel(vm: *VM, x: V) V {
+      if (comptime xk.isAtom()) return kernelAtom(xk, C, R, rk, Impl, x);
+      if (comptime xk.isVec()) return kernelVec(op, xk, C, R, rk, Impl, vm, x);
+      return V{ .err = .@"type" };
+    }
+  }.kernel;
+}
+
+fn Caster(comptime C: type) type {
+  return struct {
     inline fn cast(v: anytype) C {
       const T = @TypeOf(v);
       if (T == C) return v;
@@ -175,38 +177,55 @@ fn monadKernel(
       if (T == f32 and C == i32) return @intFromFloat(v);
       unreachable;
     }
-    fn kernel(vm: *VM, x: V) V {
-      if (comptime xk.isAtom()) {
-        const r: R = Impl.f(cast(@field(x, @tagName(xk))));
-        return V.wrap(rk, r);
-      }
-      if (comptime xk.isVec()) {
-        const vx = @field(x, @tagName(xk));
-        // GPU dispatch: I or F monad with supported op, GPU-resident,
-        // length above threshold, identity result kind.
-        if (comptime (xk == .I or xk == .F) and rk == xk and monadOpForKOp(operator) != null) {
-          if (vm.gpu) |g| if (vx.isGpu() and vx.ptr.len >= DYAD_GPU_THRESHOLD) {
-            const n: u32 = @intCast(vx.ptr.len);
-            const out_range = g.allocRange(n * @sizeOf(XT)) catch return V{ .err = .memory };
-            const gop = comptime monadOpForKOp(operator).?;
-            if (comptime xk == .I) g.monadI32(gop, out_range, vx.gpuRange(), n) catch return V{ .err = .memory }
-            else g.monadF32(gop, out_range, vx.gpuRange(), n) catch return V{ .err = .memory };
-            return @unionInit(V, @tagName(xk), N(XT).initGpu(g, out_range, n) catch return V{ .err = .memory });
-          };
-        }
-        if (comptime R == XT and rk == xk) {
-          if (vx.ptr.rc == 1) {
-            for (vx.slice()) |*xv| xv.* = Impl.f(cast(xv.*));
-            return x.ref();
-          }
-        }
-        const out = N(R).init(vm.alloc, vx.ptr.len) catch return V{ .err = .memory };
-        for (vx.slice(), out.slice()) |xv, *r| r.* = Impl.f(cast(xv));
-        return @unionInit(V, @tagName(rk), out);
-      }
-      return V{ .err = .@"type" };
+  };
+}
+
+fn kernelAtom(
+  comptime xk: K,
+  comptime C: type,
+  comptime R: type,
+  comptime rk: K,
+  comptime F: type,
+  x: V,
+) V {
+  const cast = Caster(C).cast;
+  const r: R = F.f(cast(@field(x, @tagName(xk))));
+  return V.wrap(rk, r);
+}
+
+fn kernelVec(
+  comptime op: Op,
+  comptime xk: K,
+  comptime C: type,
+  comptime R: type,
+  comptime rk: K,
+  comptime Impl: type,
+  vm: *VM, x: V,
+) V {
+  const XT = xk.backing();
+  const cast = Caster(C).cast;
+  const vx = @field(x, @tagName(xk));
+  // GPU dispatch: I or F monad with supported op, GPU-resident,
+  // length above threshold, identity result kind.
+  if (comptime (xk == .I or xk == .F) and rk == xk and monadOpForKOp(op) != null) {
+    if (vm.gpu) |g| if (vx.isGpu() and vx.ptr.len >= DYAD_GPU_THRESHOLD) {
+      const n: u32 = @intCast(vx.ptr.len);
+      const out_range = g.allocRange(n * @sizeOf(XT)) catch return V{ .err = .memory };
+      const gop = comptime monadOpForKOp(op).?;
+      if (comptime xk == .I) g.monadI32(gop, out_range, vx.gpuRange(), n) catch return V{ .err = .memory }
+      else g.monadF32(gop, out_range, vx.gpuRange(), n) catch return V{ .err = .memory };
+      return @unionInit(V, @tagName(xk), N(XT).initGpu(g, out_range, n) catch return V{ .err = .memory });
+    };
+  }
+  if (comptime R == XT and rk == xk) {
+    if (vx.ptr.rc == 1) {
+      for (vx.slice()) |*xv| xv.* = Impl.f(cast(xv.*));
+      return x.ref();
     }
-  }.kernel;
+  }
+  const out = N(R).init(vm.alloc, vx.ptr.len) catch return V{ .err = .memory };
+  for (vx.slice(), out.slice()) |xv, *r| r.* = Impl.f(cast(xv));
+  return V.wrap(rk, out);
 }
 
 fn dyadKernel(
@@ -288,155 +307,155 @@ fn dyadKernel(
 
 // ── Container kernel generators ───────────────────────────────────────────────
 
-fn monadContainerKernel(
-  comptime xk: K,
-  comptime operator: Op,
-) ?util.MonadFn {
-  if (comptime xk == .L) {
-    return &struct {
-      fn k(vm: *VM, x: V) V {
-        const n = x.L.ptr.len;
-        const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
-        @memset(res.slice(), .blank);
-        for (res.slice(), 0..) |*r, i| {
-          const elem = x.at(i);
-          defer elem.deinit(vm.alloc);
-          r.* = dispatch.dispatch1(vm, operator, elem);
-          if (r.*.tag() == .err) return promote(vm.alloc, res) catch {
-            (V{ .L = res }).deinit(vm.alloc);
-            return V{ .err = .memory };
-          };
-        }
-        return promote(vm.alloc, res) catch {
-          (V{ .L = res }).deinit(vm.alloc);
-          return V{ .err = .memory };
-        };
-      }
-    }.k;
-  }
-  if (comptime xk == .m or xk == .M) {
-    return &struct {
-      fn k(vm: *VM, x: V) V {
-        const d = @field(x, @tagName(xk));
-        const vals = dispatch.dispatch1(vm, operator, d.bv());
-        if (vals.tag() == .err) return vals;
-        return @unionInit(V, @tagName(xk), value.Dict.init(vm.alloc, d.av().ref(), vals) catch {
-          vals.deinit(vm.alloc);
-          return V{ .err = .memory };
-        });
-      }
-    }.k;
-  }
-  return null;
-}
+// fn monadContainerKernel(
+//   comptime xk: K,
+//   comptime operator: Op,
+// ) ?util.MonadFn {
+//   if (comptime xk == .L) {
+//     return &struct {
+//       fn k(vm: *VM, x: V) V {
+//         const n = x.L.ptr.len;
+//         const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
+//         @memset(res.slice(), .blank);
+//         for (res.slice(), 0..) |*r, i| {
+//           const elem = x.at(i);
+//           defer elem.deinit(vm.alloc);
+//           r.* = dispatch.dispatch1(vm, operator, elem);
+//           if (r.*.tag() == .err) return promote(vm.alloc, res) catch {
+//             (V{ .L = res }).deinit(vm.alloc);
+//             return V{ .err = .memory };
+//           };
+//         }
+//         return promote(vm.alloc, res) catch {
+//           (V{ .L = res }).deinit(vm.alloc);
+//           return V{ .err = .memory };
+//         };
+//       }
+//     }.k;
+//   }
+//   if (comptime xk == .m or xk == .M) {
+//     return &struct {
+//       fn k(vm: *VM, x: V) V {
+//         const d = @field(x, @tagName(xk));
+//         const vals = dispatch.dispatch1(vm, operator, d.bv());
+//         if (vals.tag() == .err) return vals;
+//         return @unionInit(V, @tagName(xk), value.Dict.init(vm.alloc, d.av().ref(), vals) catch {
+//           vals.deinit(vm.alloc);
+//           return V{ .err = .memory };
+//         });
+//       }
+//     }.k;
+//   }
+//   return null;
+// }
 
-fn dyadContainerKernel(
-  comptime xk: K,
-  comptime yk: K,
-  comptime operator: Op,
-) ?util.DyadFn {
-  const xIsDict = comptime (xk == .m or xk == .M);
-  const yIsDict = comptime (yk == .m or yk == .M);
-  const xIsList = comptime (xk == .L);
-  const yIsList = comptime (yk == .L);
+// fn dyadContainerKernel(
+//   comptime xk: K,
+//   comptime yk: K,
+//   comptime operator: Op,
+// ) ?util.DyadFn {
+//   const xIsDict = comptime (xk == .m or xk == .M);
+//   const yIsDict = comptime (yk == .m or yk == .M);
+//   const xIsList = comptime (xk == .L);
+//   const yIsList = comptime (yk == .L);
 
-  // dict op dict — keys must match, apply on values
-  if (comptime xIsDict and yIsDict) {
-    return &struct {
-      fn k(vm: *VM, x: V, y: V) V {
-        const dx = @field(x, @tagName(xk));
-        const dy = @field(y, @tagName(yk));
-        if (!dx.av().eq(dy.av())) return V{ .err = .length };
-        const vals = dispatch.dispatch2(vm, operator, dx.bv(), dy.bv());
-        if (vals.tag() == .err) return vals;
-        return @unionInit(V, @tagName(xk), value.Dict.init(vm.alloc, dx.av().ref(), vals) catch {
-          vals.deinit(vm.alloc);
-          return V{ .err = .memory };
-        });
-      }
-    }.k;
-  }
-  // dict op numeric/list — apply on dict values
-  if (comptime xIsDict and !yIsList) {
-    return &struct {
-      fn k(vm: *VM, x: V, y: V) V {
-        const d = @field(x, @tagName(xk));
-        const vals = dispatch.dispatch2(vm, operator, d.bv(), y);
-        if (vals.tag() == .err) return vals;
-        return @unionInit(V, @tagName(xk), value.Dict.init(vm.alloc, d.av().ref(), vals) catch {
-          vals.deinit(vm.alloc);
-          return V{ .err = .memory };
-        });
-      }
-    }.k;
-  }
-  // numeric op dict — apply on dict values
-  if (comptime yIsDict and !xIsList) {
-    return &struct {
-      fn k(vm: *VM, x: V, y: V) V {
-        const d = @field(y, @tagName(yk));
-        const vals = dispatch.dispatch2(vm, operator, x, d.bv());
-        if (vals.tag() == .err) return vals;
-        return @unionInit(V, @tagName(yk), value.Dict.init(vm.alloc, d.av().ref(), vals) catch {
-          vals.deinit(vm.alloc);
-          return V{ .err = .memory };
-        });
-      }
-    }.k;
-  }
-  // list op numeric/list — element-wise with broadcasting
-  if (comptime xIsList and !yIsDict) {
-    return &struct {
-      fn k(vm: *VM, x: V, y: V) V {
-        const xn = x.L.ptr.len;
-        const yn = y.len();
-        const n = if (xn == 1) yn else if (yn == 1) xn else if (xn == yn) xn else return V{ .err = .length };
-        const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
-        @memset(res.slice(), .blank);
-        for (res.slice(), 0..) |*r, i| {
-          const xv = if (xn == 1) x.ref() else x.at(i);
-          defer xv.deinit(vm.alloc);
-          const yv = if (yn == 1) y.ref() else y.at(i);
-          defer yv.deinit(vm.alloc);
-          r.* = dispatch.dispatch2(vm, operator, xv, yv);
-          if (r.*.tag() == .err) return promote(vm.alloc, res) catch {
-            (V{ .L = res }).deinit(vm.alloc);
-            return V{ .err = .memory };
-          };
-        }
-        return promote(vm.alloc, res) catch {
-          (V{ .L = res }).deinit(vm.alloc);
-          return V{ .err = .memory };
-        };
-      }
-    }.k;
-  }
-  // numeric op list — element-wise with broadcasting
-  if (comptime yIsList and !xIsDict) {
-    return &struct {
-      fn k(vm: *VM, x: V, y: V) V {
-        const xn = x.len();
-        const yn = y.L.ptr.len;
-        const n = if (xn == 1) yn else if (yn == 1) xn else if (xn == yn) xn else return V{ .err = .length };
-        const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
-        @memset(res.slice(), .blank);
-        for (res.slice(), 0..) |*r, i| {
-          const xv = if (xn == 1) x.ref() else x.at(i);
-          defer xv.deinit(vm.alloc);
-          const yv = if (yn == 1) y.ref() else y.at(i);
-          defer yv.deinit(vm.alloc);
-          r.* = dispatch.dispatch2(vm, operator, xv, yv);
-          if (r.*.tag() == .err) return promote(vm.alloc, res) catch {
-            (V{ .L = res }).deinit(vm.alloc);
-            return V{ .err = .memory };
-          };
-        }
-        return promote(vm.alloc, res) catch {
-          (V{ .L = res }).deinit(vm.alloc);
-          return V{ .err = .memory };
-        };
-      }
-    }.k;
-  }
-  return null; // unsupported (e.g., list op dict)
-}
+//   // dict op dict — keys must match, apply on values
+//   if (comptime xIsDict and yIsDict) {
+//     return &struct {
+//       fn k(vm: *VM, x: V, y: V) V {
+//         const dx = @field(x, @tagName(xk));
+//         const dy = @field(y, @tagName(yk));
+//         if (!dx.av().eq(dy.av())) return V{ .err = .length };
+//         const vals = dispatch.dispatch2(vm, operator, dx.bv(), dy.bv());
+//         if (vals.tag() == .err) return vals;
+//         return @unionInit(V, @tagName(xk), value.Dict.init(vm.alloc, dx.av().ref(), vals) catch {
+//           vals.deinit(vm.alloc);
+//           return V{ .err = .memory };
+//         });
+//       }
+//     }.k;
+//   }
+//   // dict op numeric/list — apply on dict values
+//   if (comptime xIsDict and !yIsList) {
+//     return &struct {
+//       fn k(vm: *VM, x: V, y: V) V {
+//         const d = @field(x, @tagName(xk));
+//         const vals = dispatch.dispatch2(vm, operator, d.bv(), y);
+//         if (vals.tag() == .err) return vals;
+//         return @unionInit(V, @tagName(xk), value.Dict.init(vm.alloc, d.av().ref(), vals) catch {
+//           vals.deinit(vm.alloc);
+//           return V{ .err = .memory };
+//         });
+//       }
+//     }.k;
+//   }
+//   // numeric op dict — apply on dict values
+//   if (comptime yIsDict and !xIsList) {
+//     return &struct {
+//       fn k(vm: *VM, x: V, y: V) V {
+//         const d = @field(y, @tagName(yk));
+//         const vals = dispatch.dispatch2(vm, operator, x, d.bv());
+//         if (vals.tag() == .err) return vals;
+//         return @unionInit(V, @tagName(yk), value.Dict.init(vm.alloc, d.av().ref(), vals) catch {
+//           vals.deinit(vm.alloc);
+//           return V{ .err = .memory };
+//         });
+//       }
+//     }.k;
+//   }
+//   // list op numeric/list — element-wise with broadcasting
+//   if (comptime xIsList and !yIsDict) {
+//     return &struct {
+//       fn k(vm: *VM, x: V, y: V) V {
+//         const xn = x.L.ptr.len;
+//         const yn = y.len();
+//         const n = if (xn == 1) yn else if (yn == 1) xn else if (xn == yn) xn else return V{ .err = .length };
+//         const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
+//         @memset(res.slice(), .blank);
+//         for (res.slice(), 0..) |*r, i| {
+//           const xv = if (xn == 1) x.ref() else x.at(i);
+//           defer xv.deinit(vm.alloc);
+//           const yv = if (yn == 1) y.ref() else y.at(i);
+//           defer yv.deinit(vm.alloc);
+//           r.* = dispatch.dispatch2(vm, operator, xv, yv);
+//           if (r.*.tag() == .err) return promote(vm.alloc, res) catch {
+//             (V{ .L = res }).deinit(vm.alloc);
+//             return V{ .err = .memory };
+//           };
+//         }
+//         return promote(vm.alloc, res) catch {
+//           (V{ .L = res }).deinit(vm.alloc);
+//           return V{ .err = .memory };
+//         };
+//       }
+//     }.k;
+//   }
+//   // numeric op list — element-wise with broadcasting
+//   if (comptime yIsList and !xIsDict) {
+//     return &struct {
+//       fn k(vm: *VM, x: V, y: V) V {
+//         const xn = x.len();
+//         const yn = y.L.ptr.len;
+//         const n = if (xn == 1) yn else if (yn == 1) xn else if (xn == yn) xn else return V{ .err = .length };
+//         const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
+//         @memset(res.slice(), .blank);
+//         for (res.slice(), 0..) |*r, i| {
+//           const xv = if (xn == 1) x.ref() else x.at(i);
+//           defer xv.deinit(vm.alloc);
+//           const yv = if (yn == 1) y.ref() else y.at(i);
+//           defer yv.deinit(vm.alloc);
+//           r.* = dispatch.dispatch2(vm, operator, xv, yv);
+//           if (r.*.tag() == .err) return promote(vm.alloc, res) catch {
+//             (V{ .L = res }).deinit(vm.alloc);
+//             return V{ .err = .memory };
+//           };
+//         }
+//         return promote(vm.alloc, res) catch {
+//           (V{ .L = res }).deinit(vm.alloc);
+//           return V{ .err = .memory };
+//         };
+//       }
+//     }.k;
+//   }
+//   return null; // unsupported (e.g., list op dict)
+// }

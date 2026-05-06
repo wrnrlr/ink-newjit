@@ -14,7 +14,10 @@ pub fn split(vm: *VM, sep: V, str: V) V {
   if (sep_chars.len == 0) return .{ .err = .domain };
 
   var parts: std.ArrayList(V) = .empty;
-  defer parts.deinit(vm.alloc);
+  defer {
+    for (parts.items) |v| v.deinit(vm.alloc);
+    parts.deinit(vm.alloc);
+  }
 
   var start: usize = 0;
   var i: usize = 0;

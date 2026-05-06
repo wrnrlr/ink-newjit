@@ -1,36 +1,4 @@
 
-
-### 8. Function composition/train cannot be stored in a variable
-
-Assigning a verb train to a variable results in type `` `! `` (error):
-
-```k
-h: *|
-@h      / → `!  (expected `q or similar)
-h 1 2 3 / → (no output, expected 3)
-```
-
-Inline trains work: `*|1 2 3` → `3`.
-
-**Fix:** Ensure the compiler/VM correctly captures composed function values during assignment.
-
----
-
-## Memory Issues
-
-### 9. Split adverb leaks memory
-
-`src/primitive/adverb/split.zig` leaks `charsFromSlice` allocations per the DebugAllocator:
-
-```
-error(DebugAllocator): memory address 0x... leaked:
-    split.zig:23 and split.zig:30
-```
-
-Each `C\` call leaks the string parts. The list container is returned but the parts' backing buffers are not tracked by the ref-count system.
-
----
-
 ## Minor Issues
 
 ### 10. `$0W` displays as integer max value
@@ -61,35 +29,3 @@ The correct form (used in `momentum.k` and `arbitrage.k`) is:
 ```
 
 ---
-
-## What Works Correctly
-
-| Feature | Status |
-|---------|--------|
-| Integer/float/char/symbol/bool literals | ✓ |
-| Null values (`0N`, `0n`, `0w`, `-0w`) | ✓ |
-| All monadic verbs (`+ - * ! # @ & \| < > = ? , ^ ~ $`) | ✓ |
-| Arithmetic `+ - *` (with spaces or variable operands) | ✓ |
-| Comparison `< > =`, Match `~`, Not `~` | ✓ |
-| Dict creation `x!y`, access, values, keys, tally | ✓ |
-| Dict take-keys, drop-key, merge | ✓ |
-| Table creation (`+dict`), tally | ✓ |
-| Drop `i_Y`, Cut `I_Y`, WeedOut (boolean), Delete `X_i` | ✓ |
-| Join `,`, Take `#`, Reshape `I#y`, Fill `^`, Without `X^y` | ✓ |
-| Pad `i$C`, Cast `s$y`, Find `?` | ✓ |
-| Amend `@[x;y;f]` and `@[x;y;F;z]` | ✓ |
-| Conditional `$[b;t;f]` | ✓ |
-| Fold `F/`, Scan `F\`, Seeded fold/scan | ✓ |
-| N-Do `n f/`, N-Dos `n f\` | ✓ |
-| Each1 `f'`, Each2 `x f'` | ✓ |
-| EachPrior `F':`, seeded eachprior | ✓ |
-| EachRight `x F/:`, EachLeft `x F\:` | ✓ |
-| Window `n':X` (integers/floats) | ✓ |
-| Stencil `n{f}'X` | ✓ |
-| Join `C/`, Split `C\` (functional, memory leak) | ✓/⚠ |
-| Decode `I/`, Encode `I\` | ✓ |
-| Lambdas with explicit args, partial application | ✓ |
-| Math functions (`sqrt`, `abs`, `log`, `exp`, `sin`, `cos`) | ✓ |
-| String formatting `$x`, type `@x` | ✓ |
-| IO (`0:`, `1:`) | ✓ |
-| Null propagation at runtime (non-constant-folded expressions) | ✓ |

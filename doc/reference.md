@@ -2,7 +2,6 @@
 
 ## Grammar
 
-At it most basic 
 Nouns can be combined into an expression using verbs and adverbs.
 
 Expressions are evaluated from right-to-left. There are no special priority rules for operators.
@@ -46,7 +45,7 @@ String of characters encoding text in `[]u8`. Empty quoted string is interpreted
 Empty list is written as `` ,() ``.
 
 ### Dict
-Dict can be written with bracket syntax `` [a:1:b:2] ``.
+Dict can be written with bracke t syntax `` [a:1:b:2] ``.
 The dict operator `!` can pair 2 equal length array `` `a`b!1 2 ``.
 A dict has the type symbol `` `m ``.
 
@@ -60,13 +59,14 @@ A dict has the type symbol `` `M ``.
 A lambdas is user defined function. They have their own local scope.
 A lambda is written between curly backeds: `` { a+b*c } ``.
 A lambda can have up to 8 arguments, arguments are either implicit in the lambda body or specified in the square bracked header `[]`.
-Unless otherwise specified a lambda hasThey have default arguments `` a b c d e f g h ``.epper
-
-A lambda has the type symbol `` `o ``.
+A lambda can have up to 8 arguments.
+A lambda's type symbol is `` `o ``.
 
 ### Partial `` `p ``
+A partial is a variadic (operator or lambda) with only a certain arguments applied.
 
 ### Composition/Train `` `q ``
+A compition is a sequence of variadics..
 
 ### Error `` `! ``
 
@@ -338,7 +338,7 @@ sliding windows of size i
 
 ### Stencil `i f'`
 Apply f to each sliding window
-`` 3{x,"."}':"abcde" `` -> `` ("abc.";"bcd.";"cde.") ``
+`` 3{x,"."}'"abcde" `` -> `` ("abc.";"bcd.";"cde.") ``
 
 ### Eachprior `F'`
 apply F between each item and its predecessor
