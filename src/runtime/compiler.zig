@@ -674,8 +674,7 @@ pub const Compiler = struct {
     
     try res_ids.append(self.alloc, res);
 
-    for (end_jumps[0..j]) |jump|
-      try self.patchJump(jump);
+    for (end_jumps[0..j]) |jump| try self.patchJump(jump);
     return try self.emitOp(.Nop, res_ids.items);
   }
 

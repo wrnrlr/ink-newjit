@@ -2,20 +2,19 @@ const std = @import("std");
 
 pub const TT = enum {
   int, float,
-  bool_lit, bools_lit,
-  date, time,
+  bit, bits,
   string, symbol,
   var_,
   keyword_op, op, verb_io,
   adverb, adverb_val,
-  colon,
-  lparen, rparen,
-  lbrace, rbrace,
-  lbracket, rbracket,
-  dollar_lbracket,
-  at_lbracket,
-  dot_lbracket,
-  table_open, utable_open,
+  @":",
+  @"(", @")",
+  @"{", @"}",
+  @"[", @"]",
+  @"$[",
+  @"@[",
+  @".[",
+  @"[[]", @"[[",
   sep,
   comment,
   command,
@@ -188,42 +187,42 @@ pub const Lexer = struct {
     if (c == '$' and self.ch1() == '[') {
       self.pos += 2;
       self.setNeither();
-      return .{ .tt = .dollar_lbracket, .start = start, .end = self.pos };
+      return .{ .tt = .@"$[", .start = start, .end = self.pos };
     }
     if (c == '@' and self.ch1() == '[') {
       self.pos += 2;
       self.setNeither();
-      return .{ .tt = .at_lbracket, .start = start, .end = self.pos };
+      return .{ .tt = .@"@[", .start = start, .end = self.pos };
     }
     if (c == '.' and self.ch1() == '[') {
       self.pos += 2;
       self.setNeither();
-      return .{ .tt = .dot_lbracket, .start = start, .end = self.pos };
+      return .{ .tt = .@".[", .start = start, .end = self.pos };
     }
     if (c == '[' and self.ch1() == '[' and self.ch2() == ']') {
       self.pos += 3;
       self.setNeither();
-      return .{ .tt = .table_open, .start = start, .end = self.pos };
+      return .{ .tt = .@"[[]", .start = start, .end = self.pos };
     }
     if (c == '[' and self.ch1() == '[') {
       self.pos += 2;
       self.setNeither();
-      return .{ .tt = .utable_open, .start = start, .end = self.pos };
+      return .{ .tt = .@"[[", .start = start, .end = self.pos };
     }
 
     // Simple delimiters
-    if (c == '(') { self.adv(); self.setNeither(); return .{ .tt = .lparen, .start = start, .end = self.pos }; }
-    if (c == ')') { self.adv(); self.setNoun();    return .{ .tt = .rparen, .start = start, .end = self.pos }; }
-    if (c == '{') { self.adv(); self.setNeither(); return .{ .tt = .lbrace, .start = start, .end = self.pos }; }
-    if (c == '}') { self.adv(); self.setNoun();    return .{ .tt = .rbrace, .start = start, .end = self.pos }; }
-    if (c == '[') { self.adv(); self.setNeither(); return .{ .tt = .lbracket, .start = start, .end = self.pos }; }
-    if (c == ']') { self.adv(); self.setNoun();    return .{ .tt = .rbracket, .start = start, .end = self.pos }; }
+    if (c == '(') { self.adv(); self.setNeither(); return .{ .tt = .@"(", .start = start, .end = self.pos }; }
+    if (c == ')') { self.adv(); self.setNoun();    return .{ .tt = .@")", .start = start, .end = self.pos }; }
+    if (c == '{') { self.adv(); self.setNeither(); return .{ .tt = .@"{", .start = start, .end = self.pos }; }
+    if (c == '}') { self.adv(); self.setNoun();    return .{ .tt = .@"}", .start = start, .end = self.pos }; }
+    if (c == '[') { self.adv(); self.setNeither(); return .{ .tt = .@"[", .start = start, .end = self.pos }; }
+    if (c == ']') { self.adv(); self.setNoun();    return .{ .tt = .@"]", .start = start, .end = self.pos }; }
 
     // Colon (check for verb_io first: digit handled below)
     if (c == ':') {
       self.adv();
       self.setNeither();
-      return .{ .tt = .colon, .start = start, .end = self.pos };
+      return .{ .tt = .@":", .start = start, .end = self.pos };
     }
 
     // String literal "..."
@@ -404,9 +403,9 @@ pub const Lexer = struct {
         self.adv(); // consume 'b'
         self.setNoun();
         if (digit_slice.len == 1) {
-          return .{ .tt = .bool_lit, .start = start, .end = self.pos };
+          return .{ .tt = .bit, .start = start, .end = self.pos };
         } else {
-          return .{ .tt = .bools_lit, .start = start, .end = self.pos };
+          return .{ .tt = .bits, .start = start, .end = self.pos };
         }
       }
     }
@@ -422,35 +421,35 @@ pub const Lexer = struct {
     }
 
     // Check for date: YYYY.MM.DD
-    if (self.ch() == '.') {
-      const after_first_dot = self.pos + 1;
-      // Peek: need exactly 2 digits then another dot
-      var pp = after_first_dot;
-      var cnt: u32 = 0;
-      while (pp < self.src.len and std.ascii.isDigit(self.src[pp])) { pp += 1; cnt += 1; }
-      if (cnt >= 1 and pp < self.src.len and self.src[pp] == '.') {
-        // Looks like date YYYY.MM.DD
-        self.adv(); // consume first '.'
-        while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
-        if (self.ch() == '.') {
-          self.adv();
-          while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
-        }
-        self.setNoun();
-        return .{ .tt = .date, .start = start, .end = self.pos };
-      }
-      // Float: digits . digits?
-      self.adv(); // consume '.'
-      while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
-      // Scientific notation
-      if (self.ch() == 'e' or self.ch() == 'E') {
-        self.adv();
-        if (self.ch() == '+' or self.ch() == '-') self.adv();
-        while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
-      }
-      self.setNoun();
-      return .{ .tt = .float, .start = start, .end = self.pos };
-    }
+    // if (self.ch() == '.') {
+    //   const after_first_dot = self.pos + 1;
+    //   // Peek: need exactly 2 digits then another dot
+    //   var pp = after_first_dot;
+    //   var cnt: u32 = 0;
+    //   while (pp < self.src.len and std.ascii.isDigit(self.src[pp])) { pp += 1; cnt += 1; }
+    //   if (cnt >= 1 and pp < self.src.len and self.src[pp] == '.') {
+    //     // Looks like date YYYY.MM.DD
+    //     self.adv(); // consume first '.'
+    //     while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
+    //     if (self.ch() == '.') {
+    //       self.adv();
+    //       while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
+    //     }
+    //     self.setNoun();
+    //     return .{ .tt = .date, .start = start, .end = self.pos };
+    //   }
+    //   // Float: digits . digits?
+    //   self.adv(); // consume '.'
+    //   while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
+    //   // Scientific notation
+    //   if (self.ch() == 'e' or self.ch() == 'E') {
+    //     self.adv();
+    //     if (self.ch() == '+' or self.ch() == '-') self.adv();
+    //     while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
+    //   }
+    //   self.setNoun();
+    //   return .{ .tt = .float, .start = start, .end = self.pos };
+    // }
 
     // Scientific notation for floats starting as integers
     if (self.ch() == 'e' or self.ch() == 'E') {
@@ -535,7 +534,7 @@ test "lexer symbol" {
 test "lexer bool" {
   const src = "0b 1b 0110b";
   var lex = Lexer.init(src);
-  try std.testing.expectEqual(TT.bool_lit,  lex.next().tt);
-  try std.testing.expectEqual(TT.bool_lit,  lex.next().tt);
-  try std.testing.expectEqual(TT.bools_lit, lex.next().tt);
+  try std.testing.expectEqual(TT.bit,  lex.next().tt);
+  try std.testing.expectEqual(TT.bit,  lex.next().tt);
+  try std.testing.expectEqual(TT.bits, lex.next().tt);
 }

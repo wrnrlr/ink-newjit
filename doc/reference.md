@@ -270,7 +270,7 @@ Ex, Length of each element in a list:  `` #'("abc";3 4 5 6) `` -> `` 3 4 ``
 ### Zip `x F'`
 Apply rhs array elementwise on rhs dyad.
 aka each2
-Ex. Reshape each element in a list:  `` 2 3#'"ab" `` -> `` ("aa";"bbb") ``
+Ex. Reshape each element in a character string:  `` 2 3#'"ab" `` -> `` ("aa";"bbb") ``
 
 ### binsearch `X'` (NYI)
 for each x, return its index in sorted X (or -1)

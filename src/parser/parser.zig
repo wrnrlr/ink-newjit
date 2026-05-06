@@ -69,11 +69,11 @@ pub const Parser = struct {
   // True if the current token can begin a noun.
   fn isNounStart(self: *Parser) bool {
     return switch (self.tok.tt) {
-      .int, .float, .bool_lit, .bools_lit, .date, .time,
+      .int, .float, .bit, .bits,
       .string, .symbol, .var_,
-      .lparen, .lbrace, .lbracket,
-      .dollar_lbracket, .at_lbracket, .dot_lbracket,
-      .table_open, .utable_open,
+      .@"(", .@"{", .@"[",
+      .@"$[", .@"@[", .@".[",
+      .@"[[]", .@"[[",
       .adverb_val,
       => true,
       else => false,
@@ -91,7 +91,7 @@ pub const Parser = struct {
   // True if we are at a statement boundary.
   fn isStmtEnd(self: *Parser) bool {
     return switch (self.tok.tt) {
-      .sep, .eof, .rbrace, .rbracket, .rparen => true,
+      .sep, .eof, .@"}", .@"]", .@")" => true,
       else => false,
     };
   }
@@ -156,7 +156,7 @@ pub const Parser = struct {
 
     // ':' clause  →  right  (or defer with adjunct, compiled identically)
     // ':' alone (followed by sep/end) → standalone ':' op (e.g. in @[arr; i; :; val])
-    if (self.is(.colon)) {
+    if (self.is(.@":")) {
       const colon_tok = self.tok;
       self.advance();
       if (self.isStmtEnd() or self.is(.comment)) {
@@ -194,13 +194,13 @@ pub const Parser = struct {
     self.skipComments();
 
     // Explicit apply: noun[...] — chains (f[1][2] works)
-    if (self.is(.lbracket)) {
+    if (self.is(.@"[")) {
       const applied = try self.parseApply(noun);
       return self.parseAfterNoun(applied);
     }
 
     // Check for bind: noun (op)? ':' (clause)?
-    if (self.is(.colon)) {
+    if (self.is(.@":")) {
       return self.parseBind(noun, null);
     }
 
@@ -215,7 +215,7 @@ pub const Parser = struct {
       const saved_av  = self.lex.after_verb;
       const saved_tok = self.tok;
       self.advance(); // consume op
-      if (self.is(.colon)) {
+      if (self.is(.@":")) {
         // compound bind: noun op ':'
         return self.parseBind(noun, op_tok.slice(self.src));
       }
@@ -262,7 +262,7 @@ pub const Parser = struct {
         term = try self.makeTerm(term, adv_tok);
       }
       // f/[...] or f/'[...]: apply the derived verb
-      if (self.is(.lbracket)) {
+      if (self.is(.@"[")) {
         const applied = try self.parseApply(term);
         return self.parseAfterNoun(applied);
       }
@@ -280,7 +280,7 @@ pub const Parser = struct {
     if (self.isNounStart()) {
       var inner = try self.parseNoun();
       // Allow bracket applications on the inner noun before checking for adverb.
-      while (self.is(.lbracket)) inner = try self.parseApply(inner);
+      while (self.is(.@"[")) inner = try self.parseApply(inner);
       if (self.is(.adverb)) {
         // Digram: noun noun adverb [rhs] → transit(noun, term(noun, adverb), rhs)
         var verb = inner;
@@ -289,7 +289,7 @@ pub const Parser = struct {
           self.advance();
           verb = try self.makeTerm(verb, adv_tok);
         }
-        if (self.is(.lbracket)) {
+        if (self.is(.@"[")) {
           const applied = try self.parseApply(verb);
           return self.parseAfterNoun(applied);
         }
@@ -316,7 +316,7 @@ pub const Parser = struct {
   // Parse bind: noun (op_str)? ':' (clause)?
   fn parseBind(self: *Parser, noun: *Node, op_str: ?[]const u8) ParseError!*Node {
     // Consume the ':'
-    std.debug.assert(self.is(.colon));
+    std.debug.assert(self.is(.@":"));
     self.advance();
     var rhs: ?*Node = null;
     if (!self.isStmtEnd() and !self.is(.comment)) {
@@ -333,7 +333,7 @@ pub const Parser = struct {
     self.advance();
 
     // Check for monad: op ':' (e.g. *: as first-class value)
-    if (self.is(.colon)) {
+    if (self.is(.@":")) {
       self.advance();
       const op_str = if (verb_node.* == .verb_op) verb_node.verb_op else "";
       // The monad value. If followed by a noun → apposit(monad, noun)
@@ -360,7 +360,7 @@ pub const Parser = struct {
     }
 
     // f[...]: apply the verb/term directly (e.g. %[4;2], +/[0;10])
-    if (self.is(.lbracket)) {
+    if (self.is(.@"[")) {
       const applied = try self.parseApply(verb);
       return self.parseAfterNoun(applied);
     }
@@ -408,18 +408,18 @@ pub const Parser = struct {
   fn parseNoun(self: *Parser) ParseError!*Node {
     const tok = self.tok;
     switch (tok.tt) {
-      .int, .float, .bool_lit, .bools_lit, .date, .time,
+      .int, .float, .bit, .bits,
       .string, .symbol, .var_,
       => return self.parseLiteralOrVector(),
 
-      .lparen => return self.parseGroupOrList(),
-      .lbrace => return self.parseLambda(),
-      .lbracket => return self.parseDictOrArgs(),
-      .table_open => return self.parseTable(),
-      .utable_open => return self.parseUTable(),
-      .dollar_lbracket => return self.parseCond(),
-      .at_lbracket => return self.parseAmend(),
-      .dot_lbracket => return self.parseDmend(),
+      .@"(" => return self.parseGroupOrList(),
+      .@"{" => return self.parseLambda(),
+      .@"[" => return self.parseDictOrArgs(),
+      .@"[[]" => return self.parseTable(),
+      .@"[[" => return self.parseUTable(),
+      .@"$[" => return self.parseCond(),
+      .@"@[" => return self.parseAmend(),
+      .@".[" => return self.parseDmend(),
       .adverb_val => {
         const adv = tok.slice(self.src);
         self.advance();
@@ -526,13 +526,13 @@ pub const Parser = struct {
         }
         return m;
       },
-      .bool_lit, .bools_lit => {
+      .bit, .bits => {
         var bools = try std.ArrayList(bool).initCapacity(self.alloc, 0);
-        try appendBools(self.alloc, &bools, tok.slice(self.src), tok.tt == .bools_lit);
-        while (self.tok.tt == .bool_lit or self.tok.tt == .bools_lit) {
+        try appendBools(self.alloc, &bools, tok.slice(self.src), tok.tt == .bits);
+        while (self.tok.tt == .bit or self.tok.tt == .bits) {
           const t2 = self.tok;
           self.advance();
-          try appendBools(self.alloc, &bools, t2.slice(self.src), t2.tt == .bools_lit);
+          try appendBools(self.alloc, &bools, t2.slice(self.src), t2.tt == .bits);
         }
         const items = try bools.toOwnedSlice(self.alloc);
         const m = try self.alloc.create(Node);
@@ -578,17 +578,6 @@ pub const Parser = struct {
         m.* = .{ .literal = .{ .@"var" = tok.slice(self.src) } };
         return m;
       },
-      .date => {
-        const m = try self.alloc.create(Node);
-        // Dates stored as string for now (compiler can interpret)
-        m.* = .{ .literal = .{ .@"var" = tok.slice(self.src) } };
-        return m;
-      },
-      .time => {
-        const m = try self.alloc.create(Node);
-        m.* = .{ .literal = .{ .@"var" = tok.slice(self.src) } };
-        return m;
-      },
       else => unreachable,
     }
   }
@@ -596,11 +585,11 @@ pub const Parser = struct {
   // ---- Group / List ----
 
   fn parseGroupOrList(self: *Parser) ParseError!*Node {
-    std.debug.assert(self.is(.lparen));
+    std.debug.assert(self.is(.@"("));
     self.advance(); // consume '('
 
     // Empty list: ()
-    if (self.eat(.rparen)) {
+    if (self.eat(.@")")) {
       const m = try self.alloc.create(Node);
       m.* = .{ .list = .{ .seq = null } };
       return m;
@@ -610,7 +599,7 @@ pub const Parser = struct {
     if (self.is(.adverb_val)) {
       const adv = self.tok.slice(self.src);
       self.advance();
-      _ = self.eat(.rparen);
+      _ = self.eat(.@")");
       const av = try self.alloc.create(Node);
       av.* = .{ .adverb_val = adv };
       const m = try self.alloc.create(Node);
@@ -619,8 +608,8 @@ pub const Parser = struct {
     }
 
     // Parse sequence inside parens
-    const seq = try self.parseSeq(.rparen);
-    _ = self.eat(.rparen);
+    const seq = try self.parseSeq(.@")");
+    _ = self.eat(.@")");
 
     const m = try self.alloc.create(Node);
     if (seq.len == 1) {
@@ -666,27 +655,25 @@ pub const Parser = struct {
     return stmts.toOwnedSlice(self.alloc);
   }
 
-  // ---- Lambda ----
-
   fn parseLambda(self: *Parser) ParseError!*Node {
-    std.debug.assert(self.is(.lbrace));
+    std.debug.assert(self.is(.@"{"));
     const start_byte = self.tok.start;
     self.advance(); // consume '{'
 
     var args: ?Args = null;
     // Optional args: [a;b;c]
-    if (self.is(.lbracket)) {
+    if (self.is(.@"[")) {
       self.advance();
       args = try self.parseArgList();
     }
 
     var seq: ?Seq = null;
-    if (!self.is(.rbrace)) {
-      seq = try self.parseSeq(.rbrace);
+    if (!self.is(.@"}")) {
+      seq = try self.parseSeq(.@"}");
     }
 
     const end_byte = self.tok.end;
-    _ = self.eat(.rbrace);
+    _ = self.eat(.@"}");
 
     const m = try self.alloc.create(Node);
     m.* = .{ .lambda = .{ .a = args, .b = seq, .start = start_byte, .end = end_byte } };
@@ -696,7 +683,7 @@ pub const Parser = struct {
   fn parseArgList(self: *Parser) ParseError!Args {
     var args = try std.ArrayList(Arg).initCapacity(self.alloc, 0);
     var awaiting = true;
-    while (!self.is(.rbracket) and !self.is(.eof)) {
+    while (!self.is(.@"]") and !self.is(.eof)) {
       self.skipComments();
       if (self.is(.sep)) {
         if (awaiting) try args.append(self.alloc, .{ .is_some = false, .value = "" });
@@ -716,26 +703,24 @@ pub const Parser = struct {
     }
     if (awaiting and args.items.len > 0)
       try args.append(self.alloc, .{ .is_some = false, .value = "" });
-    _ = self.eat(.rbracket);
+    _ = self.eat(.@"]");
     return args.toOwnedSlice(self.alloc);
   }
 
-  // ---- Dict / Table / UTable / Apply ----
-
   fn parseDictOrArgs(self: *Parser) ParseError!*Node {
     // '[' can be a dict '[k:v;...]'
-    std.debug.assert(self.is(.lbracket));
+    std.debug.assert(self.is(.@"["));
     self.advance();
 
-    if (self.is(.rbracket)) {
+    if (self.is(.@"]")) {
       self.advance();
       const m = try self.alloc.create(Node);
       m.* = .{ .dict = .{ .items = null } };
       return m;
     }
 
-    const items = try self.parseItems(.rbracket);
-    _ = self.eat(.rbracket);
+    const items = try self.parseItems(.@"]");
+    _ = self.eat(.@"]");
 
     const m = try self.alloc.create(Node);
     m.* = .{ .dict = .{ .items = if (items.len > 0) items else null } };
@@ -744,10 +729,10 @@ pub const Parser = struct {
 
   fn parseTable(self: *Parser) ParseError!*Node {
     // table_open = '[[]'
-    std.debug.assert(self.is(.table_open));
+    std.debug.assert(self.is(.@"[[]"));
     self.advance();
-    const items = try self.parseItems(.rbracket);
-    _ = self.eat(.rbracket);
+    const items = try self.parseItems(.@"]");
+    _ = self.eat(.@"]");
     const m = try self.alloc.create(Node);
     m.* = .{ .table = .{ .items = if (items.len > 0) items else null } };
     return m;
@@ -755,12 +740,12 @@ pub const Parser = struct {
 
   fn parseUTable(self: *Parser) ParseError!*Node {
     // utable_open = '[['
-    std.debug.assert(self.is(.utable_open));
+    std.debug.assert(self.is(.@"[["));
     self.advance();
-    const keys = try self.parseItems(.rbracket);
-    _ = self.eat(.rbracket);
-    const vals = try self.parseItems(.rbracket);
-    _ = self.eat(.rbracket);
+    const keys = try self.parseItems(.@"]");
+    _ = self.eat(.@"]");
+    const vals = try self.parseItems(.@"]");
+    _ = self.eat(.@"]");
     const m = try self.alloc.create(Node);
     m.* = .{ .utable = .{
       .keys = if (keys.len > 0) keys else null,
@@ -781,7 +766,7 @@ pub const Parser = struct {
       const key = try self.parseItemKey() orelse break;
 
       // Consume ':'
-      if (!self.eat(.colon)) break;
+      if (!self.eat(.@":")) break;
 
       // Parse value (optional)
       var val: *Node = undefined;
@@ -814,53 +799,51 @@ pub const Parser = struct {
 
   // Explicit function application: f[a;b;c]
   fn parseApply(self: *Parser, f: *Node) ParseError!*Node {
-    std.debug.assert(self.is(.lbracket));
+    std.debug.assert(self.is(.@"["));
     self.advance();
-    if (self.eat(.rbracket)) {
+    if (self.eat(.@"]")) {
       const m = try self.alloc.create(Node);
       m.* = .{ .apply = .{ .f = f, .a = null } };
       return m;
     }
-    const seq = try self.parseSeq(.rbracket);
-    _ = self.eat(.rbracket);
+    const seq = try self.parseSeq(.@"]");
+    _ = self.eat(.@"]");
     const m = try self.alloc.create(Node);
     m.* = .{ .apply = .{ .f = f, .a = seq } };
     return m;
   }
 
-  // ---- Cond / Amend / Dmend ----
-
   fn parseCond(self: *Parser) ParseError!*Node {
-    std.debug.assert(self.is(.dollar_lbracket));
+    std.debug.assert(self.is(.@"$["));
     self.advance();
     var stmts = try std.ArrayList(*Node).initCapacity(self.alloc, 0);
-    while (!self.is(.rbracket) and !self.is(.eof)) {
+    while (!self.is(.@"]") and !self.is(.eof)) {
       self.skipComments();
-      if (self.is(.rbracket)) break;
+      if (self.is(.@"]")) break;
       if (self.is(.sep)) { self.advance(); continue; }
       try stmts.append(self.alloc, try self.parseStmt());
     }
-    _ = self.eat(.rbracket);
+    _ = self.eat(.@"]");
     const m = try self.alloc.create(Node);
     m.* = .{ .cond = .{ .stmts = try stmts.toOwnedSlice(self.alloc) } };
     return m;
   }
 
   fn parseAmend(self: *Parser) ParseError!*Node {
-    std.debug.assert(self.is(.at_lbracket));
+    std.debug.assert(self.is(.@"@["));
     self.advance();
-    const seq = try self.parseSeq(.rbracket);
-    _ = self.eat(.rbracket);
+    const seq = try self.parseSeq(.@"]");
+    _ = self.eat(.@"]");
     const m = try self.alloc.create(Node);
     m.* = .{ .amend = seq };
     return m;
   }
 
   fn parseDmend(self: *Parser) ParseError!*Node {
-    std.debug.assert(self.is(.dot_lbracket));
+    std.debug.assert(self.is(.@".["));
     self.advance();
-    const seq = try self.parseSeq(.rbracket);
-    _ = self.eat(.rbracket);
+    const seq = try self.parseSeq(.@"]");
+    _ = self.eat(.@"]");
     const m = try self.alloc.create(Node);
     m.* = .{ .dmend = seq };
     return m;
@@ -870,8 +853,6 @@ pub const Parser = struct {
 
   fn parseIntLit(s: []const u8) ParseError!i32 {
     if (eql(u8, s, "0N") or eql(u8, s, "-0N")) return std.math.minInt(i32);
-    if (eql(u8, s, "0W")) return std.math.maxInt(i32);
-    if (eql(u8, s, "-0W")) return std.math.minInt(i32) + 1;
     return parseInt(i32, s, 0) catch return error.InvalidCharacter;
   }
 
