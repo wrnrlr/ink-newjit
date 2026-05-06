@@ -17,32 +17,21 @@ pub fn window(vm: *VM, xn: V, x: V) V {
   const count = xlen - n + 1;
   var res = N(V).init(vm.alloc, count) catch return .{ .err = .memory };
   @memset(res.slice(), .blank);
-  switch (x.tag()) {
-    .C => for (0..count) |i| {
-      var win = N(u8).init(vm.alloc, n) catch return .{ .err = .memory };
-      @memcpy(win.slice(), x.C.slice()[i .. i + n]);
-      res.slice()[i] = .{ .C = win };
-    },
-    .I => for (0..count) |i| {
-      var win = N(i32).init(vm.alloc, n) catch return .{ .err = .memory };
-      @memcpy(win.slice(), x.I.slice()[i .. i + n]);
-      res.slice()[i] = .{ .I = win };
-    },
-    .F => for (0..count) |i| {
-      var win = N(f32).init(vm.alloc, n) catch return .{ .err = .memory };
-      @memcpy(win.slice(), x.F.slice()[i .. i + n]);
-      res.slice()[i] = .{ .F = win };
-    },
-    .B => for (0..count) |i| {
-      var win = N(bool).init(vm.alloc, n) catch return .{ .err = .memory };
-      @memcpy(win.slice(), x.B.slice()[i .. i + n]);
-      res.slice()[i] = .{ .B = win };
-    },
-    else => for (0..count) |i| {
-      var win = N(V).init(vm.alloc, n) catch return .{ .err = .memory };
-      for (0..n) |j| win.slice()[j] = x.at(i + j);
-      res.slice()[i] = .{ .L = win };
-    },
+  for (0..count) |i| {
+    res.slice()[i] = makeWindow(vm.alloc, x, i, n) catch return .{ .err = .memory };
   }
   return .{ .L = res };
+}
+
+pub fn makeWindow(alloc: Alloc, x: V, start: usize, n: usize) !V {
+  inline for ([_]K{ .C, .I, .F, .B }) |k| {
+    if (x.tag() == k) {
+      const out = try N(K.backing(k)).init(alloc, n);
+      @memcpy(out.slice(), x.unwrap(k).slice()[start .. start + n]);
+      return V.wrap(k, out);
+    }
+  }
+  const out = try N(V).init(alloc, n);
+  for (0..n) |j| out.slice()[j] = x.at(start + j);
+  return .{ .L = out };
 }

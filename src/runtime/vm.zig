@@ -11,6 +11,7 @@ const value = @import("../noun/value.zig");
 const command = @import("command.zig");
 const V = value.V;
 const N = value.N;
+const K = @import("../noun/class.zig").K;
 const Partial = value.Partial;
 const Fn = value.Fn;
 const FnKind = value.FnKind;
@@ -87,6 +88,7 @@ pub const VM = struct {
   jit_ic_jf:  if (jit_enabled) ?jit_mod.JitFn                           else void = if (jit_enabled) null      else {},
 
   pub fn aList(vm:VM) !V { return .{.L = try N(V).init(vm.alloc, 0)}; }
+  pub fn aVec(vm:VM,k:K,n:usize) !V { return V.wrap(k.container(), try N(k.backing()).init(vm.alloc, n)); }
   
   pub fn create(alloc: Alloc) !*VM {
     const vm = try alloc.create(VM);
