@@ -10,7 +10,7 @@ const promote = @import("../promote.zig").promote;
 
 pub const Flip = struct {
   pub const op = .@"+";
-// TODO flip scalar
+// TODO flip scalar, k9 this is !rank
   _I: util.MonadFn = flipVector,
   _F: util.MonadFn = flipVector,
   _B: util.MonadFn = flipVector,

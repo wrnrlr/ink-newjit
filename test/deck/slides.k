@@ -302,7 +302,7 @@ drawSlide6: {[W;H]
 
 / ── Slide dispatch ──────────────────────────────────────────────────────────
 drawSlide: {[s;W;H]
-  :[s=0; drawSlide0[W;H];
+  $[s=0; drawSlide0[W;H];
     s=1; drawSlide1[W;H];
     s=2; drawSlide2[W;H];
     s=3; drawSlide3[W;H];
@@ -313,7 +313,7 @@ drawSlide: {[s;W;H]
 };
 
 NavDot: {[i;cx;y;cur]
-  [circle: cx + i*20, y, 5; fill: :[i=cur; `Blue400; `Zinc700]]
+  [circle: cx + i*20, y, 5; fill: $[i=cur; `Blue400; `Zinc700]]
 };
 
 / ── Event loop ──────────────────────────────────────────────────────────────
@@ -322,9 +322,9 @@ loop: {[window; props; events]
   H:: props`height;
 
   {[ev]
-    :[ev`type = `keydown;
+    $[ev`type = `keydown;
       {k: ev`key;
-       :[k=263; slide:: 0|(slide-1);
+       $[k=263; slide:: 0|(slide-1);
          k=262; slide:: (nSlides-1)&(slide+1);
          k=32;  slide:: (nSlides-1)&(slide+1);
          0]};

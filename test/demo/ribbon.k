@@ -19,10 +19,10 @@ Area: {[pts; x0; xn; yb; clr]
    `fill)
 };
 
-Line_: {[pts; clr; w]
+Line: {[pts; clr; w]
   (`path;
    [move: pts[0]];
-   [line: pts[1+!(#pts-1)]];
+   [line: pts[1+!((-1)+#pts)]];
    [stroke: clr; width: w];
    `stroke)
 };
@@ -82,10 +82,10 @@ loop: {[window; props; events]
     Area[pt1; x0; xn; yb; 16 185 129 45];
     Area[pt2; x0; xn; yb; 249 115 22 45];
     Area[pt3; x0; xn; yb; 168 85 247 45];
-    Line_[pt0; `Blue400; 1.5];
-    Line_[pt1; `Emerald400; 1.5];
-    Line_[pt2; `Orange400; 1.5];
-    Line_[pt3; `Violet400; 1.5];
+    Line[pt0; `Blue400; 1.5];
+    Line[pt1; `Emerald400; 1.5];
+    Line[pt2; `Orange400; 1.5];
+    Line[pt3; `Violet400; 1.5];
     [rrect: (W-145), 35, 130, 92, 6; fill: `Zinc800];
     Label[W-130; 53;  `Blue400;    "AAPL"];
     Label[W-130; 73;  `Emerald400; "MSFT"];

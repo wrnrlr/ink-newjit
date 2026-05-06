@@ -306,12 +306,12 @@ fn runCorpusFile(alloc: Alloc, path: []const u8) !void {
   var fail: u32 = 0;
   for (cases) |tc| {
     var p = parser.Parser.init(alloc);
+    defer p.deinit();
     const n = p.parse(tc.input) catch |err| {
       fail += 1;
       std.debug.print("FAIL [{s}]: parse error {s}\n", .{ tc.name, @errorName(err) });
       continue;
     };
-    defer parser.freeNode(alloc, n);
 
     var mock = try MockWriter.init(alloc);
     defer mock.deinit();

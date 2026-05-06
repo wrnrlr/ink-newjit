@@ -69,6 +69,7 @@ pub const Optimizer = struct {
       if (inst.is_dead) continue;
 
       if (inst.op == .Apply1 and inst.inputs.len > 0) {
+        if (inst.inputs[0] == ir.NO_VALUE) continue;
         const input = scope_ir.get(inst.inputs[0]);
         if (input.op == .Const) {
           const op = @as(Op, @enumFromInt(inst.arg1));
@@ -85,6 +86,7 @@ pub const Optimizer = struct {
       }
 
       if (inst.op == .Apply2 and inst.inputs.len > 1) {
+        if (inst.inputs[0] == ir.NO_VALUE or inst.inputs[1] == ir.NO_VALUE) continue;
         const left = scope_ir.get(inst.inputs[0]);
         const right = scope_ir.get(inst.inputs[1]);
         if (left.op == .Const and right.op == .Const) {

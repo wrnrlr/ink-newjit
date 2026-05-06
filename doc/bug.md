@@ -41,3 +41,24 @@ The correct form (used in `momentum.k` and `arbitrage.k`) is:
 ```
 
 ---
+
+## 4. JIT + UI combined build crashes with illegal instruction
+
+Building with `-Djit=true -Dui=true` causes `SIGABRT` / illegal instruction crashes when running UI scripts (e.g. `test/deck/slides.k`, demos using `each` with lambdas).
+
+**Observed failure:** The crash occurs in JIT-compiled lambdas called from the UI render loop (`runner_ui.zig:frame`). Example stack trace:
+
+```
+Illegal instruction at address 0x...
+src/runtime/call.zig:67: if (try self.vm.tryJit()) continue;
+src/runtime/vm.zig:227: executeCall
+src/runner_ui.zig:139: frame
+```
+
+**Likely cause:** Related to issue #2 — the stencil scanner produces incorrect `StencilInfo` (wrong `next_offset` or `operand_offset`) when the binary is compiled with both UI and JIT enabled. This corrupts the emitted JIT code, producing invalid ARM64 instructions. The additional code pulled in by `-Dui=true` (zgpu, zglfw, Metal bindings) shifts symbol addresses in the binary, which triggers the same fragility described in issue #2 even when `exec` is placed at the end of the `Op` enum.
+
+**Workaround:** Use `-Dui=true` without `-Djit=true` for UI scripts, or vice versa. The non-JIT UI build and the non-UI JIT build both work correctly.
+
+**Needed fix:** Same as issue #2 — make the stencil scanner position-independent so it is not affected by binary layout changes.
+
+---

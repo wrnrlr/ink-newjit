@@ -80,6 +80,7 @@ fn pickAtom(x: V, idx: i32) V {
 fn pickVec(alloc: Alloc, x: V, indices: []const i32) V {
   const length = x.len();
   const res = N(V).init(alloc, indices.len) catch return V{ .err = .memory };
+  @memset(res.slice(), .blank);
   for (indices, 0..) |idx, k| {
     if (idx < 0 or idx >= @as(i32, @intCast(length))) {
       for (res.slice()[0..k]) |*v| v.deinit(alloc);

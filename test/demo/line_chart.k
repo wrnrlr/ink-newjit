@@ -15,10 +15,10 @@ Area: {[pts; x0; xn; yb; clr]
    `fill)
 };
 
-Line_: {[pts; clr; w]
+Line: {[pts; clr; w]
   (`path;
    [move: pts[0]];
-   [line: pts[1+!(#pts-1)]];
+   [line: pts[1+!((-1)+#pts)]];
    [stroke: clr; width: w];
    `stroke)
 };
@@ -79,8 +79,8 @@ loop: {[window; props; events]
     grid;
     Area[pt1; x0; xn; yb; 37 99 235 35];
     Area[pt2; x0; xn; yb; 16 185 129 35];
-    Line_[pt1; `Blue400; 2.5];
-    Line_[pt2; `Emerald400; 2.5];
+    Line[pt1; `Blue400; 2.5];
+    Line[pt2; `Emerald400; 2.5];
     Dots[ptx; pty1; 3; `Blue200];
     Dots[ptx; pty2; 3; `Emerald200];
     [rrect: (W-130), 35, 110, 52, 6; fill: `Zinc800];

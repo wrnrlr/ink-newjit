@@ -67,3 +67,11 @@ pub fn exec(vm: *VM, verb: []const u8, args: []const u8) !void {
     if (result.stderr.len > 0) std.debug.print("{s}", .{result.stderr});
   }
 }
+
+const help_type = 
+\\`
+\\`i `I
+\\`f `F
+\\`c `C
+\\`s `S
+;

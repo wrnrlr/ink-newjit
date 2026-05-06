@@ -14,8 +14,8 @@ pub const Parse = struct {
 
 fn parseChars(vm: *VM, x: V) V {
   var p = parser_mod.Parser.init(vm.alloc);
+  defer p.deinit();
   const node = p.parse(x.C.slice()) catch return V{ .err = .domain };
-  defer p.free(node);
   return nodeToV(vm, node) catch return V{ .err = .memory };
 }
 
