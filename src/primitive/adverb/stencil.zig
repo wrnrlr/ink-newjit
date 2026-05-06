@@ -11,7 +11,7 @@ pub fn stencil(vm: *VM, xn: V, base: V, x: V, callFn: anytype) V {
   if (xn.i <= 0) return .{ .err = .domain };
   const n: usize = @intCast(xn.i);
   const xlen = x.len();
-  if (xlen < n) return .{ .L = N(V).init(vm.alloc, 0) catch return V{ .err = .memory } };
+  if (xlen < n) return vm.aList() catch return V{ .err = .memory };
   const count = xlen - n + 1;
   var res = N(V).init(vm.alloc, count) catch return V{ .err = .memory };
   @memset(res.slice(), .blank);

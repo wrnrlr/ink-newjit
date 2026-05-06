@@ -13,7 +13,7 @@ const promote = @import("../promote.zig").promote;
 // seeded: 10-':1 2 3 → f(1,10); f(2,1); f(3,2)
 pub fn eachprior(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
   const n = x.len();
-  if (n == 0) return .{ .L = N(V).init(vm.alloc, 0) catch return V{ .err = .memory } };
+  if (n == 0) return vm.aList() catch return V{ .err = .memory } ;
 
   var res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
 

@@ -86,6 +86,8 @@ pub const VM = struct {
   jit_ic_key: if (jit_enabled) u24                                       else void = if (jit_enabled) NO_LAMBDA else {},
   jit_ic_jf:  if (jit_enabled) ?jit_mod.JitFn                           else void = if (jit_enabled) null      else {},
 
+  pub fn aList(vm:VM) !V { return .{.L = try N(V).init(vm.alloc, 0)}; }
+  
   pub fn create(alloc: Alloc) !*VM {
     const vm = try alloc.create(VM);
     const chunk = try alloc.create(Chunk);

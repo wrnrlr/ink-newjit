@@ -126,7 +126,7 @@ pub fn scan(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
   }
 
   const n = x.len();
-  if (n == 0) return .{ .L = N(V).init(vm.alloc, 0) catch return V{ .err = .memory } };
+  if (n == 0) return vm.aList() catch return V{ .err = .memory };
 
   var res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
 
