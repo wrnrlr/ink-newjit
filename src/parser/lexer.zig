@@ -1,4 +1,7 @@
 const std = @import("std");
+const isAlphabetic = std.ascii.isAlphabetic;
+const isAlphanumeric = std.ascii.isAlphanumeric;
+const isDigit = std.ascii.isDigit;
 
 pub const TT = enum {
   int, float,
@@ -61,30 +64,24 @@ pub const Lexer = struct {
     return .{ .src = src, .pos = 0, .after_noun = false, .after_verb = false };
   }
 
-  fn ch(self: *Lexer) ?u8 {
-    if (self.pos >= self.src.len) return null;
-    return self.src[self.pos];
-  }
-
-  fn ch1(self: *Lexer) ?u8 {
-    if (self.pos + 1 >= self.src.len) return null;
-    return self.src[self.pos + 1];
-  }
-
-  fn ch2(self: *Lexer) ?u8 {
-    if (self.pos + 2 >= self.src.len) return null;
-    return self.src[self.pos + 2];
+  fn ch(self: *Lexer, i:comptime_int) ?u8 {
+    if (self.pos + i >= self.src.len) return null;
+    return self.src[self.pos + i];
   }
 
   fn adv(self: *Lexer) void {
     if (self.pos < self.src.len) self.pos += 1;
   }
 
+  inline fn CR(self: *Lexer) u8 {
+    return self.src[self.pos];
+  }
+
   // Returns true if whitespace (spaces/tabs only, not newlines) was skipped.
   fn skipSpace(self: *Lexer) bool {
     const start = self.pos;
     while (self.pos < self.src.len and
-      (self.src[self.pos] == ' ' or self.src[self.pos] == '\t'))
+      (self.CR() == ' ' or self.CR() == '\t'))
     {
       self.pos += 1;
     }
@@ -110,7 +107,7 @@ pub const Lexer = struct {
       return .{ .tt = .eof, .start = self.pos, .end = self.pos };
     }
     const start = self.pos;
-    const c = self.src[self.pos];
+    const c = self.CR();
 
     // Newline -> sep
     if (c == '\n') {
@@ -128,7 +125,7 @@ pub const Lexer = struct {
 
     // Comment: / with whitespace before it (or at start / after sep)
     if (c == '/' and (had_space or (!self.after_noun and !self.after_verb))) {
-      while (self.pos < self.src.len and self.src[self.pos] != '\n')
+      while (self.pos < self.src.len and self.CR() != '\n')
         self.adv();
       self.setNeither();
       return .{ .tt = .comment, .start = start, .end = self.pos };
@@ -138,7 +135,7 @@ pub const Lexer = struct {
     if (c == '\'') {
       if ((self.after_noun or self.after_verb) and !had_space) {
         self.adv();
-        if (self.ch() == ':') self.adv();
+        if (self.ch(0) == ':') self.adv();
         self.setVerb();
         return .{ .tt = .adverb, .start = start, .end = self.pos };
       }
@@ -153,15 +150,15 @@ pub const Lexer = struct {
       // Adverb \: or \ takes priority when immediately after a noun or verb
       if ((self.after_noun or self.after_verb) and !had_space) {
         self.adv();
-        if (self.ch() == ':') self.adv();
+        if (self.ch(0) == ':') self.adv();
         self.setVerb();
         return .{ .tt = .adverb, .start = start, .end = self.pos };
       }
       // Command: \letter... (only at start of expression, not after noun/verb)
-      if (self.ch1()) |n| {
-        if (std.ascii.isAlphabetic(n)) {
+      if (self.ch(1)) |n| {
+        if (isAlphabetic(n)) {
           self.adv(); // skip '\'
-          while (self.pos < self.src.len and self.src[self.pos] != '\n')
+          while (self.pos < self.src.len and self.CR() != '\n')
             self.adv();
           self.setNeither();
           return .{ .tt = .command, .start = start, .end = self.pos };
@@ -176,23 +173,23 @@ pub const Lexer = struct {
     // / as adverb (immediate after noun or verb, no space)
     if (c == '/' and (self.after_noun or self.after_verb) and !had_space) {
       self.adv();
-      if (self.ch() == ':') self.adv();
+      if (self.ch(0) == ':') self.adv();
       self.setVerb();
       return .{ .tt = .adverb, .start = start, .end = self.pos };
     }
 
     // Special bracket sequences
-    if (c == '$' and self.ch1() == '[') {
+    if (c == '$' and self.ch(1) == '[') {
       self.pos += 2;
       self.setNeither();
       return .{ .tt = .@"$[", .start = start, .end = self.pos };
     }
-    if (c == '[' and self.ch1() == '[' and self.ch2() == ']') {
+    if (c == '[' and self.ch(1) == '[' and self.ch(2) == ']') {
       self.pos += 3;
       self.setNeither();
       return .{ .tt = .@"[[]", .start = start, .end = self.pos };
     }
-    if (c == '[' and self.ch1() == '[') {
+    if (c == '[' and self.ch(1) == '[') {
       self.pos += 2;
       self.setNeither();
       return .{ .tt = .@"[[", .start = start, .end = self.pos };
@@ -220,7 +217,7 @@ pub const Lexer = struct {
     if (c == '"') {
       self.adv(); // skip opening "
       while (self.pos < self.src.len) {
-        const sc = self.src[self.pos];
+        const sc = self.CR();
         if (sc == '\n') break; // unclosed string
         if (sc == '\\') {
           self.adv();
@@ -244,18 +241,18 @@ pub const Lexer = struct {
     // Symbol: `body
     if (c == '`') {
       self.adv();
-      if (self.pos < self.src.len and self.src[self.pos] == '"') {
+      if (self.pos < self.src.len and self.CR() == '"') {
         // quoted symbol: `"content"
         self.adv();
-        while (self.pos < self.src.len and self.src[self.pos] != '"') self.adv();
+        while (self.pos < self.src.len and self.CR() != '"') self.adv();
         if (self.pos < self.src.len) self.adv();
       } else {
         // unquoted symbol: `abc, `123, `+, etc.
         // Symbol body uses iden = /[a-zA-Z][a-zA-Z\d]*/ — no underscores.
         const sym_ops = "%!&+*|<>=~,^#_$?@/-";
         while (self.pos < self.src.len) {
-          const sc = self.src[self.pos];
-          if (std.ascii.isAlphanumeric(sc) or sc == '.') {
+          const sc = self.CR();
+          if (isAlphanumeric(sc) or sc == '.') {
             self.adv();
           } else if (std.mem.indexOfScalar(u8, sym_ops, sc) != null and
             self.pos == start + 1)
@@ -273,17 +270,17 @@ pub const Lexer = struct {
     }
 
     // Leading-dot float: .3  .14  etc. (before op check consumes '.')
-    if (c == '.' and self.ch1() != null and std.ascii.isDigit(self.ch1().?)) {
+    if (c == '.' and self.ch(1) != null and isDigit(self.ch(1).?)) {
       return self.lexNumber(start);
     }
 
     // Numbers: digit or minus-then-digit (only when next char is numeric)
-    if (std.ascii.isDigit(c)) {
+    if (isDigit(c)) {
       return self.lexNumber(start);
     }
     if (c == '-' and !self.after_noun) {
-      const n = self.ch1();
-      if (n != null and (std.ascii.isDigit(n.?) or n.? == '.')) {
+      const n = self.ch(1);
+      if (n != null and (isDigit(n.?) or n.? == '.')) {
         return self.lexNumber(start);
       }
     }
@@ -297,9 +294,9 @@ pub const Lexer = struct {
 
     // Identifiers: must start with a letter (grammar: var = /[a-zA-Z][a-zA-Z\d]*/)
     // '_' is always an op, never a var start.
-    if (std.ascii.isAlphabetic(c)) {
+    if (isAlphabetic(c)) {
       while (self.pos < self.src.len and
-        std.ascii.isAlphanumeric(self.src[self.pos]))
+        isAlphanumeric(self.CR()))
       {
         self.adv();
       }
@@ -328,16 +325,16 @@ pub const Lexer = struct {
   }
 
   fn lexNumber(self: *Lexer, start: u32) Token {
-    const c = self.src[self.pos];
+    const c = self.CR();
 
     // Leading-dot float: .3 .14
     if (c == '.') {
       self.adv(); // consume '.'
-      while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
-      if (self.ch() == 'e' or self.ch() == 'E') {
+      while (self.pos < self.src.len and isDigit(self.CR())) self.adv();
+      if (self.ch(0) == 'e' or self.ch(0) == 'E') {
         self.adv();
-        if (self.ch() == '+' or self.ch() == '-') self.adv();
-        while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
+        if (self.ch(0) == '+' or self.ch(0) == '-') self.adv();
+        while (self.pos < self.src.len and isDigit(self.CR())) self.adv();
       }
       self.setNoun();
       return .{ .tt = .float, .start = start, .end = self.pos };
@@ -348,8 +345,8 @@ pub const Lexer = struct {
     if (has_minus) self.adv();
 
     // Special: 0N, 0W, 0n, 0w (null/infinity)
-    if (self.ch() == '0') {
-      const n = self.ch1();
+    if (self.ch(0) == '0') {
+      const n = self.ch(1);
       if (n == 'N' or n == 'W') {
         self.pos += 2;
         self.setNoun();
@@ -364,7 +361,7 @@ pub const Lexer = struct {
       if (n == 'x' or n == 'X') {
         self.pos += 2;
         while (self.pos < self.src.len and
-          std.ascii.isHex(self.src[self.pos]))
+          std.ascii.isHex(self.CR()))
         {
           self.adv();
         }
@@ -375,13 +372,13 @@ pub const Lexer = struct {
 
     // Scan digits
     const digits_start = self.pos;
-    while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos]))
+    while (self.pos < self.src.len and std.ascii.isDigit(self.CR()))
       self.adv();
     const n_digits = self.pos - digits_start;
     _ = n_digits;
 
     // Bool/bools: digits followed by 'b' where all digits are 0 or 1
-    if (self.ch() == 'b' and !has_minus) {
+    if (self.ch(0) == 'b' and !has_minus) {
       const digit_slice = self.src[digits_start..self.pos];
       var all_binary = true;
       for (digit_slice) |dc| {
@@ -399,7 +396,7 @@ pub const Lexer = struct {
     }
 
     // verb_io: single digit followed by ':'  (only if no minus)
-    if (!has_minus and self.ch() == ':') {
+    if (!has_minus and self.ch(0) == ':') {
       const dlen = self.pos - digits_start;
       if (dlen == 1) {
         self.adv(); // consume ':'
@@ -411,17 +408,18 @@ pub const Lexer = struct {
     // Float: digits.digits or digits. (trailing dot)
     // Consume dot when next char is a digit, or when it's not alphanumeric/bracket
     // (so `2.3` and `2.` are floats but `2.[` and `2.a` keep the dot as a separate op).
-    if (self.ch() == '.') {
-      const after_dot = self.ch1() orelse 0;
-      if (std.ascii.isDigit(after_dot) or
-          (!std.ascii.isAlphanumeric(after_dot) and after_dot != '['))
-      {
+    if (self.ch(0) == '.') {
+      const after_dot = self.ch(1) orelse 0;
+      if (
+        isDigit(after_dot) or
+        (!isAlphanumeric(after_dot) and after_dot != '[')
+      ) {
         self.adv(); // consume '.'
-        while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
-        if (self.ch() == 'e' or self.ch() == 'E') {
+        while (self.pos < self.src.len and isDigit(self.CR())) self.adv();
+        if (self.ch(0) == 'e' or self.ch(0) == 'E') {
           self.adv();
-          if (self.ch() == '+' or self.ch() == '-') self.adv();
-          while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
+          if (self.ch(0) == '+' or self.ch(0) == '-') self.adv();
+          while (self.pos < self.src.len and isDigit(self.CR())) self.adv();
         }
         self.setNoun();
         return .{ .tt = .float, .start = start, .end = self.pos };
@@ -429,10 +427,10 @@ pub const Lexer = struct {
     }
 
     // Scientific notation for floats starting as integers
-    if (self.ch() == 'e' or self.ch() == 'E') {
+    if (self.ch(0) == 'e' or self.ch(0) == 'E') {
       self.adv();
-      if (self.ch() == '+' or self.ch() == '-') self.adv();
-      while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) self.adv();
+      if (self.ch(0) == '+' or self.ch(0) == '-') self.adv();
+      while (self.pos < self.src.len and isDigit(self.CR())) self.adv();
       self.setNoun();
       return .{ .tt = .float, .start = start, .end = self.pos };
     }
