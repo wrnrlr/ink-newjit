@@ -9,7 +9,7 @@ test:
 	time zig build test
 
 build:
-	time zig build -Dui=true -Djit=true
+	time zig build -Dui=true
 
 bench-sort:
 	zig test src/verb/sort/bench.zig

@@ -231,7 +231,7 @@ pub const Parser = @import("parser.zig").Parser;
 test "Ints" {
   var parser = Parser.init(std.heap.c_allocator);
   const node = try parser.parse("1 2 3");
-  defer parser.free(node);
+  defer parser.deinit();
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
   const stmt = node.terse.stmts[0].node;
@@ -243,7 +243,7 @@ test "Ints" {
 test "Explicit Apply" {
   var parser = Parser.init(std.heap.c_allocator);
   const node = try parser.parse("f[1]");
-  defer parser.free(node);
+  defer parser.deinit();
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
   const stmt = node.terse.stmts[0].node;
@@ -263,7 +263,7 @@ test "Explicit Apply" {
 test "Bind" {
   var parser = Parser.init(std.heap.c_allocator);
   const node = try parser.parse("a:1");
-  defer parser.free(node);
+  defer parser.deinit();
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
   const stmt = node.terse.stmts[0].node;
@@ -282,7 +282,7 @@ test "Bind" {
 test "Lambda" {
   var parser = Parser.init(std.heap.c_allocator);
   const node = try parser.parse("{x+1}");
-  defer parser.free(node);
+  defer parser.deinit();
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
   const stmt = node.terse.stmts[0].node;
@@ -302,7 +302,7 @@ test "Lambda" {
 test "Adverb" {
   var parser = Parser.init(std.heap.c_allocator);
   const node = try parser.parse("+/ 1 2 3");
-  defer parser.free(node);
+  defer parser.deinit();
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
   const stmt = node.terse.stmts[0].node;
@@ -320,7 +320,7 @@ test "Adverb" {
 test "Implicit Call" {
   var parser = Parser.init(std.heap.c_allocator);
   const node = try parser.parse("f 1");
-  defer parser.free(node);
+  defer parser.deinit();
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
   const stmt = node.terse.stmts[0].node;
@@ -337,7 +337,7 @@ test "Implicit Call" {
 test "List" {
   var parser = Parser.init(std.heap.c_allocator);
   const node = try parser.parse("(1 2 3; 4 5 6)");
-  defer parser.free(node);
+  defer parser.deinit();
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
   const stmt = node.terse.stmts[0].node;
@@ -357,7 +357,7 @@ test "List" {
 test "String" {
   var parser = Parser.init(std.heap.c_allocator);
   const node = try parser.parse("\"Hello\"");
-  defer parser.free(node);
+  defer parser.deinit();
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
   const stmt = node.terse.stmts[0].node;
@@ -369,7 +369,7 @@ test "String" {
 test "Symbol" {
   var parser = Parser.init(std.heap.c_allocator);
   const node = try parser.parse("`abc");
-  defer parser.free(node);
+  defer parser.deinit();
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
   const stmt = node.terse.stmts[0].node;
