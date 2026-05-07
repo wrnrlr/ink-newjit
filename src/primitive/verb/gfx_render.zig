@@ -12,9 +12,9 @@ fn resolveColorName(name: []const u8) ?ink.Lch {
   if (std.mem.eql(u8, name, "white") or std.mem.eql(u8, name, "White")) return color.White;
   if (std.mem.eql(u8, name, "black") or std.mem.eql(u8, name, "Black")) return color.Black;
   if (std.mem.eql(u8, name, "transparent") or std.mem.eql(u8, name, "Transparent")) return .{ .l = 0, .c = 0, .h = 0, .a = 0 };
-  inline for (@typeInfo(ink).@"struct".decls) |decl| {
-    if (@TypeOf(@field(ink, decl.name)) == ink.Lch)
-      if (std.mem.eql(u8, name, decl.name)) return @field(ink, decl.name);
+  inline for (@typeInfo(color).@"struct".decls) |decl| {
+    if (@TypeOf(@field(color, decl.name)) == ink.Lch)
+      if (std.mem.eql(u8, name, decl.name)) return @field(color, decl.name);
   }
   return null;
 }
