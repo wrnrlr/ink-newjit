@@ -144,7 +144,8 @@ fn dictAtomKey(vm: *VM, x: V, y: V) V {
 // vec/list keys + atom value: broadcast atom to fill all key slots
 fn dictVecAtom(vm: *VM, x: V, y: V) V {
   const vals = broadcast.broadcastAtom(vm, y, x.len()) catch return V{ .err = .memory };
-  return .{ .m = Dict.init(vm.alloc, x, vals) catch return V{ .err = .memory } };
+  const a2 = x.ref();
+  return .{ .m = Dict.init(vm.alloc, a2, vals) catch return V{ .err = .memory } };
 }
 
 // vec/list keys + vec/list values: zip (lengths must match)
