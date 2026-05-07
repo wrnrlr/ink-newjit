@@ -3,4 +3,5 @@
   { "label": "test", "command": "zig", "args": ["build", "test"]},
   { "label": "build", "command": "time", "args": ["zig", "build", "-Dui=true", "-Djit=true"]},
   { "label": "ink", "command": "rlwrap", "args": ["zig-out/bin/ink"]},
+  { "label": "demo", "command": "zig-out/bin/ink", "args": ["test/demo/eyes.k"]},
 ]
