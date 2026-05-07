@@ -61,8 +61,6 @@ pub const Lexer = struct {
   src: []const u8,
   i: u32 = 0,
   tag: Tag = .phrase,
-  // after_noun: bool = false, // last emitted token was noun-like (int/float/var/)/}/])
-  // after_verb: bool = false, // last emitted token was verb-like (op/keyword_op/verb_io/adverb)
 
   pub fn init(src: []const u8) Lexer { return .{ .src = src }; }
 
@@ -106,7 +104,7 @@ pub const Lexer = struct {
     }
 
     // Comment: / with whitespace before it (or at start / after sep)
-    if (c == '/' and (had_space or (!self.after_noun and !self.after_verb))) {
+    if (c == '/' and (had_space or self.tag == .phrase)) {
       while (self.i < self.src.len and self.CR() != '\n')
         self.adv();
       self.tag = .phrase;
@@ -115,7 +113,7 @@ pub const Lexer = struct {
 
     // Adverb or adverb_val for '
     if (c == '\'') {
-      if ((self.after_noun or self.after_verb) and !had_space) {
+      if ((self.tag == .phrase) and !had_space) {
         self.adv();
         if (self.ch(0) == ':') self.adv();
         self.tag = .verb;
@@ -130,7 +128,7 @@ pub const Lexer = struct {
     // Backslash
     if (c == '\\') {
       // Adverb \: or \ takes priority when immediately after a noun or verb
-      if ((self.after_noun or self.after_verb) and !had_space) {
+      if ((self.tag != .phrase) and !had_space) {
         self.adv();
         if (self.ch(0) == ':') self.adv();
         self.tag = .verb;
@@ -153,7 +151,7 @@ pub const Lexer = struct {
     }
 
     // / as adverb (immediate after noun or verb, no space)
-    if (c == '/' and (self.after_noun or self.after_verb) and !had_space) {
+    if (c == '/' and (self.tag != .phrase) and !had_space) {
       self.adv();
       if (self.ch(0) == ':') self.adv();
       self.tag = .verb;
@@ -179,11 +177,11 @@ pub const Lexer = struct {
 
     // Simple delimiters
     if (c == '(') { self.adv(); self.tag = .phrase; return .{ .tt = .@"(", .start = start, .end = self.i }; }
-    if (c == ')') { self.adv(); self.tag = .noun;    return .{ .tt = .@")", .start = start, .end = self.i }; }
+    if (c == ')') { self.adv(); self.tag = .noun;   return .{ .tt = .@")", .start = start, .end = self.i }; }
     if (c == '{') { self.adv(); self.tag = .phrase; return .{ .tt = .@"{", .start = start, .end = self.i }; }
-    if (c == '}') { self.adv(); self.tag = .noun;    return .{ .tt = .@"}", .start = start, .end = self.i }; }
+    if (c == '}') { self.adv(); self.tag = .noun;   return .{ .tt = .@"}", .start = start, .end = self.i }; }
     if (c == '[') { self.adv(); self.tag = .phrase; return .{ .tt = .@"[", .start = start, .end = self.i }; }
-    if (c == ']') { self.adv(); self.tag = .noun;    return .{ .tt = .@"]", .start = start, .end = self.i }; }
+    if (c == ']') { self.adv(); self.tag = .noun;   return .{ .tt = .@"]", .start = start, .end = self.i }; }
 
     // Colon (check for verb_io first: digit handled below)
     if (c == ':') {
@@ -257,10 +255,8 @@ pub const Lexer = struct {
     }
 
     // Numbers: digit or minus-then-digit (only when next char is numeric)
-    if (isDigit(c)) {
-      return self.lexNumber(start);
-    }
-    if (c == '-' and !self.after_noun) {
+    if (isDigit(c)) return self.lexNumber(start);
+    if (c == '-' and self.tag!=.noun) {
       const n = self.ch(1);
       if (n != null and (isDigit(n.?) or n.? == '.')) {
         return self.lexNumber(start);
@@ -277,9 +273,7 @@ pub const Lexer = struct {
     // Identifiers: must start with a letter (grammar: var = /[a-zA-Z][a-zA-Z\d]*/)
     // '_' is always an op, never a var start.
     if (isAlphabetic(c)) {
-      while (self.i < self.src.len and
-        isAlphanumeric(self.CR()))
-      {
+      while (self.i < self.src.len and isAlphanumeric(self.CR())) {
         self.adv();
       }
       const word = self.src[start..self.i];
@@ -296,7 +290,7 @@ pub const Lexer = struct {
     if (std.mem.indexOfScalar(u8, single_ops, c) != null) {
       self.adv();
       // Check for adverb immediately following (e.g. +/)
-      // The adverb will be picked up on the next call with after_verb=true
+      // The adverb will be picked up on the next call with state after verb
       self.tag = .verb;
       return .{ .tt = .op, .start = start, .end = self.i };
     }
@@ -342,9 +336,7 @@ pub const Lexer = struct {
       // hex: 0x...
       if (n == 'x' or n == 'X') {
         self.i += 2;
-        while (self.i < self.src.len and
-          std.ascii.isHex(self.CR()))
-        {
+        while (self.i < self.src.len and std.ascii.isHex(self.CR())) {
           self.adv();
         }
         self.tag = .noun;
@@ -354,7 +346,7 @@ pub const Lexer = struct {
 
     // Scan digits
     const digits_start = self.i;
-    while (self.i < self.src.len and std.ascii.isDigit(self.CR()))
+    while (self.i < self.src.len and isDigit(self.CR()))
       self.adv();
     const n_digits = self.i - digits_start;
     _ = n_digits;
@@ -369,11 +361,8 @@ pub const Lexer = struct {
       if (all_binary and digit_slice.len > 0) {
         self.adv(); // consume 'b'
         self.tag = .noun;
-        if (digit_slice.len == 1) {
-          return .{ .tt = .bit, .start = start, .end = self.i };
-        } else {
-          return .{ .tt = .bits, .start = start, .end = self.i };
-        }
+        const tt:TT = if (digit_slice.len == 1) .bit else .bits;
+        return .{ .tt = tt, .start = start, .end = self.i };
       }
     }
 
@@ -425,12 +414,10 @@ pub const Lexer = struct {
   // Peek at the next token without advancing state.
   pub fn peekNext(self: *Lexer) Token {
     const saved_pos = self.i;
-    const saved_an = self.after_noun;
-    const saved_av = self.after_verb;
+    const saved_tag = self.tag;
     const tok = self.next();
     self.i = saved_pos;
-    self.after_noun = saved_an;
-    self.after_verb = saved_av;
+    self.tag = saved_tag;
     return tok;
   }
 };

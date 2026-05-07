@@ -55,7 +55,7 @@ const NodeType = enum {
   transit, affix, apposit, phrase, @"defer", pending,
   intrans, prefix, compose, noun, phrase_verb, apply,
   group, list, lambda, dict, table, utable, literal, term,
-  verb_op, verb_io, blank, cond,
+  verb_op, io, blank, cond,
   command, monad, adverb_val,
 };
 
