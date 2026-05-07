@@ -6,7 +6,6 @@ const OpCode = @import("tape.zig").OpCode;
 const Op = @import("tape.zig").Op;
 const Compiler = @import("compiler.zig").Compiler;
 const Registry = @import("registry.zig").Registry;
-const SourceRange = @import("registry.zig").SourceRange;
 const value = @import("../noun/value.zig");
 const command = @import("command.zig");
 const V = value.V;
@@ -18,11 +17,7 @@ const FnKind = value.FnKind;
 const FnTables = value.FnTables;
 const Pool = @import("../noun/symbol.zig").Pool;
 const assert = std.debug.assert;
-const verbs = @import("../primitive/verb/verbs.zig");
-const string = @import("../primitive/verb/string.zig");
-const verb_flip = @import("../primitive/verb/flip.zig");
 const verb_enlist = @import("../primitive/verb/enlist.zig");
-const util = @import("../util.zig");
 const call = @import("call.zig");
 const amend = @import("../primitive/amend.zig");
 const pair = @import("../primitive/verb/pair.zig");
@@ -591,27 +586,7 @@ pub const VM = struct {
     const argc = vm.readByte();
     const start = vm.stack_len - argc;
     const values = vm.stack[start..vm.stack_len];
-    var list_val = try V.valuesFromSlice(vm.alloc, values);
-
-    if (list_val.tag() == .L and list_val.len() > 1) {
-      const slice = list_val.L.slice();
-      if (slice[0].tag() == .m) {
-        const first_keys = slice[0].m.av();
-        var all_match = true;
-        for (slice[1..]) |item| {
-          if (item.tag() != .m or !item.m.av().eq(first_keys)) {
-            all_match = false;
-            break;
-          }
-        }
-        if (all_match) {
-          const table = verb_flip.flip(vm.alloc, list_val);
-          list_val.deinit(vm.alloc);
-          list_val = table;
-        }
-      }
-    }
-
+    const list_val = try V.valuesFromSlice(vm.alloc, values);
     for (values) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     try vm.push(list_val);

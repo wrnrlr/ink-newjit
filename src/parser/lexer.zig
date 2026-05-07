@@ -113,7 +113,7 @@ pub const Lexer = struct {
 
     // Adverb or adverb_val for '
     if (c == '\'') {
-      if ((self.tag == .phrase) and !had_space) {
+      if ((self.tag != .phrase) and !had_space) {
         self.adv();
         if (self.ch(0) == ':') self.adv();
         self.tag = .verb;
@@ -348,8 +348,6 @@ pub const Lexer = struct {
     const digits_start = self.i;
     while (self.i < self.src.len and isDigit(self.CR()))
       self.adv();
-    const n_digits = self.i - digits_start;
-    _ = n_digits;
 
     // Bool/bools: digits followed by 'b' where all digits are 0 or 1
     if (self.ch(0) == 'b' and !has_minus) {

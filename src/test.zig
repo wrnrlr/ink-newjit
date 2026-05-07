@@ -315,13 +315,11 @@ test "+X flip" {
   try t.check("+(1 2; 4 5)", "(1 4;2 5)");
   try t.check("+(1 2; 4.5 5.5)", "(1.0 4.5;2.0 5.5)");
 }
-test "flip dict" {
+test "flip dict & table" {
   var t = try Tester.init(); defer t.deinit();
-  _ = try t.eval("t:(`a`b!1 2;`a`b!3 4)");
-  _ = try t.eval("l:(`a`b!1 2;`a`c!3 4)"); // no matching keys
-  try t.check("t", "[[]a:1 3;b:2 4]");
-  try t.check("l", "([a:1;b:2];[a:3;c:4])");
-  // try t.check("+t", "[a:1 3;b:2 4]");
+  try t.check("+`a`b!(1 2;3 4)", "[[]a:1 2;b:3 4]");
+  try t.check("+([a:1 2;b:3 4])", "[[]a:1 2;b:3 4]");
+  try t.check("+([[]a:1 2;b:3 4])", "[a:1 2;b:3 4]");
 }
 test "nulls verb" {
   var t = try Tester.init(); defer t.deinit();
