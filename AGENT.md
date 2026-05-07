@@ -8,6 +8,7 @@
 - Cast ints and floats in Zig like this: `@as(f64, @floatFromInt(a))`.
 - Add debug statements to verify your thinking.
 - Report issues and bugs with the ink language or runtime, and that are not stricktly related to the current task to `report.md`
+- See `doc/spec.md` for most up to date specification (WIP)
 
 # Ink language Overview
 Ink (sometimes called terse) is an array programming language based on k.
@@ -79,6 +80,7 @@ The language parser, compiler and runtime are all written in Zig 0.16.
 - `doc`
   - `bug.md` Known bug, add new issue you find here
   - `spec.md` Ink language specification (WIP)
+  - `changelog.md` Changelog, document changes here
   - `plan.md` Planning of future features
 - `src`
   - `encoding`
@@ -104,22 +106,7 @@ The language parser, compiler and runtime are all written in Zig 0.16.
     - `parser.zig`
   - `primitive`
     - `adverb` Implementation of around 15 adverbs 
-      - `adverbs.zig`
-      - `converge.zig` NYI
-      - `converges.zig` NYI
-      - `decodes.zig`
-      - `each.zig`
-      - `zip.zig`
-      - `eachleft.zig`
-      - `eachprior.zig`
-      - `eachright.zig`
-      - `encode.zig`
-      - `fold.zig`
-      - `join.zig`
-      - `scan.zig`
-      - `split.zig`
-      - `stencil.zig`
-      - `window.zig`
+      - `adverbs.zig` Overview of all adverbs.
     - `verb` Implementation of 60 verbs
       - `calc.zig` Arithmetic `+ - * %`, numeric: `sin abs ...`
       - `logic.zig` Logic verbs `< > = ~`
