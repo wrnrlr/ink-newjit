@@ -70,7 +70,7 @@ pub const Parser = struct {
   fn isNounStart(self: *Parser) bool {
     return switch (self.tok.tt) {
       .int, .float, .bit, .bits,
-      .string, .symbol, .var_,
+      .string, .symbol, .iden,
       .@"(", .@"{", .@"[",
       .@"$[",
       .@"[[]", .@"[[",
@@ -83,7 +83,7 @@ pub const Parser = struct {
   // True if the current token can begin a verb.
   fn isVerbStart(self: *Parser) bool {
     return switch (self.tok.tt) {
-      .op, .keyword_op, .verb_io => true,
+      .op, .keyword, .io => true,
       else => false,
     };
   }
@@ -206,15 +206,11 @@ pub const Parser = struct {
     }
 
     // op followed by colon → compound bind: noun op ':' (clause)?
-    if (self.is(.op) or self.is(.keyword_op)) {
+    if (self.is(.op) or self.is(.keyword)) {
       const op_tok = self.tok;
       // Peek: is the character immediately after op a ':' making it 'op:'?
       // We need to detect `noun op ':' clause` vs `noun op clause`.
       // Save state and advance to check.
-      const saved_pos = self.lex.pos;
-      const saved_an  = self.lex.after_noun;
-      const saved_av  = self.lex.after_verb;
-      const saved_tok = self.tok;
       self.advance(); // consume op
       if (self.is(.@":")) {
         // compound bind: noun op ':'
@@ -224,7 +220,6 @@ pub const Parser = struct {
       const verb_node = try self.makeVerbNode(op_tok);
       // Handle adverb immediately following (term)
       const verb = try self.applyAdverb(verb_node);
-      _ = saved_pos; _ = saved_an; _ = saved_av; _ = saved_tok;
       // Now expect right clause for transit
       if (self.isStmtEnd() or self.is(.comment)) {
         // intrans: noun verb (no right arg)
@@ -240,7 +235,7 @@ pub const Parser = struct {
 
     // verb_io followed by colon would have been consumed as verb_io already,
     // so handle it as transit:
-    if (self.is(.verb_io)) {
+    if (self.is(.io)) {
       const verb_node = try self.makeVerbNode(self.tok);
       self.advance();
       if (self.isStmtEnd() or self.is(.comment)) {
@@ -397,8 +392,8 @@ pub const Parser = struct {
   fn makeVerbNode(self: *Parser, tok: Token) ParseError!*Node {
     const m = try self.arena.allocator().create(Node);
     m.* = switch (tok.tt) {
-      .op, .keyword_op => .{ .verb_op = tok.slice(self.src) },
-      .verb_io => .{ .verb_io = tok.slice(self.src) },
+      .op, .keyword => .{ .verb_op = tok.slice(self.src) },
+      .io => .{ .io = tok.slice(self.src) },
       else => .blank,
     };
     return m;
@@ -410,7 +405,7 @@ pub const Parser = struct {
     const tok = self.tok;
     switch (tok.tt) {
       .int, .float, .bit, .bits,
-      .string, .symbol, .var_,
+      .string, .symbol, .iden,
       => return self.parseLiteralOrVector(),
 
       .@"(" => return self.parseGroupOrList(),
@@ -572,7 +567,7 @@ pub const Parser = struct {
         m.* = .{ .literal = .{ .c = inner } };
         return m;
       },
-      .var_ => {
+      .iden => {
         const m = try self.arena.allocator().create(Node);
         m.* = .{ .literal = .{ .@"var" = tok.slice(self.src) } };
         return m;
@@ -690,7 +685,7 @@ pub const Parser = struct {
         self.advance();
         continue;
       }
-      if (self.is(.var_)) {
+      if (self.is(.iden)) {
         if (awaiting) {
           try args.append(self.arena.allocator(), .{ .is_some = true, .value = self.tokSlice() });
           awaiting = false;
@@ -782,7 +777,7 @@ pub const Parser = struct {
 
   fn parseItemKey(self: *Parser) ParseError!?[]const u8 {
     switch (self.tok.tt) {
-      .var_, .int, .string, .symbol => {
+      .iden, .int, .string, .symbol => {
         const s = self.tok.slice(self.src);
         const key = switch (self.tok.tt) {
           .string => if (s.len >= 2) s[1 .. s.len - 1] else s,

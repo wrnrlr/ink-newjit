@@ -88,7 +88,7 @@ pub const Node = union(NodeType) {
   literal: Literal,
   term: Term,
   verb_op: Op,
-  verb_io: Io,
+  io: Io,
   blank: void,
   cond: Cond,
   command: Command,

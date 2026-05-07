@@ -7,8 +7,8 @@ pub const TT = enum {
   int, float,
   bit, bits,
   string, symbol,
-  var_,
-  keyword_op, op, verb_io,
+  iden,
+  keyword, op, io,
   adverb, adverb_val,
   @":",
   @"(", @")",
@@ -41,6 +41,9 @@ fn isKeywordOp(s: []const u8) bool {
   return false;
 }
 
+// Part of speech can be a prase, noun, or a verb
+const Tag = enum { phrase, noun, verb };
+
 // A '"' inside a K string closes the string only when the next character is one of these.
 // This implements the "string doubling" convention: "" inside a string is a literal quote.
 fn isStringCloseChar(c: u8) bool {
@@ -56,79 +59,58 @@ fn isStringCloseChar(c: u8) bool {
 
 pub const Lexer = struct {
   src: []const u8,
-  pos: u32,
-  after_noun: bool, // last emitted token was noun-like (int/float/var/)/}/])
-  after_verb: bool, // last emitted token was verb-like (op/keyword_op/verb_io/adverb)
+  i: u32 = 0,
+  tag: Tag = .phrase,
+  // after_noun: bool = false, // last emitted token was noun-like (int/float/var/)/}/])
+  // after_verb: bool = false, // last emitted token was verb-like (op/keyword_op/verb_io/adverb)
 
-  pub fn init(src: []const u8) Lexer {
-    return .{ .src = src, .pos = 0, .after_noun = false, .after_verb = false };
-  }
+  pub fn init(src: []const u8) Lexer { return .{ .src = src }; }
 
   fn ch(self: *Lexer, i:comptime_int) ?u8 {
-    if (self.pos + i >= self.src.len) return null;
-    return self.src[self.pos + i];
+    if (self.i + i >= self.src.len) return null;
+    return self.src[self.i + i];
   }
 
-  fn adv(self: *Lexer) void {
-    if (self.pos < self.src.len) self.pos += 1;
-  }
+  fn adv(self: *Lexer) void { if (self.i < self.src.len) self.i += 1; }
 
-  inline fn CR(self: *Lexer) u8 {
-    return self.src[self.pos];
-  }
+  inline fn CR(self: *Lexer) u8 { return self.src[self.i]; }
 
   // Returns true if whitespace (spaces/tabs only, not newlines) was skipped.
   fn skipSpace(self: *Lexer) bool {
-    const start = self.pos;
-    while (self.pos < self.src.len and
-      (self.CR() == ' ' or self.CR() == '\t'))
-    {
-      self.pos += 1;
-    }
-    return self.pos > start;
-  }
-
-  fn setNoun(self: *Lexer) void {
-    self.after_noun = true;
-    self.after_verb = false;
-  }
-  fn setVerb(self: *Lexer) void {
-    self.after_noun = false;
-    self.after_verb = true;
-  }
-  fn setNeither(self: *Lexer) void {
-    self.after_noun = false;
-    self.after_verb = false;
+    const start = self.i;
+    while (self.i < self.src.len and (self.CR() == ' ' or self.CR() == '\t'))
+      self.i += 1;
+    return self.i > start;
   }
 
   pub fn next(self: *Lexer) Token {
     const had_space = self.skipSpace();
-    if (self.pos >= self.src.len) {
-      return .{ .tt = .eof, .start = self.pos, .end = self.pos };
+    if (self.i >= self.src.len) {
+      return .{ .tt = .eof, .start = self.i, .end = self.i };
     }
-    const start = self.pos;
+    const start = self.i;
     const c = self.CR();
 
     // Newline -> sep
     if (c == '\n') {
       self.adv();
-      self.setNeither();
-      return .{ .tt = .sep, .start = start, .end = self.pos };
+      self.tag = .phrase;
+      return .{ .tt = .sep, .start = start, .end = self.i };
     }
 
     // Semicolon -> sep
     if (c == ';') {
       self.adv();
-      self.setNeither();
-      return .{ .tt = .sep, .start = start, .end = self.pos };
+      self.tag = .phrase;
+      return .{ .tt = .sep, .start = start, .end = self.i };
     }
 
     // Comment: / with whitespace before it (or at start / after sep)
     if (c == '/' and (had_space or (!self.after_noun and !self.after_verb))) {
-      while (self.pos < self.src.len and self.CR() != '\n')
+      while (self.i < self.src.len and self.CR() != '\n')
         self.adv();
-      self.setNeither();
-      return .{ .tt = .comment, .start = start, .end = self.pos };
+      self.tag = .phrase;
+      return .{ .tt = .comment, .start = start, .end = self.i };
     }
 
     // Adverb or adverb_val for '
@@ -136,13 +118,13 @@ pub const Lexer = struct {
       if ((self.after_noun or self.after_verb) and !had_space) {
         self.adv();
         if (self.ch(0) == ':') self.adv();
-        self.setVerb();
-        return .{ .tt = .adverb, .start = start, .end = self.pos };
+        self.tag = .verb;
+        return .{ .tt = .adverb, .start = start, .end = self.i };
       }
       // adverb_val: ' as noun value (inside group etc.)
       self.adv();
-      self.setNoun();
-      return .{ .tt = .adverb_val, .start = start, .end = self.pos };
+      self.tag = .noun;
+      return .{ .tt = .adverb_val, .start = start, .end = self.i };
     }
 
     // Backslash
@@ -151,63 +133,63 @@ pub const Lexer = struct {
       if ((self.after_noun or self.after_verb) and !had_space) {
         self.adv();
         if (self.ch(0) == ':') self.adv();
-        self.setVerb();
-        return .{ .tt = .adverb, .start = start, .end = self.pos };
+        self.tag = .verb;
+        return .{ .tt = .adverb, .start = start, .end = self.i };
       }
       // Command: \letter... (only at start of expression, not after noun/verb)
       if (self.ch(1)) |n| {
         if (isAlphabetic(n)) {
           self.adv(); // skip '\'
-          while (self.pos < self.src.len and self.CR() != '\n')
+          while (self.i < self.src.len and self.CR() != '\n')
             self.adv();
-          self.setNeither();
-          return .{ .tt = .command, .start = start, .end = self.pos };
+          self.tag = .phrase;
+          return .{ .tt = .command, .start = start, .end = self.i };
         }
       }
       // adverb_val: \ as noun value
       self.adv();
-      self.setNoun();
-      return .{ .tt = .adverb_val, .start = start, .end = self.pos };
+      self.tag = .noun;
+      return .{ .tt = .adverb_val, .start = start, .end = self.i };
     }
 
     // / as adverb (immediate after noun or verb, no space)
     if (c == '/' and (self.after_noun or self.after_verb) and !had_space) {
       self.adv();
       if (self.ch(0) == ':') self.adv();
-      self.setVerb();
-      return .{ .tt = .adverb, .start = start, .end = self.pos };
+      self.tag = .verb;
+      return .{ .tt = .adverb, .start = start, .end = self.i };
     }
 
     // Special bracket sequences
     if (c == '$' and self.ch(1) == '[') {
-      self.pos += 2;
-      self.setNeither();
-      return .{ .tt = .@"$[", .start = start, .end = self.pos };
+      self.i += 2;
+      self.tag = .phrase;
+      return .{ .tt = .@"$[", .start = start, .end = self.i };
     }
     if (c == '[' and self.ch(1) == '[' and self.ch(2) == ']') {
-      self.pos += 3;
-      self.setNeither();
-      return .{ .tt = .@"[[]", .start = start, .end = self.pos };
+      self.i += 3;
+      self.tag = .phrase;
+      return .{ .tt = .@"[[]", .start = start, .end = self.i };
     }
     if (c == '[' and self.ch(1) == '[') {
-      self.pos += 2;
-      self.setNeither();
-      return .{ .tt = .@"[[", .start = start, .end = self.pos };
+      self.i += 2;
+      self.tag = .phrase;
+      return .{ .tt = .@"[[", .start = start, .end = self.i };
     }
 
     // Simple delimiters
-    if (c == '(') { self.adv(); self.setNeither(); return .{ .tt = .@"(", .start = start, .end = self.pos }; }
-    if (c == ')') { self.adv(); self.setNoun();    return .{ .tt = .@")", .start = start, .end = self.pos }; }
-    if (c == '{') { self.adv(); self.setNeither(); return .{ .tt = .@"{", .start = start, .end = self.pos }; }
-    if (c == '}') { self.adv(); self.setNoun();    return .{ .tt = .@"}", .start = start, .end = self.pos }; }
-    if (c == '[') { self.adv(); self.setNeither(); return .{ .tt = .@"[", .start = start, .end = self.pos }; }
-    if (c == ']') { self.adv(); self.setNoun();    return .{ .tt = .@"]", .start = start, .end = self.pos }; }
+    if (c == '(') { self.adv(); self.tag = .phrase; return .{ .tt = .@"(", .start = start, .end = self.i }; }
+    if (c == ')') { self.adv(); self.tag = .noun;    return .{ .tt = .@")", .start = start, .end = self.i }; }
+    if (c == '{') { self.adv(); self.tag = .phrase; return .{ .tt = .@"{", .start = start, .end = self.i }; }
+    if (c == '}') { self.adv(); self.tag = .noun;    return .{ .tt = .@"}", .start = start, .end = self.i }; }
+    if (c == '[') { self.adv(); self.tag = .phrase; return .{ .tt = .@"[", .start = start, .end = self.i }; }
+    if (c == ']') { self.adv(); self.tag = .noun;    return .{ .tt = .@"]", .start = start, .end = self.i }; }
 
     // Colon (check for verb_io first: digit handled below)
     if (c == ':') {
       self.adv();
-      self.setNeither();
-      return .{ .tt = .@":", .start = start, .end = self.pos };
+      self.tag = .phrase;
+      return .{ .tt = .@":", .start = start, .end = self.i };
     }
 
     // String literal "..."
@@ -216,14 +198,14 @@ pub const Lexer = struct {
     // Example: """ is a 1-char string containing '"'.
     if (c == '"') {
       self.adv(); // skip opening "
-      while (self.pos < self.src.len) {
+      while (self.i < self.src.len) {
         const sc = self.CR();
         if (sc == '\n') break; // unclosed string
         if (sc == '\\') {
           self.adv();
-          if (self.pos < self.src.len) self.adv();
+          if (self.i < self.src.len) self.adv();
         } else if (sc == '"') {
-          const next_c: u8 = if (self.pos + 1 < self.src.len) self.src[self.pos + 1] else 0;
+          const next_c: u8 = if (self.i + 1 < self.src.len) self.src[self.i + 1] else 0;
           if (isStringCloseChar(next_c)) {
             self.adv(); // consume closing "
             break;
@@ -234,28 +216,28 @@ pub const Lexer = struct {
           self.adv();
         }
       }
-      self.setNoun();
-      return .{ .tt = .string, .start = start, .end = self.pos };
+      self.tag = .noun;
+      return .{ .tt = .string, .start = start, .end = self.i };
     }
 
     // Symbol: `body
     if (c == '`') {
       self.adv();
-      if (self.pos < self.src.len and self.CR() == '"') {
+      if (self.i < self.src.len and self.CR() == '"') {
         // quoted symbol: `"content"
         self.adv();
-        while (self.pos < self.src.len and self.CR() != '"') self.adv();
-        if (self.pos < self.src.len) self.adv();
+        while (self.i < self.src.len and self.CR() != '"') self.adv();
+        if (self.i < self.src.len) self.adv();
       } else {
         // unquoted symbol: `abc, `123, `+, etc.
         // Symbol body uses iden = /[a-zA-Z][a-zA-Z\d]*/ — no underscores.
         const sym_ops = "%!&+*|<>=~,^#_$?@/-";
-        while (self.pos < self.src.len) {
+        while (self.i < self.src.len) {
           const sc = self.CR();
           if (isAlphanumeric(sc) or sc == '.') {
             self.adv();
           } else if (std.mem.indexOfScalar(u8, sym_ops, sc) != null and
-            self.pos == start + 1)
+            self.i == start + 1)
           {
             // single-char op symbol: `+, `-, etc. (only at start)
             self.adv();
@@ -265,8 +247,8 @@ pub const Lexer = struct {
           }
         }
       }
-      self.setNoun();
-      return .{ .tt = .symbol, .start = start, .end = self.pos };
+      self.tag = .noun;
+      return .{ .tt = .symbol, .start = start, .end = self.i };
     }
 
     // Leading-dot float: .3  .14  etc. (before op check consumes '.')
@@ -288,25 +270,25 @@ pub const Lexer = struct {
     // Minus as operator (after noun, or when not followed by digit)
     if (c == '-') {
       self.adv();
-      self.setVerb();
-      return .{ .tt = .op, .start = start, .end = self.pos };
+      self.tag = .verb;
+      return .{ .tt = .op, .start = start, .end = self.i };
     }
 
     // Identifiers: must start with a letter (grammar: var = /[a-zA-Z][a-zA-Z\d]*/)
     // '_' is always an op, never a var start.
     if (isAlphabetic(c)) {
-      while (self.pos < self.src.len and
+      while (self.i < self.src.len and
         isAlphanumeric(self.CR()))
       {
         self.adv();
       }
-      const word = self.src[start..self.pos];
+      const word = self.src[start..self.i];
       if (isKeywordOp(word)) {
-        self.setVerb();
-        return .{ .tt = .keyword_op, .start = start, .end = self.pos };
+        self.tag = .verb;
+        return .{ .tt = .keyword, .start = start, .end = self.i };
       }
-      self.setNoun();
-      return .{ .tt = .var_, .start = start, .end = self.pos };
+      self.tag = .noun;
+      return .{ .tt = .iden, .start = start, .end = self.i };
     }
 
     // Single-char ops: %!&+*|<>=~,^#_$?@./  (note: _ is here, not in idents)
@@ -315,13 +297,13 @@ pub const Lexer = struct {
       self.adv();
       // Check for adverb immediately following (e.g. +/)
       // The adverb will be picked up on the next call with after_verb=true
-      self.setVerb();
-      return .{ .tt = .op, .start = start, .end = self.pos };
+      self.tag = .verb;
+      return .{ .tt = .op, .start = start, .end = self.i };
     }
 
     // Unknown character — advance and return as eof-like
     self.adv();
-    return .{ .tt = .eof, .start = start, .end = self.pos };
+    return .{ .tt = .eof, .start = start, .end = self.i };
   }
 
   fn lexNumber(self: *Lexer, start: u32) Token {
@@ -330,14 +312,14 @@ pub const Lexer = struct {
     // Leading-dot float: .3 .14
     if (c == '.') {
       self.adv(); // consume '.'
-      while (self.pos < self.src.len and isDigit(self.CR())) self.adv();
+      while (self.i < self.src.len and isDigit(self.CR())) self.adv();
       if (self.ch(0) == 'e' or self.ch(0) == 'E') {
         self.adv();
         if (self.ch(0) == '+' or self.ch(0) == '-') self.adv();
-        while (self.pos < self.src.len and isDigit(self.CR())) self.adv();
+        while (self.i < self.src.len and isDigit(self.CR())) self.adv();
       }
-      self.setNoun();
-      return .{ .tt = .float, .start = start, .end = self.pos };
+      self.tag = .noun;
+      return .{ .tt = .float, .start = start, .end = self.i };
     }
 
     // Handle negative sign
@@ -348,60 +330,60 @@ pub const Lexer = struct {
     if (self.ch(0) == '0') {
       const n = self.ch(1);
       if (n == 'N' or n == 'W') {
-        self.pos += 2;
-        self.setNoun();
-        return .{ .tt = .int, .start = start, .end = self.pos };
+        self.i += 2;
+        self.tag = .noun;
+        return .{ .tt = .int, .start = start, .end = self.i };
       }
       if (n == 'n' or n == 'w') {
-        self.pos += 2;
-        self.setNoun();
-        return .{ .tt = .float, .start = start, .end = self.pos };
+        self.i += 2;
+        self.tag = .noun;
+        return .{ .tt = .float, .start = start, .end = self.i };
       }
       // hex: 0x...
       if (n == 'x' or n == 'X') {
-        self.pos += 2;
-        while (self.pos < self.src.len and
+        self.i += 2;
+        while (self.i < self.src.len and
           std.ascii.isHex(self.CR()))
         {
           self.adv();
         }
-        self.setNoun();
-        return .{ .tt = .int, .start = start, .end = self.pos };
+        self.tag = .noun;
+        return .{ .tt = .int, .start = start, .end = self.i };
       }
     }
 
     // Scan digits
-    const digits_start = self.pos;
-    while (self.pos < self.src.len and std.ascii.isDigit(self.CR()))
+    const digits_start = self.i;
+    while (self.i < self.src.len and std.ascii.isDigit(self.CR()))
       self.adv();
-    const n_digits = self.pos - digits_start;
+    const n_digits = self.i - digits_start;
     _ = n_digits;
 
     // Bool/bools: digits followed by 'b' where all digits are 0 or 1
     if (self.ch(0) == 'b' and !has_minus) {
-      const digit_slice = self.src[digits_start..self.pos];
+      const digit_slice = self.src[digits_start..self.i];
       var all_binary = true;
       for (digit_slice) |dc| {
         if (dc != '0' and dc != '1') { all_binary = false; break; }
       }
       if (all_binary and digit_slice.len > 0) {
         self.adv(); // consume 'b'
-        self.setNoun();
+        self.tag = .noun;
         if (digit_slice.len == 1) {
-          return .{ .tt = .bit, .start = start, .end = self.pos };
+          return .{ .tt = .bit, .start = start, .end = self.i };
         } else {
-          return .{ .tt = .bits, .start = start, .end = self.pos };
+          return .{ .tt = .bits, .start = start, .end = self.i };
         }
       }
     }
 
     // verb_io: single digit followed by ':'  (only if no minus)
     if (!has_minus and self.ch(0) == ':') {
-      const dlen = self.pos - digits_start;
+      const dlen = self.i - digits_start;
       if (dlen == 1) {
         self.adv(); // consume ':'
-        self.setVerb();
-        return .{ .tt = .verb_io, .start = start, .end = self.pos };
+        self.tag = .verb;
+        return .{ .tt = .io, .start = start, .end = self.i };
       }
     }
 
@@ -415,14 +397,14 @@ pub const Lexer = struct {
         (!isAlphanumeric(after_dot) and after_dot != '[')
       ) {
         self.adv(); // consume '.'
-        while (self.pos < self.src.len and isDigit(self.CR())) self.adv();
+        while (self.i < self.src.len and isDigit(self.CR())) self.adv();
         if (self.ch(0) == 'e' or self.ch(0) == 'E') {
           self.adv();
           if (self.ch(0) == '+' or self.ch(0) == '-') self.adv();
-          while (self.pos < self.src.len and isDigit(self.CR())) self.adv();
+          while (self.i < self.src.len and isDigit(self.CR())) self.adv();
         }
-        self.setNoun();
-        return .{ .tt = .float, .start = start, .end = self.pos };
+        self.tag = .noun;
+        return .{ .tt = .float, .start = start, .end = self.i };
       }
     }
 
@@ -430,23 +412,23 @@ pub const Lexer = struct {
     if (self.ch(0) == 'e' or self.ch(0) == 'E') {
       self.adv();
       if (self.ch(0) == '+' or self.ch(0) == '-') self.adv();
-      while (self.pos < self.src.len and isDigit(self.CR())) self.adv();
-      self.setNoun();
-      return .{ .tt = .float, .start = start, .end = self.pos };
+      while (self.i < self.src.len and isDigit(self.CR())) self.adv();
+      self.tag = .noun;
+      return .{ .tt = .float, .start = start, .end = self.i };
     }
 
     // Plain integer
-    self.setNoun();
-    return .{ .tt = .int, .start = start, .end = self.pos };
+    self.tag = .noun;
+    return .{ .tt = .int, .start = start, .end = self.i };
   }
 
   // Peek at the next token without advancing state.
   pub fn peekNext(self: *Lexer) Token {
-    const saved_pos = self.pos;
+    const saved_pos = self.i;
     const saved_an = self.after_noun;
     const saved_av = self.after_verb;
     const tok = self.next();
-    self.pos = saved_pos;
+    self.i = saved_pos;
     self.after_noun = saved_an;
     self.after_verb = saved_av;
     return tok;

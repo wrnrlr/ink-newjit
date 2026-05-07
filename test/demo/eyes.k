@@ -28,7 +28,8 @@ loop: {[window;props;events]
 
   window 9: (
     `animate;
-    [rect: 0,0,w,h; fill: `Zinc900];
+    [rect: 0,0,w,h; fill: `Neutral900];
+    [rect: 0,0,w%2,h%2; fill: `Red200];
     drawEye[(w%2)-er*1.5; h%2; er; mx; my];
     drawEye[(w%2)+er*1.5; h%2; er; mx; my]
   )

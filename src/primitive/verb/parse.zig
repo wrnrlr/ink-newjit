@@ -73,7 +73,7 @@ fn nodeToV(vm: *VM, node: *Node) anyerror!V {
       return transfer(alloc, &list);
     },
     .verb_op    => return sym(vm, "op"),
-    .verb_io    => return sym(vm, "verb_io"),
+    .io    => return sym(vm, "verb_io"),
     .adverb_val => return sym(vm, "adverb_val"),
     .monad      => return sym(vm, "monad"),
     .blank      => return sym(vm, "blank"),

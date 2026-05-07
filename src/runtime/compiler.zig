@@ -150,7 +150,7 @@ pub const Compiler = struct {
           .{ .func = value.Fn.makeTrain(op) };
         break :blk try self.emitConst(v);
       },
-      .verb_io => |io| blk: {
+      .io => |io| blk: {
         const op = Op.fromString(io) orelse return error.UnknownOp;
         break :blk try self.emitConst(V{ .func = value.Fn.makeBuiltin(op) });
       },
@@ -384,8 +384,8 @@ pub const Compiler = struct {
   }
 
   fn compileTransit(self: *Compiler, t: ast.Transit, is_tail: bool) anyerror!ir.ValueId {
-    if (t.v.* == .verb_op or t.v.* == .verb_io) {
-      const op = if (t.v.* == .verb_op) t.v.verb_op else t.v.verb_io;
+    if (t.v.* == .verb_op or t.v.* == .io) {
+      const op = if (t.v.* == .verb_op) t.v.verb_op else t.v.io;
       if (Op.fromString(op)) |o| {
         var inputs: [2]ir.ValueId = undefined;
         inputs[0] = try self.compileNode(t.a, false);
@@ -415,8 +415,8 @@ pub const Compiler = struct {
 
   fn compileIntrans(self: *Compiler, i: ast.Intrans, is_tail: bool) anyerror!ir.ValueId {
     if (i.z) |z| {
-      if (i.v.* == .verb_op or i.v.* == .verb_io) {
-        const op = if (i.v.* == .verb_op) i.v.verb_op else i.v.verb_io;
+      if (i.v.* == .verb_op or i.v.* == .io) {
+        const op = if (i.v.* == .verb_op) i.v.verb_op else i.v.io;
         if (Op.fromString(op)) |_| {
           var inputs: [2]ir.ValueId = undefined;
           inputs[0] = try self.compileNode(i.a, false);
@@ -430,8 +430,8 @@ pub const Compiler = struct {
       inputs[2] = try self.compileNode(z, false);
       return try self.emitOpWithArg(if (is_tail) .TailCall else .Call, 2, &inputs);
     } else {
-      if (i.v.* == .verb_op or i.v.* == .verb_io) {
-        const op = if (i.v.* == .verb_op) i.v.verb_op else i.v.verb_io;
+      if (i.v.* == .verb_op or i.v.* == .io) {
+        const op = if (i.v.* == .verb_op) i.v.verb_op else i.v.io;
         if (Op.fromString(op)) |o| {
           // Partial dyadic symbolic or IO op: a v -> v(a, )
           const v = V{ .func = value.Fn.makeBuiltin(o) };
