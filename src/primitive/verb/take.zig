@@ -67,7 +67,6 @@ fn takeVec(comptime yk: K) util.DyadFn {
           dst[j] = src[idx];
         }
       }
-      if (yk == .L) return promote(vm.alloc, res);
       return @unionInit(V, @tagName(yk), res);
     }
   }.f;
