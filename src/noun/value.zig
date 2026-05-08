@@ -31,6 +31,7 @@ pub const V = union(K) {
 
   pub inline fn wrap(comptime k: K, v: holder(k)) V { return @unionInit(V, @tagName(k), v); }
   pub inline fn unwrap(v: V, comptime k: K) holder(k) { return @field(v, @tagName(k)); }
+  
   fn holder(comptime k: K) type {
     return switch (k) {
       .blank => void,
@@ -120,8 +121,11 @@ pub const V = union(K) {
 
   pub fn at(v: V, i: usize) V {
     return switch (v) {
-      .B => |n| .{ .b = n.slice()[i] }, .I => |n| .{ .i = n.slice()[i] }, .F => |n| .{ .f = n.slice()[i] },
-      .S => |n| .{ .s = n.slice()[i] }, .C => |n| .{ .c = n.slice()[i] },
+      .B => |n| .{ .b = n.slice()[i] },
+      .I => |n| .{ .i = n.slice()[i] },
+      .F => |n| .{ .f = n.slice()[i] },
+      .S => |n| .{ .s = n.slice()[i] },
+      .C => |n| .{ .c = n.slice()[i] },
       .L => |n| n.slice()[i].ref(),
       inline .m, .M => |n| n.bv().at(i),
       else => v.ref(),
