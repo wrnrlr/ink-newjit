@@ -1,6 +1,7 @@
 const std = @import("std");
 const value = @import("../../noun/value.zig");
 const util = @import("../../util.zig");
+const promote = @import("../promote.zig");
 const take = @import("./take.zig").take;
 const VM = @import("../../runtime/vm.zig").VM;
 const N = @import("../../noun/value.zig").N;
@@ -60,9 +61,8 @@ fn catCols(alloc: Alloc, col1: V, col2: V) V {
   @memset(res.slice(), .blank);
   for (0..n1) |i| res.slice()[i] = col1.at(i);
   for (0..n2) |i| res.slice()[n1 + i] = col2.at(i);
-  return try util.promote(alloc, res);
+  return try promote.promote(alloc, res);
 }
-
 
 // Left join: all rows of t, with value columns from k matched by key. Unmatched rows get 0.
 // fn leftJoin(alloc: Alloc, t: Table, k: UTable) V {

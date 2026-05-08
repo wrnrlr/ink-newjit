@@ -1,6 +1,7 @@
 const std = @import("std");
 const value = @import("../../noun/value.zig");
 const util = @import("../../util.zig");
+const K = @import("../../noun/class.zig").K;
 const VM = @import("../../runtime/vm.zig").VM;
 const promote = @import("../promote.zig").promote;
 
@@ -9,51 +10,69 @@ const N = value.N;
 
 pub const Random = struct {
   pub const op = .@"?";
-  _i_I: util.DyadFn = rand,
-  _i_F: util.DyadFn = rand,
-  _i_S: util.DyadFn = rand,
-  _i_C: util.DyadFn = rand,
-  _i_B: util.DyadFn = rand,
-  _i_T: util.DyadFn = rand,
-  _i_D: util.DyadFn = rand,
-  _i_L: util.DyadFn = rand,
+  _i_I: util.DyadFn = randomVec(.I),
+  _i_F: util.DyadFn = randomVec(.F),
+  _i_S: util.DyadFn = randomVec(.S),
+  _i_C: util.DyadFn = randomVec(.C),
+  _i_B: util.DyadFn = randomVec(.B),
+  _i_L: util.DyadFn = randomList,
 };
 
-fn rand(vm: *VM, x: V, y: V) V {
-  const n = y.len();
-  const count_abs = @abs(x.i);
-  const count: usize = @intCast(count_abs);
+fn randomVec(comptime yk: K) util.DyadFn {
+  comptime std.debug.assert(yk.isVec());
+  return struct {
+    const T = K.backing(yk);
+    fn f(vm: *VM, x: V, y: V) V {
+      const src = @field(y, @tagName(yk)).slice();
+      const n = src.len;
+      const count: usize = @intCast(@abs(x.i));
+      const random = vm.prng.random();
+      if (x.i >= 0) {
+        if (n == 0) return .{ .err = .length };
+        const res = N(T).init(vm.alloc, count) catch return V{ .err = .memory };
+        for (res.slice()) |*v| v.* = src[random.uintLessThan(usize, n)];
+        return V.wrap(yk, res);
+      } else {
+        if (count > n) return .{ .err = .length };
+        var indices = vm.alloc.alloc(usize, n) catch return V{ .err = .memory };
+        defer vm.alloc.free(indices);
+        for (indices, 0..) |*idx, j| idx.* = j;
+        for (0..count) |j| {
+          const swap_idx = j + random.uintLessThan(usize, n - j);
+          const tmp = indices[j];
+          indices[j] = indices[swap_idx];
+          indices[swap_idx] = tmp;
+        }
+        const res = N(T).init(vm.alloc, count) catch return V{ .err = .memory };
+        for (res.slice(), 0..) |*v, j| v.* = src[indices[j]];
+        return V.wrap(yk, res);
+      }
+    }
+  }.f;
+}
 
+fn randomList(vm: *VM, x: V, y: V) V {
+  const n = y.len();
+  const count: usize = @intCast(@abs(x.i));
+  const random = vm.prng.random();
   if (x.i >= 0) {
-    // Roll: i random selections from y (with replacement)
     if (n == 0) return .{ .err = .length };
     const res = N(V).init(vm.alloc, count) catch return V{ .err = .memory };
-    const random = vm.prng.random();
-    for (res.slice()) |*val| {
-      const idx = random.uintLessThan(usize, n);
-      val.* = y.at(idx);
-    }
+    for (res.slice()) |*val| val.* = y.at(random.uintLessThan(usize, n));
     return promote(vm.alloc, res);
   } else {
-    // Deal: |i| unique selections from y (without replacement)
     if (count > n) return .{ .err = .length };
-
     var indices = vm.alloc.alloc(usize, n) catch return V{ .err = .memory };
     defer vm.alloc.free(indices);
     for (indices, 0..) |*idx, j| idx.* = j;
-
-    const random = vm.prng.random();
     for (0..count) |j| {
       const swap_idx = j + random.uintLessThan(usize, n - j);
       const tmp = indices[j];
       indices[j] = indices[swap_idx];
       indices[swap_idx] = tmp;
     }
-
     const res = N(V).init(vm.alloc, count) catch return V{ .err = .memory };
-    for (res.slice(), 0..) |*v, j| {
-      v.* = y.at(indices[j]);
-    }
+    for (res.slice(), 0..) |*v, j| v.* = y.at(indices[j]);
     return promote(vm.alloc, res);
   }
 }

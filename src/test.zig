@@ -313,7 +313,7 @@ test "+X flip" {
   try t.check("+1 2 3", ",1 2 3");
   try t.check("+(\"ab\";\"cd\")", "(\"ac\";\"bd\")");
   try t.check("+(1 2; 4 5)", "(1 4;2 5)");
-  try t.check("+(1 2; 4.5 5.5)", "(1.0 4.5;2.0 5.5)");
+  try t.check("+(1 2; 4.5 5.5)", "((1;4.5);(2;5.5))");
 }
 test "flip dict & table" {
   var t = try Tester.init(); defer t.deinit();

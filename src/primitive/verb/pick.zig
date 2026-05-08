@@ -1,5 +1,6 @@
 const std = @import("std");
 const Alloc = @import("std").mem.Allocator;
+const K = @import("../../noun/class.zig").K;
 const N = @import("../../noun/value.zig").N;
 const V = @import("../../noun/value.zig").V;
 const Dict = @import("../../noun/value.zig").Dict;
@@ -19,10 +20,10 @@ pub const Pick = struct {
   _C_b: util.DyadFn = pickBoolFn,
   _L_b: util.DyadFn = pickBoolFn,
 
-  _B_B: util.DyadFn = pickMaskFn,
-  _I_B: util.DyadFn = pickMaskFn,
-  _F_B: util.DyadFn = pickMaskFn,
-  _C_B: util.DyadFn = pickMaskFn,
+  _B_B: util.DyadFn = pickMaskTyped(.B),
+  _I_B: util.DyadFn = pickMaskTyped(.I),
+  _F_B: util.DyadFn = pickMaskTyped(.F),
+  _C_B: util.DyadFn = pickMaskTyped(.C),
   _L_B: util.DyadFn = pickMaskFn,
 
   _B_i: util.DyadFn = pickAtomFn,
@@ -35,11 +36,11 @@ pub const Pick = struct {
   _L_i: util.DyadFn = pickAtomFn,
   _m_i: util.DyadFn = pickAtomFn,
 
-  _B_I: util.DyadFn = pickVecFn,
-  _I_I: util.DyadFn = pickVecFn,
-  _F_I: util.DyadFn = pickVecFn,
-  _S_I: util.DyadFn = pickVecFn,
-  _C_I: util.DyadFn = pickVecFn,
+  _B_I: util.DyadFn = pickVecTyped(.B),
+  _I_I: util.DyadFn = pickVecTyped(.I),
+  _F_I: util.DyadFn = pickVecTyped(.F),
+  _S_I: util.DyadFn = pickVecTyped(.S),
+  _C_I: util.DyadFn = pickVecTyped(.C),
   _T_I: util.DyadFn = pickVecFn,
   _D_I: util.DyadFn = pickVecFn,
   _L_I: util.DyadFn = pickVecFn,
@@ -62,6 +63,49 @@ fn pickBoolFn(_: *VM, x: V, y: V) V  { return x.at(if (y.b) 1 else 0); }
 fn pickMaskFn(vm: *VM, x: V, y: V) V { return pickMask(vm.alloc, x, y.B.slice()); }
 fn pickAtomFn(_: *VM, x: V, y: V) V  { return pickAtom(x, y.i); }
 fn pickVecFn(vm: *VM, x: V, y: V) V  { return pickVec(vm.alloc, x, y.I.slice()); }
+
+fn pickVecTyped(comptime xk: K) util.DyadFn {
+  comptime std.debug.assert(xk.isVec());
+  return struct {
+    const T = K.backing(xk);
+    fn f(vm: *VM, x: V, y: V) V {
+      const src = @field(x, @tagName(xk)).slice();
+      const indices = y.I.slice();
+      const res = N(T).init(vm.alloc, indices.len) catch return V{ .err = .memory };
+      for (indices, 0..) |idx, k| {
+        if (idx < 0 or idx >= @as(i32, @intCast(src.len))) {
+          res.deinit(vm.alloc);
+          return .{ .err = .length };
+        }
+        res.slice()[k] = src[@intCast(idx)];
+      }
+      return @unionInit(V, @tagName(xk), res);
+    }
+  }.f;
+}
+
+fn pickMaskTyped(comptime xk: K) util.DyadFn {
+  comptime std.debug.assert(xk.isVec());
+  return struct {
+    const T = K.backing(xk);
+    fn f(vm: *VM, x: V, y: V) V {
+      const src = @field(x, @tagName(xk)).slice();
+      const mask = y.B.slice();
+      if (src.len == 2) {
+        const res = N(T).init(vm.alloc, mask.len) catch return V{ .err = .memory };
+        for (mask, 0..) |m, k| res.slice()[k] = src[if (m) @as(usize, 1) else 0];
+        return @unionInit(V, @tagName(xk), res);
+      }
+      if (mask.len != src.len) return .{ .err = .length };
+      var count: usize = 0;
+      for (mask) |m| if (m) { count += 1; };
+      const res = N(T).init(vm.alloc, count) catch return V{ .err = .memory };
+      var j: usize = 0;
+      for (mask, src) |m, v| if (m) { res.slice()[j] = v; j += 1; };
+      return @unionInit(V, @tagName(xk), res);
+    }
+  }.f;
+}
 fn pickSymAtomFn(_: *VM, x: V, y: V) V  { return pickSymAtom(x, y.s); }
 fn pickSymVecFn(vm: *VM, x: V, y: V) V  { return pickSymVec(vm.alloc, x, y.S.slice()); }
 fn pickDictSymFn(_: *VM, x: V, y: V) V  { return pickDictSym(x.m, y.s); }
@@ -181,30 +225,4 @@ fn pickTableColVec(alloc: Alloc, x: V, keys: []const u32) V {
   }
   const dict = Dict.init(alloc, .{ .S = res_keys }, promote(alloc, res_vals)) catch return V{ .err = .memory };
   return V{ .M = dict };
-}
-
-pub fn pick(alloc: Alloc, x: V, i: V) V {
-  return switch (x) {
-    .M => |t| switch (i) {
-      .i => |idx| pickTableRow(alloc, t, idx),
-      .I => |idxs| pickTableRowVec(alloc, x, idxs.slice()),
-      .s => |s| pickTableCol(t, s),
-      .S => |keys| pickTableColVec(alloc, x, keys.slice()),
-      else => .{ .err = .@"type" },
-    },
-    .m => |d| switch (i) {
-      .s => |s| pickDictSym(d, s),
-      .S => |keys| pickDictSymVec(alloc, d, keys.slice()),
-      .i => |idx| pickAtom(x, idx),
-      .I => |idxs| pickVec(alloc, x, idxs.slice()),
-      else => .{ .err = .@"type" },
-    },
-    else => switch (i) {
-      .i => |idx| pickAtom(x, idx),
-      .I => |idxs| pickVec(alloc, x, idxs.slice()),
-      .b => |m| x.at(if (m) 1 else 0),
-      .B => |mask| pickMask(alloc, x, mask.slice()),
-      else => .{ .err = .@"type" },
-    },
-  };
 }
