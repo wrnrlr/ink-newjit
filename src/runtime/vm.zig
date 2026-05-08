@@ -589,7 +589,7 @@ pub const VM = struct {
     const argc = vm.readByte();
     const start = vm.stack_len - argc;
     const values = vm.stack[start..vm.stack_len];
-    const list_val = try V.valuesFromSlice(vm.alloc, values);
+    const list_val = try V.Values(vm.alloc, values);
     for (values) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     try vm.push(list_val);
@@ -599,11 +599,11 @@ pub const VM = struct {
     const n = vm.readByte();
     const start = vm.stack_len - 2 * n;
     const keys = if (n == 1) vm.stack[start].ref()
-                 else promote(vm.alloc, (try V.valuesFromSlice(vm.alloc, vm.stack[start .. start + n])).L);
+                 else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start .. start + n])).L);
     var keys_live = n > 1;
     errdefer { if (keys_live) keys.deinit(vm.alloc); }
     const vals = if (n == 1) vm.stack[start + 1].ref()
-                 else promote(vm.alloc, (try V.valuesFromSlice(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
+                 else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
     var vals_live = n > 1;
     errdefer { if (vals_live) vals.deinit(vm.alloc); }
     const res = if (n == 1) V{ .m = try value.Dict.init(vm.alloc, keys, vals) }
@@ -619,9 +619,9 @@ pub const VM = struct {
     const n = vm.readByte();
     const start = vm.stack_len - 2 * n;
     const keys = if (n == 1) verb_enlist.enlist(vm.alloc, vm.stack[start])
-                 else promote(vm.alloc, (try V.valuesFromSlice(vm.alloc, vm.stack[start .. start + n])).L);
+                 else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start .. start + n])).L);
     const vals = if (n == 1) verb_enlist.enlist(vm.alloc, vm.stack[start + 1])
-                 else promote(vm.alloc, (try V.valuesFromSlice(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
+                 else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
     const res = V{ .M = try value.Dict.init(vm.alloc, keys, vals) };
     for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;

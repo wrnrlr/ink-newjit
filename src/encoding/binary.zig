@@ -367,7 +367,7 @@ test "binary round-trip: integer vector" {
   const alloc = testing.allocator;
   var pool = Pool.init(alloc);
   defer pool.deinit();
-  const v = try V.intsFromSlice(alloc, &.{ 1, 2, 3 });
+  const v = try V.Ints(alloc, &.{ 1, 2, 3 });
   defer v.deinit(alloc);
   const got = try roundTrip(alloc, &pool, v);
   defer got.deinit(alloc);
@@ -378,7 +378,7 @@ test "binary round-trip: float vector" {
   const alloc = testing.allocator;
   var pool = Pool.init(alloc);
   defer pool.deinit();
-  const v = try V.floatsFromSlice(alloc, &.{ 1.0, 2.5, 3.0 });
+  const v = try V.Floats(alloc, &.{ 1.0, 2.5, 3.0 });
   defer v.deinit(alloc);
   const got = try roundTrip(alloc, &pool, v);
   defer got.deinit(alloc);
@@ -400,7 +400,7 @@ test "binary round-trip: char vector" {
   const alloc = testing.allocator;
   var pool = Pool.init(alloc);
   defer pool.deinit();
-  const v = try V.charsFromSlice(alloc, "hello");
+  const v = try V.Chars(alloc, "hello");
   defer v.deinit(alloc);
   const got = try roundTrip(alloc, &pool, v);
   defer got.deinit(alloc);
@@ -414,7 +414,7 @@ test "binary round-trip: symbol vector" {
   const ia = try pool.intern("a");
   const ib = try pool.intern("b");
   const ic = try pool.intern("c");
-  const v = try V.symbolsFromSlice(alloc, &.{ ia, ib, ic });
+  const v = try V.Symbols(alloc, &.{ ia, ib, ic });
   defer v.deinit(alloc);
   const got = try roundTrip(alloc, &pool, v);
   defer got.deinit(alloc);
@@ -426,7 +426,7 @@ test "binary round-trip: mixed list" {
   var pool = Pool.init(alloc);
   defer pool.deinit();
   const items: []const V = &.{ .{ .i = 1 }, .{ .f = 2.0 }, .{ .b = true } };
-  const v = try V.valuesFromSlice(alloc, items);
+  const v = try V.Values(alloc, items);
   defer v.deinit(alloc);
   const got = try roundTrip(alloc, &pool, v);
   defer got.deinit(alloc);
@@ -443,9 +443,9 @@ test "binary round-trip: dict" {
   defer pool.deinit();
   const ka = try pool.intern("a");
   const kb = try pool.intern("b");
-  const keys = try V.symbolsFromSlice(alloc, &.{ ka, kb });
+  const keys = try V.Symbols(alloc, &.{ ka, kb });
   errdefer keys.deinit(alloc);
-  const vals = try V.intsFromSlice(alloc, &.{ 10, 20 });
+  const vals = try V.Ints(alloc, &.{ 10, 20 });
   errdefer vals.deinit(alloc);
   const d = V{ .m = try value.Dict.init(alloc, keys, vals) };
   defer d.deinit(alloc);

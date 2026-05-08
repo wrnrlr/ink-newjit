@@ -19,7 +19,7 @@ fn isNumeric(s: []const u8) bool {
 fn parseCell(alloc: Alloc, s: []const u8) !V {
   if (std.fmt.parseInt(i32, s, 10)) |iv| return V{ .i = iv } else |_| {}
   if (std.fmt.parseFloat(f32, s)) |fv| return V{ .f = fv } else |_| {}
-  return V.charsFromSlice(alloc, s);
+  return V.Chars(alloc, s);
 }
 
 /// Parse CSV text into a Table value.
@@ -111,7 +111,7 @@ pub fn parse(alloc: Alloc, pool: *Pool, text: []const u8) !V {
   const sv_n = try N(V).init(alloc, num_cols);
   const sv = V{ .L = sv_n };
   for (0..num_cols) |i| {
-    const col_raw = try V.valuesFromSlice(alloc, col_lists[i].items);
+    const col_raw = try V.Values(alloc, col_lists[i].items);
     sv_n.slice()[i] = promote(alloc, col_raw.L);
   }
 

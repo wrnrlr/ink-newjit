@@ -6,11 +6,11 @@ const V = value.V;
 
 // Monad handler: 9: cmd_list → {render:`gfx; cmds:L}
 fn drawMonad(vm: *VM, x: V) V {
-  const keys = V.symbolsFromSlice(vm.alloc, &[_]u32{
+  const keys = V.Symbols(vm.alloc, &[_]u32{
     vm.intern("render") catch return V{ .err = .memory },
     vm.intern("cmds") catch return V{ .err = .memory },
   }) catch return V{ .err = .memory };
-  const vals = V.valuesFromSlice(vm.alloc, &[_]V{
+  const vals = V.Values(vm.alloc, &[_]V{
     V{ .s = vm.intern("gfx") catch return V{ .err = .memory } },
     x,
   }) catch return V{ .err = .memory };
@@ -25,12 +25,12 @@ fn drawDyad(vm: *VM, x: V, y: V) V {
 
 // Dyad fallback: data 9: spec → {render:`plot; data:x; spec:y}
 fn drawPlot(vm: *VM, x: V, y: V) V {
-  const keys = V.symbolsFromSlice(vm.alloc, &[_]u32{
+  const keys = V.Symbols(vm.alloc, &[_]u32{
     vm.intern("render") catch return V{ .err = .memory },
     vm.intern("data") catch return V{ .err = .memory },
     vm.intern("spec") catch return V{ .err = .memory },
   }) catch return V{ .err = .memory };
-  const vals = V.valuesFromSlice(vm.alloc, &[_]V{
+  const vals = V.Values(vm.alloc, &[_]V{
     V{ .s = vm.intern("plot") catch return V{ .err = .memory } },
     x,
     y,

@@ -30,7 +30,7 @@ fn groupValuesFn(vm: *VM, x: V) V { return groupValues(vm.alloc, x.L.slice()); }
 
 // O(n) typed group using AutoArrayHashMap (preserves order of first occurrence)
 fn groupHash(comptime T: type, alloc: Alloc, data: []const T) V {
-  if (data.len == 0) return V.valuesFromSlice(alloc, &.{}) catch return V{ .err = .memory };
+  if (data.len == 0) return V.Values(alloc, &.{}) catch return V{ .err = .memory };
 
   var map: std.AutoArrayHashMapUnmanaged(T, void) = .{};
   defer map.deinit(alloc);
@@ -66,7 +66,7 @@ fn groupHash(comptime T: type, alloc: Alloc, data: []const T) V {
 
 // O(n) byte group — 256-bucket direct lookup, no hashing overhead
 fn groupByte(alloc: Alloc, data: []const u8) V {
-  if (data.len == 0) return V.valuesFromSlice(alloc, &.{}) catch return V{ .err = .memory };
+  if (data.len == 0) return V.Values(alloc, &.{}) catch return V{ .err = .memory };
 
   var counts: [256]usize = .{0} ** 256;
   var seen:   [256]bool  = .{false} ** 256;
@@ -98,7 +98,7 @@ fn groupByte(alloc: Alloc, data: []const u8) V {
 
 // Float group: compare by bit pattern so NaN with same bits → same group
 fn groupFloats(alloc: Alloc, data: []const f32) V {
-  if (data.len == 0) return V.valuesFromSlice(alloc, &.{}) catch return V{ .err = .memory };
+  if (data.len == 0) return V.Values(alloc, &.{}) catch return V{ .err = .memory };
   const bits = alloc.alloc(u32, data.len) catch return V{ .err = .memory };
   defer alloc.free(bits);
   for (data, bits) |f, *b| b.* = @bitCast(f);
@@ -107,7 +107,7 @@ fn groupFloats(alloc: Alloc, data: []const f32) V {
 
 // O(n²) fallback for heterogeneous lists (V has no cheap hash)
 fn groupValues(alloc: Alloc, data: []const V) V {
-  if (data.len == 0) return V.valuesFromSlice(alloc, &.{}) catch return V{ .err = .memory };
+  if (data.len == 0) return V.Values(alloc, &.{}) catch return V{ .err = .memory };
 
   var groups: std.ArrayList(std.ArrayList(i32)) = .empty;
   defer { for (groups.items) |*g| g.deinit(alloc); groups.deinit(alloc); }
@@ -143,7 +143,7 @@ fn groupValues(alloc: Alloc, data: []const V) V {
 test "group integers" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-  var v = try V.intsFromSlice(vm.alloc, &.{ 3, 1, 4, 1, 3 });
+  var v = try V.Ints(vm.alloc, &.{ 3, 1, 4, 1, 3 });
   defer v.deinit(vm.alloc);
   var res = genGroupHash(.I)(vm, v);
   defer res.deinit(vm.alloc);
@@ -156,7 +156,7 @@ test "group integers" {
 test "group chars" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-  var v = try V.charsFromSlice(vm.alloc, "abac");
+  var v = try V.Chars(vm.alloc, "abac");
   defer v.deinit(vm.alloc);
   var res = groupByteFn(vm, v);
   defer res.deinit(vm.alloc);
@@ -169,7 +169,7 @@ test "group chars" {
 test "group single element" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-  var v = try V.intsFromSlice(vm.alloc, &.{42});
+  var v = try V.Ints(vm.alloc, &.{42});
   defer v.deinit(vm.alloc);
   var res = genGroupHash(.I)(vm, v);
   defer res.deinit(vm.alloc);
@@ -180,7 +180,7 @@ test "group single element" {
 test "group all same" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-  var v = try V.intsFromSlice(vm.alloc, &.{ 7, 7, 7 });
+  var v = try V.Ints(vm.alloc, &.{ 7, 7, 7 });
   defer v.deinit(vm.alloc);
   var res = genGroupHash(.I)(vm, v);
   defer res.deinit(vm.alloc);
@@ -191,7 +191,7 @@ test "group all same" {
 test "group all unique" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-  var v = try V.intsFromSlice(vm.alloc, &.{ 1, 2, 3 });
+  var v = try V.Ints(vm.alloc, &.{ 1, 2, 3 });
   defer v.deinit(vm.alloc);
   var res = genGroupHash(.I)(vm, v);
   defer res.deinit(vm.alloc);

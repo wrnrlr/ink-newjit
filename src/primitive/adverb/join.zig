@@ -12,7 +12,7 @@ pub fn join(vm: *VM, sep: V, parts: V) V {
   if (parts != .L) return .{ .err = .rank };
   const sep_chars = if (sep == .C) sep.C.slice() else &[_]u8{sep.c};
   const n = parts.len();
-  if (n == 0) return V.charsFromSlice(vm.alloc, "") catch return V{ .err = .memory };
+  if (n == 0) return V.Chars(vm.alloc, "") catch return V{ .err = .memory };
 
   // Calculate total length
   var total: usize = 0;
@@ -37,5 +37,5 @@ pub fn join(vm: *VM, sep: V, parts: V) V {
     @memcpy(buf[pos..pos + pchars.len], pchars);
     pos += pchars.len;
   }
-  return V.charsFromSlice(vm.alloc, buf) catch return V{ .err = .memory };
+  return V.Chars(vm.alloc, buf) catch return V{ .err = .memory };
 }

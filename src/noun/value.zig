@@ -183,11 +183,12 @@ pub const V = union(K) {
   pub fn isPartial(v: V) bool { return v == .partial; }
   pub fn asPartial(v: V) *Partial { return v.partial; }
 
-  pub fn intsFromSlice(alloc: Alloc, x: []const i32) !V { return .{ .I = try N(i32).n1(alloc, x) }; }
-  pub fn floatsFromSlice(alloc: Alloc, x: []const f32) !V { return .{ .F = try N(f32).n1(alloc, x) }; }
-  pub fn symbolsFromSlice(alloc: Alloc, x: []const u32) !V { return .{ .S = try N(u32).n1(alloc, x) }; }
-  pub fn charsFromSlice(alloc: Alloc, x: []const u8) !V { return .{ .C = try N(u8).n1(alloc, x) }; }
-  pub fn valuesFromSlice(alloc: Alloc, x: []const V) !V { return .{ .L = try N(V).n1(alloc, x) }; }
+  pub fn Ints(alloc: Alloc, x: []const i32) !V { return .{ .I = try N(i32).n1(alloc, x) }; }
+  pub fn Floats(alloc: Alloc, x: []const f32) !V { return .{ .F = try N(f32).n1(alloc, x) }; }
+  pub fn Symbols(alloc: Alloc, x: []const u32) !V { return .{ .S = try N(u32).n1(alloc, x) }; }
+  pub fn Chars(alloc: Alloc, x: []const u8) !V { return .{ .C = try N(u8).n1(alloc, x) }; }
+  pub fn Values(alloc: Alloc, x: []const V) !V { return .{ .L = try N(V).n1(alloc, x) }; }
+  
   pub fn make(comptime kk: K, comptime T: type, alloc: Alloc, vals: []const T) !V {
     return @unionInit(V, @tagName(kk), try N(T).n1(alloc, vals));
   }

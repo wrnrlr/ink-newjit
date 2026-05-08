@@ -108,7 +108,7 @@ const App = struct {
 
       const alloc = self.vm.alloc;
 
-      const prop_keys = try V.symbolsFromSlice(alloc, &[_]u32{
+      const prop_keys = try V.Symbols(alloc, &[_]u32{
         try self.vm.intern("width"),
         try self.vm.intern("height"),
         try self.vm.intern("ppi"),
@@ -117,7 +117,7 @@ const App = struct {
         try self.vm.intern("my"),
       });
       errdefer prop_keys.deinit(alloc);
-      const prop_vals = try V.valuesFromSlice(alloc, &[_]V{
+      const prop_vals = try V.Values(alloc, &[_]V{
         V{ .f = fw / xscale },
         V{ .f = fh / yscale },
         V{ .f = xscale * 96.0 },
@@ -179,7 +179,7 @@ const App = struct {
 fn buildEvents(vm: *VM) !V {
   const alloc = vm.alloc;
   const evs = g_events.items;
-  if (evs.len == 0) return V.valuesFromSlice(alloc, &.{});
+  if (evs.len == 0) return V.Values(alloc, &.{});
 
   const list = try value.N(V).init(alloc, evs.len);
   @memset(list.slice(), .blank);
@@ -189,66 +189,66 @@ fn buildEvents(vm: *VM) !V {
   for (evs, 0..) |ev, i| {
     list.slice()[i] = switch (ev) {
       .mousemove => |e| blk: {
-        const ks = try V.symbolsFromSlice(alloc, &[_]u32{
+        const ks = try V.Symbols(alloc, &[_]u32{
           try vm.intern("type"), try vm.intern("x"), try vm.intern("y"),
         });
         errdefer ks.deinit(alloc);
-        const vs = try V.valuesFromSlice(alloc, &[_]V{
+        const vs = try V.Values(alloc, &[_]V{
           V{ .s = try vm.intern("mousemove") }, V{ .f = @floatCast(e.x) }, V{ .f = @floatCast(e.y) },
         });
         errdefer vs.deinit(alloc);
         break :blk V{ .m = try value.Dict.init(alloc, ks, vs) };
       },
       .mousedown => |e| blk: {
-        const ks = try V.symbolsFromSlice(alloc, &[_]u32{
+        const ks = try V.Symbols(alloc, &[_]u32{
           try vm.intern("type"), try vm.intern("button"), try vm.intern("x"), try vm.intern("y"),
         });
         errdefer ks.deinit(alloc);
-        const vs = try V.valuesFromSlice(alloc, &[_]V{
+        const vs = try V.Values(alloc, &[_]V{
           V{ .s = try vm.intern("mousedown") }, V{ .i = e.button }, V{ .f = @floatCast(e.x) }, V{ .f = @floatCast(e.y) },
         });
         errdefer vs.deinit(alloc);
         break :blk V{ .m = try value.Dict.init(alloc, ks, vs) };
       },
       .mouseup => |e| blk: {
-        const ks = try V.symbolsFromSlice(alloc, &[_]u32{
+        const ks = try V.Symbols(alloc, &[_]u32{
           try vm.intern("type"), try vm.intern("button"), try vm.intern("x"), try vm.intern("y"),
         });
         errdefer ks.deinit(alloc);
-        const vs = try V.valuesFromSlice(alloc, &[_]V{
+        const vs = try V.Values(alloc, &[_]V{
           V{ .s = try vm.intern("mouseup") }, V{ .i = e.button }, V{ .f = @floatCast(e.x) }, V{ .f = @floatCast(e.y) },
         });
         errdefer vs.deinit(alloc);
         break :blk V{ .m = try value.Dict.init(alloc, ks, vs) };
       },
       .keydown => |e| blk: {
-        const ks = try V.symbolsFromSlice(alloc, &[_]u32{
+        const ks = try V.Symbols(alloc, &[_]u32{
           try vm.intern("type"), try vm.intern("key"), try vm.intern("mods"),
         });
         errdefer ks.deinit(alloc);
-        const vs = try V.valuesFromSlice(alloc, &[_]V{
+        const vs = try V.Values(alloc, &[_]V{
           V{ .s = try vm.intern("keydown") }, V{ .i = e.key }, V{ .i = e.mods },
         });
         errdefer vs.deinit(alloc);
         break :blk V{ .m = try value.Dict.init(alloc, ks, vs) };
       },
       .keyup => |e| blk: {
-        const ks = try V.symbolsFromSlice(alloc, &[_]u32{
+        const ks = try V.Symbols(alloc, &[_]u32{
           try vm.intern("type"), try vm.intern("key"), try vm.intern("mods"),
         });
         errdefer ks.deinit(alloc);
-        const vs = try V.valuesFromSlice(alloc, &[_]V{
+        const vs = try V.Values(alloc, &[_]V{
           V{ .s = try vm.intern("keyup") }, V{ .i = e.key }, V{ .i = e.mods },
         });
         errdefer vs.deinit(alloc);
         break :blk V{ .m = try value.Dict.init(alloc, ks, vs) };
       },
       .scroll => |e| blk: {
-        const ks = try V.symbolsFromSlice(alloc, &[_]u32{
+        const ks = try V.Symbols(alloc, &[_]u32{
           try vm.intern("type"), try vm.intern("dx"), try vm.intern("dy"),
         });
         errdefer ks.deinit(alloc);
-        const vs = try V.valuesFromSlice(alloc, &[_]V{
+        const vs = try V.Values(alloc, &[_]V{
           V{ .s = try vm.intern("scroll") }, V{ .f = @floatCast(e.dx) }, V{ .f = @floatCast(e.dy) },
         });
         errdefer vs.deinit(alloc);

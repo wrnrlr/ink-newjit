@@ -29,14 +29,14 @@ pub fn execImpl(vm: *VM, argv: []const []const u8, stdin_bytes: ?[]const u8) V {
             r.interface.appendRemainingUnlimited(vm.alloc, &out) catch {};
         }
         _ = child.wait(io_obj) catch {};
-        return V.charsFromSlice(vm.alloc, out.items) catch V{ .err = .memory };
+        return V.Chars(vm.alloc, out.items) catch V{ .err = .memory };
     } else {
         const result = std.process.run(vm.alloc, io_obj, .{
             .argv = argv,
         }) catch return V{ .err = .io };
         defer vm.alloc.free(result.stdout);
         defer vm.alloc.free(result.stderr);
-        return V.charsFromSlice(vm.alloc, result.stdout) catch V{ .err = .memory };
+        return V.Chars(vm.alloc, result.stdout) catch V{ .err = .memory };
     }
 }
 

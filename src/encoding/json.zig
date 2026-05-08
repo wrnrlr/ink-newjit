@@ -29,9 +29,9 @@ fn convertVal(alloc: Alloc, pool: *Pool, jv: std.json.Value) anyerror!V {
     .number_string   => |s| blk: {
       if (std.fmt.parseInt(i32, s, 10)) |iv| break :blk V{ .i = iv } else |_| {}
       if (std.fmt.parseFloat(f32, s))  |fv| break :blk V{ .f = fv } else |_| {}
-      break :blk try V.charsFromSlice(alloc, s);
+      break :blk try V.Chars(alloc, s);
     },
-    .string          => |s| try V.charsFromSlice(alloc, s),
+    .string          => |s| try V.Chars(alloc, s),
     .array           => |arr| try convertArr(alloc, pool, arr.items),
     .object          => |obj| try convertObj(alloc, pool, &obj),
   };
@@ -56,7 +56,7 @@ fn convertArr(alloc: Alloc, pool: *Pool, items: []const std.json.Value) anyerror
     if (tryTable(alloc, list.items)) |t| return t else |_| {}
   }
 
-  const lv = try V.valuesFromSlice(alloc, list.items);
+  const lv = try V.Values(alloc, list.items);
   return promote(alloc, lv.L);
 }
 
@@ -100,7 +100,7 @@ fn tryTable(alloc: Alloc, items: []const V) !V {
   errdefer sv_n.deinit(alloc);
   const sv = V{ .L = sv_n };
   for (0..num_cols) |i| {
-    const col_raw = try V.valuesFromSlice(alloc, cols[i].items);
+    const col_raw = try V.Values(alloc, cols[i].items);
     sv_n.slice()[i] = promote(alloc, col_raw.L);
   }
 
@@ -121,9 +121,9 @@ fn convertObj(alloc: Alloc, pool: *Pool, obj: *const std.json.ObjectMap) anyerro
     vals.append(alloc, v) catch |err| { v.deinit(alloc); return err; };
   }
 
-  const kv = try V.symbolsFromSlice(alloc, keys.items);
+  const kv = try V.Symbols(alloc, keys.items);
   errdefer kv.deinit(alloc);
-  const vv = try V.valuesFromSlice(alloc, vals.items);
+  const vv = try V.Values(alloc, vals.items);
   errdefer vv.deinit(alloc);
   return V{ .m = try value.Dict.init(alloc, kv, vv) };
 }

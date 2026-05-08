@@ -34,10 +34,10 @@ fn readLinesById(vm: *VM, x: V) V {
   var iter = std.mem.splitScalar(u8, text, '\n');
   while (iter.next()) |line| {
     const stripped = std.mem.trimEnd(u8, line, &[_]u8{'\r'});
-    const s = V.charsFromSlice(vm.alloc, stripped) catch return V{ .err = .memory };
+    const s = V.Chars(vm.alloc, stripped) catch return V{ .err = .memory };
     list.append(vm.alloc, s) catch return V{ .err = .memory };
   }
-  return V.valuesFromSlice(vm.alloc, list.items) catch return V{ .err = .memory };
+  return V.Values(vm.alloc, list.items) catch return V{ .err = .memory };
 }
 
 pub const ReadLines = struct {
@@ -130,7 +130,7 @@ fn readBytesByChars(vm: *VM, x: V) V {
   return readBytesById(vm, V{ .i = @intCast(id) });
 }
 fn readBytesById(vm: *VM, x: V) V {
-  return V.charsFromSlice(vm.alloc, vm.registry.getFileText(@as(u32, @intCast(x.i)))) catch return V{ .err = .memory };
+  return V.Chars(vm.alloc, vm.registry.getFileText(@as(u32, @intCast(x.i)))) catch return V{ .err = .memory };
 }
 
 pub const ReadBytes = struct {

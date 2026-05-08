@@ -40,7 +40,7 @@ fn getPrngState(vm: *VM) V {
         arr[i * 2]     = @bitCast(@as(u32, @truncate(u)));
         arr[i * 2 + 1] = @bitCast(@as(u32, @truncate(u >> 32)));
     }
-    return V.intsFromSlice(vm.alloc, &arr) catch V{ .err = .memory };
+    return V.Ints(vm.alloc, &arr) catch V{ .err = .memory };
 }
 
 fn setPrngState(vm: *VM, v: V) V {
@@ -71,12 +71,12 @@ fn getEnv(vm: *VM) anyerror!V {
         const entry = std.mem.span(entry_ptr);
         const sep = std.mem.indexOfScalar(u8, entry, '=') orelse continue;
         keys_raw[j] = try vm.intern(entry[0..sep]);
-        vals_n.slice()[j] = try V.charsFromSlice(vm.alloc, entry[sep + 1..]);
+        vals_n.slice()[j] = try V.Chars(vm.alloc, entry[sep + 1..]);
         j += 1;
     }
     const actual_n = j;
 
-    const keys_v = try V.symbolsFromSlice(vm.alloc, keys_raw[0..actual_n]);
+    const keys_v = try V.Symbols(vm.alloc, keys_raw[0..actual_n]);
     errdefer keys_v.deinit(vm.alloc);
 
     // Resize the list value to actual count (set remaining slots to blank already done above)

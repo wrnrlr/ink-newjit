@@ -139,7 +139,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     errdefer (V{ .L = argv_items_n }).deinit(allocator);
     @memset(argv_items_n.slice(), .blank);
     for (extra_args.items, argv_items_n.slice()) |arg, *slot| {
-      slot.* = try V.charsFromSlice(allocator, arg);
+      slot.* = try V.Chars(allocator, arg);
     }
     vm.argv = V{ .L = argv_items_n };
     const key = try vm.alloc.dupe(u8, "x");

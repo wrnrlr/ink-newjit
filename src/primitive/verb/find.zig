@@ -295,7 +295,7 @@ fn findFallback(vm: *VM, x: V, y: V) V {
 test "find integers atom" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-  var x = try V.intsFromSlice(vm.alloc, &.{ 3, 1, 4, 1, 5 });
+  var x = try V.Ints(vm.alloc, &.{ 3, 1, 4, 1, 5 });
   defer x.deinit(vm.alloc);
   try std.testing.expectEqual(@as(i32, 0), findI_i(vm, x, .{ .i = 3 }).i);
   try std.testing.expectEqual(@as(i32, 1), findI_i(vm, x, .{ .i = 1 }).i); // first of two 1s
@@ -305,9 +305,9 @@ test "find integers atom" {
 test "find integers vector" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-  var x = try V.intsFromSlice(vm.alloc, &.{ 3, 1, 4 });
+  var x = try V.Ints(vm.alloc, &.{ 3, 1, 4 });
   defer x.deinit(vm.alloc);
-  var y = try V.intsFromSlice(vm.alloc, &.{ 4, 9, 3 });
+  var y = try V.Ints(vm.alloc, &.{ 4, 9, 3 });
   defer y.deinit(vm.alloc);
   var res = findI_I(vm, x, y);
   defer res.deinit(vm.alloc);
@@ -319,7 +319,7 @@ test "find integers large (hash path)" {
   defer vm.deinit();
   var buf: [so.FIND_THRESHOLD + 1]i32 = undefined;
   for (&buf, 0..) |*v, i| v.* = @intCast(i * 2); // even numbers 0,2,4,...
-  var x = try V.intsFromSlice(vm.alloc, &buf);
+  var x = try V.Ints(vm.alloc, &buf);
   defer x.deinit(vm.alloc);
   try std.testing.expectEqual(@as(i32, 0), findI_i(vm, x, .{ .i = 0 }).i);
   try std.testing.expectEqual(@as(i32, 1), findI_i(vm, x, .{ .i = 2 }).i);
@@ -329,7 +329,7 @@ test "find integers large (hash path)" {
 test "find chars atom" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-  var x = try V.charsFromSlice(vm.alloc, "abcba");
+  var x = try V.Chars(vm.alloc, "abcba");
   defer x.deinit(vm.alloc);
   try std.testing.expectEqual(@as(i32, 1), findC_c(vm, x, .{ .c = 'b' }).i); // first b
   try std.testing.expectEqual(V.@"0N",     findC_c(vm, x, .{ .c = 'z' }).i);
@@ -338,9 +338,9 @@ test "find chars atom" {
 test "find chars vector" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-  var x = try V.charsFromSlice(vm.alloc, "abc");
+  var x = try V.Chars(vm.alloc, "abc");
   defer x.deinit(vm.alloc);
-  var y = try V.charsFromSlice(vm.alloc, "bza");
+  var y = try V.Chars(vm.alloc, "bza");
   defer y.deinit(vm.alloc);
   var res = findC_C(vm, x, y);
   defer res.deinit(vm.alloc);
@@ -362,7 +362,7 @@ test "find floats with NaN" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
   const nan = std.math.nan(f32);
-  var x = try V.floatsFromSlice(vm.alloc, &.{ 1.0, nan, 3.0 });
+  var x = try V.Floats(vm.alloc, &.{ 1.0, nan, 3.0 });
   defer x.deinit(vm.alloc);
   try std.testing.expectEqual(@as(i32, 0), findF_f(vm, x, .{ .f = 1.0 }).i);
   try std.testing.expectEqual(@as(i32, 1), findF_f(vm, x, .{ .f = nan }).i);

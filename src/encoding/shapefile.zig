@@ -161,7 +161,7 @@ pub fn parseShp(alloc: Alloc, pool: *Pool, data: []const u8) !V {
     try records.append(alloc, v);
   }
 
-  const res_data = try V.valuesFromSlice(alloc, records.items);
+  const res_data = try V.Values(alloc, records.items);
   const header_v = try header.toV(alloc, pool);
 
   const keys = [_][]const u8{ "header", "data" };
@@ -199,7 +199,7 @@ pub fn parseShx(alloc: Alloc, pool: *Pool, data: []const u8) !V {
     try records.append(alloc, .{.I = pair});
   }
 
-  const res_data = try V.valuesFromSlice(alloc, records.items);
+  const res_data = try V.Values(alloc, records.items);
   const header_v = try header.toV(alloc, pool);
 
   const keys = [_][]const u8{ "header", "index" };
@@ -299,7 +299,7 @@ pub fn parseDbf(alloc: Alloc, pool: *Pool, data: []const u8) !V {
             val = if (f.decimals == 0) .{.i = V.@"0N"} else .{.f = std.math.nan(f32)};
           }
         },
-        'C', 'D' => val = try V.charsFromSlice(alloc, raw),
+        'C', 'D' => val = try V.Chars(alloc, raw),
         'L' => {
           if (raw.len > 0) {
             val = .{.i = if (raw[0] == 'T' or raw[0] == 't' or raw[0] == 'Y' or raw[0] == 'y') @as(i32, 1) else @as(i32, 0)};
@@ -307,7 +307,7 @@ pub fn parseDbf(alloc: Alloc, pool: *Pool, data: []const u8) !V {
             val = .{.i = 0};
           }
         },
-        else => val = try V.charsFromSlice(alloc, raw),
+        else => val = try V.Chars(alloc, raw),
       }
       try col_lists[i].append(alloc, val);
       f_pos += f.length;
@@ -320,7 +320,7 @@ pub fn parseDbf(alloc: Alloc, pool: *Pool, data: []const u8) !V {
 
   const sv_n = try N(V).init(alloc, num_fields);
   for (0..num_fields) |i| {
-    const col_raw = try V.valuesFromSlice(alloc, col_lists[i].items);
+    const col_raw = try V.Values(alloc, col_lists[i].items);
     sv_n.slice()[i] = promote(alloc, col_raw.L);
   }
 
@@ -330,11 +330,11 @@ pub fn parseDbf(alloc: Alloc, pool: *Pool, data: []const u8) !V {
 /// Parse .prj projection file data.
 pub fn parsePrj(alloc: Alloc, pool: *Pool, data: []const u8) !V {
   _ = pool;
-  return try V.charsFromSlice(alloc, data);
+  return try V.Chars(alloc, data);
 }
 
 /// Parse .cpg code page file data.
 pub fn parseCpg(alloc: Alloc, pool: *Pool, data: []const u8) !V {
   _ = pool;
-  return try V.charsFromSlice(alloc, std.mem.trim(u8, data, " \n\t"));
+  return try V.Chars(alloc, std.mem.trim(u8, data, " \n\t"));
 }

@@ -229,7 +229,7 @@ pub fn parse(alloc: Alloc, pool: *Pool, text: []const u8) !V {
           try parents.append(alloc, cur_id);
           try kinds.append(alloc, sym_attr);
           try names.append(alloc, try pool.intern(attr.name));
-          try vals_raw.append(alloc, try V.charsFromSlice(alloc, attr.val));
+          try vals_raw.append(alloc, try V.Chars(alloc, attr.val));
         }
 
         if (token.tag == .elem_start) try stack.append(alloc, cur_id);
@@ -239,19 +239,19 @@ pub fn parse(alloc: Alloc, pool: *Pool, text: []const u8) !V {
         try parents.append(alloc, parent_id);
         try kinds.append(alloc, sym_text);
         try names.append(alloc, sym_empty);
-        try vals_raw.append(alloc, try V.charsFromSlice(alloc, token.text));
+        try vals_raw.append(alloc, try V.Chars(alloc, token.text));
       },
       .comment => {
         try parents.append(alloc, parent_id);
         try kinds.append(alloc, sym_comment);
         try names.append(alloc, sym_empty);
-        try vals_raw.append(alloc, try V.charsFromSlice(alloc, token.text));
+        try vals_raw.append(alloc, try V.Chars(alloc, token.text));
       },
       .cdata => {
         try parents.append(alloc, parent_id);
         try kinds.append(alloc, sym_cdata);
         try names.append(alloc, sym_empty);
-        try vals_raw.append(alloc, try V.charsFromSlice(alloc, token.text));
+        try vals_raw.append(alloc, try V.Chars(alloc, token.text));
       },
       .proc_inst => unreachable, // consumed in tokenizer
     }

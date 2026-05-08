@@ -132,7 +132,7 @@ fn distinctL(vm: *VM, x: V) V {
 test "distinct integers" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-  var x = try V.intsFromSlice(vm.alloc, &.{ 3, 1, 4, 1, 3 });
+  var x = try V.Ints(vm.alloc, &.{ 3, 1, 4, 1, 3 });
   defer x.deinit(vm.alloc);
   var res = distinctI(vm, x);
   defer res.deinit(vm.alloc);
@@ -145,7 +145,7 @@ test "distinct integers large (hash path)" {
   defer vm.deinit();
   var buf: [so.DEDUP_THRESHOLD * 2]i32 = undefined;
   for (&buf, 0..) |*v, i| v.* = @intCast(i % (so.DEDUP_THRESHOLD + 1));
-  var x = try V.intsFromSlice(vm.alloc, &buf);
+  var x = try V.Ints(vm.alloc, &buf);
   defer x.deinit(vm.alloc);
   var res = distinctI(vm, x);
   defer res.deinit(vm.alloc);
@@ -156,7 +156,7 @@ test "distinct integers large (hash path)" {
 test "distinct chars" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-  var x = try V.charsFromSlice(vm.alloc, "banana");
+  var x = try V.Chars(vm.alloc, "banana");
   defer x.deinit(vm.alloc);
   var res = distinctC(vm, x);
   defer res.deinit(vm.alloc);
@@ -179,7 +179,7 @@ test "distinct floats with NaN" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
   const nan = std.math.nan(f32);
-  var x = try V.floatsFromSlice(vm.alloc, &.{ 1.0, nan, 1.0, nan });
+  var x = try V.Floats(vm.alloc, &.{ 1.0, nan, 1.0, nan });
   defer x.deinit(vm.alloc);
   var res = distinctF(vm, x);
   defer res.deinit(vm.alloc);
@@ -191,7 +191,7 @@ test "distinct floats with NaN" {
 test "distinct all unique" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-  var x = try V.intsFromSlice(vm.alloc, &.{ 1, 2, 3 });
+  var x = try V.Ints(vm.alloc, &.{ 1, 2, 3 });
   defer x.deinit(vm.alloc);
   var res = distinctI(vm, x);
   defer res.deinit(vm.alloc);
@@ -201,7 +201,7 @@ test "distinct all unique" {
 test "distinct all same" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-  var x = try V.intsFromSlice(vm.alloc, &.{ 7, 7, 7 });
+  var x = try V.Ints(vm.alloc, &.{ 7, 7, 7 });
   defer x.deinit(vm.alloc);
   var res = distinctI(vm, x);
   defer res.deinit(vm.alloc);
@@ -211,7 +211,7 @@ test "distinct all same" {
 test "distinct empty" {
   const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-  var x = try V.intsFromSlice(vm.alloc, &.{});
+  var x = try V.Ints(vm.alloc, &.{});
   defer x.deinit(vm.alloc);
   var res = distinctI(vm, x);
   defer res.deinit(vm.alloc);

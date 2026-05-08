@@ -61,7 +61,7 @@ const testing = std.testing;
 test "drop positive" {
   const vm = try VM.create(testing.allocator);
   defer vm.deinit();
-  var y = try V.intsFromSlice(vm.alloc, &.{ 1, 2, 3, 4, 5 });
+  var y = try V.Ints(vm.alloc, &.{ 1, 2, 3, 4, 5 });
   defer y.deinit(vm.alloc);
   const res = dropVec(.I)(vm, .{ .i = 2 }, y);
   defer res.deinit(vm.alloc);
@@ -71,7 +71,7 @@ test "drop positive" {
 test "drop negative" {
   const vm = try VM.create(testing.allocator);
   defer vm.deinit();
-  var y = try V.intsFromSlice(vm.alloc, &.{ 1, 2, 3, 4, 5 });
+  var y = try V.Ints(vm.alloc, &.{ 1, 2, 3, 4, 5 });
   defer y.deinit(vm.alloc);
   const res = dropVec(.I)(vm, .{ .i = -2 }, y);
   defer res.deinit(vm.alloc);
@@ -81,7 +81,7 @@ test "drop negative" {
 test "drop zero" {
   const vm = try VM.create(testing.allocator);
   defer vm.deinit();
-  var y = try V.intsFromSlice(vm.alloc, &.{ 1, 2, 3 });
+  var y = try V.Ints(vm.alloc, &.{ 1, 2, 3 });
   defer y.deinit(vm.alloc);
   const res = dropVec(.I)(vm, .{ .i = 0 }, y);
   defer res.deinit(vm.alloc);
@@ -91,7 +91,7 @@ test "drop zero" {
 test "drop all" {
   const vm = try VM.create(testing.allocator);
   defer vm.deinit();
-  var y = try V.intsFromSlice(vm.alloc, &.{ 1, 2, 3 });
+  var y = try V.Ints(vm.alloc, &.{ 1, 2, 3 });
   defer y.deinit(vm.alloc);
   const res = dropVec(.I)(vm, .{ .i = 10 }, y);
   defer res.deinit(vm.alloc);
@@ -101,7 +101,7 @@ test "drop all" {
 test "drop chars" {
   const vm = try VM.create(testing.allocator);
   defer vm.deinit();
-  var y = try V.charsFromSlice(vm.alloc, "hello");
+  var y = try V.Chars(vm.alloc, "hello");
   defer y.deinit(vm.alloc);
   const res = dropVec(.C)(vm, .{ .i = 2 }, y);
   defer res.deinit(vm.alloc);

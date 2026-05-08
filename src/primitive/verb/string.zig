@@ -39,5 +39,5 @@ fn fmt(vm: *VM, x: V) V {
   var f = tf.formatter();
   var w = mock.writer();
   f.format(x, &w.interface) catch return V{ .err = .io };
-  return V.charsFromSlice(vm.alloc, mock.getText()) catch return V{ .err = .memory };
+  return V.Chars(vm.alloc, mock.getText()) catch return V{ .err = .memory };
 }

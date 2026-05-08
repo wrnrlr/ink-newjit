@@ -23,13 +23,13 @@ pub fn split(vm: *VM, sep: V, str: V) V {
   var i: usize = 0;
   while (i + sep_chars.len <= str_chars.len) {
     if (std.mem.eql(u8, str_chars[i..i + sep_chars.len], sep_chars)) {
-      parts.append(vm.alloc, V.charsFromSlice(vm.alloc, str_chars[start..i]) catch return V{ .err = .memory }) catch return V{ .err = .memory };
+      parts.append(vm.alloc, V.Chars(vm.alloc, str_chars[start..i]) catch return V{ .err = .memory }) catch return V{ .err = .memory };
       i += sep_chars.len;
       start = i;
     } else {
       i += 1;
     }
   }
-  parts.append(vm.alloc, V.charsFromSlice(vm.alloc, str_chars[start..]) catch return V{ .err = .memory }) catch return V{ .err = .memory };
-  return V.valuesFromSlice(vm.alloc, parts.items) catch return V{ .err = .memory };
+  parts.append(vm.alloc, V.Chars(vm.alloc, str_chars[start..]) catch return V{ .err = .memory }) catch return V{ .err = .memory };
+  return V.Values(vm.alloc, parts.items) catch return V{ .err = .memory };
 }

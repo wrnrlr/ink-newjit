@@ -262,7 +262,7 @@ fn hasListVec(alloc: Alloc, data: []const V, y: V) V {
 
 test "has integers atom" {
   const alloc = std.testing.allocator;
-  var x = try V.intsFromSlice(alloc, &.{ 1, 2, 3 });
+  var x = try V.Ints(alloc, &.{ 1, 2, 3 });
   defer x.deinit(alloc);
   try std.testing.expect(containsOrdered(i32, alloc, x.I.slice(), 2) == true);
   try std.testing.expect(containsOrdered(i32, alloc, x.I.slice(), 9) == false);
@@ -270,9 +270,9 @@ test "has integers atom" {
 
 test "has integers vector" {
   const alloc = std.testing.allocator;
-  var x = try V.intsFromSlice(alloc, &.{ 1, 2, 3 });
+  var x = try V.Ints(alloc, &.{ 1, 2, 3 });
   defer x.deinit(alloc);
-  var y = try V.intsFromSlice(alloc, &.{ 3, 9, 1 });
+  var y = try V.Ints(alloc, &.{ 3, 9, 1 });
   defer y.deinit(alloc);
   var res = lookupOrderedVec(i32, alloc, x.I.slice(), y.I.slice());
   defer res.deinit(alloc);
@@ -284,7 +284,7 @@ test "has integers large (hash path)" {
   const alloc = std.testing.allocator;
   var buf: [so.HAS_THRESHOLD + 1]i32 = undefined;
   for (&buf, 0..) |*v, i| v.* = @intCast(i);
-  var x = try V.intsFromSlice(alloc, &buf);
+  var x = try V.Ints(alloc, &buf);
   defer x.deinit(alloc);
   try std.testing.expect(containsOrdered(i32, alloc, x.I.slice(), 0) == true);
   try std.testing.expect(containsOrdered(i32, alloc, x.I.slice(), so.HAS_THRESHOLD) == true);
@@ -293,7 +293,7 @@ test "has integers large (hash path)" {
 
 test "has chars atom" {
   const alloc = std.testing.allocator;
-  var x = try V.charsFromSlice(alloc, "aeiou");
+  var x = try V.Chars(alloc, "aeiou");
   defer x.deinit(alloc);
   try std.testing.expect(hasCharAtom(x.C.slice(), 'e') == true);
   try std.testing.expect(hasCharAtom(x.C.slice(), 'z') == false);
@@ -301,9 +301,9 @@ test "has chars atom" {
 
 test "has chars vector" {
   const alloc = std.testing.allocator;
-  var x = try V.charsFromSlice(alloc, "aeiou");
+  var x = try V.Chars(alloc, "aeiou");
   defer x.deinit(alloc);
-  var y = try V.charsFromSlice(alloc, "azbz");
+  var y = try V.Chars(alloc, "azbz");
   defer y.deinit(alloc);
   var res = hasCharVec(alloc, x.C.slice(), y.C.slice());
   defer res.deinit(alloc);
@@ -328,7 +328,7 @@ test "has booleans" {
 test "has floats with NaN" {
   const alloc = std.testing.allocator;
   const nan = std.math.nan(f32);
-  var x = try V.floatsFromSlice(alloc, &.{ 1.0, nan, 3.0 });
+  var x = try V.Floats(alloc, &.{ 1.0, nan, 3.0 });
   defer x.deinit(alloc);
   try std.testing.expect(containsF(x.F.slice(), 1.0) == true);
   try std.testing.expect(containsF(x.F.slice(), nan) == true);
@@ -337,7 +337,7 @@ test "has floats with NaN" {
 
 test "has empty haystack" {
   const alloc = std.testing.allocator;
-  var x = try V.intsFromSlice(alloc, &.{});
+  var x = try V.Ints(alloc, &.{});
   defer x.deinit(alloc);
   try std.testing.expect(containsOrdered(i32, alloc, x.I.slice(), 1) == false);
 }

@@ -121,7 +121,7 @@ pub fn sortIndices(alloc: Alloc, v: V, desc: bool) V {
 test "ascend integers" {
   const alloc = std.testing.allocator;
   var i_vals = [_]i32{ 3, 1, 4, 1, 5, 9, 2 };
-  var v_i = try V.intsFromSlice(alloc, &i_vals);
+  var v_i = try V.Ints(alloc, &i_vals);
   defer v_i.deinit(alloc);
   var res = sortIndices(alloc, v_i, false);
   defer res.deinit(alloc);
@@ -131,7 +131,7 @@ test "ascend integers" {
 test "descend integers" {
   const alloc = std.testing.allocator;
   var i_vals = [_]i32{ 3, 1, 4, 2 };
-  var v_i = try V.intsFromSlice(alloc, &i_vals);
+  var v_i = try V.Ints(alloc, &i_vals);
   defer v_i.deinit(alloc);
   var res = sortIndices(alloc, v_i, true);
   defer res.deinit(alloc);
@@ -141,7 +141,7 @@ test "descend integers" {
 test "ascend floats with NaN" {
   const alloc = std.testing.allocator;
   var f_vals = [_]f32{ 1.1, std.math.nan(f32), 0.5 };
-  var v_f = try V.floatsFromSlice(alloc, &f_vals);
+  var v_f = try V.Floats(alloc, &f_vals);
   defer v_f.deinit(alloc);
   var res = sortIndices(alloc, v_f, false);
   defer res.deinit(alloc);
@@ -152,7 +152,7 @@ test "ascend floats with NaN" {
 test "ascend chars" {
   const alloc = std.testing.allocator;
   var c_vals = [_]u8{ 'c', 'a', 'b' };
-  var v_c = try V.charsFromSlice(alloc, &c_vals);
+  var v_c = try V.Chars(alloc, &c_vals);
   defer v_c.deinit(alloc);
   var res = sortIndices(alloc, v_c, false);
   defer res.deinit(alloc);
