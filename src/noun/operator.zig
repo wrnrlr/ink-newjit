@@ -5,9 +5,9 @@ const Op = @import("../runtime/tape.zig").Op;
 const K = @import("class.zig").K;
 const util = @import("../util.zig");
 const activeTag = std.meta.activeTag;
-pub const ExtObj = @import("../runtime/plugin.zig").ExtObj;
-pub const ExtVTable = @import("../runtime/plugin.zig").ExtVTable;
-pub const ExtRegistry = @import("../runtime/plugin.zig").ExtRegistry;
+pub const ExtObj = @import("plugin.zig").ExtObj;
+pub const ExtVTable = @import("plugin.zig").ExtVTable;
+pub const ExtRegistry = @import("plugin.zig").ExtRegistry;
 
 pub const Adverb = enum(u8) {
   @"'", @"/", @"\\", @"':", @"/:", @"\\:"

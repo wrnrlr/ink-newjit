@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Alloc = std.mem.Allocator;
 const Parser = @import("../parser/ast.zig").Parser;
 const Chunk = @import("tape.zig").Chunk;
@@ -7,6 +8,7 @@ const Op = @import("tape.zig").Op;
 const Compiler = @import("compiler.zig").Compiler;
 const Registry = @import("registry.zig").Registry;
 const value = @import("../noun/value.zig");
+const Pool = @import("../noun/symbol.zig").Pool;
 const GpuCtx = @import("gpu").GpuCtx;
 const command = @import("command.zig");
 const V = value.V;
@@ -18,19 +20,17 @@ const Fn = opmod.Fn;
 const Adverb = opmod.Adverb;
 const FnKind = opmod.FnKind;
 const FnTables = @import("fntable.zig").FnTables;
-const Pool = @import("../noun/symbol.zig").Pool;
 const assert = std.debug.assert;
-const verb_enlist = @import("../primitive/verb/enlist.zig");
 const call = @import("call.zig");
+const verb_enlist = @import("../primitive/verb/enlist.zig");
 const amend = @import("../primitive/amend.zig");
 const pair = @import("../primitive/verb/pair.zig");
 const promote = @import("../primitive/promote.zig").promote;
 const dispatch = @import("../primitive/dispatch.zig");
 const TerseFormatter = @import("../noun/format.zig").TerseFormatter;
 const MockWriter = @import("../util.zig").MockWriter;
-const ext_mod = @import("plugin.zig");
+const ExtRegistry = @import("../noun/plugin.zig").ExtRegistry;
 const build_options = @import("build_options");
-const builtin = @import("builtin");
 // JIT is only available on arm64/macOS; the flag is silently ignored elsewhere.
 const jit_enabled = build_options.enable_jit and
     builtin.cpu.arch == .aarch64 and
@@ -73,7 +73,7 @@ pub const VM = struct {
   current_chunk: *Chunk,
   registry: Registry,
   fn_tables: FnTables,
-  ext: ext_mod.ExtRegistry,
+  ext: ExtRegistry,
   out: ?*std.Io.Writer = null,
   prng: std.Random.DefaultPrng,
   argv: V = .blank,
@@ -109,7 +109,7 @@ pub const VM = struct {
       .globals_names = std.StringHashMap(u8).init(alloc),
       .registry      = try Registry.init(alloc),
       .fn_tables     = FnTables.init(alloc),
-      .ext           = ext_mod.ExtRegistry.init(alloc),
+      .ext           = ExtRegistry.init(alloc),
       .prng          = std.Random.DefaultPrng.init(0),
     };
 
