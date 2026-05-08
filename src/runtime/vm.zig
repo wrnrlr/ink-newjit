@@ -7,6 +7,7 @@ const Op = @import("tape.zig").Op;
 const Compiler = @import("compiler.zig").Compiler;
 const Registry = @import("registry.zig").Registry;
 const value = @import("../noun/value.zig");
+const GpuCtx = @import("gpu").GpuCtx;
 const command = @import("command.zig");
 const V = value.V;
 const N = value.N;
@@ -53,7 +54,7 @@ const Frame = struct {
 
 pub const VM = struct {
   alloc: Alloc,
-  gpu: ?*value.GpuCtx = null,
+  gpu: ?*GpuCtx = null,
   parser: ?*Parser,
   compiler: *Compiler,
   chunk: *Chunk,
