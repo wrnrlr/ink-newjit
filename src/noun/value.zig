@@ -31,6 +31,23 @@ pub const V = union(K) {
 
   pub inline fn wrap(comptime k: K, v: holder(k)) V { return @unionInit(V, @tagName(k), v); }
   pub inline fn unwrap(v: V, comptime k: K) holder(k) { return @field(v, @tagName(k)); }
+
+  pub inline fn tag(v: V) K { return activeTag(v); }
+  pub inline fn code(v: V) usize { return v.tag().code(); }
+  
+  pub fn isAtom(v: V) bool { return v.tag().isAtom(); }
+  pub fn isVec(v: V) bool { return v.tag().isVec(); }
+  pub fn isDict(v: V) bool { return switch (v.tag()) { .m, .M => true, else => false }; }
+  pub fn isLambda(v: V) bool { return v == .func and v.func.getKind() == .lambda; }
+  pub fn isPartial(v: V) bool { return v == .partial; }
+  
+  pub fn asPartial(v: V) *Partial { return v.partial; }
+
+  pub fn Ints(alloc: Alloc, x: []const i32) !V { return .{ .I = try N(i32).n1(alloc, x) }; }
+  pub fn Floats(alloc: Alloc, x: []const f32) !V { return .{ .F = try N(f32).n1(alloc, x) }; }
+  pub fn Symbols(alloc: Alloc, x: []const u32) !V { return .{ .S = try N(u32).n1(alloc, x) }; }
+  pub fn Chars(alloc: Alloc, x: []const u8) !V { return .{ .C = try N(u8).n1(alloc, x) }; }
+  pub fn Values(alloc: Alloc, x: []const V) !V { return .{ .L = try N(V).n1(alloc, x) }; }
   
   fn holder(comptime k: K) type {
     return switch (k) {
@@ -172,22 +189,6 @@ pub const V = union(K) {
       else => 1,
     };
   }
-
-  pub inline fn tag(v: V) K { return activeTag(v); }
-  pub inline fn code(v: V) usize { return v.tag().code(); }
-  pub fn isAtom(v: V) bool { return v.tag().isAtom(); }
-  pub fn isVec(v: V) bool { return v.tag().isVec(); }
-  pub fn isDict(v: V) bool { return switch (v.tag()) { .m, .M => true, else => false }; }
-
-  pub fn isLambda(v: V) bool { return v == .func and v.func.getKind() == .lambda; }
-  pub fn isPartial(v: V) bool { return v == .partial; }
-  pub fn asPartial(v: V) *Partial { return v.partial; }
-
-  pub fn Ints(alloc: Alloc, x: []const i32) !V { return .{ .I = try N(i32).n1(alloc, x) }; }
-  pub fn Floats(alloc: Alloc, x: []const f32) !V { return .{ .F = try N(f32).n1(alloc, x) }; }
-  pub fn Symbols(alloc: Alloc, x: []const u32) !V { return .{ .S = try N(u32).n1(alloc, x) }; }
-  pub fn Chars(alloc: Alloc, x: []const u8) !V { return .{ .C = try N(u8).n1(alloc, x) }; }
-  pub fn Values(alloc: Alloc, x: []const V) !V { return .{ .L = try N(V).n1(alloc, x) }; }
   
   pub fn make(comptime kk: K, comptime T: type, alloc: Alloc, vals: []const T) !V {
     return @unionInit(V, @tagName(kk), try N(T).n1(alloc, vals));
@@ -202,21 +203,6 @@ test "wrap" {
   try std.testing.expect(V.wrap(.f, 2.3).f == 2.3);
   try std.testing.expect(V.wrap(.c, 'A').c == 'A');
 }
-
-// test "FnRef inline kinds" {
-//   const r1 = Fn.makeBuiltin(.@"+");
-//   try std.testing.expect(r1.getKind() == .builtin);
-//   try std.testing.expect(r1.getOp() == .@"+");
-//   try std.testing.expect(r1.arity == 2);
-
-//   const r2 = Fn.makeBuiltinMonad(.@"*");
-//   try std.testing.expect(r2.monad == 1);
-//   try std.testing.expect(r2.getRealArity() == 1);
-
-//   const r3 = Fn.makeDerivedBuiltin(.@"+", .@"/");
-//   try std.testing.expect(r3.getKind() == .derived_builtin);
-//   try std.testing.expect(r3.getAdverb() == .@"/");
-// }
 
 test "atoms" {
   const v1 = V{ .i = 42 }; const v2 = V{ .f = 3.14 };

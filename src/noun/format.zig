@@ -157,7 +157,7 @@ pub const TerseFormatter = struct {
       .func => |ref| try self.formatFn(ref, w),
       .partial => |p| {
         // Compact display for operator projections: 1+ or +1
-        const is_builtin = p.ref.getKind() == .builtin and p.ref.monad == 0;
+        const is_builtin = p.ref.getKind() == .builtin and p.ref.monadic == 0;
         if (is_builtin and p.arity == 2) {
           const arg0_filled = p.fill & 1 != 0;
           const arg1_filled = p.fill & 2 != 0;
@@ -198,7 +198,7 @@ pub const TerseFormatter = struct {
     switch (ref.getKind()) {
       .builtin => {
         const op = ref.getOp();
-        if (ref.monad != 0) {
+        if (ref.monadic != 0) {
           try w.writeAll(op.toString());
           try w.writeAll(":");
         } else {

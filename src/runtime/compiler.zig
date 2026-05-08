@@ -93,20 +93,20 @@ pub const Compiler = struct {
       .pending => |p| try self.compileBind(.{ .v = p.v, .f = p.f, .a = p.a }),
       .verb_op => |op| blk: {
         const v: V = if (Op.fromString(op)) |o|
-          .{ .func = Fn.makeBuiltin(o) }
+          .{ .func = Fn.dyad(o) }
         else
           .{ .func = Fn.makeTrain(op) };
         break :blk try self.emitConst(v);
       },
       .io => |io| blk: {
         const op = Op.fromString(io) orelse return error.UnknownOp;
-        break :blk try self.emitConst(V{ .func = Fn.makeBuiltin(op) });
+        break :blk try self.emitConst(V{ .func = Fn.dyad(op) });
       },
       .monad => |mv| blk: {
         const op = Op.fromString(mv.f) orelse return error.UnknownOp;
-        break :blk try self.emitConst(V{ .func = Fn.makeBuiltinMonad(op) });
+        break :blk try self.emitConst(V{ .func = Fn.monad(op) });
       },
-      .adverb_val => |a| try self.emitConst(V{ .func = Fn.makeAdverb(adverbFromString(a)) }),
+      .adverb_val => |a| try self.emitConst(V{ .func = Fn.adverb(adverbFromString(a)) }),
       .command => |cmd| blk: {
         // Encode command as a single char-vector constant: verb\0args
         const full_len = cmd.verb.len + 1 + cmd.args.len;
@@ -382,7 +382,7 @@ pub const Compiler = struct {
         const op = if (i.v.* == .verb_op) i.v.verb_op else i.v.io;
         if (Op.fromString(op)) |o| {
           // Partial dyadic symbolic or IO op: a v -> v(a, )
-          const v = V{ .func = Fn.makeBuiltin(o) };
+          const v = V{ .func = Fn.dyad(o) };
           var inputs: [2]ir.ValueId = undefined;
           inputs[0] = try self.emitConst(v);
           inputs[1] = try self.compileNode(i.a, false);
@@ -409,7 +409,7 @@ pub const Compiler = struct {
       if (Op.fromString(p.v)) |_| {
         return try self.compilePrimitive(p.v, 1, &.{arg_id});
       } else if (std.ascii.isAlphabetic(p.v[0])) {
-        const v: V = if (Op.fromString(p.v)) |o| .{ .func = Fn.makeBuiltin(o) } else .{ .func = Fn.makeTrain(p.v) };
+        const v: V = if (Op.fromString(p.v)) |o| .{ .func = Fn.dyad(o) } else .{ .func = Fn.makeTrain(p.v) };
         var inputs: [2]ir.ValueId = undefined;
         inputs[0] = try self.emitConst(v);
         inputs[1] = arg_id;
@@ -597,7 +597,7 @@ pub const Compiler = struct {
       .range  = range_id,
     });
     chunk_owned = false;
-    return try self.emitConst(V{ .func = Fn.makeLambda(lambda_idx, arity_res) });
+    return try self.emitConst(V{ .func = Fn.lambda(lambda_idx, arity_res) });
   }
 
   fn compileCond(self: *Compiler, c: ast.Cond, is_tail: bool) anyerror!ir.ValueId {

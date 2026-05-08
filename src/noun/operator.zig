@@ -25,7 +25,7 @@ pub const FnKind = enum(u4) {
 
 pub const Fn = packed struct(u64) {
   kind:  u4,   // FnKind backing int
-  monad: u1,   // for builtin: 1 = forced monadic
+  monadic: u1,   // for builtin: 1 = forced monadic
   arity: u3,   // 0-7; for train: number of ops (= 1 arg but stored here)
   idx:   u24,  // per-kind index or inline data
   extra: u32,  // per-kind inline data
@@ -34,29 +34,29 @@ pub const Fn = packed struct(u64) {
   pub fn getOp(self: Fn) Op { return @enumFromInt(@as(u8, @truncate(self.idx))); }
   pub fn getAdverb(self: Fn) Adverb { return @enumFromInt(@as(u8, @truncate(self.extra))); }
 
-  pub fn makeBuiltin(op: Op) Fn {
-    return .{ .kind = @intFromEnum(FnKind.builtin), .monad = 0, .arity = 2, .idx = @intFromEnum(op), .extra = 0 };
+  pub fn dyad(op: Op) Fn {
+    return .{ .kind = @intFromEnum(FnKind.builtin), .monadic = 0, .arity = 2, .idx = @intFromEnum(op), .extra = 0 };
   }
-  pub fn makeBuiltinMonad(op: Op) Fn {
-    return .{ .kind = @intFromEnum(FnKind.builtin), .monad = 1, .arity = 1, .idx = @intFromEnum(op), .extra = 0 };
+  pub fn monad(op: Op) Fn {
+    return .{ .kind = @intFromEnum(FnKind.builtin), .monadic = 1, .arity = 1, .idx = @intFromEnum(op), .extra = 0 };
   }
-  pub fn makeAdverb(adv: Adverb) Fn {
-    return .{ .kind = @intFromEnum(FnKind.adverb), .monad = 0, .arity = 1, .idx = @intFromEnum(adv), .extra = 0 };
+  pub fn adverb(adv: Adverb) Fn {
+    return .{ .kind = @intFromEnum(FnKind.adverb), .monadic = 0, .arity = 1, .idx = @intFromEnum(adv), .extra = 0 };
   }
   pub fn makeDerivedBuiltin(op: Op, adv: Adverb) Fn {
-    return .{ .kind = @intFromEnum(FnKind.derived_builtin), .monad = 0, .arity = 1, .idx = @intFromEnum(op), .extra = @intFromEnum(adv) };
+    return .{ .kind = @intFromEnum(FnKind.derived_builtin), .monadic = 0, .arity = 1, .idx = @intFromEnum(op), .extra = @intFromEnum(adv) };
   }
   pub fn makeDerivedLambda(lambda_idx: u24, adv: Adverb) Fn {
-    return .{ .kind = @intFromEnum(FnKind.derived_lambda), .monad = 0, .arity = 1, .idx = lambda_idx, .extra = @intFromEnum(adv) };
+    return .{ .kind = @intFromEnum(FnKind.derived_lambda), .monadic = 0, .arity = 1, .idx = lambda_idx, .extra = @intFromEnum(adv) };
   }
   pub fn makeDerivedTable(tbl_idx: u24) Fn {
-    return .{ .kind = @intFromEnum(FnKind.derived_table), .monad = 0, .arity = 1, .idx = tbl_idx, .extra = 0 };
+    return .{ .kind = @intFromEnum(FnKind.derived_table), .monadic = 0, .arity = 1, .idx = tbl_idx, .extra = 0 };
   }
-  pub fn makeLambda(lambda_idx: u24, fn_arity: u8) Fn {
-    return .{ .kind = @intFromEnum(FnKind.lambda), .monad = 0, .arity = @intCast(fn_arity), .idx = lambda_idx, .extra = 0 };
+  pub fn lambda(lambda_idx: u24, fn_arity: u8) Fn {
+    return .{ .kind = @intFromEnum(FnKind.lambda), .monadic = 0, .arity = @intCast(fn_arity), .idx = lambda_idx, .extra = 0 };
   }
   pub fn makeTrain(ops: []const u8) Fn {
-    var r = Fn{ .kind = @intFromEnum(FnKind.train), .monad = 0, .arity = @intCast(ops.len), .idx = 0, .extra = 0 };
+    var r = Fn{ .kind = @intFromEnum(FnKind.train), .monadic = 0, .arity = @intCast(ops.len), .idx = 0, .extra = 0 };
     for (ops, 0..) |op, i| {
       if (i < 3) r.idx |= @as(u24, op) << @intCast(i * 8)
       else r.extra |= @as(u32, op) << @intCast((i - 3) * 8);
@@ -105,3 +105,18 @@ pub const Op2 = enum(u8) {
 
 
 test "FnRef size" { try std.testing.expect(@sizeOf(Fn) == 8); }
+
+test "FnRef inline kinds" {
+  const r1 = Fn.dyad(.@"+");
+  try std.testing.expect(r1.getKind() == .builtin);
+  try std.testing.expect(r1.getOp() == .@"+");
+  try std.testing.expect(r1.arity == 2);
+
+  const r2 = Fn.monad(.@"*");
+  try std.testing.expect(r2.monadic == 1);
+  try std.testing.expect(r2.getRealArity() == 1);
+
+  const r3 = Fn.makeDerivedBuiltin(.@"+", .@"/");
+  try std.testing.expect(r3.getKind() == .derived_builtin);
+  try std.testing.expect(r3.getAdverb() == .@"/");
+}

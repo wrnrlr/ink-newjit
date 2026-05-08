@@ -43,7 +43,7 @@ pub const Call = struct {
     switch (ref.getKind()) {
       .builtin => {
         const op = ref.getOp();
-        const monad = ref.monad != 0;
+        const monad = ref.monadic != 0;
         if (monad) {
           if (args.len == 1) return dispatch.dispatch1(self.vm, op, args[0]);
           return .{ .err = .rank };
@@ -89,11 +89,11 @@ pub const Call = struct {
         return .{ .err = .rank };
       },
       .derived_builtin => {
-        const base = V{ .func = Fn.makeBuiltin(ref.getOp()) };
+        const base = V{ .func = Fn.dyad(ref.getOp()) };
         return derived(self.vm, base, ref.getAdverb(), args, wrapper);
       },
       .derived_lambda => {
-        const lambda_ref = Fn.makeLambda(@intCast(ref.idx), self.vm.fn_tables.lambdaAt(@intCast(ref.idx)).arity);
+        const lambda_ref = Fn.lambda(@intCast(ref.idx), self.vm.fn_tables.lambdaAt(@intCast(ref.idx)).arity);
         const base = V{ .func = lambda_ref };
         return derived(self.vm, base, ref.getAdverb(), args, wrapper);
       },
