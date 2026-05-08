@@ -1,9 +1,9 @@
 const std = @import("std");
 const VM = @import("../runtime/vm.zig").VM;
 const V = @import("./value.zig").V;
-const Fn = @import("./value.zig").Fn;
-const Adverb = @import("./value.zig").Adverb;
-const FnKind = @import("./value.zig").FnKind;
+const Fn = @import("./operator.zig").Fn;
+const Adverb = @import("./operator.zig").Adverb;
+const FnKind = @import("./operator.zig").FnKind;
 const Dict = @import("./value.zig").Dict;
 const Alloc = std.mem.Allocator;
 

@@ -11,10 +11,12 @@ const command = @import("command.zig");
 const V = value.V;
 const N = value.N;
 const K = @import("../noun/class.zig").K;
-const Partial = value.Partial;
-const Fn = value.Fn;
-const FnKind = value.FnKind;
-const FnTables = value.FnTables;
+const Partial = @import("../noun/partial.zig").Partial;
+const opmod = @import("../noun/operator.zig");
+const Fn = opmod.Fn;
+const Adverb = opmod.Adverb;
+const FnKind = opmod.FnKind;
+const FnTables = @import("fntable.zig").FnTables;
 const Pool = @import("../noun/symbol.zig").Pool;
 const assert = std.debug.assert;
 const verb_enlist = @import("../primitive/verb/enlist.zig");
@@ -244,7 +246,7 @@ pub const VM = struct {
 
   // Direct lambda call without wrapper→apply overhead. Used by hot adverb loops.
   // Uses a monomorphic inline cache to skip the JIT hash-map lookup on repeat calls.
-  pub fn callLambdaAndRun(vm: *VM, ref: value.Fn, args: []const V) V {
+  pub fn callLambdaAndRun(vm: *VM, ref: Fn, args: []const V) V {
     const prev_frames = vm.frames_len;
     const res_slot = vm.stack_len;
     vm.push(.blank) catch return V{ .err = .memory };
@@ -561,7 +563,7 @@ pub const VM = struct {
   }
 
   fn doDerive(vm: *VM) !void {
-    const adv: value.Adverb = @enumFromInt(vm.readByte());
+    const adv: Adverb = @enumFromInt(vm.readByte());
     const base_v = vm.pop();
     const derived: Fn = if (base_v == .func) blk: {
       const ref = base_v.func;
@@ -714,8 +716,8 @@ fn opJumpFalse(vm: *VM) anyerror!void { try vm.doJumpWhen(false); }
 fn opJumpTrue(vm: *VM) anyerror!void  { try vm.doJumpWhen(true); }
 
 const OpHandler = *const fn(*VM) anyerror!void;
-const op_table: [@typeInfo(OpCode).@"enum".fields.len]OpHandler = build: {
-  var t: [@typeInfo(OpCode).@"enum".fields.len]OpHandler = undefined;
+const op_table: [OpCode.COUNT]OpHandler = build: {
+  var t: [OpCode.COUNT]OpHandler = undefined;
   t[@intFromEnum(OpCode.Nop)]              = &opNop;
   t[@intFromEnum(OpCode.Gap)]              = &opGap;
   t[@intFromEnum(OpCode.Drop)]             = &opDrop;

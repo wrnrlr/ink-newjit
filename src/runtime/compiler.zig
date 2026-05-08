@@ -1,10 +1,13 @@
 const std = @import("std");
 const ast = @import("../parser/ast.zig");
 const value = @import("../noun/value.zig");
+const Adverb = @import("../noun/operator.zig").Adverb;
 const ir = @import("ir.zig");
 const optimizer = @import("optimizer.zig");
+const fntable = @import("fntable.zig");
 const V = value.V;
 const N = @import("../noun/value.zig").N;
+const Fn = @import("../noun/operator.zig").Fn;
 const Alloc = std.mem.Allocator;
 const Chunk = @import("tape.zig").Chunk;
 const OpCode = @import("tape.zig").OpCode;
@@ -12,72 +15,17 @@ const Op = @import("tape.zig").Op;
 const Pool = @import("../noun/symbol.zig").Pool;
 const Registry = @import("registry.zig").Registry;
 
-const PatchInfo = struct {
-  instruction_idx: usize,
-  name: []const u8,
-};
-
-const Scope = struct {
-  alloc: Alloc,
-  parent: ?*Scope,
-  chunk: *Chunk,
-  ir: ir.IR,
-  locals: std.StringHashMap(u8),
-  patches: std.ArrayList(PatchInfo),
-  inline_args: ?[]ir.ValueId = null,
-
-  is_lambda: bool = false,
-  named_args: ?ast.Args = null,
-  uses_x: bool = false,
-  uses_y: bool = false,
-  uses_z: bool = false,
-
-  pub fn init(alloc: Alloc, chunk: *Chunk, parent: ?*Scope) !Scope {
-    return .{
-      .alloc = alloc,
-      .parent = parent,
-      .chunk = chunk,
-      .ir = try ir.IR.init(alloc),
-      .locals = std.StringHashMap(u8).init(alloc),
-      .patches = try std.ArrayList(PatchInfo).initCapacity(alloc, 0),
-    };
-  }
-
-  pub fn deinit(self: *Scope) void {
-    self.ir.deinit();
-    self.locals.deinit();
-    self.patches.deinit(self.alloc);
-  }
-
-  pub fn reset(self: *Scope) void {
-    self.ir.reset();
-    self.locals.clearRetainingCapacity();
-    self.patches.clearRetainingCapacity();
-    self.uses_x = false;
-    self.uses_y = false;
-    self.uses_z = false;
-  }
-
-  fn arity(self: *Scope) u8 {
-    if (self.named_args) |args| return @intCast(args.len);
-    if (self.uses_z) return 3;
-    if (self.uses_y) return 2;
-    if (self.uses_x) return 1;
-    return 0;
-  }
-};
-
 pub const Compiler = struct {
   alloc: Alloc,
   chunk: *Chunk,
   globals: *std.StringHashMap(u8),
   symbols: *Pool,
   registry: *Registry,
-  fn_tables: *value.FnTables,
+  fn_tables: *fntable.FnTables,
   scope: *Scope,
   text_id: u32 = 0,
 
-  pub fn init(alloc: Alloc, chunk: *Chunk, globals: *std.StringHashMap(u8), symbols: *Pool, registry: *Registry, fn_tables: *value.FnTables) !Compiler {
+  pub fn init(alloc: Alloc, chunk: *Chunk, globals: *std.StringHashMap(u8), symbols: *Pool, registry: *Registry, fn_tables: *fntable.FnTables) !Compiler {
     const scope = try alloc.create(Scope);
     scope.* = try Scope.init(alloc, chunk, null);
     return .{
@@ -145,20 +93,20 @@ pub const Compiler = struct {
       .pending => |p| try self.compileBind(.{ .v = p.v, .f = p.f, .a = p.a }),
       .verb_op => |op| blk: {
         const v: V = if (Op.fromString(op)) |o|
-          .{ .func = value.Fn.makeBuiltin(o) }
+          .{ .func = Fn.makeBuiltin(o) }
         else
-          .{ .func = value.Fn.makeTrain(op) };
+          .{ .func = Fn.makeTrain(op) };
         break :blk try self.emitConst(v);
       },
       .io => |io| blk: {
         const op = Op.fromString(io) orelse return error.UnknownOp;
-        break :blk try self.emitConst(V{ .func = value.Fn.makeBuiltin(op) });
+        break :blk try self.emitConst(V{ .func = Fn.makeBuiltin(op) });
       },
       .monad => |mv| blk: {
         const op = Op.fromString(mv.f) orelse return error.UnknownOp;
-        break :blk try self.emitConst(V{ .func = value.Fn.makeBuiltinMonad(op) });
+        break :blk try self.emitConst(V{ .func = Fn.makeBuiltinMonad(op) });
       },
-      .adverb_val => |a| try self.emitConst(V{ .func = value.Fn.makeAdverb(adverbFromString(a)) }),
+      .adverb_val => |a| try self.emitConst(V{ .func = Fn.makeAdverb(adverbFromString(a)) }),
       .command => |cmd| blk: {
         // Encode command as a single char-vector constant: verb\0args
         const full_len = cmd.verb.len + 1 + cmd.args.len;
@@ -434,7 +382,7 @@ pub const Compiler = struct {
         const op = if (i.v.* == .verb_op) i.v.verb_op else i.v.io;
         if (Op.fromString(op)) |o| {
           // Partial dyadic symbolic or IO op: a v -> v(a, )
-          const v = V{ .func = value.Fn.makeBuiltin(o) };
+          const v = V{ .func = Fn.makeBuiltin(o) };
           var inputs: [2]ir.ValueId = undefined;
           inputs[0] = try self.emitConst(v);
           inputs[1] = try self.compileNode(i.a, false);
@@ -461,7 +409,7 @@ pub const Compiler = struct {
       if (Op.fromString(p.v)) |_| {
         return try self.compilePrimitive(p.v, 1, &.{arg_id});
       } else if (std.ascii.isAlphabetic(p.v[0])) {
-        const v: V = if (Op.fromString(p.v)) |o| .{ .func = value.Fn.makeBuiltin(o) } else .{ .func = value.Fn.makeTrain(p.v) };
+        const v: V = if (Op.fromString(p.v)) |o| .{ .func = Fn.makeBuiltin(o) } else .{ .func = Fn.makeTrain(p.v) };
         var inputs: [2]ir.ValueId = undefined;
         inputs[0] = try self.emitConst(v);
         inputs[1] = arg_id;
@@ -487,7 +435,7 @@ pub const Compiler = struct {
     var ops_buf: [7]u8 = undefined;
     var ops_len: usize = 0;
     if (collectVerbOps(ap.f, &ops_buf, &ops_len) and collectVerbOps(ap.a, &ops_buf, &ops_len)) {
-      const v = V{ .func = value.Fn.makeTrain(ops_buf[0..ops_len]) };
+      const v = V{ .func = Fn.makeTrain(ops_buf[0..ops_len]) };
       return try self.emitConst(v);
     }
     var inputs: [2]ir.ValueId = undefined;
@@ -513,7 +461,7 @@ pub const Compiler = struct {
     }
   }
 
-  fn adverbFromString(a: []const u8) value.Adverb {
+  fn adverbFromString(a: []const u8) Adverb {
     if (std.mem.eql(u8, a, "'")) return .@"'"
     else if (std.mem.eql(u8, a, "/")) return .@"/"
     else if (std.mem.eql(u8, a, "\\")) return .@"\\"
@@ -533,7 +481,7 @@ pub const Compiler = struct {
     if (Op.fromString(name)) |op| {
       return try self.emitOpWithArg(if (arity_val == 1) .Apply1 else .Apply2, @intFromEnum(op), inputs);
     } else {
-      const v = V{ .func = value.Fn.makeTrain(name) };
+      const v = V{ .func = Fn.makeTrain(name) };
       const f_id = try self.emitConst(v);
       var call_inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, inputs.len + 1);
       defer call_inputs.deinit(self.alloc);
@@ -649,7 +597,7 @@ pub const Compiler = struct {
       .range  = range_id,
     });
     chunk_owned = false;
-    return try self.emitConst(V{ .func = value.Fn.makeLambda(lambda_idx, arity_res) });
+    return try self.emitConst(V{ .func = Fn.makeLambda(lambda_idx, arity_res) });
   }
 
   fn compileCond(self: *Compiler, c: ast.Cond, is_tail: bool) anyerror!ir.ValueId {
@@ -807,5 +755,60 @@ pub const Compiler = struct {
       },
       else => {},
     }
+  }
+};
+
+const PatchInfo = struct {
+  instruction_idx: usize,
+  name: []const u8,
+};
+
+const Scope = struct {
+  alloc: Alloc,
+  parent: ?*Scope,
+  chunk: *Chunk,
+  ir: ir.IR,
+  locals: std.StringHashMap(u8),
+  patches: std.ArrayList(PatchInfo),
+  inline_args: ?[]ir.ValueId = null,
+
+  is_lambda: bool = false,
+  named_args: ?ast.Args = null,
+  uses_x: bool = false,
+  uses_y: bool = false,
+  uses_z: bool = false,
+
+  pub fn init(alloc: Alloc, chunk: *Chunk, parent: ?*Scope) !Scope {
+    return .{
+      .alloc = alloc,
+      .parent = parent,
+      .chunk = chunk,
+      .ir = try ir.IR.init(alloc),
+      .locals = std.StringHashMap(u8).init(alloc),
+      .patches = try std.ArrayList(PatchInfo).initCapacity(alloc, 0),
+    };
+  }
+
+  pub fn deinit(self: *Scope) void {
+    self.ir.deinit();
+    self.locals.deinit();
+    self.patches.deinit(self.alloc);
+  }
+
+  pub fn reset(self: *Scope) void {
+    self.ir.reset();
+    self.locals.clearRetainingCapacity();
+    self.patches.clearRetainingCapacity();
+    self.uses_x = false;
+    self.uses_y = false;
+    self.uses_z = false;
+  }
+
+  fn arity(self: *Scope) u8 {
+    if (self.named_args) |args| return @intCast(args.len);
+    if (self.uses_z) return 3;
+    if (self.uses_y) return 2;
+    if (self.uses_x) return 1;
+    return 0;
   }
 };

@@ -23,6 +23,8 @@ pub const OpCode = enum(u8) {
 	MakeDict,                // make a dict from keys and values on stack
 	MakeTable,               // make a table from items on stack
 	Command,                 // meta command (\h \l \d \t \v \f \cd)
+
+	pub const COUNT = @typeInfo(OpCode).@"enum".fields.len;
 };
 
 /// Op is used to encode primitive IDs and dispatch.

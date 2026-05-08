@@ -3,7 +3,7 @@ const Alloc = std.mem.Allocator;
 const value = @import("../noun/value.zig");
 const VM = @import("../runtime/vm.zig").VM;
 const V = value.V;
-const Adverb = value.Adverb;
+const Adverb = @import("../noun/operator.zig").Adverb;
 const util = @import("../util.zig");
 const adverbs = @import("adverb/adverbs.zig");
 
