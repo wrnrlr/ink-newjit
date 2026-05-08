@@ -57,8 +57,6 @@ pub const K = enum(u8) {
     };
   }
 
-  // ── Type predicates (arithmetic / bitmask, no switch) ────────────────────
-
   pub fn isScalar(k: K) bool { const v = @intFromEnum(k); return v >= 2 and v <= 6; }
   pub fn isAtom(k: K)   bool { return k.isScalar(); }
   pub fn isVec(k: K)    bool { return @intFromEnum(k) & VEC_BIT != 0; }
@@ -77,8 +75,6 @@ pub const K = enum(u8) {
   }
   pub fn isMap(k: K) bool { return k == .m or k == .M; }
 
-  // ── Scalar ↔ vector (single bitwise op) ──────────────────────────────────
-
   // b → B, i → I, etc.  Caller must ensure k is a scalar type.
   pub inline fn container(comptime k: K) K {
     return @enumFromInt(@intFromEnum(k) | VEC_BIT);
@@ -87,8 +83,6 @@ pub const K = enum(u8) {
   pub inline fn atom(comptime k: K) K {
     return @enumFromInt(@intFromEnum(k) & ~@as(u8, VEC_BIT));
   }
-
-  // ── Type backing ─────────────────────────────────────────────────────────
 
   pub fn backing(comptime k: K) type {
     return switch (k) {

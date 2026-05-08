@@ -8,7 +8,8 @@ const OpCode   = chunk_mod.OpCode;
 const Op       = chunk_mod.Op;
 const Chunk    = chunk_mod.Chunk;
 const V        = value.V;
-const Adverb   = value.Adverb;
+const Adverb   = @import("../noun/operator.zig").Adverb;
+const Pool   = @import("../noun/symbol.zig").Pool;
 const Compiler = compiler_mod.Compiler;
 const Parser   = ast.Parser;
 
@@ -63,7 +64,7 @@ fn readU16(code: []const u8, ip: usize) u16 {
   return @as(u16, code[ip]) | (@as(u16, code[ip + 1]) << 8);
 }
 
-fn printChunk(chunk: *Chunk, symbols: *const @import("../noun/symbol.zig").Pool, names: []const ?[]const u8, out: *std.Io.Writer) !void {
+fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, out: *std.Io.Writer) !void {
   const code = chunk.code.items;
   var ip: usize = 0;
 
@@ -186,7 +187,7 @@ fn printChunk(chunk: *Chunk, symbols: *const @import("../noun/symbol.zig").Pool,
   }
 }
 
-fn fmtValue(v: V, symbols: *const @import("../noun/symbol.zig").Pool, out: *std.Io.Writer) anyerror!void {
+fn fmtValue(v: V, symbols: *const Pool, out: *std.Io.Writer) anyerror!void {
   switch (v) {
     .blank   => try out.print("(blank)", .{}),
     .err     => |e| try out.print("!{s}", .{@tagName(e)}),

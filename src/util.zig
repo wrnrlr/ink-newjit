@@ -1,12 +1,7 @@
 const std = @import("std");
-const builtin = @import("builtin");
-const value = @import("noun/value.zig");
-const VM = @import("runtime/vm.zig").VM;
 const Alloc = std.mem.Allocator;
-
-const V = value.V;
-const K = @import("noun/class.zig").K;
-const N = value.N;
+const V = @import("noun/value.zig").V;
+const VM = @import("runtime/vm.zig").VM;
 
 pub const DEBUG = false;
 
@@ -19,6 +14,7 @@ pub const MonadFn = *const fn (*VM, V) V;
 pub const DyadFn = *const fn (*VM, V, V) V;
 pub const TriadFn = *const fn (*VM, V, V, V) V;
 pub const TetradFn = *const fn (*VM, V, V, V, V) V;
+
 pub const ApplyFn = *const fn (*VM, V, []const V) V;
 
 pub fn EnumFieldMap(comptime T: type) std.StaticStringMap(T) {
