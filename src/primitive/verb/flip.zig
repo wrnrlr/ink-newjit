@@ -7,6 +7,7 @@ const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
 const enlist = @import("enlist.zig").enlist;
 const promote = @import("../promote.zig").promote;
+const promoteAs = @import("../promote.zig").promoteAs;
 
 pub const Flip = struct {
   pub const op = .@"+";
@@ -71,14 +72,26 @@ pub fn flip(alloc: Alloc, x: V) V {
   return flipListAlloc(alloc, x);
 }
 
+fn dictAv(v: V) V { return switch (v) { .m => |d| d.av(), .M => |d| d.av(), else => unreachable }; }
+fn dictBv(v: V) V { return switch (v) { .m => |d| d.bv(), .M => |d| d.bv(), else => unreachable }; }
+
+// Only promote when all elements share the same tag; otherwise keep as mixed list.
+fn strictPromote(alloc: Alloc, n: N(V)) V {
+  const s = n.slice();
+  if (s.len == 0) return V{ .L = n };
+  const k = s[0].tag();
+  if (!k.isAtom()) return V{ .L = n };
+  for (s[1..]) |v| if (v.tag() != k) return V{ .L = n };
+  return promoteAs(alloc, n, k);
+}
+
 fn flipListAlloc(alloc: Alloc, x: V) V {
   const slice = x.L.slice();
   if (slice.len == 0) return x.ref();
   if (slice[0].isDict()) {
-    const keys = switch (slice[0]) {
-      .m => |di| di.av(), .M => |di| di.av(), else => unreachable,
-    };
+    const keys = dictAv(slice[0]);
     const num_cols = keys.len();
+    const scalar_key = num_cols == 1 and !keys.tag().isVec();
     const row_count = slice.len;
     const res_vals_n = N(V).init(alloc, num_cols) catch return V{ .err = .memory };
     for (0..num_cols) |j| {
@@ -86,20 +99,15 @@ fn flipListAlloc(alloc: Alloc, x: V) V {
       for (0..row_count) |i| {
         const item = slice[i];
         if (!item.isDict()) return V{ .err = .@"type" };
-        const item_keys = switch (item) {
-          .m => |di| di.av(), .M => |di| di.av(), else => unreachable,
-        };
-        if (!item_keys.eq(keys)) return V{ .err = .length };
-        const item_vals = switch (item) {
-          .m => |di| di.bv(), .M => |di| di.bv(), else => unreachable,
-        };
-        col.slice()[i] = if (num_cols == 1 and !keys.tag().isVec()) item_vals.ref() else item_vals.at(j);
+        if (!dictAv(item).eq(keys)) return V{ .err = .length };
+        const item_vals = dictBv(item);
+        col.slice()[i] = if (scalar_key) item_vals.ref() else item_vals.at(j);
       }
-      res_vals_n.slice()[j] = promote(alloc, col);
+      res_vals_n.slice()[j] = strictPromote(alloc, col);
     }
     var rk = keys.ref();
     const rv = promote(alloc, res_vals_n);
-    if (num_cols == 1 and !keys.tag().isVec()) { rk.deinit(alloc); rk = enlist(alloc, keys); }
+    if (scalar_key) { rk.deinit(alloc); rk = enlist(alloc, keys); }
     return V{ .M = Dict.init(alloc, rk, rv) catch return V{ .err = .memory } };
   }
   const row_count = slice.len;
@@ -109,7 +117,7 @@ fn flipListAlloc(alloc: Alloc, x: V) V {
   for (0..first_row_len) |j| {
     const col = N(V).init(alloc, row_count) catch return V{ .err = .memory };
     for (0..row_count) |i| col.slice()[i] = slice[i].at(j);
-    res.slice()[j] = promote(alloc, col);
+    res.slice()[j] = strictPromote(alloc, col);
   }
   return promote(alloc, res);
 }

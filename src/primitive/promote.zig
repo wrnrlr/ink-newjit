@@ -27,28 +27,43 @@ fn castAtom(comptime tk: K, v: V) tk.backing() {
   };
 }
 
-pub fn promote(alloc: Alloc, n: N(V)) V {
-  const slice = n.slice();
-  if (slice.len == 0) return V{ .L = n };
-  var target: ?K = null;
-  for (slice) |v| {
+/// Determine the common promotable kind for a slice of atoms.
+/// Returns null if the slice is empty, contains a non-atom, or has incompatible types.
+/// Does not check for .err — callers that need error propagation must check separately.
+pub fn inferKind(slice: []const V) ?K {
+  if (slice.len == 0) return null;
+  var target = slice[0].tag();
+  if (!target.isAtom()) return null;
+  for (slice[1..]) |v| {
     const k = v.tag();
-    if (k == .err) { n.deinit(alloc); return v; }
-    if (!k.isAtom()) return V{ .L = n };
-    if (target == null) target = k;
-    const t = target.?;
-    if (t == k) continue;
-    if (t.isNumeric() or t == .b and k.isNumeric() or k == .b) {
-      if (t.isFloat() or k.isFloat()) target = .f else target = .i;
-    } else return V{ .L = n };
+    if (!k.isAtom()) return null;
+    if (target == k) continue;
+    if (target.isNumeric() or target == .b and k.isNumeric() or k == .b) {
+      if (target.isFloat() or k.isFloat()) target = .f else target = .i;
+    } else return null;
   }
+  return target;
+}
+
+/// Allocate a typed vector and cast all elements of n into kind k.
+/// Caller guarantees inferKind already returned k for n's elements.
+/// Takes ownership of n; deinits it on success or OOM.
+pub fn promoteAs(alloc: Alloc, n: N(V), k: K) V {
+  const slice = n.slice();
   inline for (promotable) |tk| {
-    if (target.? == tk) {
+    if (k == tk) {
       var res = N(tk.backing()).init(alloc, slice.len) catch { n.deinit(alloc); return V{ .err = .memory }; };
       for (slice, 0..) |v, i| res.slice()[i] = castAtom(tk, v);
       n.deinit(alloc);
       return V.wrap(tk.container(), res);
     }
   }
+  unreachable; // k must be a promotable kind
+}
+
+pub fn promote(alloc: Alloc, n: N(V)) V {
+  const slice = n.slice();
+  for (slice) |v| if (v.tag() == .err) { n.deinit(alloc); return v; };
+  if (inferKind(slice)) |k| return promoteAs(alloc, n, k);
   return V{ .L = n };
 }
