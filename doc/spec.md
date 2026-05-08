@@ -15,16 +15,16 @@ The types are organized in different classes:
 - Vectors: 
 - Mappings: the associative types Dict & Table
 
-### Integer `` `i ``
+### Integer `` 0 1 -2 0N ``
 Signed hole numbers, writen as arabic numerals, `-2 0 1`, null value `0N`.
 
-### Float `` `f ``
+### Float `` 0.1 2. -3. 0n 0w -0w ``
 Floating point number, null value `0n`, plus/minus infinity `-0w 0w`
 
-### Symbol `` `s ``
+### Symbol `` `Abc ``
 Common nouns. Blank symbols are written with single backquote `` ` ``.
 
-### Char `` `c ``
+### Char `` "H" ``
 Character encoded in `u8`. Whitespace is interpreted as empty `" "`.
 
 ### Integers `` `I ``
@@ -114,14 +114,8 @@ Converts a list of counts into repeated indices.
 #### Reverse `|x`
 Returns x with its elements in reverse order.
 
-#### Open `<s`
-ile and return handle
-
 #### Ascend `<X`
 Returns the indices that would sort X in ascending order.
-
-#### Close `<s`
-ile handle
 
 #### Descend `>X`
 Returns the indices that would sort X in descending order.
@@ -237,13 +231,29 @@ Returns first index of y in x (null if not found).
 
 #### Apply1 `x@y`
 
-#### Special Symbol 
+### IO Verbs
+
+#### Read Line `` 0:x ``
+
+#### Write Line `` x 0:y``
+
+#### Read Byte `` 1:x ``
+
+#### Write Byte `` x 1:y``
+
+#### Open `<s`
+Open file and return handle
+
+#### Close `>s`
+file handle
+
+### Special Symbol 
 Some special symbols can be called with apply `s@` or call `s "Abc"` .
 - Parse ink as AST: `` `p@"1+2" `` --> `` (`terse;(`transit;(`literal;`int);`op;(`literal;`int))) ``
 
-## Amend 
+### Amend 
 
-## Drill
+### Drill
 
 ## Adverbs
 An adverb is written using any of these plyph(s) `` ' / \ ': /: \: ``.
