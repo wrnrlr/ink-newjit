@@ -123,8 +123,8 @@ const App = struct {
         V{ .f = fh / yscale },
         V{ .f = xscale * 96.0 },
         V{ .f = @floatCast(zglfw.getTime()) },
-        V{ .f = @floatCast(g_cursor_x / xscale) },
-        V{ .f = @floatCast(g_cursor_y / yscale) },
+        V{ .f = @floatCast(g_cursor_x) },
+        V{ .f = @floatCast(g_cursor_y) },
       });
       errdefer prop_vals.deinit(alloc);
       const props = V{ .m = try Dict.init(alloc, prop_keys, prop_vals) };
