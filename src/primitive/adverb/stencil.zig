@@ -1,8 +1,7 @@
 const std = @import("std");
-const value = @import("../../noun/value.zig");
 const VM = @import("../../runtime/vm.zig").VM;
-const V = value.V;
-const N = value.N;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 const makeWindow = @import("window.zig").makeWindow;
 
 // stencil: f'[n;x] — apply f to each sliding window of size n

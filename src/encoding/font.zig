@@ -20,11 +20,10 @@
 
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const value = @import("../noun/value.zig");
+const V = @import("../noun/value.zig").V;
+const N = @import("../noun/array.zig").N;
+const Dict = @import("../noun/dict.zig").Dict;
 const Pool  = @import("../noun/symbol.zig").Pool;
-
-const V = value.V;
-const N = value.N;
 
 // ── Big-endian read helpers ───────────────────────────────────────────────────
 
@@ -44,7 +43,7 @@ fn makeDict(alloc: Alloc, syms: []const u32, vals: []const V) !V {
     const keys = try N(u32).n1(alloc, syms);
     const vn   = try N(V).init(alloc, vals.len);
     @memcpy(vn.slice(), vals);
-    return V{ .m = try value.Dict.init(alloc, .{ .S = keys }, .{ .L = vn }) };
+    return V{ .m = try Dict.init(alloc, .{ .S = keys }, .{ .L = vn }) };
 }
 
 fn makeTable(alloc: Alloc, syms: []const u32, cols: []const V) !V {
@@ -52,7 +51,7 @@ fn makeTable(alloc: Alloc, syms: []const u32, cols: []const V) !V {
     const keys = try N(u32).n1(alloc, syms);
     const vn   = try N(V).init(alloc, cols.len);
     @memcpy(vn.slice(), cols);
-    return V{ .M = try value.Dict.init(alloc, .{ .S = keys }, .{ .L = vn }) };
+    return V{ .M = try Dict.init(alloc, .{ .S = keys }, .{ .L = vn }) };
 }
 
 // ── Table directory ───────────────────────────────────────────────────────────
@@ -630,7 +629,7 @@ pub fn parse(alloc: Alloc, pool: *Pool, d: []const u8) !V {
     const v_n = try N(V).init(alloc, vals.items.len);
     @memcpy(v_n.slice(), vals.items);
     // vals.deinit() in defer releases only the backing array, not the V data
-    return V{ .m = try value.Dict.init(alloc, .{ .S = k_n }, .{ .L = v_n }) };
+    return V{ .m = try Dict.init(alloc, .{ .S = k_n }, .{ .L = v_n }) };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

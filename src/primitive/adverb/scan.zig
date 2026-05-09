@@ -1,13 +1,13 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const K = @import("../../noun/class.zig").K;
 const Op = @import("../../runtime/tape.zig").Op;
 const VM = @import("../../runtime/vm.zig").VM;
 const value = @import("../../noun/value.zig");
 const gpu = @import("gpu");
 const util = @import("../../util.zig");
-const V = value.V;
-const N = value.N;
+const K = @import("../../noun/class.zig").K;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 
 const SCAN_GPU_THRESHOLD: usize = 4096;
 

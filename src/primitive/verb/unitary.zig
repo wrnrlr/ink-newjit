@@ -1,10 +1,9 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const value = @import("../../noun/value.zig");
 const util = @import("../../util.zig");
 const VM = @import("../../runtime/vm.zig").VM;
-const N = value.N;
-const V = value.V;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 
 pub const Unitary = struct {
   pub const op = .@"=";

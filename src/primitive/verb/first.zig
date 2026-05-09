@@ -1,12 +1,10 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const value = @import("../../noun/value.zig");
-const K = @import("../../noun/class.zig").K;
 const util = @import("../../util.zig");
 const VM = @import("../../runtime/vm.zig").VM;
-
-const V = value.V;
-const N = value.N;
+const K = @import("../../noun/class.zig").K;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 
 pub const First = struct {
   pub const op = .@"*";

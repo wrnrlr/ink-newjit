@@ -2,9 +2,8 @@ const std = @import("std");
 const value = @import("../../noun/value.zig");
 const util = @import("../../util.zig");
 const VM = @import("../../runtime/vm.zig").VM;
-
-const V = value.V;
-const N = value.N;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 
 pub const UniformOp = struct {
   _i: util.MonadFn = uniform,

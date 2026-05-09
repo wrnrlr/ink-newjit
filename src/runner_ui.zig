@@ -7,8 +7,9 @@ const VM = @import("runtime/vm.zig").VM;
 const value = @import("noun/value.zig");
 const call_mod = @import("runtime/call.zig");
 const gfx_render = @import("primitive/verb/gfx_render.zig");
-
-const V = value.V;
+const V = @import("noun/value.zig").V;
+const N = @import("noun/array.zig").N;
+const Dict = @import("noun/dict.zig").Dict;
 
 extern fn glfwGetCocoaWindow(window: *anyopaque) ?*anyopaque;
 
@@ -126,7 +127,7 @@ const App = struct {
         V{ .f = @floatCast(g_cursor_y / yscale) },
       });
       errdefer prop_vals.deinit(alloc);
-      const props = V{ .m = try value.Dict.init(alloc, prop_keys, prop_vals) };
+      const props = V{ .m = try Dict.init(alloc, prop_keys, prop_vals) };
       defer props.deinit(alloc);
 
       const events_v = try buildEvents(self.vm);
@@ -181,7 +182,7 @@ fn buildEvents(vm: *VM) !V {
   const evs = g_events.items;
   if (evs.len == 0) return V.Values(alloc, &.{});
 
-  const list = try value.N(V).init(alloc, evs.len);
+  const list = try N(V).init(alloc, evs.len);
   @memset(list.slice(), .blank);
   const result = V{ .L = list };
   errdefer result.deinit(alloc);
@@ -197,7 +198,7 @@ fn buildEvents(vm: *VM) !V {
           V{ .s = try vm.intern("mousemove") }, V{ .f = @floatCast(e.x) }, V{ .f = @floatCast(e.y) },
         });
         errdefer vs.deinit(alloc);
-        break :blk V{ .m = try value.Dict.init(alloc, ks, vs) };
+        break :blk V{ .m = try Dict.init(alloc, ks, vs) };
       },
       .mousedown => |e| blk: {
         const ks = try V.Symbols(alloc, &[_]u32{
@@ -208,7 +209,7 @@ fn buildEvents(vm: *VM) !V {
           V{ .s = try vm.intern("mousedown") }, V{ .i = e.button }, V{ .f = @floatCast(e.x) }, V{ .f = @floatCast(e.y) },
         });
         errdefer vs.deinit(alloc);
-        break :blk V{ .m = try value.Dict.init(alloc, ks, vs) };
+        break :blk V{ .m = try Dict.init(alloc, ks, vs) };
       },
       .mouseup => |e| blk: {
         const ks = try V.Symbols(alloc, &[_]u32{
@@ -219,7 +220,7 @@ fn buildEvents(vm: *VM) !V {
           V{ .s = try vm.intern("mouseup") }, V{ .i = e.button }, V{ .f = @floatCast(e.x) }, V{ .f = @floatCast(e.y) },
         });
         errdefer vs.deinit(alloc);
-        break :blk V{ .m = try value.Dict.init(alloc, ks, vs) };
+        break :blk V{ .m = try Dict.init(alloc, ks, vs) };
       },
       .keydown => |e| blk: {
         const ks = try V.Symbols(alloc, &[_]u32{
@@ -230,7 +231,7 @@ fn buildEvents(vm: *VM) !V {
           V{ .s = try vm.intern("keydown") }, V{ .i = e.key }, V{ .i = e.mods },
         });
         errdefer vs.deinit(alloc);
-        break :blk V{ .m = try value.Dict.init(alloc, ks, vs) };
+        break :blk V{ .m = try Dict.init(alloc, ks, vs) };
       },
       .keyup => |e| blk: {
         const ks = try V.Symbols(alloc, &[_]u32{
@@ -241,7 +242,7 @@ fn buildEvents(vm: *VM) !V {
           V{ .s = try vm.intern("keyup") }, V{ .i = e.key }, V{ .i = e.mods },
         });
         errdefer vs.deinit(alloc);
-        break :blk V{ .m = try value.Dict.init(alloc, ks, vs) };
+        break :blk V{ .m = try Dict.init(alloc, ks, vs) };
       },
       .scroll => |e| blk: {
         const ks = try V.Symbols(alloc, &[_]u32{
@@ -252,7 +253,7 @@ fn buildEvents(vm: *VM) !V {
           V{ .s = try vm.intern("scroll") }, V{ .f = @floatCast(e.dx) }, V{ .f = @floatCast(e.dy) },
         });
         errdefer vs.deinit(alloc);
-        break :blk V{ .m = try value.Dict.init(alloc, ks, vs) };
+        break :blk V{ .m = try Dict.init(alloc, ks, vs) };
       },
     };
   }

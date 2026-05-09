@@ -1,9 +1,8 @@
 const std = @import("std");
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
-const value = @import("../../noun/value.zig");
-const V = value.V;
-const N = value.N;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 
 // while: (cond)step/init — apply step while cond holds, return final value
 pub fn whiledo(vm: *VM, cond: V, step: V, init: V, f: util.ApplyFn) V {

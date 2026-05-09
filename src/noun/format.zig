@@ -4,7 +4,7 @@ const V = @import("./value.zig").V;
 const Fn = @import("./operator.zig").Fn;
 const Adverb = @import("./operator.zig").Adverb;
 const FnKind = @import("./operator.zig").FnKind;
-const Dict = @import("./value.zig").Dict;
+const Dict = @import("./dict.zig").Dict;
 const Alloc = std.mem.Allocator;
 
 fn adverbStr(adv: Adverb) []const u8 {

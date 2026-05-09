@@ -1,8 +1,7 @@
 const std = @import("std");
-const value = @import("../noun/value.zig");
-const chunk = @import("tape.zig");
-const V = value.V;
-const OpCode = chunk.OpCode;
+const V = @import("../noun/value.zig").V;
+const ArrayFlags = @import("../noun/array.zig").ArrayFlags;
+const OpCode = @import("tape.zig").OpCode;
 
 pub const ValueId = u32;
 pub const NO_VALUE: ValueId = 0xffffffff;
@@ -84,8 +83,8 @@ pub const IR = struct {
     const stored = val.ref();
     // Mark array constants immutable so cow() always copies them.
     switch (stored) {
-      inline .B, .I, .F, .S, .C, .L => |n| n.setFlag(value.ArrayFlags.immutable),
-      inline .m, .M => |d| { d.ptr.flags |= value.ArrayFlags.immutable; },
+      inline .B, .I, .F, .S, .C, .L => |n| n.setFlag(ArrayFlags.immutable),
+      inline .m, .M => |d| { d.ptr.flags |= ArrayFlags.immutable; },
       else => {},
     }
     try self.instructions.append(self.alloc, .{

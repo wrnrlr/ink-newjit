@@ -1,9 +1,8 @@
 const std = @import("std");
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
-const value = @import("../../noun/value.zig");
-const V = value.V;
-const N = value.N;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 
 // converges: collect all intermediate values until fixed point
 // f\x → x, f(x), f(f(x)), ... until result repeats

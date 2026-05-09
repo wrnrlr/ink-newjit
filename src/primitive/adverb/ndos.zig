@@ -1,8 +1,7 @@
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
-const value = @import("../../noun/value.zig");
-const V = value.V;
-const N = value.N;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 
 // ndos: collect init + n applications of f
 // 5(2*)\ 1 → 1 2 4 8 16 32

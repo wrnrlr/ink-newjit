@@ -1,6 +1,7 @@
 const std = @import("std");
 const VM = @import("../../runtime/vm.zig").VM;
 const value = @import("../../noun/value.zig");
+const Dict = @import("../../noun/dict.zig").Dict;
 const util = @import("../../util.zig");
 const V = value.V;
 
@@ -14,7 +15,7 @@ fn drawMonad(vm: *VM, x: V) V {
     V{ .s = vm.intern("gfx") catch return V{ .err = .memory } },
     x,
   }) catch return V{ .err = .memory };
-  return V{ .m = value.Dict.init(vm.alloc, keys, vals) catch return V{ .err = .memory } };
+  return V{ .m = Dict.init(vm.alloc, keys, vals) catch return V{ .err = .memory } };
 }
 
 // Dyad handler: h 9: cmds — integer window handle, ignores x → same as monad
@@ -35,7 +36,7 @@ fn drawPlot(vm: *VM, x: V, y: V) V {
     x,
     y,
   }) catch return V{ .err = .memory };
-  return V{ .m = value.Dict.init(vm.alloc, keys, vals) catch return V{ .err = .memory } };
+  return V{ .m = Dict.init(vm.alloc, keys, vals) catch return V{ .err = .memory } };
 }
 
 // Monad dispatch table entry: 9: L  and  9: m

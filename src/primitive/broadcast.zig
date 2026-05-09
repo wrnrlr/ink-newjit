@@ -1,11 +1,10 @@
 const std = @import("std");
-const value = @import("../noun/value.zig");
 const VM = @import("../runtime/vm.zig").VM;
 const Alloc = std.mem.Allocator;
 const assert = std.debug.assert;
-const V = value.V;
 const K = @import("../noun/class.zig").K;
-const N = value.N;
+const V = @import("../noun/value.zig").V;
+const N = @import("../noun/array.zig").N;
 
 pub fn broadcastAtom(vm: *VM, x: V, n: usize) !V {
   assert(x.isAtom());

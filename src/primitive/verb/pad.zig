@@ -1,13 +1,11 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const value = @import("../../noun/value.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const TerseFormatter = @import("../../noun/format.zig").TerseFormatter;
 const util = @import("../../util.zig");
 const MockWriter = util.MockWriter;
-
-const V = value.V;
-const N = value.N;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 
 pub const Pad = struct {
   pub const op = .@"$";

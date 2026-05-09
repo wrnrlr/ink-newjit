@@ -1,11 +1,13 @@
 const std = @import("std");
-const value = @import("../../noun/value.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
 const Op = @import("../../runtime/tape.zig").Op;
 const dispatch = @import("../dispatch.zig");
 const promote = @import("../promote.zig").promote;
 const gpu = @import("gpu");
+const V = @import("../../noun/value.zig").V;
+const K = @import("../../noun/class.zig").K;
+const N = @import("../../noun/array.zig").N;
 
 // Threshold at which (.I, .I) elementwise dyads dispatch to the GPU
 // when a backend is attached. Below this the kernel-launch + arena
@@ -31,10 +33,6 @@ fn monadOpForKOp(comptime op: Op) ?gpu.MonadOp {
     else   => null,
   };
 }
-
-const V = value.V;
-const K = @import("../../noun/class.zig").K;
-const N = value.N;
 
 pub const Attr = std.builtin.Type.StructField.Attributes;
 

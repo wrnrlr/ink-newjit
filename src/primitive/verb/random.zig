@@ -1,12 +1,10 @@
 const std = @import("std");
-const value = @import("../../noun/value.zig");
 const util = @import("../../util.zig");
-const K = @import("../../noun/class.zig").K;
 const VM = @import("../../runtime/vm.zig").VM;
 const promote = @import("../promote.zig").promote;
-
-const V = value.V;
-const N = value.N;
+const K = @import("../../noun/class.zig").K;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 
 pub const Random = struct {
   pub const op = .@"?";

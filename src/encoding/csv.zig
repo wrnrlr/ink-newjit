@@ -1,12 +1,11 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const value = @import("../noun/value.zig");
-const Pool = @import("../noun/symbol.zig").Pool;
 const util = @import("../util.zig");
 const promote = @import("../primitive/promote.zig").promote;
-
-const V = value.V;
-const N = value.N;
+const V = @import("../noun/value.zig").V;
+const N = @import("../noun/array.zig").N;
+const Dict = @import("../noun/dict.zig").Dict;
+const Pool = @import("../noun/symbol.zig").Pool;
 
 fn isNumeric(s: []const u8) bool {
   if (s.len == 0) return false;
@@ -115,5 +114,5 @@ pub fn parse(alloc: Alloc, pool: *Pool, text: []const u8) !V {
     sv_n.slice()[i] = promote(alloc, col_raw.L);
   }
 
-  return V{ .M = try value.Dict.init(alloc, .{ .S = sk_n }, sv) };
+  return V{ .M = try Dict.init(alloc, .{ .S = sk_n }, sv) };
 }

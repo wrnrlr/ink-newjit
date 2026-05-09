@@ -1,10 +1,9 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
 const VM = @import("../../runtime/vm.zig").VM;
-const value = @import("../../noun/value.zig");
 const K = @import("../../noun/class.zig").K;
-const N = value.N;
-const V = value.V;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 const promote = @import("../promote.zig").promote; // for promote() via pub fn concat()
 
 // Returns the shared vector kind if x and y have compatible base types, else null.

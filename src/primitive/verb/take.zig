@@ -1,8 +1,8 @@
 const std = @import("std");
 const VM = @import("../../runtime/vm.zig").VM;
-const V = @import("../../noun/value.zig").V;
-const N = @import("../../noun/value.zig").N;
 const K = @import("../../noun/class.zig").K;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 const util = @import("../../util.zig");
 const promote = @import("../promote.zig").promote;
 

@@ -1,11 +1,10 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const value = @import("../noun/value.zig");
 const util = @import("../util.zig");
 const calc = @import("verb/calc.zig");
 const concat = @import("verb/concat.zig");
-const V = value.V;
-const N = @import("../noun/value.zig").N;
+const V = @import("../noun/value.zig").V;
+const N = @import("../noun/array.zig").N;
 const VM = @import("../runtime/vm.zig").VM;
 const Call = @import("../runtime/call.zig").Call;
 

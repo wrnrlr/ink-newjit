@@ -2,11 +2,10 @@ const std = @import("std");
 const Alloc = std.mem.Allocator;
 const VM = @import("../../runtime/vm.zig").VM;
 const K = @import("../../noun/class.zig").K;
-const util = @import("../../util.zig");
-const value = @import("../../noun/value.zig");
-const V = value.V;
-const N = value.N;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 const promote = @import("../promote.zig").promote;
+const util = @import("../../util.zig");
 
 // eachPrior: apply f to each adjacent pair (f': in ngn/k)
 // monadic: -':1 2 3 4 → first element unchanged, rest f(cur, prev)

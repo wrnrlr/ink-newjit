@@ -1,7 +1,7 @@
 const std = @import("std");
-const value = @import("../noun/value.zig");
-const V = value.V;
-const N = value.N;
+const V = @import("../noun/value.zig").V;
+const N = @import("../noun/array.zig").N;
+const Dict = @import("../noun/dict.zig").Dict;
 const VM = @import("vm.zig").VM;
 const exec_mod = @import("../primitive/verb/exec.zig");
 
@@ -82,7 +82,7 @@ fn getEnv(vm: *VM) anyerror!V {
     // Resize the list value to actual count (set remaining slots to blank already done above)
     vals_n.ptr.len = @intCast(actual_n);
 
-    return V{ .m = try value.Dict.init(vm.alloc, keys_v, V{ .L = vals_n }) };
+    return V{ .m = try Dict.init(vm.alloc, keys_v, V{ .L = vals_n }) };
 }
 
 fn forkExec(vm: *VM, cmd: V, stdin_v: ?V) anyerror!V {

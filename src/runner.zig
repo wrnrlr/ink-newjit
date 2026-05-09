@@ -1,7 +1,6 @@
 const std = @import("std");
 const VM = @import("runtime/vm.zig").VM;
 const Repl = @import("repl.zig").Repl;
-const value = @import("noun/value.zig");
 const disasm = @import("runtime/disasm.zig");
 
 const build_options = @import("build_options");
@@ -9,8 +8,9 @@ const enable_ui  = build_options.enable_ui;
 const enable_gpu = build_options.enable_gpu;
 const gpu_compute = if (enable_gpu) @import("gpu_compute") else void;
 
-const V = value.V;
+const V = @import("noun/value.zig").V;
 const K = @import("noun/class.zig").K;
+const N = @import("noun/array.zig").N;
 
 // ── REPL / stdin eval ─────────────────────────────────────────────────────────
 
@@ -135,7 +135,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
   // Build argv list and pre-register global x before loading any script.
   if (extra_args.items.len > 0) {
     const n = extra_args.items.len;
-    const argv_items_n = try value.N(V).init(allocator, n);
+    const argv_items_n = try N(V).init(allocator, n);
     errdefer (V{ .L = argv_items_n }).deinit(allocator);
     @memset(argv_items_n.slice(), .blank);
     for (extra_args.items, argv_items_n.slice()) |arg, *slot| {

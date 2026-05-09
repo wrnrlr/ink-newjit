@@ -1,12 +1,12 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
 const value = @import("../noun/value.zig");
-const Pool = @import("../noun/symbol.zig").Pool;
 const util = @import("../util.zig");
 const promote = @import("../primitive/promote.zig").promote;
-
-const V = value.V;
-const N = value.N;
+const V = @import("../noun/value.zig").V;
+const N = @import("../noun/array.zig").N;
+const Dict = @import("../noun/dict.zig").Dict;
+const Pool = @import("../noun/symbol.zig").Pool;
 
 // --- Recursive JSON → Terse conversion ---
 //
@@ -104,7 +104,7 @@ fn tryTable(alloc: Alloc, items: []const V) !V {
     sv_n.slice()[i] = promote(alloc, col_raw.L);
   }
 
-  return V{ .M = try value.Dict.init(alloc, .{ .S = sk_n }, sv) };
+  return V{ .M = try Dict.init(alloc, .{ .S = sk_n }, sv) };
 }
 
 fn convertObj(alloc: Alloc, pool: *Pool, obj: *const std.json.ObjectMap) anyerror!V {
@@ -125,7 +125,7 @@ fn convertObj(alloc: Alloc, pool: *Pool, obj: *const std.json.ObjectMap) anyerro
   errdefer kv.deinit(alloc);
   const vv = try V.Values(alloc, vals.items);
   errdefer vv.deinit(alloc);
-  return V{ .m = try value.Dict.init(alloc, kv, vv) };
+  return V{ .m = try Dict.init(alloc, kv, vv) };
 }
 
 pub fn parse(alloc: Alloc, pool: *Pool, text: []const u8) !V {

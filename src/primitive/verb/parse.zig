@@ -1,6 +1,6 @@
 const std = @import("std");
 const V = @import("../../noun/value.zig").V;
-const N = @import("../../noun/value.zig").N;
+const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
 const ast = @import("../../parser/ast.zig");
 const Node = ast.Node;

@@ -2,16 +2,16 @@ const value = @import("../noun/value.zig");
 const gpu_mod = @import("gpu");
 const Op = @import("../runtime/tape.zig").Op;
 const syms = @import("../runtime/syms.zig");
-const K = @import("../noun/class.zig").K;
 const util = @import("../util.zig");
 const verbs = @import("verb/verbs.zig");
 const concat = @import("verb/concat.zig");
 const pair = @import("verb/pair.zig");
 const promote = @import("promote.zig").promote;
 const VM = @import("../runtime/vm.zig").VM;
-
-const V = value.V;
-const N = value.N;
+const K = @import("../noun/class.zig").K;
+const V = @import("../noun/value.zig").V;
+const N = @import("../noun/array.zig").N;
+const Dict = @import("../noun/dict.zig").Dict;
 
 pub fn dispatch1(vm: *VM, op: Op, x: V) V {
   const xt = x.tag();
@@ -103,7 +103,7 @@ pub fn dispatch2(vm: *VM, op: Op, x: V, y: V) V {
 fn fallbackDict(vm: *VM, op: Op, av: V, bv: V, comptime k: K) V {
   const r = dispatch1(vm, op, bv);
   if (r.tag() == .err) return r;
-  return V.wrap(k, value.Dict.init(vm.alloc, av.ref(), r) catch {
+  return V.wrap(k, Dict.init(vm.alloc, av.ref(), r) catch {
     r.deinit(vm.alloc);
     return V{ .err = .memory };
   });
@@ -139,8 +139,8 @@ fn listDyad(vm: *VM, op: Op, x: V, y: V) V {
       const vals = dispatch2(vm, op, x_bv, y_bv);
       if (vals.tag() == .err) return vals;
       return switch (x) {
-        .m => V{ .m = value.Dict.init(vm.alloc, x_av.ref(), vals) catch { vals.deinit(vm.alloc); return V{ .err = .memory }; } },
-        .M => V{ .M = value.Dict.init(vm.alloc, x_av.ref(), vals) catch { vals.deinit(vm.alloc); return V{ .err = .memory }; } },
+        .m => V{ .m = Dict.init(vm.alloc, x_av.ref(), vals) catch { vals.deinit(vm.alloc); return V{ .err = .memory }; } },
+        .M => V{ .M = Dict.init(vm.alloc, x_av.ref(), vals) catch { vals.deinit(vm.alloc); return V{ .err = .memory }; } },
         else => unreachable,
       };
     }
@@ -150,8 +150,8 @@ fn listDyad(vm: *VM, op: Op, x: V, y: V) V {
       const vals = dispatch2(vm, op, x_bv, y);
       if (vals.tag() == .err) return vals;
       return switch (x) {
-        .m => V{ .m = value.Dict.init(vm.alloc, x_av.ref(), vals) catch { vals.deinit(vm.alloc); return V{ .err = .memory }; } },
-        .M => V{ .M = value.Dict.init(vm.alloc, x_av.ref(), vals) catch { vals.deinit(vm.alloc); return V{ .err = .memory }; } },
+        .m => V{ .m = Dict.init(vm.alloc, x_av.ref(), vals) catch { vals.deinit(vm.alloc); return V{ .err = .memory }; } },
+        .M => V{ .M = Dict.init(vm.alloc, x_av.ref(), vals) catch { vals.deinit(vm.alloc); return V{ .err = .memory }; } },
         else => unreachable,
       };
     }
@@ -160,8 +160,8 @@ fn listDyad(vm: *VM, op: Op, x: V, y: V) V {
     const vals = dispatch2(vm, op, x, y_bv);
     if (vals.tag() == .err) return vals;
     return switch (y) {
-      .m => V{ .m = value.Dict.init(vm.alloc, y_av.ref(), vals) catch { vals.deinit(vm.alloc); return V{ .err = .memory }; } },
-      .M => V{ .M = value.Dict.init(vm.alloc, y_av.ref(), vals) catch { vals.deinit(vm.alloc); return V{ .err = .memory }; } },
+      .m => V{ .m = Dict.init(vm.alloc, y_av.ref(), vals) catch { vals.deinit(vm.alloc); return V{ .err = .memory }; } },
+      .M => V{ .M = Dict.init(vm.alloc, y_av.ref(), vals) catch { vals.deinit(vm.alloc); return V{ .err = .memory }; } },
       else => unreachable,
     };
   }

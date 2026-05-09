@@ -11,9 +11,10 @@ const value = @import("../noun/value.zig");
 const Pool = @import("../noun/symbol.zig").Pool;
 const GpuCtx = @import("gpu").GpuCtx;
 const command = @import("command.zig");
-const V = value.V;
-const N = value.N;
+const V = @import("../noun/value.zig").V;
+const N = @import("../noun/array.zig").N;
 const K = @import("../noun/class.zig").K;
+const Dict = @import("../noun/dict.zig").Dict;
 const Partial = @import("../noun/partial.zig").Partial;
 const opmod = @import("../noun/operator.zig");
 const Fn = opmod.Fn;
@@ -606,7 +607,7 @@ pub const VM = struct {
                  else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
     var vals_live = n > 1;
     errdefer { if (vals_live) vals.deinit(vm.alloc); }
-    const res = if (n == 1) V{ .m = try value.Dict.init(vm.alloc, keys, vals) }
+    const res = if (n == 1) V{ .m = try Dict.init(vm.alloc, keys, vals) }
                 else pair.dict(vm, keys, vals);
     errdefer res.deinit(vm.alloc);
     if (n > 1) { keys.deinit(vm.alloc); keys_live = false; vals.deinit(vm.alloc); vals_live = false; }
@@ -622,7 +623,7 @@ pub const VM = struct {
                  else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start .. start + n])).L);
     const vals = if (n == 1) verb_enlist.enlist(vm.alloc, vm.stack[start + 1])
                  else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
-    const res = V{ .M = try value.Dict.init(vm.alloc, keys, vals) };
+    const res = V{ .M = try Dict.init(vm.alloc, keys, vals) };
     for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     try vm.push(res);

@@ -1,8 +1,7 @@
 const std = @import("std");
 const VM = @import("../../runtime/vm.zig").VM;
-const value = @import("../../noun/value.zig");
 const util = @import("../../util.zig");
-const V = value.V;
+const V = @import("../../noun/value.zig").V;
 
 // Core: spawn argv with optional stdin bytes, capture stdout as chars V.
 // For small stdin (< pipe buffer ~64KB) the write-then-read sequence is safe.

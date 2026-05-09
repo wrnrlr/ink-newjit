@@ -2,7 +2,7 @@ const std = @import("std");
 const util = @import("../../util.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const V = @import("../../noun/value.zig").V;
-const N = @import("../../noun/value.zig").N;
+const N = @import("../../noun/array.zig").N;
 const Alloc = std.mem.Allocator;
 
 pub const Tally = struct {

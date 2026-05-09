@@ -1,11 +1,10 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const K = @import("../../noun/class.zig").K;
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
-const value = @import("../../noun/value.zig");
-const V = value.V;
-const N = value.N;
+const K = @import("../../noun/class.zig").K;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 
 pub fn eachright(vm: *VM, base: V, x: V, y: V, f: util.ApplyFn) V {
   const n = y.len();

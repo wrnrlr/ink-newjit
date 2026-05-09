@@ -1,12 +1,10 @@
 const std = @import("std");
-const value = @import("../../noun/value.zig");
 const util = @import("../../util.zig");
 const promote = @import("../promote.zig").promote;
 const VM = @import("../../runtime/vm.zig").VM;
 const so = @import("setops.zig");
-
-const N = value.N;
-const V = value.V;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 const Alloc = std.mem.Allocator;
 
 pub const Distinct = struct {

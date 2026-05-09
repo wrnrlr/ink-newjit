@@ -1,9 +1,8 @@
 const std = @import("std");
-const value = @import("../noun/value.zig");
 const Alloc = std.mem.Allocator;
 const K = @import("../noun/class.zig").K;
-const V = value.V;
-const N = value.N;
+const V = @import("../noun/value.zig").V;
+const N = @import("../noun/array.zig").N;
 
 const promotable = [_]K{ .b, .i, .f, .s, .c };
 

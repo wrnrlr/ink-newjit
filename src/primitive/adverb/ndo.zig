@@ -1,7 +1,7 @@
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
-const value = @import("../../noun/value.zig");
-const V = value.V;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 
 // ndo: apply f to init exactly n times
 // 5(2*)/ 1 → 32

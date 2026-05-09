@@ -31,11 +31,11 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
 const value = @import("../noun/value.zig");
-const K = @import("../noun/class.zig").K;
 const Pool = @import("../noun/symbol.zig").Pool;
-
-const V = value.V;
-const N = value.N;
+const K = @import("../noun/class.zig").K;
+const V = @import("../noun/value.zig").V;
+const N = @import("../noun/array.zig").N;
+const Dict = @import("../noun/dict.zig").Dict;
 const Err = value.Err;
 
 const VERSION: u8 = 0x03;
@@ -234,14 +234,14 @@ fn desVal(alloc: Alloc, pool: *Pool, bytes: []const u8, pos: *usize) anyerror!V 
       errdefer av.deinit(alloc);
       const bv = try desVal(alloc, pool, bytes, pos);
       errdefer bv.deinit(alloc);
-      break :blk .{ .m = try value.Dict.init(alloc, av, bv) };
+      break :blk .{ .m = try Dict.init(alloc, av, bv) };
     },
     .M => blk: {
       const av = try desVal(alloc, pool, bytes, pos);
       errdefer av.deinit(alloc);
       const bv = try desVal(alloc, pool, bytes, pos);
       errdefer bv.deinit(alloc);
-      break :blk .{ .M = try value.Dict.init(alloc, av, bv) };
+      break :blk .{ .M = try Dict.init(alloc, av, bv) };
     },
     else => error.UnsupportedType,
   };
@@ -447,7 +447,7 @@ test "binary round-trip: dict" {
   errdefer keys.deinit(alloc);
   const vals = try V.Ints(alloc, &.{ 10, 20 });
   errdefer vals.deinit(alloc);
-  const d = V{ .m = try value.Dict.init(alloc, keys, vals) };
+  const d = V{ .m = try Dict.init(alloc, keys, vals) };
   defer d.deinit(alloc);
   const got = try roundTrip(alloc, &pool, d);
   defer got.deinit(alloc);

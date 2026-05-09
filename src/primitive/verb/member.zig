@@ -1,10 +1,9 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
 const VM = @import("../../runtime/vm.zig").VM;
-const value = @import("../../noun/value.zig");
 const so = @import("setops.zig");
-const V = value.V;
-const N = value.N;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 const util = @import("../../util.zig");
 
 // Has: x contains y?

@@ -5,8 +5,9 @@ const Pool = @import("../noun/symbol.zig").Pool;
 const util = @import("../util.zig");
 const promote = @import("../primitive/promote.zig").promote;
 
-const V = value.V;
-const N = value.N;
+const V = @import("../noun/value.zig").V;
+const N = @import("../noun/array.zig").N;
+const Dict = @import("../noun/dict.zig").Dict;
 
 /// Shapefile Header (100 bytes)
 pub const Header = struct {
@@ -64,7 +65,7 @@ pub const Header = struct {
     sv_n.slice()[10] = .{.f = self.mmin};
     sv_n.slice()[11] = .{.f = self.mmax};
 
-    return V{ .m = try value.Dict.init(alloc, .{ .S = sk_n }, .{ .L = sv_n }) };
+    return V{ .m = try Dict.init(alloc, .{ .S = sk_n }, .{ .L = sv_n }) };
   }
 };
 
@@ -173,7 +174,7 @@ pub fn parseShp(alloc: Alloc, pool: *Pool, data: []const u8) !V {
   sv_n.slice()[0] = header_v;
   sv_n.slice()[1] = res_data;
 
-  return V{ .m = try value.Dict.init(alloc, .{ .S = sk_n }, .{ .L = sv_n }) };
+  return V{ .m = try Dict.init(alloc, .{ .S = sk_n }, .{ .L = sv_n }) };
 }
 
 /// Parse .shx index file data.
@@ -211,7 +212,7 @@ pub fn parseShx(alloc: Alloc, pool: *Pool, data: []const u8) !V {
   sv_n.slice()[0] = header_v;
   sv_n.slice()[1] = res_data;
 
-  return V{ .m = try value.Dict.init(alloc, .{ .S = sk_n }, .{ .L = sv_n }) };
+  return V{ .m = try Dict.init(alloc, .{ .S = sk_n }, .{ .L = sv_n }) };
 }
 
 /// Parse .dbf dBase III file data.
@@ -324,7 +325,7 @@ pub fn parseDbf(alloc: Alloc, pool: *Pool, data: []const u8) !V {
     sv_n.slice()[i] = promote(alloc, col_raw.L);
   }
 
-  return V{ .M = try value.Dict.init(alloc, .{ .S = sk_n }, .{.L = sv_n}) };
+  return V{ .M = try Dict.init(alloc, .{ .S = sk_n }, .{.L = sv_n}) };
 }
 
 /// Parse .prj projection file data.

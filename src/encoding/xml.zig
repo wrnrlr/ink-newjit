@@ -2,9 +2,9 @@ const std = @import("std");
 const Alloc = std.mem.Allocator;
 const value = @import("../noun/value.zig");
 const Pool = @import("../noun/symbol.zig").Pool;
-
-const V = value.V;
-const N = value.N;
+const V = @import("../noun/value.zig").V;
+const N = @import("../noun/array.zig").N;
+const Dict = @import("../noun/dict.zig").Dict;
 
 // --- Forward-star XML representation ---
 //
@@ -285,5 +285,5 @@ pub fn parse(alloc: Alloc, pool: *Pool, text: []const u8) !V {
   sv_n.slice()[3] = V{ .S = name_n };
   sv_n.slice()[4] = V{ .L = val_n };
 
-  return V{ .M = try value.Dict.init(alloc, .{ .S = sk_n }, V{ .L = sv_n }) };
+  return V{ .M = try Dict.init(alloc, .{ .S = sk_n }, V{ .L = sv_n }) };
 }

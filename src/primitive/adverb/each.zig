@@ -3,12 +3,12 @@ const Alloc = std.mem.Allocator;
 const K = @import("../../noun/class.zig").K;
 const Op = @import("../../runtime/tape.zig").Op;
 const VM = @import("../../runtime/vm.zig").VM;
-const value = @import("../../noun/value.zig");
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 const gpu = @import("gpu");
 const util = @import("../../util.zig");
 const promote = @import("../promote.zig").promote;
-const V = value.V;
-const N = value.N;
+
 
 const EACH_GPU_THRESHOLD: usize = 4096;
 

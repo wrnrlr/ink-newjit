@@ -1,11 +1,9 @@
 const std = @import("std");
-const value = @import("../../noun/value.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
 const so = @import("setops.zig");
-
-const V = value.V;
-const N = value.N;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 
 // Find the first element of x that matches y otherwise return 0N
 // TODO k9 returns the length of the vector if nothing is found, why could this be usefull?

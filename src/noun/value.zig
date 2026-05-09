@@ -2,18 +2,18 @@ const std = @import("std");
 const Alloc = std.mem.Allocator;
 const Chunk = @import("../runtime/tape.zig").Chunk;
 const Op = @import("../runtime/tape.zig").Op;
-const K = @import("class.zig").K;
-pub const N = @import("array.zig").N;
-pub const ArrayFlags = @import("array.zig").ArrayFlags;
-pub const Rc = @import("rc.zig").Rc;
+const ArrayFlags = @import("array.zig").ArrayFlags;
+const Rc = @import("rc.zig").Rc;
 const opmod = @import("operator.zig");
 const Partial = @import("partial.zig").Partial;
-pub const Dict = @import("dict.zig").Dict;
+const K = @import("class.zig").K;
+const N = @import("array.zig").N;
+const Dict = @import("dict.zig").Dict;
 const util = @import("../util.zig");
 const activeTag = std.meta.activeTag;
-pub const ExtObj = @import("plugin.zig").ExtObj;
-pub const ExtVTable = @import("plugin.zig").ExtVTable;
-pub const ExtRegistry = @import("plugin.zig").ExtRegistry;
+const ExtObj = @import("plugin.zig").ExtObj;
+const ExtVTable = @import("plugin.zig").ExtVTable;
+const ExtRegistry = @import("plugin.zig").ExtRegistry;
 
 pub const Err = enum { domain, length, rank, nyi, memory, @"type", io };
 

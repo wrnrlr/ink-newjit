@@ -1,39 +1,38 @@
 const std = @import("std");
-const Alloc = @import("std").mem.Allocator;
 const K = @import("../../noun/class.zig").K;
-const N = @import("../../noun/value.zig").N;
 const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
-const util = @import("../../util.zig");
+const DyadFn = @import("../../util.zig").DyadFn;
 const promote = @import("../promote.zig").promote;
 
 pub const Without = struct {
   pub const op = .@"^";
-  _B_B: util.DyadFn = withoutVec(.B),
-  _I_B: util.DyadFn = withoutVec(.B),
-  _L_B: util.DyadFn = withoutVec(.B),
-  _B_I: util.DyadFn = withoutVec(.I),
-  _I_I: util.DyadFn = withoutVec(.I),
-  _F_I: util.DyadFn = withoutVec(.I),
-  _L_I: util.DyadFn = withoutVec(.I),
-  _I_F: util.DyadFn = withoutVec(.F),
-  _F_F: util.DyadFn = withoutVec(.F),
-  _L_F: util.DyadFn = withoutVec(.F),
-  _I_C: util.DyadFn = withoutVec(.C),
-  _C_C: util.DyadFn = withoutVec(.C),
-  _L_C: util.DyadFn = withoutVec(.C),
-  _I_S: util.DyadFn = withoutVec(.S),
-  _S_S: util.DyadFn = withoutVec(.S),
-  _L_S: util.DyadFn = withoutVec(.S),
-  _B_L: util.DyadFn = withoutList,
-  _I_L: util.DyadFn = withoutList,
-  _F_L: util.DyadFn = withoutList,
-  _S_L: util.DyadFn = withoutList,
-  _C_L: util.DyadFn = withoutList,
-  _L_L: util.DyadFn = withoutList,
+  _B_B: DyadFn = withoutVec(.B),
+  _I_B: DyadFn = withoutVec(.B),
+  _L_B: DyadFn = withoutVec(.B),
+  _B_I: DyadFn = withoutVec(.I),
+  _I_I: DyadFn = withoutVec(.I),
+  _F_I: DyadFn = withoutVec(.I),
+  _L_I: DyadFn = withoutVec(.I),
+  _I_F: DyadFn = withoutVec(.F),
+  _F_F: DyadFn = withoutVec(.F),
+  _L_F: DyadFn = withoutVec(.F),
+  _I_C: DyadFn = withoutVec(.C),
+  _C_C: DyadFn = withoutVec(.C),
+  _L_C: DyadFn = withoutVec(.C),
+  _I_S: DyadFn = withoutVec(.S),
+  _S_S: DyadFn = withoutVec(.S),
+  _L_S: DyadFn = withoutVec(.S),
+  _B_L: DyadFn = withoutList,
+  _I_L: DyadFn = withoutList,
+  _F_L: DyadFn = withoutList,
+  _S_L: DyadFn = withoutList,
+  _C_L: DyadFn = withoutList,
+  _L_L: DyadFn = withoutList,
 };
 
-fn withoutVec(comptime yk: K) util.DyadFn {
+fn withoutVec(comptime yk: K) DyadFn {
   comptime std.debug.assert(yk.isVec());
   return struct {
     const T = K.backing(yk);

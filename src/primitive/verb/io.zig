@@ -3,7 +3,7 @@ const VM = @import("../../runtime/vm.zig").VM;
 const value = @import("../../noun/value.zig");
 const format = @import("../../noun/format.zig");
 const util = @import("../../util.zig");
-const V = value.V;
+const V = @import("../../noun/value.zig").V;
 
 fn writeFile(vm: *VM, id: u32, content: []const u8) !void {
   if (vm.registry.getPath(id)) |path| {

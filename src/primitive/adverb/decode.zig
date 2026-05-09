@@ -2,9 +2,8 @@ const std = @import("std");
 const Alloc = std.mem.Allocator;
 const VM = @import("../../runtime/vm.zig").VM;
 const K = @import("../../noun/class.zig").K;
-const value = @import("../../noun/value.zig");
-const V = value.V;
-const N = value.N;
+const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 
 // I/ — mixed-radix decode (digits to number)
 // 24 60 60/1 2 3 → 3723   2/1 1 0 1 → 13

@@ -66,10 +66,6 @@ pub const K = enum(u8) {
     const e = @intFromEnum(k) & ~@as(u8, VEC_BIT);
     return e >= 2 and e <= 4;
   }
-  pub fn isInteger(k: K) bool {
-    const e = @intFromEnum(k) & ~@as(u8, VEC_BIT);
-    return e == 2 or e == 3;
-  }
   pub fn isFloat(k: K) bool {
     return (@intFromEnum(k) & ~@as(u8, VEC_BIT)) == 4;
   }
@@ -93,17 +89,6 @@ pub const K = enum(u8) {
       .s, .S => u32,
       .c, .C => u8,
       else => @compileError("no backing type for " ++ @tagName(k)),
-    };
-  }
-  pub fn holder(comptime k: K) type {
-    return switch (k) {
-      .blank => void,
-      .b => bool,  .B => N(bool),
-      .i => i32,   .I => N(i32),
-      .f => f32,   .F => N(f32),
-      .s => u32,   .S => N(u32),
-      .c => u8,    .C => N(u8),
-      else => @compileError("no holder type for " ++ @tagName(k)),
     };
   }
   pub fn isNullFn(comptime k: K) fn(K.backing(k)) bool {
