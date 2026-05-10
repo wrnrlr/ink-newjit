@@ -88,6 +88,13 @@ pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
   }
 }
 
+const help_info = 
+\\\ help
+\\\
+\\`c `C
+\\`s `S
+;
+
 const help_type = 
 \\`
 \\`i `I

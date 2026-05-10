@@ -1,36 +1,33 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Alloc = std.mem.Allocator;
-const Parser = @import("../parser/ast.zig").Parser;
 const Chunk = @import("tape.zig").Chunk;
 const OpCode = @import("tape.zig").OpCode;
 const Op = @import("tape.zig").Op;
 const Compiler = @import("compiler.zig").Compiler;
 const Registry = @import("registry.zig").Registry;
-const value = @import("../noun/value.zig");
-const Pool = @import("../noun/symbol.zig").Pool;
 const GpuCtx = @import("gpu").GpuCtx;
 const command = @import("command.zig");
+const FnTables = @import("fntable.zig").FnTables;
+const assert = std.debug.assert;
+const call = @import("call.zig");
 const V = @import("../noun/value.zig").V;
 const N = @import("../noun/array.zig").N;
 const K = @import("../noun/class.zig").K;
 const Dict = @import("../noun/dict.zig").Dict;
 const Partial = @import("../noun/partial.zig").Partial;
-const opmod = @import("../noun/operator.zig");
-const Fn = opmod.Fn;
-const Adverb = opmod.Adverb;
-const FnKind = opmod.FnKind;
-const FnTables = @import("fntable.zig").FnTables;
-const assert = std.debug.assert;
-const call = @import("call.zig");
+const Pool = @import("../noun/symbol.zig").Pool;
+const ExtRegistry = @import("../noun/plugin.zig").ExtRegistry;
+const Fn = @import("../noun/operator.zig").Fn;
+const Adverb = @import("../noun/operator.zig").Adverb;
+const FnKind = @import("../noun/operator.zig").FnKind;
+const Parser = @import("../parser/ast.zig").Parser;
 const verb_enlist = @import("../primitive/verb/enlist.zig");
 const amend = @import("../primitive/amend.zig");
 const pair = @import("../primitive/verb/pair.zig");
 const promote = @import("../primitive/promote.zig").promote;
 const dispatch = @import("../primitive/dispatch.zig");
-const TerseFormatter = @import("../noun/format.zig").TerseFormatter;
 const MockWriter = @import("../util.zig").MockWriter;
-const ExtRegistry = @import("../noun/plugin.zig").ExtRegistry;
 const build_options = @import("build_options");
 // JIT is only available on arm64/macOS; the flag is silently ignored elsewhere.
 const jit_enabled = build_options.enable_jit and
@@ -416,10 +413,8 @@ pub const VM = struct {
       return;
     }
     const parent_idx = vm.currentFrame().lambda_idx;
-    vm.current_chunk = if (parent_idx != NO_LAMBDA)
-      vm.fn_tables.lambdaAt(parent_idx).chunk
-    else vm.chunk;
-
+    vm.current_chunk = if (parent_idx == NO_LAMBDA) vm.chunk
+                       else vm.fn_tables.lambdaAt(parent_idx).chunk;
     for (vm.stack[frame.result_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
     vm.stack_len = frame.result_slot;
     try vm.push(result);
@@ -645,20 +640,17 @@ pub const VM = struct {
   }
 
 
-  pub fn callLambda(vm: *VM, ref: Fn, argc: usize, res_slot: usize) !void {
+  pub fn callLambda(vm: *VM, ref: Fn, argc: usize, slot: usize) !void {
     if (vm.frames_len >= FRAMES_MAX) return VMError.StackOverflow;
-    const lambda_idx = @as(u24, @intCast(ref.idx));
-    const entry = vm.fn_tables.lambdaAt(lambda_idx);
+    const idx = @as(u24, @intCast(ref.idx));
+    const entry = vm.fn_tables.lambdaAt(idx);
 
     const total_slots = @as(usize, entry.arity) + @as(usize, entry.locals);
     const locals_to_push = if (total_slots > argc) total_slots - argc else 0;
     for (0..locals_to_push) |_| try vm.push(.blank);
 
-    vm.pushFrame(.{
-      .lambda_idx  = lambda_idx,
-      .base        = vm.stack_len - argc - locals_to_push,
-      .result_slot = res_slot,
-    });
+    const base = vm.stack_len - argc - locals_to_push;
+    vm.pushFrame(.{ .lambda_idx = idx, .base = base, .result_slot = slot });
 
     vm.current_chunk = entry.chunk;
   }
@@ -760,224 +752,224 @@ const op_table: [OpCode.COUNT]OpHandler = build: {
 // free of arm64 inline assembly and the JIT allocation overhead.
 
 const JitImpl = if (jit_enabled) struct {
-    const stencils_mod = @import("jit/stencils.zig");
+  const stencils_mod = @import("jit/stencils.zig");
 
-    // ── Handler stubs ────────────────────────────────────────────────────────
-    // Mirror the interpreter do* methods but accept operands directly so the
-    // JIT can call them without a bytecode stream.
+  // ── Handler stubs ────────────────────────────────────────────────────────
+  // Mirror the interpreter do* methods but accept operands directly so the
+  // JIT can call them without a bytecode stream.
 
-    fn jhGap(vm: *VM) callconv(.c) void { vm.push(.blank) catch {}; }
-    fn jhDrop(vm: *VM) callconv(.c) void { vm.pop().deinit(vm.alloc); }
-    fn jhInt(vm: *VM, raw: u16) callconv(.c) void {
-        vm.push(.{ .i = @as(i32, @as(i16, @bitCast(raw))) }) catch {};
-    }
-    fn jhConst(vm: *VM, idx: u8) callconv(.c) void {
-        vm.push(vm.current_chunk.constants.items[idx].ref()) catch {};
-    }
-    fn jhGlobal(vm: *VM, idx: u8) callconv(.c) void {
-        while (vm.globals.items.len <= idx) vm.globals.append(vm.alloc, .blank) catch return;
-        vm.push(vm.globals.items[idx].ref()) catch {};
-    }
-    fn jhLocal(vm: *VM, slot: u8) callconv(.c) void {
-        vm.push(vm.stack[vm.currentFrame().base + slot].ref()) catch {};
-    }
-    fn jhLocalLast(vm: *VM, slot: u8) callconv(.c) void {
-        const i = vm.currentFrame().base + slot;
-        const v = vm.stack[i];
-        vm.stack[i] = .blank;
-        vm.push(v) catch {};
-    }
-    fn jhAssignGlobal(vm: *VM, idx: u8) callconv(.c) void {
-        const val = vm.pop();
-        while (vm.globals.items.len <= idx) vm.globals.append(vm.alloc, .blank) catch return;
-        vm.globals.items[idx].deinit(vm.alloc);
-        vm.globals.items[idx] = val;
-        vm.push(.blank) catch {};
-    }
-    fn jhAssignLocal(vm: *VM, slot: u8) callconv(.c) void {
-        const val = vm.pop();
-        const i = vm.currentFrame().base + slot;
-        vm.stack[i].deinit(vm.alloc);
-        vm.stack[i] = val;
-        vm.push(.blank) catch {};
-    }
-    fn jhApply1(vm: *VM, op: u8) callconv(.c) void {
-        const a = vm.pop(); defer a.deinit(vm.alloc);
-        vm.push(dispatch.dispatch1(vm, @enumFromInt(op), a)) catch {};
-    }
-    fn jhApply2(vm: *VM, op: u8) callconv(.c) void {
-        const b = vm.pop(); defer b.deinit(vm.alloc);
-        const a = vm.pop(); defer a.deinit(vm.alloc);
-        vm.push(dispatch.dispatch2(vm, @enumFromInt(op), a, b)) catch {};
-    }
-    fn jhJump(vm: *VM, offset: u16) callconv(.c) void { vm.currentFrame().ip += offset; }
-    fn jhJumpFalse(vm: *VM, offset: u16) callconv(.c) void {
-        const v = vm.pop(); defer v.deinit(vm.alloc);
-        if (!v.isTrue()) vm.currentFrame().ip += offset;
-    }
-    fn jhJumpTrue(vm: *VM, offset: u16) callconv(.c) void {
-        const v = vm.pop(); defer v.deinit(vm.alloc);
-        if (v.isTrue()) vm.currentFrame().ip += offset;
-    }
-    fn jhReturn(vm: *VM) callconv(.c) void { vm.doReturn() catch {}; }
+  fn jhGap(vm: *VM) callconv(.c) void { vm.push(.blank) catch {}; }
+  fn jhDrop(vm: *VM) callconv(.c) void { vm.pop().deinit(vm.alloc); }
+  fn jhInt(vm: *VM, raw: u16) callconv(.c) void {
+    vm.push(.{ .i = @as(i32, @as(i16, @bitCast(raw))) }) catch {};
+  }
+  fn jhConst(vm: *VM, idx: u8) callconv(.c) void {
+    vm.push(vm.current_chunk.constants.items[idx].ref()) catch {};
+  }
+  fn jhGlobal(vm: *VM, idx: u8) callconv(.c) void {
+    while (vm.globals.items.len <= idx) vm.globals.append(vm.alloc, .blank) catch return;
+    vm.push(vm.globals.items[idx].ref()) catch {};
+  }
+  fn jhLocal(vm: *VM, slot: u8) callconv(.c) void {
+    vm.push(vm.stack[vm.currentFrame().base + slot].ref()) catch {};
+  }
+  fn jhLocalLast(vm: *VM, slot: u8) callconv(.c) void {
+    const i = vm.currentFrame().base + slot;
+    const v = vm.stack[i];
+    vm.stack[i] = .blank;
+    vm.push(v) catch {};
+  }
+  fn jhAssignGlobal(vm: *VM, idx: u8) callconv(.c) void {
+    const val = vm.pop();
+    while (vm.globals.items.len <= idx) vm.globals.append(vm.alloc, .blank) catch return;
+    vm.globals.items[idx].deinit(vm.alloc);
+    vm.globals.items[idx] = val;
+    vm.push(.blank) catch {};
+  }
+  fn jhAssignLocal(vm: *VM, slot: u8) callconv(.c) void {
+    const val = vm.pop();
+    const i = vm.currentFrame().base + slot;
+    vm.stack[i].deinit(vm.alloc);
+    vm.stack[i] = val;
+    vm.push(.blank) catch {};
+  }
+  fn jhApply1(vm: *VM, op: u8) callconv(.c) void {
+    const a = vm.pop(); defer a.deinit(vm.alloc);
+    vm.push(dispatch.dispatch1(vm, @enumFromInt(op), a)) catch {};
+  }
+  fn jhApply2(vm: *VM, op: u8) callconv(.c) void {
+    const b = vm.pop(); defer b.deinit(vm.alloc);
+    const a = vm.pop(); defer a.deinit(vm.alloc);
+    vm.push(dispatch.dispatch2(vm, @enumFromInt(op), a, b)) catch {};
+  }
+  fn jhJump(vm: *VM, offset: u16) callconv(.c) void { vm.currentFrame().ip += offset; }
+  fn jhJumpFalse(vm: *VM, offset: u16) callconv(.c) void {
+    const v = vm.pop(); defer v.deinit(vm.alloc);
+    if (!v.isTrue()) vm.currentFrame().ip += offset;
+  }
+  fn jhJumpTrue(vm: *VM, offset: u16) callconv(.c) void {
+    const v = vm.pop(); defer v.deinit(vm.alloc);
+    if (v.isTrue()) vm.currentFrame().ip += offset;
+  }
+  fn jhReturn(vm: *VM) callconv(.c) void { vm.doReturn() catch {}; }
 
-    // ── apply2Worker ─────────────────────────────────────────────────────────
-    // Called indirectly from stencilApply2 via vm.jit_apply2 (LDR+BLR).
-    // Being a regular function it can BL freely; errors go to vm.jit_err.
-    fn apply2Worker(vm: *VM, op: u8) callconv(.c) void {
-        const b = vm.pop(); defer b.deinit(vm.alloc);
-        const a = vm.pop(); defer a.deinit(vm.alloc);
-        vm.push(dispatch.dispatch2(vm, @enumFromInt(op), a, b)) catch {};
+  // ── apply2Worker ─────────────────────────────────────────────────────────
+  // Called indirectly from stencilApply2 via vm.jit_apply2 (LDR+BLR).
+  // Being a regular function it can BL freely; errors go to vm.jit_err.
+  fn apply2Worker(vm: *VM, op: u8) callconv(.c) void {
+    const b = vm.pop(); defer b.deinit(vm.alloc);
+    const a = vm.pop(); defer a.deinit(vm.alloc);
+    vm.push(dispatch.dispatch2(vm, @enumFromInt(op), a, b)) catch {};
+  }
+
+  // ── CPS stencil functions ────────────────────────────────────────────────
+  // Each stencil is a LEAF (no BLR) so the tail-call chain via BR X8 works.
+  // NEXT hole  = MOVZ/MOVK×3/BR X8 at the end, patched to the next stencil.
+  // OPERAND hole = MOVZ X1, #0xFFFF, patched with the actual operand.
+
+  // Inline ref for stencil leaves — avoids BL to the normal ref() helper.
+  // Skips ExtObj (.x) so the function stays a leaf.
+  inline fn stencilRef(v: V) V {
+    switch (v) {
+      .I  => |n| { if (n.ptr.rc != std.math.maxInt(u32)) n.ptr.rc += 1; },
+      inline .B, .F, .S, .C, .L => |n| n.ptr.rc += 1,
+      inline .m, .M => |n| n.ptr.rc += 1,
+      .partial => |p| p.rc += 1,
+      else => {},
     }
+    return v;
+  }
 
-    // ── CPS stencil functions ────────────────────────────────────────────────
-    // Each stencil is a LEAF (no BLR) so the tail-call chain via BR X8 works.
-    // NEXT hole  = MOVZ/MOVK×3/BR X8 at the end, patched to the next stencil.
-    // OPERAND hole = MOVZ X1, #0xFFFF, patched with the actual operand.
+  fn stencilGap(vm: *VM) callconv(.c) void {
+    vm.stack[vm.stack_len] = .blank;
+    vm.stack_len += 1;
+    asm volatile (
+      \\.inst 0xD2800008   // MOVZ X8, #0      — NEXT hole word 0
+      \\.inst 0xF2A00008   // MOVK X8, #0, LSL 16
+      \\.inst 0xF2C00008   // MOVK X8, #0, LSL 32
+      \\.inst 0xF2E00008   // MOVK X8, #0, LSL 48
+      \\.inst 0xD61F0100   // BR X8
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
 
-    // Inline ref for stencil leaves — avoids BL to the normal ref() helper.
-    // Skips ExtObj (.x) so the function stays a leaf.
-    inline fn stencilRef(v: V) V {
-        switch (v) {
-            .I  => |n| { if (n.ptr.rc != std.math.maxInt(u32)) n.ptr.rc += 1; },
-            inline .B, .F, .S, .C, .L => |n| n.ptr.rc += 1,
-            inline .m, .M => |n| n.ptr.rc += 1,
-            .partial => |p| p.rc += 1,
-            else => {},
-        }
-        return v;
-    }
+  fn stencilInt(vm: *VM) callconv(.c) void {
+    var raw: u32 = undefined;
+    asm volatile (
+      \\.inst 0xD29FFFE1   // MOVZ X1, #0xFFFF — OPERAND hole
+      : [o] "={x1}" (raw)
+    );
+    vm.stack[vm.stack_len] = .{ .i = @as(i32, @as(i16, @bitCast(@as(u16, @truncate(raw))))) };
+    vm.stack_len += 1;
+    asm volatile (
+      \\.inst 0xD2800008
+      \\.inst 0xF2A00008
+      \\.inst 0xF2C00008
+      \\.inst 0xF2E00008
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
 
-    fn stencilGap(vm: *VM) callconv(.c) void {
-        vm.stack[vm.stack_len] = .blank;
-        vm.stack_len += 1;
-        asm volatile (
-            \\.inst 0xD2800008   // MOVZ X8, #0      — NEXT hole word 0
-            \\.inst 0xF2A00008   // MOVK X8, #0, LSL 16
-            \\.inst 0xF2C00008   // MOVK X8, #0, LSL 32
-            \\.inst 0xF2E00008   // MOVK X8, #0, LSL 48
-            \\.inst 0xD61F0100   // BR X8
-            ::: .{ .x8 = true }
-        );
-        unreachable;
-    }
+  fn stencilLocal(vm: *VM) callconv(.c) void {
+    var slot: u32 = undefined;
+    asm volatile (
+      \\.inst 0xD29FFFE1   // MOVZ X1, #0xFFFF — OPERAND hole
+      : [o] "={x1}" (slot)
+    );
+    const frame = &vm.frames[vm.frames_len - 1];
+    const val = stencilRef(vm.stack[frame.base + slot]);
+    vm.stack[vm.stack_len] = val;
+    vm.stack_len += 1;
+    asm volatile (
+      \\.inst 0xD2800008
+      \\.inst 0xF2A00008
+      \\.inst 0xF2C00008
+      \\.inst 0xF2E00008
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
 
-    fn stencilInt(vm: *VM) callconv(.c) void {
-        var raw: u32 = undefined;
-        asm volatile (
-            \\.inst 0xD29FFFE1   // MOVZ X1, #0xFFFF — OPERAND hole
-            : [o] "={x1}" (raw)
-        );
-        vm.stack[vm.stack_len] = .{ .i = @as(i32, @as(i16, @bitCast(@as(u16, @truncate(raw))))) };
-        vm.stack_len += 1;
-        asm volatile (
-            \\.inst 0xD2800008
-            \\.inst 0xF2A00008
-            \\.inst 0xF2C00008
-            \\.inst 0xF2E00008
-            \\.inst 0xD61F0100
-            ::: .{ .x8 = true }
-        );
-        unreachable;
-    }
+  fn stencilLocalLast(vm: *VM) callconv(.c) void {
+    var slot: u32 = undefined;
+    asm volatile (
+      \\.inst 0xD29FFFE1   // MOVZ X1, #0xFFFF — OPERAND hole
+      : [o] "={x1}" (slot)
+    );
+    const frame = &vm.frames[vm.frames_len - 1];
+    const src = &vm.stack[frame.base + slot];
+    const val = src.*;
+    src.* = .blank;
+    vm.stack[vm.stack_len] = val;
+    vm.stack_len += 1;
+    asm volatile (
+      \\.inst 0xD2800008
+      \\.inst 0xF2A00008
+      \\.inst 0xF2C00008
+      \\.inst 0xF2E00008
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
 
-    fn stencilLocal(vm: *VM) callconv(.c) void {
-        var slot: u32 = undefined;
-        asm volatile (
-            \\.inst 0xD29FFFE1   // MOVZ X1, #0xFFFF — OPERAND hole
-            : [o] "={x1}" (slot)
-        );
-        const frame = &vm.frames[vm.frames_len - 1];
-        const val = stencilRef(vm.stack[frame.base + slot]);
-        vm.stack[vm.stack_len] = val;
-        vm.stack_len += 1;
-        asm volatile (
-            \\.inst 0xD2800008
-            \\.inst 0xF2A00008
-            \\.inst 0xF2C00008
-            \\.inst 0xF2E00008
-            \\.inst 0xD61F0100
-            ::: .{ .x8 = true }
-        );
-        unreachable;
-    }
+  // Apply2 stencil: reads opcode from OPERAND hole, delegates to vm.jit_apply2
+  // (LDR from VM struct — position-independent when copied to JIT memory).
+  // Uses scanWithFrame so the STP/LDP frame is preserved across the BLR.
+  fn stencilApply2(vm: *VM) callconv(.c) void {
+    var op_raw: u32 = undefined;
+    asm volatile (
+      \\.inst 0xD29FFFE1   // MOVZ X1, #0xFFFF — OPERAND hole
+      : [o] "={x1}" (op_raw)
+    );
+    vm.jit_apply2(vm, @as(u8, @truncate(op_raw)));
+    asm volatile (
+      \\.inst 0xD2800008   // MOVZ X8, #0      — NEXT hole word 0
+      \\.inst 0xF2A00008   // MOVK X8, #0, LSL 16
+      \\.inst 0xF2C00008   // MOVK X8, #0, LSL 32
+      \\.inst 0xF2E00008   // MOVK X8, #0, LSL 48
+      \\.inst 0xD61F0100   // BR X8
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
 
-    fn stencilLocalLast(vm: *VM) callconv(.c) void {
-        var slot: u32 = undefined;
-        asm volatile (
-            \\.inst 0xD29FFFE1   // MOVZ X1, #0xFFFF — OPERAND hole
-            : [o] "={x1}" (slot)
-        );
-        const frame = &vm.frames[vm.frames_len - 1];
-        const src = &vm.stack[frame.base + slot];
-        const val = src.*;
-        src.* = .blank;
-        vm.stack[vm.stack_len] = val;
-        vm.stack_len += 1;
-        asm volatile (
-            \\.inst 0xD2800008
-            \\.inst 0xF2A00008
-            \\.inst 0xF2C00008
-            \\.inst 0xF2E00008
-            \\.inst 0xD61F0100
-            ::: .{ .x8 = true }
-        );
-        unreachable;
-    }
+  // ── Builder helpers ──────────────────────────────────────────────────────
 
-    // Apply2 stencil: reads opcode from OPERAND hole, delegates to vm.jit_apply2
-    // (LDR from VM struct — position-independent when copied to JIT memory).
-    // Uses scanWithFrame so the STP/LDP frame is preserved across the BLR.
-    fn stencilApply2(vm: *VM) callconv(.c) void {
-        var op_raw: u32 = undefined;
-        asm volatile (
-            \\.inst 0xD29FFFE1   // MOVZ X1, #0xFFFF — OPERAND hole
-            : [o] "={x1}" (op_raw)
-        );
-        vm.jit_apply2(vm, @as(u8, @truncate(op_raw)));
-        asm volatile (
-            \\.inst 0xD2800008   // MOVZ X8, #0      — NEXT hole word 0
-            \\.inst 0xF2A00008   // MOVK X8, #0, LSL 16
-            \\.inst 0xF2C00008   // MOVK X8, #0, LSL 32
-            \\.inst 0xF2E00008   // MOVK X8, #0, LSL 48
-            \\.inst 0xD61F0100   // BR X8
-            ::: .{ .x8 = true }
-        );
-        unreachable;
-    }
+  fn buildStencils() jit_mod.StencilTable {
+    const s = stencils_mod;
+    return .{
+      .gap        = s.scan(@intFromPtr(&stencilGap)),
+      .int_       = s.scan(@intFromPtr(&stencilInt)),
+      .local      = s.scan(@intFromPtr(&stencilLocal)),
+      .local_last = s.scan(@intFromPtr(&stencilLocalLast)),
+      .apply2     = s.scanWithFrame(@intFromPtr(&stencilApply2)),
+    };
+  }
 
-    // ── Builder helpers ──────────────────────────────────────────────────────
-
-    fn buildStencils() jit_mod.StencilTable {
-        const s = stencils_mod;
-        return .{
-            .gap        = s.scan(@intFromPtr(&stencilGap)),
-            .int_       = s.scan(@intFromPtr(&stencilInt)),
-            .local      = s.scan(@intFromPtr(&stencilLocal)),
-            .local_last = s.scan(@intFromPtr(&stencilLocalLast)),
-            .apply2     = s.scanWithFrame(@intFromPtr(&stencilApply2)),
-        };
-    }
-
-    fn buildHandlers() jit_mod.Handlers {
-        return .{
-            .gap           = @intFromPtr(&jhGap),
-            .drop          = @intFromPtr(&jhDrop),
-            .int_          = @intFromPtr(&jhInt),
-            .const_        = @intFromPtr(&jhConst),
-            .global        = @intFromPtr(&jhGlobal),
-            .local         = @intFromPtr(&jhLocal),
-            .local_last    = @intFromPtr(&jhLocalLast),
-            .assign_global = @intFromPtr(&jhAssignGlobal),
-            .assign_local  = @intFromPtr(&jhAssignLocal),
-            .apply1        = @intFromPtr(&jhApply1),
-            .apply2        = @intFromPtr(&jhApply2),
-            .jump          = @intFromPtr(&jhJump),
-            .jump_false    = @intFromPtr(&jhJumpFalse),
-            .jump_true     = @intFromPtr(&jhJumpTrue),
-            .return_       = @intFromPtr(&jhReturn),
-        };
-    }
+  fn buildHandlers() jit_mod.Handlers {
+    return .{
+      .gap           = @intFromPtr(&jhGap),
+      .drop          = @intFromPtr(&jhDrop),
+      .int_          = @intFromPtr(&jhInt),
+      .const_        = @intFromPtr(&jhConst),
+      .global        = @intFromPtr(&jhGlobal),
+      .local         = @intFromPtr(&jhLocal),
+      .local_last    = @intFromPtr(&jhLocalLast),
+      .assign_global = @intFromPtr(&jhAssignGlobal),
+      .assign_local  = @intFromPtr(&jhAssignLocal),
+      .apply1        = @intFromPtr(&jhApply1),
+      .apply2        = @intFromPtr(&jhApply2),
+      .jump          = @intFromPtr(&jhJump),
+      .jump_false    = @intFromPtr(&jhJumpFalse),
+      .jump_true     = @intFromPtr(&jhJumpTrue),
+      .return_       = @intFromPtr(&jhReturn),
+    };
+  }
 } else struct {};
 
 test "VM simple addition" {
