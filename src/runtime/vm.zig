@@ -22,9 +22,9 @@ const Fn = @import("../noun/operator.zig").Fn;
 const Adverb = @import("../noun/operator.zig").Adverb;
 const FnKind = @import("../noun/operator.zig").FnKind;
 const Parser = @import("../parser/ast.zig").Parser;
-const verb_enlist = @import("../primitive/verb/enlist.zig");
+const enlist = @import("../primitive/verb/enlist.zig").enlist;
+const dict = @import("../primitive/verb/pair.zig").dict;
 const amend = @import("../primitive/amend.zig");
-const pair = @import("../primitive/verb/pair.zig");
 const promote = @import("../primitive/promote.zig").promote;
 const dispatch = @import("../primitive/dispatch.zig");
 const MockWriter = @import("../util.zig").MockWriter;
@@ -556,7 +556,7 @@ pub const VM = struct {
 
     for (vm.stack[args_start - 1 .. vm.stack_len]) |*v| v.deinit(vm.alloc);
     vm.stack_len = args_start - 1;
-    try vm.push(V{ .partial = p });
+    try vm.push(.{ .partial = p });
   }
 
   fn doDerive(vm: *VM) !void {
@@ -578,7 +578,7 @@ pub const VM = struct {
       const idx = try vm.fn_tables.addDerived(.{ .base = base_v, .adverb = adv });
       break :blk Fn.makeDerivedTable(idx);
     };
-    try vm.push(V{ .func = derived });
+    try vm.push(.{ .func = derived });
   }
   
   fn doMakeList(vm: *VM) !void {
@@ -603,7 +603,7 @@ pub const VM = struct {
     var vals_live = n > 1;
     errdefer { if (vals_live) vals.deinit(vm.alloc); }
     const res = if (n == 1) V{ .m = try Dict.init(vm.alloc, keys, vals) }
-                else pair.dict(vm, keys, vals);
+                else dict(vm, keys, vals);
     errdefer res.deinit(vm.alloc);
     if (n > 1) { keys.deinit(vm.alloc); keys_live = false; vals.deinit(vm.alloc); vals_live = false; }
     for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
@@ -614,9 +614,9 @@ pub const VM = struct {
   fn doMakeTable(vm: *VM) !void {
     const n = vm.readByte();
     const start = vm.stack_len - 2 * n;
-    const keys = if (n == 1) verb_enlist.enlist(vm.alloc, vm.stack[start])
+    const keys = if (n == 1) enlist(vm.alloc, vm.stack[start])
                  else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start .. start + n])).L);
-    const vals = if (n == 1) verb_enlist.enlist(vm.alloc, vm.stack[start + 1])
+    const vals = if (n == 1) enlist(vm.alloc, vm.stack[start + 1])
                  else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
     const res = V{ .M = try Dict.init(vm.alloc, keys, vals) };
     for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
