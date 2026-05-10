@@ -30,9 +30,7 @@ const dispatch = @import("../primitive/dispatch.zig");
 const MockWriter = @import("../util.zig").MockWriter;
 const build_options = @import("build_options");
 // JIT is only available on arm64/macOS; the flag is silently ignored elsewhere.
-const jit_enabled = build_options.enable_jit and
-    builtin.cpu.arch == .aarch64 and
-    builtin.os.tag == .macos;
+const jit_enabled = build_options.enable_jit and builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos;
 const jit_mod = if (jit_enabled) @import("jit/jit.zig") else struct {};
 
 const STACK_MAX = 2048;
