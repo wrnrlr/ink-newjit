@@ -2,27 +2,36 @@
 //
 // Each stencil is a machine-code fragment in the text segment that:
 //   1. Does its work (push a value, etc.)
-//   2. Ends with a NEXT HOLE: MOVZ X8,#0; MOVK X8,#0,LSL16; ...; BR X8
+//   2. Ends with a NEXT HOLE: MOVZ X8,#0xDEAD; MOVK X8,#0xBEEF,LSL16; ...; BR X8
 //      The BR chains to the next stencil (or handler section) in JIT memory.
+//      patchNext() overwrites the MOVZ/MOVK words with the actual target address.
 //
 // Parameterised stencils additionally carry an OPERAND HOLE:
-//   MOVZ X1, #0xFFFF  (= 0xD29FFFE1)
+//   MOVZ X1, #0xCA11  (= 0xD2994221)
 // which is patched to MOVZ X1, #<actual_operand> before execution.
 //
 // Stencil functions are defined in vm.zig (needs VM type) and are scanned
 // here at JIT-cache initialisation time.
 
 // ── Hole signatures (u32, little-endian, native byte order) ──────────────────
-pub const OPERAND_SIG: u32 = 0xD29FFFE1; // MOVZ X1, #0xFFFF
-pub const NEXT_SIG:    u32 = 0xD2800008; // MOVZ X8, #0  (first word of NEXT hole)
+//
+// Magic sentinel values chosen so they cannot appear in naturally-generated
+// ARM64 code.  Using non-zero, unusual immediates prevents the scanner from
+// false-matching instructions that the compiler emits for other purposes
+// (e.g. MOVZ X1, #0xFFFF generated for maxInt(u32) comparisons, or
+//  MOVZ X8, #0 generated for zero-initialisation).
+//
+//   OPERAND_SIG: MOVZ X1, #0xCA11  (0xD2994221)
+//   NEXT_SIG[0]: MOVZ X8, #0xDEAD  (0xD29BD5A8)
+//   NEXT_SIG[1]: MOVK X8, #0xBEEF, LSL16  (0xF2B7DDE8)
+//   NEXT_SIG[2]: MOVK X8, #0xCAFE, LSL32  (0xF2D95FC8)
+//   NEXT_SIG[3]: MOVK X8, #0xBABE, LSL48  (0xF2F757C8)
+//   NEXT_SIG[4]: BR   X8                   (0xD61F0100) — unchanged
+pub const OPERAND_SIG: u32 = 0xD2994221; // MOVZ X1, #0xCA11
+pub const NEXT_SIG:    u32 = 0xD29BD5A8; // MOVZ X8, #0xDEAD  (first word of NEXT hole)
 
 // Full 5-word NEXT hole that we scan for:
-//   MOVZ X8, #0          0xD2800008
-//   MOVK X8, #0, LSL 16  0xF2A00008
-//   MOVK X8, #0, LSL 32  0xF2C00008
-//   MOVK X8, #0, LSL 48  0xF2E00008
-//   BR   X8              0xD61F0100
-const NEXT_WORDS = [5]u32{ 0xD2800008, 0xF2A00008, 0xF2C00008, 0xF2E00008, 0xD61F0100 };
+const NEXT_WORDS = [5]u32{ 0xD29BD5A8, 0xF2B7DDE8, 0xF2D95FC8, 0xF2F757C8, 0xD61F0100 };
 
 pub const StencilInfo = struct {
   /// Pointer to the stencil's machine code in the text segment.
@@ -44,7 +53,10 @@ pub fn scanWithFrame(fn_addr: usize) ?StencilInfo {
 
   for (0..MAX_WORDS) |i| {
     const w = p[i];
-    if (w == OPERAND_SIG) { operand_off = i * 4; continue; }
+    // Record only the FIRST occurrence so a compiler-generated instruction
+    // that accidentally matches later in the body does not overwrite the
+    // real hole offset.
+    if (w == OPERAND_SIG) { if (operand_off == null) operand_off = i * 4; continue; }
     if (w == NEXT_SIG and i + 4 < MAX_WORDS) {
       if (p[i+1] == NEXT_WORDS[1] and p[i+2] == NEXT_WORDS[2] and
         p[i+3] == NEXT_WORDS[3] and p[i+4] == NEXT_WORDS[4])
@@ -99,8 +111,9 @@ pub fn scan(fn_addr: usize) ?StencilInfo {
   for (0..MAX_WORDS) |i| {
     const w = body[i];
 
+    // Record only the FIRST occurrence — see scanWithFrame for rationale.
     if (w == OPERAND_SIG) {
-      operand_off = i * 4;
+      if (operand_off == null) operand_off = i * 4;
       continue;
     }
 

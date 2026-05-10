@@ -14,13 +14,12 @@ const call = @import("call.zig");
 const V = @import("../noun/value.zig").V;
 const N = @import("../noun/array.zig").N;
 const K = @import("../noun/class.zig").K;
+const Fn = @import("../noun/operator.zig").Fn;
+const Adverb = @import("../noun/operator.zig").Adverb;
 const Dict = @import("../noun/dict.zig").Dict;
 const Partial = @import("../noun/partial.zig").Partial;
 const Pool = @import("../noun/symbol.zig").Pool;
 const ExtRegistry = @import("../noun/plugin.zig").ExtRegistry;
-const Fn = @import("../noun/operator.zig").Fn;
-const Adverb = @import("../noun/operator.zig").Adverb;
-const FnKind = @import("../noun/operator.zig").FnKind;
 const Parser = @import("../parser/ast.zig").Parser;
 const enlist = @import("../primitive/verb/enlist.zig").enlist;
 const dict = @import("../primitive/verb/pair.zig").dict;
@@ -182,7 +181,6 @@ pub const VM = struct {
     const text_id = try vm.registry.addFile(path, text);
     return vm.interpret(text, text_id);
   }
-
 
   pub fn interpret(vm: *VM, txt: []const u8, text_id: u32) !V {
     vm.resetStack();
@@ -603,7 +601,12 @@ pub const VM = struct {
     const res = if (n == 1) V{ .m = try Dict.init(vm.alloc, keys, vals) }
                 else dict(vm, keys, vals);
     errdefer res.deinit(vm.alloc);
-    if (n > 1) { keys.deinit(vm.alloc); keys_live = false; vals.deinit(vm.alloc); vals_live = false; }
+    if (n > 1) {
+      keys.deinit(vm.alloc);
+      keys_live = false;
+      vals.deinit(vm.alloc);
+      vals_live = false;
+    }
     for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     try vm.push(res);
@@ -842,10 +845,10 @@ const JitImpl = if (jit_enabled) struct {
     vm.stack[vm.stack_len] = .blank;
     vm.stack_len += 1;
     asm volatile (
-      \\.inst 0xD2800008   // MOVZ X8, #0      — NEXT hole word 0
-      \\.inst 0xF2A00008   // MOVK X8, #0, LSL 16
-      \\.inst 0xF2C00008   // MOVK X8, #0, LSL 32
-      \\.inst 0xF2E00008   // MOVK X8, #0, LSL 48
+      \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
+      \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
+      \\.inst 0xF2D95FC8   // MOVK X8, #0xCAFE, LSL 32
+      \\.inst 0xF2F757C8   // MOVK X8, #0xBABE, LSL 48
       \\.inst 0xD61F0100   // BR X8
       ::: .{ .x8 = true }
     );
@@ -855,17 +858,17 @@ const JitImpl = if (jit_enabled) struct {
   fn stencilInt(vm: *VM) callconv(.c) void {
     var raw: u32 = undefined;
     asm volatile (
-      \\.inst 0xD29FFFE1   // MOVZ X1, #0xFFFF — OPERAND hole
+      \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
       : [o] "={x1}" (raw)
     );
     vm.stack[vm.stack_len] = .{ .i = @as(i32, @as(i16, @bitCast(@as(u16, @truncate(raw))))) };
     vm.stack_len += 1;
     asm volatile (
-      \\.inst 0xD2800008
-      \\.inst 0xF2A00008
-      \\.inst 0xF2C00008
-      \\.inst 0xF2E00008
-      \\.inst 0xD61F0100
+      \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
+      \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
+      \\.inst 0xF2D95FC8   // MOVK X8, #0xCAFE, LSL 32
+      \\.inst 0xF2F757C8   // MOVK X8, #0xBABE, LSL 48
+      \\.inst 0xD61F0100   // BR X8
       ::: .{ .x8 = true }
     );
     unreachable;
@@ -874,7 +877,7 @@ const JitImpl = if (jit_enabled) struct {
   fn stencilLocal(vm: *VM) callconv(.c) void {
     var slot: u32 = undefined;
     asm volatile (
-      \\.inst 0xD29FFFE1   // MOVZ X1, #0xFFFF — OPERAND hole
+      \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
       : [o] "={x1}" (slot)
     );
     const frame = &vm.frames[vm.frames_len - 1];
@@ -882,11 +885,11 @@ const JitImpl = if (jit_enabled) struct {
     vm.stack[vm.stack_len] = val;
     vm.stack_len += 1;
     asm volatile (
-      \\.inst 0xD2800008
-      \\.inst 0xF2A00008
-      \\.inst 0xF2C00008
-      \\.inst 0xF2E00008
-      \\.inst 0xD61F0100
+      \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
+      \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
+      \\.inst 0xF2D95FC8   // MOVK X8, #0xCAFE, LSL 32
+      \\.inst 0xF2F757C8   // MOVK X8, #0xBABE, LSL 48
+      \\.inst 0xD61F0100   // BR X8
       ::: .{ .x8 = true }
     );
     unreachable;
@@ -895,7 +898,7 @@ const JitImpl = if (jit_enabled) struct {
   fn stencilLocalLast(vm: *VM) callconv(.c) void {
     var slot: u32 = undefined;
     asm volatile (
-      \\.inst 0xD29FFFE1   // MOVZ X1, #0xFFFF — OPERAND hole
+      \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
       : [o] "={x1}" (slot)
     );
     const frame = &vm.frames[vm.frames_len - 1];
@@ -905,11 +908,11 @@ const JitImpl = if (jit_enabled) struct {
     vm.stack[vm.stack_len] = val;
     vm.stack_len += 1;
     asm volatile (
-      \\.inst 0xD2800008
-      \\.inst 0xF2A00008
-      \\.inst 0xF2C00008
-      \\.inst 0xF2E00008
-      \\.inst 0xD61F0100
+      \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
+      \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
+      \\.inst 0xF2D95FC8   // MOVK X8, #0xCAFE, LSL 32
+      \\.inst 0xF2F757C8   // MOVK X8, #0xBABE, LSL 48
+      \\.inst 0xD61F0100   // BR X8
       ::: .{ .x8 = true }
     );
     unreachable;
@@ -921,15 +924,15 @@ const JitImpl = if (jit_enabled) struct {
   fn stencilApply2(vm: *VM) callconv(.c) void {
     var op_raw: u32 = undefined;
     asm volatile (
-      \\.inst 0xD29FFFE1   // MOVZ X1, #0xFFFF — OPERAND hole
+      \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
       : [o] "={x1}" (op_raw)
     );
     vm.jit_apply2(vm, @as(u8, @truncate(op_raw)));
     asm volatile (
-      \\.inst 0xD2800008   // MOVZ X8, #0      — NEXT hole word 0
-      \\.inst 0xF2A00008   // MOVK X8, #0, LSL 16
-      \\.inst 0xF2C00008   // MOVK X8, #0, LSL 32
-      \\.inst 0xF2E00008   // MOVK X8, #0, LSL 48
+      \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
+      \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
+      \\.inst 0xF2D95FC8   // MOVK X8, #0xCAFE, LSL 32
+      \\.inst 0xF2F757C8   // MOVK X8, #0xBABE, LSL 48
       \\.inst 0xD61F0100   // BR X8
       ::: .{ .x8 = true }
     );
