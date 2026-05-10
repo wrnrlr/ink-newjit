@@ -772,14 +772,6 @@ test "do not reuse the left argument" {
   try t.check("a: 1 2 3; b: a+1; a", "1 2 3");
 }
 
-// test "kSQL" {
-//   var t = try Tester.init(); defer t.deinit();
-//   try t.check("T: [[]n:`a`b`c;i:0 1 2]", "");
-//   try t.check("select n from T", "[[]n:`a`b`c]");
-//   try t.check("select i from T", "[[]i:0 1 2]");
-//   try t.check("select i,j:i+1 from T", "[[]i:0 1 2;j:1 2 3]");
-// }
-
 test "csv parsing" {
   var t = try Tester.init(); defer t.deinit();
   // try t.check("`csv$\"name,age\nAlice,30\nBob,25\"", "[[]name:(\"Alice\";\"Bob\");age:30 25]");
