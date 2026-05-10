@@ -3,13 +3,16 @@ VERSION := 0.0.1
 INK  := zig-out/bin/ink
 NGNK := $(HOME)/.k/k
 
-.PHONY: test bench bench-sort bench-view bench-langs bench-report
+.PHONY: test bench bench-sort bench-view bench-langs bench-report release
 
 test:
 	time zig build test
 
 build:
 	time zig build -Dui=true
+
+release:
+	time zig build -Doptimize=ReleaseFast -Djit=true
 
 bench-sort:
 	zig test src/verb/sort/bench.zig
