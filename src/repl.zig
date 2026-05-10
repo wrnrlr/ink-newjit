@@ -61,15 +61,24 @@ pub const Repl = struct {
       results_list.deinit(self.alloc);
     }
 
+    // Pre-extract all stmt info before any vm.eval call.
+    // vm.eval calls parse() which resets the parser arena, invalidating node.
+    const StmtInfo = struct { is_blank: bool, source: []const u8 };
+    const stmt_infos = try self.alloc.alloc(StmtInfo, node.terse.stmts.len);
+    defer self.alloc.free(stmt_infos);
+    for (node.terse.stmts, 0..) |s, j| {
+      stmt_infos[j] = .{ .is_blank = s.node.* == .blank, .source = s.source };
+    }
+
     const src_base: usize = @intFromPtr(source.ptr);
     var prev_src_end: usize = 0;
 
     var i: usize = 0;
-    while (i < node.terse.stmts.len) {
-      const stmt = node.terse.stmts[i];
+    while (i < stmt_infos.len) {
+      const stmt = stmt_infos[i];
       i += 1;
 
-      if (stmt.node.* == .blank) continue;
+      if (stmt.is_blank) continue;
 
       // stmt.source is a slice of source; compute its byte offset.
       const stmt_start = @intFromPtr(stmt.source.ptr) - src_base;
@@ -96,8 +105,8 @@ pub const Repl = struct {
       defer full_stmt_src.deinit(self.alloc);
       try full_stmt_src.appendSlice(self.alloc, source[stmt_start..stmt_end]);
 
-      if (i < node.terse.stmts.len and node.terse.stmts[i].node.* == .blank and
-          std.mem.eql(u8, node.terse.stmts[i].source, ";")) {
+      if (i < stmt_infos.len and stmt_infos[i].is_blank and
+          std.mem.eql(u8, stmt_infos[i].source, ";")) {
         try full_stmt_src.appendSlice(self.alloc, ";");
         i += 1;
         is_suppressed = true;
