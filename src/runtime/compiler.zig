@@ -108,13 +108,17 @@ pub const Compiler = struct {
       },
       .adverb_val => |a| try self.emitConst(V{ .func = Fn.adverb(adverbFromString(a)) }),
       .command => |cmd| blk: {
-        // Encode command as a single char-vector constant: verb\0args
-        const full_len = cmd.verb.len + 1 + cmd.args.len;
+        // Encode command as: verb\0count_str\0args
+        var count_buf: [12]u8 = undefined;
+        const count_str = std.fmt.bufPrint(&count_buf, "{d}", .{cmd.n}) catch "1";
+        const full_len = cmd.verb.len + 1 + count_str.len + 1 + cmd.args.len;
         const buf = try self.alloc.alloc(u8, full_len);
         defer self.alloc.free(buf);
         @memcpy(buf[0..cmd.verb.len], cmd.verb);
         buf[cmd.verb.len] = 0;
-        @memcpy(buf[cmd.verb.len + 1 ..], cmd.args);
+        @memcpy(buf[cmd.verb.len + 1 .. cmd.verb.len + 1 + count_str.len], count_str);
+        buf[cmd.verb.len + 1 + count_str.len] = 0;
+        @memcpy(buf[cmd.verb.len + 2 + count_str.len ..], cmd.args);
         const cv = V{ .C = try N(u8).n1(self.alloc, buf) };
         defer cv.deinit(self.alloc);
         const const_id = try self.emitConst(cv);

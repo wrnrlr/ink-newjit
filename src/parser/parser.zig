@@ -155,6 +155,32 @@ pub const Parser = struct {
   fn parseStmt(self: *Parser) ParseError!*Node {
     self.skipComments();
 
+    if (self.is(.command)) {
+      const raw = self.tokSlice(); // e.g., "\t:5 1+1"
+      var text = if (raw.len > 0 and raw[0] == '\\') raw[1..] else raw;
+      var verb_end: usize = 0;
+      while (verb_end < text.len and std.ascii.isAlphabetic(text[verb_end])) verb_end += 1;
+      const verb = text[0..verb_end];
+      text = text[verb_end..];
+      var n: u32 = 1;
+      if (text.len > 0 and text[0] == ':') {
+        text = text[1..];
+        var num_end: usize = 0;
+        while (num_end < text.len and text[num_end] >= '0' and text[num_end] <= '9') num_end += 1;
+        if (num_end > 0) {
+          n = parseInt(u32, text[0..num_end], 10) catch 1;
+          text = text[num_end..];
+        }
+      }
+      var args_start: usize = 0;
+      while (args_start < text.len and (text[args_start] == ' ' or text[args_start] == '\t')) args_start += 1;
+      const args = text[args_start..];
+      const m = try self.arena.allocator().create(Node);
+      m.* = .{ .command = .{ .verb = verb, .n = n, .args = args } };
+      self.advance();
+      return m;
+    }
+
     // ':' clause  →  right  (or defer with adjunct, compiled identically)
     // ':' alone (followed by sep/end) → standalone ':' op (e.g. in @[arr; i; :; val])
     if (self.is(.@":")) {

@@ -175,13 +175,7 @@ fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, o
         try out.print("Derive      {s}\n", .{@tagName(adv)});
       },
       .Command => {
-        const idx = code[ip]; ip += 1;
-        const bytes = chunk.constants.items[idx].C.slice();
-        const sep = std.mem.indexOfScalar(u8, bytes, 0) orelse bytes.len;
-        const verb = bytes[0..sep];
-        const args = if (sep < bytes.len) std.mem.trim(u8, bytes[sep + 1 ..], " \t") else "";
-        if (args.len > 0) try out.print("Command     \\{s} {s}\n", .{ verb, args })
-        else              try out.print("Command     \\{s}\n", .{verb});
+        try out.print("Command\n", .{});
       },
     }
   }

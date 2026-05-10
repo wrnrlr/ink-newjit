@@ -17,7 +17,7 @@ pub const Literal = union(enum) {
   @"var": []const u8
 };
 
-pub const Command = struct { verb: []const u8, args: []const u8 };
+pub const Command = struct { verb: []const u8, n: u32, args: []const u8 };
 
 pub const Item = struct { k: Var, v: *Node };
 pub const Items = []Item;
@@ -176,6 +176,7 @@ pub const Node = union(NodeType) {
       },
       .command => |cmd| {
         try writer.print("\\{s}", .{cmd.verb});
+        if (cmd.n > 1) try writer.print(":{d}", .{cmd.n});
         if (cmd.args.len > 0) try writer.print(" {s}", .{cmd.args});
       },
       .literal => |literal| {

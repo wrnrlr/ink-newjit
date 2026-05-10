@@ -2,6 +2,7 @@ const std = @import("std");
 const MockWriter = @import("../util.zig").MockWriter;
 const TerseFormatter = @import("../noun/format.zig").TerseFormatter;
 const VM = @import("vm.zig").VM;
+const V = @import("../noun/value.zig").V;
 
 const Cmd = union {
   h: void,        // show help
@@ -10,16 +11,20 @@ const Cmd = union {
   cd: []const u8, // change directory
   d: ?[]const u8, // set namespace
   l: []const u8,  // load namespace
-  t: ?[]const u8, // time expression
-  
+  t: struct {
+    n: u32 = 1,
+    expr: []const u8
+  }, // time expression
 };
 
-pub fn exec(vm: *VM, verb: []const u8, args: []const u8) !void {
+pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
   const io = std.Io.Threaded.global_single_threaded.io();
   if (std.mem.eql(u8, verb, "h")) {
     std.debug.print("{s}\n", .{"TODO"});
+    return .blank;
   } else if (std.mem.eql(u8, verb, "l")) {
     _ = try vm.load(args);
+    return .blank;
   } else if (std.mem.eql(u8, verb, "v")) {
     var it_v = vm.globals_names.iterator();
     while (it_v.next()) |entry| {
@@ -37,6 +42,7 @@ pub fn exec(vm: *VM, verb: []const u8, args: []const u8) !void {
         }
       }
     }
+    return .blank;
   } else if (std.mem.eql(u8, verb, "f")) {
     var it_f = vm.globals_names.iterator();
     while (it_f.next()) |entry| {
@@ -46,13 +52,26 @@ pub fn exec(vm: *VM, verb: []const u8, args: []const u8) !void {
         std.debug.print("{s}\n", .{name});
       }
     }
+    return .blank;
   } else if (std.mem.eql(u8, verb, "cd")) {
     const dir = try std.Io.Dir.openDir(std.Io.Dir.cwd(), io, args, .{});
     try std.process.setCurrentDir(io, dir);
+    return .blank;
   } else if (std.mem.eql(u8, verb, "d")) {
     std.debug.print("\\d {s}\n", .{args});
+    return .blank;
   } else if (std.mem.eql(u8, verb, "t")) {
-    std.debug.print("\\t NYI\n", .{});
+    if (args.len == 0) return .blank;
+    const count = if (n == 0) 1 else n;
+    const start = std.Io.Clock.awake.now(io);
+    for (0..@as(usize, count)) |_| {
+      var r = try vm.eval(args);
+      r.deinit(vm.alloc);
+    }
+    const end = std.Io.Clock.awake.now(io);
+    const elapsed_ns = end.nanoseconds - start.nanoseconds;
+    const elapsed_ms: i32 = @intCast(@divTrunc(elapsed_ns, std.time.ns_per_ms));
+    return V{ .i = elapsed_ms };
   } else {
     // Pass to shell
     const full_cmd = if (args.len > 0)
@@ -65,6 +84,7 @@ pub fn exec(vm: *VM, verb: []const u8, args: []const u8) !void {
     defer vm.alloc.free(result.stderr);
     if (result.stdout.len > 0) std.debug.print("{s}", .{result.stdout});
     if (result.stderr.len > 0) std.debug.print("{s}", .{result.stderr});
+    return .blank;
   }
 }
 

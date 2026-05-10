@@ -157,7 +157,7 @@ pub const VM = struct {
     }
 
     if (comptime jit_enabled) {
-        if (vm.jit) |*j| j.deinit();
+      if (vm.jit) |*j| j.deinit();
     }
 
     vm.alloc.destroy(vm);
@@ -633,12 +633,15 @@ pub const VM = struct {
     var cmd_v = vm.pop();
     defer cmd_v.deinit(vm.alloc);
     const bytes = cmd_v.C.slice();
-    // bytes is verb\0args
-    const sep = std.mem.indexOfScalar(u8, bytes, 0) orelse bytes.len;
-    const verb = bytes[0..sep];
-    const args = if (sep < bytes.len) std.mem.trim(u8, bytes[sep + 1 ..], " \t") else "";
-    try command.exec(vm, verb, args);
-    try vm.push(.blank);
+    // bytes is verb\0count_str\0args
+    const sep1 = std.mem.indexOfScalar(u8, bytes, 0) orelse bytes.len;
+    const verb = bytes[0..sep1];
+    const rest = if (sep1 < bytes.len) bytes[sep1 + 1 ..] else "";
+    const sep2 = std.mem.indexOfScalar(u8, rest, 0) orelse rest.len;
+    const n = std.fmt.parseInt(u32, rest[0..sep2], 10) catch 1;
+    const args = if (sep2 < rest.len) std.mem.trim(u8, rest[sep2 + 1 ..], " \t") else "";
+    const result = try command.exec(vm, verb, n, args);
+    try vm.push(result);
   }
 
 
