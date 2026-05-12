@@ -51,3 +51,52 @@ The Phase 2 handler section needs a `STP/LDP` frame because handlers are called 
 Concretely: change handler stubs from `fn(vm, operand) void` to `fn(vm, operand, next: *const fn(*VM) void) void`. The emitter passes each handler the address of the next one as an argument. The last handler in the chain receives a sentinel "return to caller" continuation. The `STP x19,x20` / `LDP x19,x20` and the outer `RET` disappear.
 
 This is a larger refactor (all ~15 handler signatures change) but the result is a single execution model — stencil and handler continuations are indistinguishable at runtime.
+
+---
+
+## Compiler: expose basic block data
+
+The optimizer already computes the full basic block graph — leaders, successor edges, gen/kill sets, liveness — inside `livenessLocals` (`optimizer.zig:179–304`). It throws this away after marking `LocalLast`. The emitter needs this same information to implement per-block JIT compilation.
+
+**Task:** after `livenessLocals` runs, retain the BB table in a new `Chunk.blocks` field (array of `{start_ip, end_ip, succ[2]}`). The JIT emitter reads this instead of re-deriving it from the bytecode. No new analysis is needed — it's already there, just not surfaced.
+
+As a smaller alternative, the emitter could re-derive BBs itself in ~30 lines (the bytecode format is simple enough). Either approach unblocks branch stencils and per-block JIT compilation.
+
+---
+
+## Optimizer improvements
+
+### Fix constant folding coverage
+
+`foldMonad` and `foldDyad` in `optimizer.zig` both begin with `if (x == .i)` and return `null` for everything else. Float, boolean, and simple vector constants are never folded. Extend both functions to cover `.f` (float arithmetic, comparisons) and `.b` (boolean logic). This is purely additive — no structural change.
+
+### Fix the convergence loop
+
+The `optimize` loop runs up to 10 fixed iterations (`while (changed and iter < 10)`). The comment in the source flags this as suspicious. Replace with a true fixed-point loop: `while (try self.constantFolding(...) or try self.dce(...)) {}`. Ten iterations is almost always enough in practice, but the bound is arbitrary and hides the intent.
+
+### Implement loop-invariant code motion
+
+`liftInvariants` exists as a stub (`optimizer.zig:171`) that always returns `false`. For array code, expressions like `#x` (count), `*x` (first), or any pure function of a variable that doesn't change across loop iterations can be hoisted out of the loop body. The BB graph built for liveness is the right foundation: an expression is invariant if all its inputs are defined outside the loop's back-edge.
+
+### Lambda inlining for simple bodies
+
+A lambda like `{x+y}` called as the body of `+/` (fold) or `'{f}` (each) could be inlined at the call site in the IR, replacing `Call` + frame overhead with a direct `Apply2`. The guard is: lambda is pure (`is_pure`), has arity ≤ 2, and its body compiles to a single `Apply1`/`Apply2`. The IR already tracks `is_pure`; the inliner just substitutes the lambda's IR nodes at the call site before lowering.
+
+---
+
+## Verbs: selective type-specialised stencils
+
+The `dispatch.zig` scalar fast paths (`x.i +% y.i`, etc.) are the right model for type-specialised stencils. For a stencil to be safe to copy it must be position-independent — no ADRP, no access to `monad_table`/`dyad_table`. The ~8 core arithmetic ops (`+`, `-`, `*`, `%`, `&`, `|`, `<`, `>`, `=` on `.i` and `.f`) satisfy this: their implementations in `calc.zig` are a single arithmetic expression with no global data access.
+
+**Task:** add one stencil per hot (op, type-pair) combination, e.g. `stencilAdd_ii`, `stencilSub_ii`, `stencilMul_ff`. Each stencil:
+1. Reads the opcode from the OPERAND hole (same as `stencilApply2`)
+2. Loads the top two stack values
+3. Checks their tags — if they don't match, falls through to `apply2Worker`
+4. Performs the inline arithmetic and pushes the result
+5. Jumps via the NEXT hole
+
+The emitter selects the specialised stencil when it can prove (statically or via profile feedback) that the types will match. Initially, emit the specialised stencil unconditionally and let the guard handle mismatches — wrong-type calls degrade to the handler path, not incorrect behaviour.
+
+Do **not** extend this to all 60 verbs. Complex ops (sort, search, string manipulation) involve allocation and control flow that cannot be expressed as position-independent stencils. The fast-path scalar arithmetic in `dispatch.zig` is the precise set worth specialising; everything else stays in the handler path.
+
+The `dispatch.zig` fast paths themselves should be kept: they serve the interpreter and the Phase 2 handler path for cases the stencils don't cover.
