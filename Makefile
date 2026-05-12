@@ -12,7 +12,7 @@ build:
 	time zig build -Dui=true
 
 release:
-	time zig build -Doptimize=ReleaseFast -Djit=true
+	time zig build -Doptimize=ReleaseFast -Djit=true -Dui=true
 
 bench-sort:
 	zig test src/verb/sort/bench.zig

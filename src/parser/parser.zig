@@ -136,10 +136,18 @@ pub const Parser = struct {
       try stmts.append(self.arena.allocator(), .{ .node = node, .source = source });
 
       self.skipComments();
-      // After a statement, consume a sep if present
+      // After a statement, consume a sep if present.
+      // An inline `;` produces a blank ";" stmt (suppression marker).
       if (self.tok.tt == .sep) {
+        const sep_slice = self.tok.slice(self.src);
+        const is_semicolon = sep_slice.len > 0 and sep_slice[0] == ';';
         self.advance();
         self.skipComments();
+        if (is_semicolon) {
+          const m2 = try self.arena.allocator().create(Node);
+          m2.* = .blank;
+          try stmts.append(self.arena.allocator(), .{ .node = m2, .source = ";" });
+        }
       } else {
         break;
       }

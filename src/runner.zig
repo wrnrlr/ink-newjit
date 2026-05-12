@@ -55,12 +55,11 @@ fn evalStdin(allocator: std.mem.Allocator, vm: *VM) !void {
   defer content_list.deinit(allocator);
   try reader.interface.appendRemainingUnlimited(allocator, &content_list);
   const content = content_list.items;
+  var stdout_buf: [4096]u8 = undefined;
+  var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
+  vm.out = &stdout_writer.interface;
   var repl = Repl.init(allocator, vm);
-  const res = try repl.eval(std.mem.trim(u8, content, " \t\r\n"));
-  defer res.deinit(allocator);
-  for (res.results) |r| {
-    if (r.output.len > 0) std.debug.print("{s}\n", .{r.output});
-  }
+  _ = try repl.evalStream(std.mem.trim(u8, content, " \t\r\n"), &stdout_writer.interface);
 }
 
 // ── main ─────────────────────────────────────────────────────────────────────
@@ -156,11 +155,20 @@ pub fn main(init: std.process.Init.Minimal) !void {
   var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
   vm.out = &stdout_writer.interface;
 
-  const script_res = vm.load(script_path.?) catch |err| {
+  // Read the file and evaluate statement-by-statement so that:
+  // - each non-blank, non-suppressed result is printed to stdout
+  // - commands like \t that internally call vm.eval don't break subsequent statements
+  const text = std.Io.Dir.cwd().readFileAlloc(io, script_path.?, allocator, std.Io.Limit.limited(10 * 1024 * 1024)) catch |err| {
     std.debug.print("error loading {s}: {}\n", .{ script_path.?, err });
     std.process.exit(1);
   };
-  script_res.deinit(vm.alloc);
+  defer allocator.free(text);
+
+  var repl = Repl.init(allocator, vm);
+  _ = repl.evalStream(std.mem.trim(u8, text, " \t\r\n"), &stdout_writer.interface) catch |err| {
+    std.debug.print("error in {s}: {}\n", .{ script_path.?, err });
+    std.process.exit(1);
+  };
 
   // Find 'loop' global — if absent, file was already evaluated; exit cleanly
   const loop_idx = vm.globals_names.get("loop") orelse return;

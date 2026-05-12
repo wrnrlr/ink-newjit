@@ -154,6 +154,73 @@ pub const Repl = struct {
       .vm_alloc = self.vm.alloc,
     };
   }
+
+  /// Evaluates source statement-by-statement, printing each non-blank result
+  /// immediately to writer (interleaved with io verb side effects).
+  /// Returns true if an error occurred.
+  pub fn evalStream(self: *Repl, source: []const u8, writer: *std.Io.Writer) !bool {
+    if (source.len == 0) return false;
+  
+    const node = self.vm.parser.?.parse(source) catch |err| {
+      writer.print("!parse_error: {s}\n", .{@errorName(err)}) catch {};
+      writer.flush() catch {};
+      return true;
+    };
+    if (node.* != .terse) { self.vm.parser.?.free(node); return false; }
+  
+    const StmtInfo = struct { is_blank: bool, source: []const u8 };
+    const stmt_infos = try self.alloc.alloc(StmtInfo, node.terse.stmts.len);
+    defer self.alloc.free(stmt_infos);
+    for (node.terse.stmts, 0..) |s, j| {
+      stmt_infos[j] = .{ .is_blank = s.node.* == .blank, .source = s.source };
+    }
+    self.vm.parser.?.free(node);
+  
+    var i: usize = 0;
+    while (i < stmt_infos.len) {
+      const stmt = stmt_infos[i];
+      i += 1;
+      if (stmt.is_blank) continue;
+  
+      var is_suppressed = false;
+      var full_stmt_src = try std.ArrayList(u8).initCapacity(self.alloc, stmt.source.len + 1);
+      defer full_stmt_src.deinit(self.alloc);
+      try full_stmt_src.appendSlice(self.alloc, stmt.source);
+  
+      if (i < stmt_infos.len and stmt_infos[i].is_blank and
+          std.mem.eql(u8, stmt_infos[i].source, ";")) {
+        try full_stmt_src.append(self.alloc, ';');
+        i += 1;
+        is_suppressed = true;
+      }
+  
+      var res = self.vm.eval(full_stmt_src.items) catch |err| {
+        writer.print("!{s}\n", .{@errorName(err)}) catch {};
+        writer.flush() catch {};
+        return true;
+      };
+      defer res.deinit(self.vm.alloc);
+  
+      if (!is_suppressed) {
+        var mock_out = try MockWriter.init(self.alloc);
+        defer mock_out.deinit();
+        var t_fmt = TerseFormatter.init(self.vm, self.alloc, .Repl);
+        var mw_out = mock_out.writer();
+        t_fmt.formatter().format(res, &mw_out.interface) catch {};
+  
+        var result_text = mock_out.getText();
+        while (result_text.len > 0 and std.ascii.isWhitespace(result_text[result_text.len - 1])) {
+          result_text = result_text[0 .. result_text.len - 1];
+        }
+  
+        if (result_text.len > 0) {
+          writer.print("{s}\n", .{result_text}) catch {};
+          writer.flush() catch {};
+        }
+      }
+    }
+    return false;
+  }
 };
 
 /// Scan a raw source gap (between two stmts or at the start/end) and emit any
