@@ -27,4 +27,27 @@ This is the largest single performance win for array code with inner loops.
 
 ### Longer-term: stencil composition (generators)
 
-The C&P paper describes *generators* that fuse multiple ops into a single combined stencil — e.g. "load two locals and apply a dyadic op" emitted as one blob. This removes the chain of `BR X8` jumps between individual stencils in tight lambda bodies like `{x+y}`. Worth revisiting once branch stencils are in place and profiling shows the per-stencil overhead is significant.
+The Copy & Patch paper describes *generators* that fuse multiple ops into a single combined stencil — e.g. "load two locals and apply a dyadic op" emitted as one blob. This removes the chain of `BR X8` jumps between individual stencils in tight lambda bodies like `{x+y}`. Worth revisiting once branch stencils are in place and profiling shows the per-stencil overhead is significant.
+
+---
+
+## CPS-style execution
+
+The paper describes Copy-and-Patch as "CPS-inspired": each stencil is a continuation that does its work and jumps directly to the *next* continuation via `BR X8` — no central dispatch loop, no return. Phase 1 already is this. Phase 2 is not.
+
+### Basic block decomposition (prerequisite for CPS branches)
+
+The emitter currently treats each lambda as a flat sequence and falls back to Phase 2 at the first branch. The CPS fix is to pre-scan the bytecode into **basic blocks** — maximal linear sequences with no internal branches — and compile each block as its own JIT function. A `JumpFalse` in block 0 becomes a branch stencil with two NEXT holes patched to the compiled addresses of block 1 and block 2. Loops then stay entirely in Phase 1 across iterations: the loop body is a stencil chain that ends with a branch stencil calling back into itself.
+
+This requires:
+- A pre-pass in the emitter that identifies block boundaries and jump targets before emitting any code
+- The JIT cache storing a table of (block_start_ip → JitFn) per lambda instead of a single entry
+- The branch stencil from the section above
+
+### Frame-free Phase 2 (CPS handler chain)
+
+The Phase 2 handler section needs a `STP/LDP` frame because handlers are called with `BL` and return normally. In a fully CPS design, each handler would not return — it would tail-call the next handler in the chain. This eliminates the frame entirely and lets Phase 1 and Phase 2 merge into a single uniform continuation chain.
+
+Concretely: change handler stubs from `fn(vm, operand) void` to `fn(vm, operand, next: *const fn(*VM) void) void`. The emitter passes each handler the address of the next one as an argument. The last handler in the chain receives a sentinel "return to caller" continuation. The `STP x19,x20` / `LDP x19,x20` and the outer `RET` disappear.
+
+This is a larger refactor (all ~15 handler signatures change) but the result is a single execution model — stencil and handler continuations are indistinguishable at runtime.
