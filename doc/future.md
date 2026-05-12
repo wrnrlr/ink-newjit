@@ -100,3 +100,31 @@ The emitter selects the specialised stencil when it can prove (statically or via
 Do **not** extend this to all 60 verbs. Complex ops (sort, search, string manipulation) involve allocation and control flow that cannot be expressed as position-independent stencils. The fast-path scalar arithmetic in `dispatch.zig` is the precise set worth specialising; everything else stays in the handler path.
 
 The `dispatch.zig` fast paths themselves should be kept: they serve the interpreter and the Phase 2 handler path for cases the stencils don't cover.
+
+
+# Tasks 
+Based on dependencies, risk, and impact for an array language:
+
+**1. Fix optimizer convergence loop** — five-minute correctness fix, no dependencies, do it first.
+
+**2. Fix constant folding for floats and booleans** — purely additive, standalone, makes the optimizer meaningfully more useful.
+
+**3. `Apply1` stencil** — mirrors `Apply2`, ~20 lines, no architecture changes. Immediate Phase 1 coverage for monadic ops.
+
+**4. Expose basic block data from the optimizer** — the BB graph is already computed in `livenessLocals`, just not kept. This is the foundation everything else depends on. Do it before touching the JIT further.
+
+**5. `Const` and `AssignLocal` stencils** — straightforward after the infrastructure is solid. `Const` and `AssignLocal` together with `Apply1` finish off the "easy" Phase 1 coverage.
+
+**6. Lambda inlining** — works at the IR level before lowering, no JIT changes needed. High impact for adverb-heavy code (`+/`, `'`, etc.) since it eliminates `Call` + frame overhead for simple lambda bodies.
+
+**7. Branch stencils + per-block JIT compilation** — the single biggest win, but the most involved: requires the BB data from step 4, a second NEXT hole in `StencilInfo`, `patchBranch()`, and emitter changes for per-block compilation. Everything above should be in place first.
+
+**8. Type-specialised stencils** — most impactful *after* branch stencils, because only then do inner loops stay entirely in Phase 1 where the specialised arithmetic matters. Before that, the loop body runs in Phase 2 anyway.
+
+**9. Loop-invariant code motion** — uses the BB graph from step 4, but only pays off once the JIT is compiling loops properly (step 7).
+
+**10. Frame-free Phase 2 / CPS handler chain** — architectural cleanup. All the performance wins above don't depend on it. Do it last, once the rest is stable.
+
+**11. Stencil composition** — research-level. Profile first; may not be needed if the per-stencil `BR X8` overhead is negligible compared to the work each stencil does.
+
+The critical path is **4 → 7 → 8**: expose BBs, then use them for branch stencils, then layer on type specialisation. Steps 1–3 and 5–6 are quick wins you can do in parallel or before starting that path.
