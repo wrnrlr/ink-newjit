@@ -1,7 +1,5 @@
-ARGV: `argv[];
+N: `I$`argv[2]
 
-` 0: "All "," "/ARGV
+N
 
-` 0: "First ",ARGV[0]
-` 0: "Second ",ARGV[1]
-` 0: "Third ",`argv[2]
+\t:20 {!N}

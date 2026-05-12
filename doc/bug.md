@@ -33,16 +33,9 @@ The correct form (used in `momentum.k` and `arbitrage.k`) is:
 
 ---
 
-## 4. Special command line arguments symbol should accept indexes as argument.
+## 4. Integer parsing bug
 
-Currenlty the command line argument special symbol does not support indexing of arguments.
-
+```k-repl
+ `I$"10000000000"
+0N
 ```
-`argv[] / Returns list of command line arguments
-
-`argv[0] / Should only return the first argument
-```
-
----
-
-## 5. Special command line argument symbol first argument should be name of program.

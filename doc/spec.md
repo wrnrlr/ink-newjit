@@ -368,15 +368,19 @@ apply F with fixed left arg to each right item
 
 ## Special Symbols
 
- ### Arguments `` `argv[] ``
- list of cmd line args (also in global variable x)
+### Arguments `` `argv[] ``
+list of cmd line args (also in global variable x)
 
- ### Enviroment Variables `` `env[] ``
- dict of env variables
+### Enviroment Variables `` `env[] ``
+dict of env variables
 
- ### Random Number `` `prng[] ``
- The `` `prng@I `` get/set pseudo-random number generator internal state
- 
-                      s:`prng[];r:9?0;`prng s;r~9?0 -> 1
-`prng@0 use current time to set state
- ### Exit `` `exit@i ``
+### Random Number `` `prng[] ``
+
+### Exit `` `exit@i ``
+
+## Commands
+
+A command always start at the beginning of a line with `\`.
+
+### Time Command `\t:n expr`
+The time elapsed milliseconds after n runs. The n is optional.

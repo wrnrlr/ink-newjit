@@ -1,6 +1,5 @@
 const std = @import("std");
 const VM = @import("../../runtime/vm.zig").VM;
-const value = @import("../../noun/value.zig");
 const format = @import("../../noun/format.zig");
 const util = @import("../../util.zig");
 const V = @import("../../noun/value.zig").V;
