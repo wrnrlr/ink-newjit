@@ -47,11 +47,14 @@ pub const Handlers = struct {
 /// Stencil machine-code fragments for chainable ops.
 /// Null entries fall back to handler calls.
 pub const StencilTable = struct {
-  gap:        ?st.StencilInfo = null,
-  int_:       ?st.StencilInfo = null,
-  local:      ?st.StencilInfo = null,
-  local_last: ?st.StencilInfo = null,
-  apply2:     ?st.StencilInfo = null,
+  gap:          ?st.StencilInfo = null,
+  int_:         ?st.StencilInfo = null,
+  const_:       ?st.StencilInfo = null,
+  local:        ?st.StencilInfo = null,
+  local_last:   ?st.StencilInfo = null,
+  assign_local: ?st.StencilInfo = null,
+  apply1:       ?st.StencilInfo = null,
+  apply2:       ?st.StencilInfo = null,
 };
 
 pub const MAX_JIT_BYTES = 128 * 1024;
@@ -85,12 +88,15 @@ pub fn emitLambda(
 
     // Determine if this op has a stencil and read its operand bytes.
     const maybe_info: ?st.StencilInfo = switch (op) {
-      .Gap       => stencils.gap,
-      .Int       => stencils.int_,
-      .Local     => stencils.local,
-      .LocalLast => stencils.local_last,
-      .Apply2    => stencils.apply2,
-      else       => null,
+      .Gap         => stencils.gap,
+      .Int         => stencils.int_,
+      .Const       => stencils.const_,
+      .Local       => stencils.local,
+      .LocalLast   => stencils.local_last,
+      .AssignLocal => stencils.assign_local,
+      .Apply1      => stencils.apply1,
+      .Apply2      => stencils.apply2,
+      else         => null,
     };
 
     const info = maybe_info orelse break; // fall through to Phase 2
@@ -99,7 +105,7 @@ pub fn emitLambda(
 
     // Read operand bytes (before consuming ip further for the next iteration).
     const operand: u16 = switch (op) {
-      .Local, .LocalLast, .Apply2 => blk: {
+      .Const, .Local, .LocalLast, .AssignLocal, .Apply1, .Apply2 => blk: {
         const v = code[ip]; ip += 1;
         break :blk v;
       },

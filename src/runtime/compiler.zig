@@ -54,6 +54,8 @@ pub const Compiler = struct {
     if (self.scope.parent == null) {
       var opt = optimizer.Optimizer.init(self.alloc);
       try opt.optimize(&self.scope.ir, root_id);
+      _ = try opt.inlineLambdas(&self.scope.ir, self.fn_tables);
+      try opt.optimize(&self.scope.ir, root_id);
       try opt.livenessLocals(&self.scope.ir);
       try self.lower();
     }
@@ -583,6 +585,8 @@ pub const Compiler = struct {
       var opt = optimizer.Optimizer.init(self.alloc);
       const root_id = if (scope_ptr.ir.instructions.items.len > 0) @as(ir.ValueId, @intCast(scope_ptr.ir.instructions.items.len - 1)) else ir.NO_VALUE;
       try opt.optimize(&scope_ptr.ir, root_id);
+      _ = try opt.inlineLambdas(&scope_ptr.ir, self.fn_tables);
+      try opt.optimize(&scope_ptr.ir, root_id);
       try opt.livenessLocals(&scope_ptr.ir);
       try self.lower();
       break :blk a;
@@ -683,6 +687,7 @@ pub const Compiler = struct {
       if (inst.is_dead) continue;
       try self.lowerInst(scope.chunk, inst, i, offsets);
     }
+    try scope.chunk.buildBlocks();
   }
 
   fn instSize(self: *Compiler, inst: ir.IRInst) usize {

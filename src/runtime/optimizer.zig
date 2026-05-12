@@ -2,6 +2,8 @@ const std = @import("std");
 const ir = @import("ir.zig");
 const value = @import("../noun/value.zig");
 const chunk = @import("tape.zig");
+const fntable = @import("fntable.zig");
+const operator = @import("../noun/operator.zig");
 const V = value.V;
 const Op = chunk.Op;
 const OpCode = chunk.OpCode;
@@ -53,14 +55,7 @@ pub const Optimizer = struct {
   }
 
   pub fn optimize(self: *Optimizer, scope_ir: *ir.IR, root_id: ir.ValueId) !void {
-    var changed = true;
-    var iter: usize = 0;
-    // this looks suspicious, we justy loop 10 times and call optimize
-    while (changed and iter < 10) : (iter += 1) {
-      changed = false;
-      if (try self.constantFolding(scope_ir)) changed = true;
-      if (try self.dce(scope_ir, root_id)) changed = true;
-    }
+    while (try self.constantFolding(scope_ir) or try self.dce(scope_ir, root_id)) {}
   }
 
   fn constantFolding(self: *Optimizer, scope_ir: *ir.IR) !bool {
@@ -108,26 +103,62 @@ pub const Optimizer = struct {
 
   fn foldMonad(self: *Optimizer, op: Op, x: V) !?V {
     _ = self;
-    if (x == .i) {
-      return switch (op) {
+    return switch (x) {
+      .i => |xv| switch (op) {
         .@"+" => x.ref(),
-        .@"-" => V{ .i = 0 -% x.i },
-        .@"~" => V{ .b = (x.i == 0) },
+        .@"-" => V{ .i = 0 -% xv },
+        .@"~" => V{ .b = xv == 0 },
         else => null,
-      };
-    }
-    return null;
+      },
+      .f => |xv| switch (op) {
+        .@"-" => V{ .f = -xv },
+        .@"~" => V{ .b = xv == 0.0 },
+        else => null,
+      },
+      .b => |xv| switch (op) {
+        .@"~" => V{ .b = !xv },
+        else => null,
+      },
+      else => null,
+    };
   }
 
   fn foldDyad(self: *Optimizer, op: Op, x: V, y: V) !?V {
     _ = self;
     if (x == .i and y == .i) {
-      const xv = x.i;
-      const yv = y.i;
+      const xv = x.i; const yv = y.i;
       return switch (op) {
         .@"+" => V{ .i = xv +% yv },
         .@"-" => V{ .i = xv -% yv },
         .@"*" => V{ .i = xv *% yv },
+        .@"&" => V{ .i = @min(xv, yv) },
+        .@"|" => V{ .i = @max(xv, yv) },
+        .@"<" => V{ .b = xv < yv },
+        .@">" => V{ .b = xv > yv },
+        .@"=" => V{ .b = xv == yv },
+        .@"~" => V{ .b = xv == yv },
+        else => null,
+      };
+    }
+    if (x == .f and y == .f) {
+      const xv = x.f; const yv = y.f;
+      return switch (op) {
+        .@"+" => V{ .f = xv + yv },
+        .@"-" => V{ .f = xv - yv },
+        .@"*" => V{ .f = xv * yv },
+        .@"%" => V{ .f = xv / yv },
+        .@"&" => V{ .f = @min(xv, yv) },
+        .@"|" => V{ .f = @max(xv, yv) },
+        .@"<" => V{ .b = xv < yv },
+        .@">" => V{ .b = xv > yv },
+        .@"=" => V{ .b = xv == yv },
+        .@"~" => V{ .b = xv == yv },
+        else => null,
+      };
+    }
+    if (x == .b and y == .b) {
+      const xv = x.b; const yv = y.b;
+      return switch (op) {
         .@"=" => V{ .b = xv == yv },
         .@"~" => V{ .b = xv == yv },
         else => null,
@@ -164,6 +195,46 @@ pub const Optimizer = struct {
         scope_ir.instructions.items[idx].is_dead = true;
         changed = true;
       }
+    }
+    return changed;
+  }
+
+  // Inline simple lambda bodies into their call sites.
+  // A lambda qualifies if: arity ≤ 2, and its bytecode is exactly
+  //   (Local|LocalLast 0), [Local|LocalLast 1,] Apply1|Apply2 op, Return.
+  // Such lambdas are replaced with Apply1/Apply2 so the call frame is avoided.
+  pub fn inlineLambdas(self: *Optimizer, scope_ir: *ir.IR, fn_tables: *const fntable.FnTables) !bool {
+    _ = self;
+    var changed = false;
+    const insts = scope_ir.instructions.items;
+    for (insts, 0..) |*inst, i| {
+      if (inst.is_dead) continue;
+      if (inst.op != .Call and inst.op != .TailCall) continue;
+      if (inst.inputs.len < 1) continue;
+      const func_id = inst.inputs[0];
+      if (func_id == ir.NO_VALUE) continue;
+      const func_inst = scope_ir.get(func_id);
+      if (func_inst.op != .Const) continue;
+      const fval = func_inst.val orelse continue;
+      if (fval != .func) continue;
+      const fn_ref = fval.func;
+      if (fn_ref.getKind() != .lambda) continue;
+      const lambda_idx = fn_ref.idx;
+      if (lambda_idx >= fn_tables.lambdas.items.len) continue;
+      const entry = fn_tables.lambdas.items[lambda_idx];
+      const op_byte = tryGetSimpleOp(entry.chunk, entry.arity) orelse continue;
+      const n_args = inst.inputs.len - 1;
+      if (n_args != entry.arity) continue;
+      // Replace Call with Apply1/Apply2.
+      const new_op: OpCode = if (entry.arity == 1) .Apply1 else .Apply2;
+      const new_inputs = try scope_ir.alloc.dupe(ir.ValueId, inst.inputs[1..]);
+      scope_ir.alloc.free(inst.inputs);
+      inst.op = new_op;
+      inst.arg1 = op_byte;
+      inst.inputs = new_inputs;
+      inst.is_pure = true;
+      _ = i;
+      changed = true;
     }
     return changed;
   }
@@ -303,3 +374,29 @@ pub const Optimizer = struct {
     }
   }
 };
+
+// Returns the builtin op byte if the chunk's bytecode is a single-op body:
+//   arity=1: (Local|LocalLast 0), Apply1 op, Return
+//   arity=2: (Local|LocalLast 0), (Local|LocalLast 1), Apply2 op, Return
+fn tryGetSimpleOp(c: *const chunk.Chunk, arity: u8) ?u8 {
+  const code = c.code.items;
+  if (arity == 1 and code.len == 5) {
+    const op0: OpCode = @enumFromInt(code[0]);
+    if ((op0 == .Local or op0 == .LocalLast) and code[1] == 0) {
+      if (@as(OpCode, @enumFromInt(code[2])) == .Apply1 and
+          @as(OpCode, @enumFromInt(code[4])) == .Return)
+        return code[3];
+    }
+  }
+  if (arity == 2 and code.len == 7) {
+    const op0: OpCode = @enumFromInt(code[0]);
+    const op1: OpCode = @enumFromInt(code[2]);
+    if ((op0 == .Local or op0 == .LocalLast) and code[1] == 0 and
+        (op1 == .Local or op1 == .LocalLast) and code[3] == 1) {
+      if (@as(OpCode, @enumFromInt(code[4])) == .Apply2 and
+          @as(OpCode, @enumFromInt(code[6])) == .Return)
+        return code[5];
+    }
+  }
+  return null;
+}

@@ -74,7 +74,9 @@ pub const VM = struct {
   argv: V = .blank,
   jit:        if (jit_enabled) ?jit_mod.JitCache                    else void = if (jit_enabled) null      else {},
   jit_err:    if (jit_enabled) ?anyerror                             else void = if (jit_enabled) null      else {},
-  jit_apply2: if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
+  jit_apply1:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
+  jit_apply2:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
+  jit_assign_local:  if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
   // Monomorphic inline cache: last successfully JIT-compiled lambda.
   // Avoids a hash-map lookup on every call in hot adverb loops.
   jit_ic_key: if (jit_enabled) u24                                       else void = if (jit_enabled) NO_LAMBDA else {},
@@ -111,7 +113,9 @@ pub const VM = struct {
     vm.compiler.* = try Compiler.init(alloc, chunk, &vm.globals_names, &vm.symbols, &vm.registry, &vm.fn_tables);
 
     if (comptime jit_enabled) {
-        vm.jit_apply2 = &JitImpl.apply2Worker;
+        vm.jit_apply1       = &JitImpl.apply1Worker;
+        vm.jit_apply2       = &JitImpl.apply2Worker;
+        vm.jit_assign_local = &JitImpl.assignLocalWorker;
         vm.jit = jit_mod.JitCache.init(alloc, JitImpl.buildHandlers(), JitImpl.buildStencils(), @intFromPtr(&JitImpl.jhApply2)) catch null;
     }
 
@@ -814,13 +818,26 @@ const JitImpl = if (jit_enabled) struct {
   }
   fn jhReturn(vm: *VM) callconv(.c) void { vm.doReturn() catch {}; }
 
-  // ── apply2Worker ─────────────────────────────────────────────────────────
-  // Called indirectly from stencilApply2 via vm.jit_apply2 (LDR+BLR).
-  // Being a regular function it can BL freely; errors go to vm.jit_err.
+  // ── apply1Worker / apply2Worker ──────────────────────────────────────────
+  // Called indirectly from stencilApply1/2 via vm.jit_apply1/2 (LDR+BLR).
+  // Being regular functions they can BL freely; errors go to vm.jit_err.
+  fn apply1Worker(vm: *VM, op: u8) callconv(.c) void {
+    const a = vm.pop(); defer a.deinit(vm.alloc);
+    vm.push(dispatch.dispatch1(vm, @enumFromInt(op), a)) catch {};
+  }
+
   fn apply2Worker(vm: *VM, op: u8) callconv(.c) void {
     const b = vm.pop(); defer b.deinit(vm.alloc);
     const a = vm.pop(); defer a.deinit(vm.alloc);
     vm.push(dispatch.dispatch2(vm, @enumFromInt(op), a, b)) catch {};
+  }
+
+  fn assignLocalWorker(vm: *VM, slot: u8) callconv(.c) void {
+    const val = vm.pop();
+    const i = vm.currentFrame().base + slot;
+    vm.stack[i].deinit(vm.alloc);
+    vm.stack[i] = val;
+    vm.push(.blank) catch {};
   }
 
   // ── CPS stencil functions ────────────────────────────────────────────────
@@ -918,6 +935,69 @@ const JitImpl = if (jit_enabled) struct {
     unreachable;
   }
 
+  // Apply1 stencil: reads opcode from OPERAND hole, delegates to vm.jit_apply1.
+  // Uses scanWithFrame so the STP/LDP frame is preserved across the BLR.
+  // AssignLocal stencil: pops TOS, stores into local slot, pushes blank.
+  // Delegates to vm.jit_assign_local via LDR+BLR (handles heap deinit).
+  // Uses scanWithFrame so the STP/LDP frame is preserved across the BLR.
+  fn stencilAssignLocal(vm: *VM) callconv(.c) void {
+    var slot: u32 = undefined;
+    asm volatile (
+      \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
+      : [o] "={x1}" (slot)
+    );
+    vm.jit_assign_local(vm, @as(u8, @truncate(slot)));
+    asm volatile (
+      \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
+      \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
+      \\.inst 0xF2D95FC8   // MOVK X8, #0xCAFE, LSL 32
+      \\.inst 0xF2F757C8   // MOVK X8, #0xBABE, LSL 48
+      \\.inst 0xD61F0100   // BR X8
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
+  // Const stencil: OPERAND hole = u8 index into vm.current_chunk.constants.
+  // Loads value, increments refcount via stencilRef, and pushes to stack.
+  fn stencilConst(vm: *VM) callconv(.c) void {
+    var idx: u32 = undefined;
+    asm volatile (
+      \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
+      : [o] "={x1}" (idx)
+    );
+    const val = stencilRef(vm.current_chunk.constants.items[idx]);
+    vm.stack[vm.stack_len] = val;
+    vm.stack_len += 1;
+    asm volatile (
+      \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
+      \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
+      \\.inst 0xF2D95FC8   // MOVK X8, #0xCAFE, LSL 32
+      \\.inst 0xF2F757C8   // MOVK X8, #0xBABE, LSL 48
+      \\.inst 0xD61F0100   // BR X8
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
+  fn stencilApply1(vm: *VM) callconv(.c) void {
+    var op_raw: u32 = undefined;
+    asm volatile (
+      \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
+      : [o] "={x1}" (op_raw)
+    );
+    vm.jit_apply1(vm, @as(u8, @truncate(op_raw)));
+    asm volatile (
+      \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
+      \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
+      \\.inst 0xF2D95FC8   // MOVK X8, #0xCAFE, LSL 32
+      \\.inst 0xF2F757C8   // MOVK X8, #0xBABE, LSL 48
+      \\.inst 0xD61F0100   // BR X8
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
   // Apply2 stencil: reads opcode from OPERAND hole, delegates to vm.jit_apply2
   // (LDR from VM struct — position-independent when copied to JIT memory).
   // Uses scanWithFrame so the STP/LDP frame is preserved across the BLR.
@@ -944,11 +1024,14 @@ const JitImpl = if (jit_enabled) struct {
   fn buildStencils() jit_mod.StencilTable {
     const s = stencils_mod;
     return .{
-      .gap        = s.scan(@intFromPtr(&stencilGap)),
-      .int_       = s.scan(@intFromPtr(&stencilInt)),
-      .local      = s.scan(@intFromPtr(&stencilLocal)),
-      .local_last = s.scan(@intFromPtr(&stencilLocalLast)),
-      .apply2     = s.scanWithFrame(@intFromPtr(&stencilApply2)),
+      .gap          = s.scan(@intFromPtr(&stencilGap)),
+      .int_         = s.scan(@intFromPtr(&stencilInt)),
+      .const_       = s.scan(@intFromPtr(&stencilConst)),
+      .local        = s.scan(@intFromPtr(&stencilLocal)),
+      .local_last   = s.scan(@intFromPtr(&stencilLocalLast)),
+      .assign_local = s.scanWithFrame(@intFromPtr(&stencilAssignLocal)),
+      .apply1       = s.scanWithFrame(@intFromPtr(&stencilApply1)),
+      .apply2       = s.scanWithFrame(@intFromPtr(&stencilApply2)),
     };
   }
 
