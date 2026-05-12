@@ -51,32 +51,19 @@ done
 
 IFS=',' read -ra SIZES <<< "$SIZES_STR"
 
-# ── inner-reps per benchmark (must match the reps: comment in each .k file) ──
-# Used only to populate the CSV column so downstream analysis can compute
-# per-iteration time as measurement_ms / reps.
-declare -A BENCH_REPS
-BENCH_REPS=(
-  [alloc]=10
-  [sum]=10
-  [max]=10
-  [reverse]=10
-  [scan]=10
-  [sort]=5
-  [sqrt_vec]=10
-  [exp_vec]=10
-  [inner_sq]=10
-  [each_sq]=1
-  [group]=5
-)
-DEFAULT_REPS=10
+# ── inner-reps per benchmark (parsed from "/ reps: N" comment in each .k file)
+get_reps() {
+  local reps
+  reps=$(grep -m1 '^/ reps:' "$1" 2>/dev/null | awk '{print $3}')
+  echo "${reps:-10}"
+}
 
 # ── build ─────────────────────────────────────────────────────────────────────
 build_variant() {
   local label="$1"; shift
   local dest="$1"; shift
-  local extra_flags=("$@")
-  echo "  zig build -Doptimize=ReleaseFast ${extra_flags[*]}"
-  if (cd "$ROOT" && zig build -Doptimize=ReleaseFast "${extra_flags[@]}"); then
+  echo "  zig build -Doptimize=ReleaseFast $*"
+  if (cd "$ROOT" && zig build -Doptimize=ReleaseFast "$@"); then
     cp "$ROOT/zig-out/bin/ink" "$dest"
     echo "  → $dest"
     return 0
@@ -107,14 +94,15 @@ else
 fi
 
 # ── collect active runtimes ────────────────────────────────────────────────────
-declare -a RUNTIMES=()
-declare -A RUNTIME_BIN
+RUNTIMES=""
+RUNTIME_ink="$INK_BASE"
+RUNTIME_ink_jit="$INK_JIT"
+RUNTIME_ink_jit_gpu="$INK_JIT_GPU"
 
 try_runtime() {
   local name="$1" bin="$2"
   if [[ -x "$bin" ]]; then
-    RUNTIMES+=("$name")
-    RUNTIME_BIN["$name"]="$bin"
+    RUNTIMES="$RUNTIMES $name"
     echo "  runtime: $name  ($bin)"
   else
     echo "  MISSING: $bin" >&2
@@ -127,48 +115,66 @@ try_runtime "ink"         "$INK_BASE"
 try_runtime "ink-jit"     "$INK_JIT"
 [[ $NO_GPU -eq 0 ]] && try_runtime "ink-jit-gpu" "$INK_JIT_GPU"
 
-if [[ ${#RUNTIMES[@]} -eq 0 ]]; then
+if [[ -z "${RUNTIMES# }" ]]; then
   echo "No ink binaries found. Run without --no-build first." >&2
   exit 1
 fi
 
-# ── discover benchmark files ───────────────────────────────────────────────────
-mapfile -t BENCH_FILES < <(ls "$SCRIPT_DIR"/*.k 2>/dev/null | sort)
+runtime_bin() {
+  case "$1" in
+    ink)         echo "$RUNTIME_ink" ;;
+    ink-jit)     echo "$RUNTIME_ink_jit" ;;
+    ink-jit-gpu) echo "$RUNTIME_ink_jit_gpu" ;;
+  esac
+}
 
-if [[ ${#BENCH_FILES[@]} -eq 0 ]]; then
+# ── discover benchmark files ───────────────────────────────────────────────────
+BENCH_FILES=""
+for f in "$SCRIPT_DIR"/*.k; do
+  [[ -f "$f" ]] && BENCH_FILES="$BENCH_FILES $f"
+done
+BENCH_FILES="${BENCH_FILES# }"
+
+if [[ -z "$BENCH_FILES" ]]; then
   echo "No .k files found in $SCRIPT_DIR" >&2
   exit 1
 fi
 
+bench_count=$(echo "$BENCH_FILES" | wc -w | tr -d ' ')
+runtime_count=$(echo "$RUNTIMES" | wc -w | tr -d ' ')
+size_count=${#SIZES[@]}
+
 # ── run ───────────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Running ==="
-echo "  benchmarks : ${#BENCH_FILES[@]}"
-echo "  runtimes   : ${RUNTIMES[*]}"
+echo "  benchmarks : $bench_count"
+echo "  runtimes   : $RUNTIMES"
 echo "  N sizes    : ${SIZES[*]}"
 echo "  outer reps : $OUTER_REPS"
 echo ""
 
 printf 'name,runtime,argument,reps,measurement_ms\n' > "$OUT_CSV"
 
-TOTAL=$(( ${#BENCH_FILES[@]} * ${#SIZES[@]} * ${#RUNTIMES[@]} * OUTER_REPS ))
+TOTAL=$(( bench_count * size_count * runtime_count * OUTER_REPS ))
 DONE=0
 
-for bench_file in "${BENCH_FILES[@]}"; do
+for bench_file in $BENCH_FILES; do
   name="$(basename "$bench_file" .k)"
-  inner_reps="${BENCH_REPS[$name]:-$DEFAULT_REPS}"
+  inner_reps="$(get_reps "$bench_file")"
 
   for N in "${SIZES[@]}"; do
-    for runtime in "${RUNTIMES[@]}"; do
-      binary="${RUNTIME_BIN[$runtime]}"
+    for runtime in $RUNTIMES; do
+      binary="$(runtime_bin "$runtime")"
 
-      for ((rep=1; rep<=OUTER_REPS; rep++)); do
+      rep=1
+      while [[ $rep -le $OUTER_REPS ]]; do
         ms="$("$binary" "$bench_file" "$N" 2>/dev/null)" || ms="-1"
         printf '%s,%s,%d,%d,%s\n' "$name" "$runtime" "$N" "$inner_reps" "$ms" >> "$OUT_CSV"
         DONE=$(( DONE + 1 ))
         PCT=$(( DONE * 100 / TOTAL ))
         printf '\r  [%3d%%] %-14s %-12s N=%-9d rep=%d    ' \
           "$PCT" "$name" "$runtime" "$N" "$rep" >&2
+        rep=$(( rep + 1 ))
       done
     done
   done

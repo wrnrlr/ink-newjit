@@ -8,3 +8,6 @@ patches/**/.zig-cache/
 patches/**/zig-pkg/
 *.dylib
 *.a
+bench/ink
+bench/ink-*
+bench/report.csv
