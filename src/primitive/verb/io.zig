@@ -54,11 +54,11 @@ pub const ReadLines = struct {
 fn writeLinesConsole(vm: *VM, _: V, y: V) V {
   if (y.tag() == .C) {
     vm.print("{s}\n", .{y.C.slice()});
-    return y.ref();
+    return .blank;
   }
   if (y.tag() == .s) {
     vm.print("{s}\n", .{vm.getSymbol(y.s)});
-    return y.ref();
+    return .blank;
   }
   if (y.tag() == .L) {
     for (y.L.slice(), 0..) |item, i| {
@@ -67,7 +67,7 @@ fn writeLinesConsole(vm: *VM, _: V, y: V) V {
       else if (item.tag() == .s) vm.print("{s}", .{vm.getSymbol(item.s)});
     }
     vm.print("\n", .{});
-    return y.ref();
+    return .blank;
   }
   return V{ .err = .@"type" };
 }
@@ -100,7 +100,7 @@ fn writeLinesById(vm: *VM, x: V, y: V) V {
   }
   out.append(vm.alloc, '\n') catch return V{ .err = .memory };
   writeFile(vm, id, out.items) catch return V{ .err = .io };
-  return y.ref();
+  return .blank;
 }
 
 pub const WriteLines = struct {
@@ -154,7 +154,7 @@ fn writeBytesByChars(vm: *VM, x: V, y: V) V {
 }
 fn writeBytesByHandle(vm: *VM, x: V, y: V) V {
   writeFile(vm, @as(u32, @intCast(x.i)), y.C.slice()) catch return V{ .err = .io };
-  return y.ref();
+  return .blank;
 }
 
 pub const WriteBytes = struct {
@@ -239,5 +239,5 @@ pub fn writeDataFallback(vm: *VM, x: V, y: V) V {
   var w = mock.writer();
   formatter.formatter().format(y, &w.interface) catch return V{ .err = .io };
   writeFile(vm, id, mock.getText()) catch return V{ .err = .io };
-  return y.ref();
+  return .blank;
 }

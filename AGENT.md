@@ -78,10 +78,10 @@ The language parser, compiler and runtime are all written in Zig 0.16.
 
 # Project Overview
 - `doc`
-  - `bug.md` Known bug, add new issue you find here
+  - `bug.md` Known bugs, add new issue you find here
   - `spec.md` Ink language specification (WIP)
   - `changelog.md` Changelog, document changes here
-  - `plan.md` Planning of future features
+  - `future.md` Planning of future features
 - `src`
   - `encoding`
   - `gpu`

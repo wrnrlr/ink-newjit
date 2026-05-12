@@ -23,8 +23,26 @@ The correct form (used in `momentum.k` and `arbitrage.k`) is:
 ((w-1)#0.0),-1_(s[w+!nn]-s[!nn])%w
 ```
 
+---
+
 ## 3. Long for-each breaks ink+rlwrap
 
 ```
   \t {x*3}'!100000000
 ```
+
+---
+
+## 4. Special command line arguments symbol should accept indexes as argument.
+
+Currenlty the command line argument special symbol does not support indexing of arguments.
+
+```
+`argv[] / Returns list of command line arguments
+
+`argv[0] / Should only return the first argument
+```
+
+---
+
+## 5. Special command line argument symbol first argument should be name of program.

@@ -1,7 +1,6 @@
 VERSION := 0.0.1
 
 INK  := zig-out/bin/ink
-NGNK := $(HOME)/.k/k
 
 .PHONY: test bench bench-sort bench-view bench-langs bench-report release
 
@@ -13,6 +12,8 @@ build:
 
 release:
 	time zig build -Doptimize=ReleaseFast -Djit=true -Dui=true
+	@echo "Total lines:" && find src -name '*.zig' | xargs wc -l | tail -n 1
+	@echo "Binary size:" && du -h zig-out/bin/*
 
 bench-sort:
 	zig test src/verb/sort/bench.zig
@@ -33,10 +34,8 @@ bench-report:
 	$(INK) test/bench/report.k
 
 info: build
-	@echo "Total lines:" && \
-	find src -name '*.zig' | xargs wc -l | tail -n 1
-	@echo "Binary size:" && \
-	du -h zig-out/bin/*
+	@echo "Total lines:" && find src -name '*.zig' | xargs wc -l | tail -n 1
+	@echo "Binary size:" && du -h zig-out/bin/*
 
 clean:
 	rm -rf zig-out

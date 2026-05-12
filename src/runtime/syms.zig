@@ -15,7 +15,15 @@ pub fn apply(vm: *VM, sym_idx: u32, args: []const V) anyerror!V {
         return .{ .i = @truncate(us) };
     }
     if (std.mem.eql(u8, name, "argv")) {
-        return vm.argv.ref();
+        const has_arg = args.len == 1 and args[0] != .blank;
+        if (!has_arg) return vm.argv.ref();
+        if (vm.argv == .blank) return V{ .err = .domain };
+        const items = vm.argv.L.slice();
+        const arg = args[0];
+        if (arg.tag() != .i) return V{ .err = .@"type" };
+        const idx = arg.i;
+        if (idx < 0 or @as(usize, @intCast(idx)) >= items.len) return V{ .err = .domain };
+        return items[@as(usize, @intCast(idx))].ref();
     }
     if (std.mem.eql(u8, name, "env")) {
         return getEnv(vm);

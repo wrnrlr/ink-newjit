@@ -71,7 +71,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
   var args_iter = try init.args.iterateAllocator(allocator);
   defer args_iter.deinit();
-  _ = args_iter.next(); // skip exe name
+  const exe_name = args_iter.next() orelse "";
 
   var disasm_mode = false;
   var gpu_flag    = false;
@@ -131,21 +131,34 @@ pub fn main(init: std.process.Init.Minimal) !void {
     if (gpu_backend) |b| b.destroy();
   };
 
-  // Build argv list and pre-register global x before loading any script.
+  // Build argv = [exe_name, script_path?, ...extra_args]
+  {
+    var parts: usize = 1; // exe always included
+    if (script_path != null) parts += 1;
+    parts += extra_args.items.len;
+    const argv_n = try N(V).init(allocator, parts);
+    errdefer (V{ .L = argv_n }).deinit(allocator);
+    @memset(argv_n.slice(), .blank);
+    var i: usize = 0;
+    argv_n.slice()[i] = try V.Chars(allocator, exe_name); i += 1;
+    if (script_path) |sp| { argv_n.slice()[i] = try V.Chars(allocator, sp); i += 1; }
+    for (extra_args.items) |arg| { argv_n.slice()[i] = try V.Chars(allocator, arg); i += 1; }
+    vm.argv = V{ .L = argv_n };
+  }
+  // Register 'x' global with extra_args only (user-provided script arguments)
   if (extra_args.items.len > 0) {
     const n = extra_args.items.len;
-    const argv_items_n = try N(V).init(allocator, n);
-    errdefer (V{ .L = argv_items_n }).deinit(allocator);
-    @memset(argv_items_n.slice(), .blank);
-    for (extra_args.items, argv_items_n.slice()) |arg, *slot| {
+    const x_n = try N(V).init(allocator, n);
+    errdefer (V{ .L = x_n }).deinit(allocator);
+    @memset(x_n.slice(), .blank);
+    for (extra_args.items, x_n.slice()) |arg, *slot| {
       slot.* = try V.Chars(allocator, arg);
     }
-    vm.argv = V{ .L = argv_items_n };
     const key = try vm.alloc.dupe(u8, "x");
     errdefer vm.alloc.free(key);
     const idx: u8 = @intCast(vm.globals.items.len);
     try vm.globals_names.put(key, idx);
-    try vm.globals.append(vm.alloc, vm.argv.ref());
+    try vm.globals.append(vm.alloc, V{ .L = x_n });
   }
 
   if (script_path == null and stdin_is_tty) return runRepl(allocator, vm);
