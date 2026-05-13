@@ -1133,12 +1133,19 @@ const JitImpl = if (jit_enabled) struct {
       .apply2       = s.scanWithFrame(@intFromPtr(&stencilApply2)),
       .jump_false   = s.scan2WithFrame(@intFromPtr(&stencilJumpFalse)),
       .jump_true    = s.scan2WithFrame(@intFromPtr(&stencilJumpTrue)),
-      .add_ii       = s.scanWithFrame(@intFromPtr(&stencilAdd_ii)),
-      .sub_ii       = s.scanWithFrame(@intFromPtr(&stencilSub_ii)),
-      .mul_ii       = s.scanWithFrame(@intFromPtr(&stencilMul_ii)),
-      .lt_ii        = s.scanWithFrame(@intFromPtr(&stencilLt_ii)),
-      .gt_ii        = s.scanWithFrame(@intFromPtr(&stencilGt_ii)),
-      .eq_ii        = s.scanWithFrame(@intFromPtr(&stencilEq_ii)),
+      // In ReleaseFast the compiler splits specDyadInt into a fast path (no
+      // frame) and a slow path (frame + BLR), placing a separate NEXT hole
+      // after each.  scanWithFrame only finds the first NEXT hole and the
+      // b.ne between the two paths escapes the copied region → crash.
+      // Fallback: scan2WithFrame captures both NEXT holes and all intervening
+      // code, making branches self-contained.  The emitter patches both to
+      // the same successor address (see emit.zig dual-next handling).
+      .add_ii = s.scanWithFrame(@intFromPtr(&stencilAdd_ii)) orelse s.scan2WithFrame(@intFromPtr(&stencilAdd_ii)),
+      .sub_ii = s.scanWithFrame(@intFromPtr(&stencilSub_ii)) orelse s.scan2WithFrame(@intFromPtr(&stencilSub_ii)),
+      .mul_ii = s.scanWithFrame(@intFromPtr(&stencilMul_ii)) orelse s.scan2WithFrame(@intFromPtr(&stencilMul_ii)),
+      .lt_ii  = s.scanWithFrame(@intFromPtr(&stencilLt_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilLt_ii)),
+      .gt_ii  = s.scanWithFrame(@intFromPtr(&stencilGt_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilGt_ii)),
+      .eq_ii  = s.scanWithFrame(@intFromPtr(&stencilEq_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilEq_ii)),
     };
   }
 

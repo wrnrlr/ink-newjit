@@ -46,8 +46,43 @@ pub const StencilInfo = struct {
   branch_offset: ?usize = null,
 };
 
+/// Return true if the code words [0, next_word) contain any arm64 PC-relative
+/// branch instruction whose target lies at or beyond word (next_word + 5).
+/// Such a branch would jump outside the stencil's copied region (which ends
+/// after the 5-word NEXT hole) and cause an illegal-instruction crash in the
+/// JIT buffer.  Also rejects ADRP (position-dependent page-relative loads)
+/// and BL (position-dependent call) for the same reason.
+fn hasEscapingBranch(code: [*]const u32, next_word: usize) bool {
+  const end: i64 = @as(i64, @intCast(next_word)) + 5;
+  for (0..next_word) |i| {
+    const w = code[i];
+    const top = w >> 24;
+    // ADRP: position-dependent page-relative address load.
+    if ((top & 0x9F) == 0x90) return true;
+    // BL: position-dependent call.
+    if (top >= 0x94 and top <= 0x97) return true;
+    // PC-relative branches: check if the target escapes the stencil bounds.
+    const base: i64 = @intCast(i);
+    const target: i64 = switch (top) {
+      // B.cond (conditional branch): imm19 in bits [23:5]
+      0x54 => base + @as(i64, @as(i19, @bitCast(@as(u19, @truncate(w >> 5))))),
+      // CBZ / CBNZ 32-bit [0x34/0x35] and 64-bit [0xB4/0xB5]: imm19 in bits [23:5]
+      0x34, 0x35, 0xB4, 0xB5 => base + @as(i64, @as(i19, @bitCast(@as(u19, @truncate(w >> 5))))),
+      // TBZ / TBNZ 32-bit [0x36/0x37] and 64-bit [0xB6/0xB7]: imm14 in bits [18:5]
+      0x36, 0x37, 0xB6, 0xB7 => base + @as(i64, @as(i14, @bitCast(@as(u14, @truncate(w >> 5))))),
+      // B unconditional: imm26 in bits [25:0]
+      0x14, 0x15, 0x16, 0x17 => base + @as(i64, @as(i26, @bitCast(@as(u26, @truncate(w))))),
+      else => continue,
+    };
+    if (target >= end) return true;
+  }
+  return false;
+}
+
 /// Scan without skipping any prologue — for stencils that call other functions
 /// and therefore need their own STP/LDP frame preserved in the copied body.
+/// Returns null if the stencil body contains branches that escape the copied
+/// region (a ReleaseFast code-layout hazard).
 pub fn scanWithFrame(fn_addr: usize) ?StencilInfo {
   const MAX_WORDS = 256;
   const p: [*]const u32 = @ptrFromInt(fn_addr);
@@ -63,6 +98,7 @@ pub fn scanWithFrame(fn_addr: usize) ?StencilInfo {
       if (p[i+1] == NEXT_WORDS[1] and p[i+2] == NEXT_WORDS[2] and
         p[i+3] == NEXT_WORDS[3] and p[i+4] == NEXT_WORDS[4])
       {
+        if (hasEscapingBranch(p, i)) return null;
         return .{
           .bytes          = @ptrFromInt(fn_addr),
           .size           = (i + 5) * 4,
@@ -125,6 +161,7 @@ pub fn scan(fn_addr: usize) ?StencilInfo {
         body[i+3] == NEXT_WORDS[3] and
         body[i+4] == NEXT_WORDS[4])
       {
+        if (hasEscapingBranch(body, i)) return null;
         return .{
           .bytes          = @ptrFromInt(fn_addr + skip * 4),
           .size           = (i + 5) * 4,

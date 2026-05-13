@@ -217,6 +217,18 @@ pub fn emitLambda(
       }
     } else {
       pending_next_hole = copy_start + info.next_offset;
+      // Non-branch stencil with a secondary NEXT hole (e.g. type-specialised
+      // Apply2 in ReleaseFast where the slow path gets its own NEXT hole).
+      // Both holes must jump to the same successor — register the secondary as
+      // a pending branch that targets the very next bytecode instruction (ip),
+      // so it is patched to the same copy_start as the primary when that
+      // instruction is compiled.
+      if (info.branch_offset) |branch_off| {
+        if (n_pending_branches < pending_branches.len) {
+          pending_branches[n_pending_branches] = .{ .hole_off = copy_start + branch_off, .target_ip = ip };
+          n_pending_branches += 1;
+        }
+      }
     }
 
     stop_ip = ip;

@@ -94,3 +94,51 @@ As described above, the correct implementation is:
 3. In `lowerInst`, when emitting a `Global` instruction with `cache_slot != null`, emit: `Global X; AssignLocal T; Local T` (three bytecode instructions instead of one).  When emitting a dead `Global` whose id was replaced, emit nothing (already handled by `is_dead` check).
 
 The net effect: each unique invariant Global is loaded once per lambda call, stored in a fast local slot, and read from there on subsequent uses.  Local reads are handled by stencils (Phase 1, no frame overhead); Global reads fall to Phase 2.  For a lambda like `{(x+y)*scale - scale}` called N times by fold, this eliminates one Phase 2 handler call per iteration.
+
+---
+
+## ReleaseFast SIGILL crash (fixed)
+
+**Symptom**: The JIT binary built with `-Doptimize=ReleaseFast -Djit=true` crashed with `illegal hardware instruction` (SIGILL) when running programs that use arithmetic.
+
+**Root cause**: Two independent code-layout problems caused the scanner to copy an incomplete stencil into JIT memory, leaving unpatched sentinel words (`MOVZ X8, #0xDEAD`) as live instructions.
+
+### Problem 1 — type-specialised Apply2 stencils (`stencilAdd_ii`, etc.)
+
+In ReleaseFast, Zig compiles `specDyadInt` (the body shared by all six arithmetic stencils) with the fast path first and the type-guard failure path (`b.ne` → slow BLR path) appended after the NEXT hole sequence.  The layout is:
+
+```
+[fast path code]
+MOVZ X8, #0xDEAD   ← first NEXT hole (scanner stops here)
+MOVK X8, #0xBEEF, LSL16
+MOVK X8, #0xCAFE, LSL32
+MOVK X8, #0xBABE, LSL48
+BR   X8
+[slow path: STP ...; BLR handler; LDP ...]
+MOVZ X8, #0xDEAD   ← second NEXT hole (not seen by scanWithFrame)
+...
+BR   X8
+```
+
+`scanWithFrame` scanned only to the first NEXT hole, so the `b.ne` from inside the fast path targeted code beyond the copied region → SIGILL on the branch.
+
+### Problem 2 — Local and Const stencils (`stencilLocal`, `stencilConst`)
+
+These stencils inline `stencilRef` via a switch on the value tag.  In ReleaseFast the switch arms generate a `b.ne` that jumps forward to an "else" block placed after the NEXT hole, creating the same escape pattern.
+
+**Fix — three parts**:
+
+1. **`hasEscapingBranch` detector** (`stencils.zig`): Before accepting a stencil, scan all instructions before the NEXT hole for any PC-relative branch (B.cond, CBZ, CBNZ, TBZ, TBNZ, B, ADRP, BL) whose target lies at or beyond the NEXT hole boundary.  If found, return `null` from `scan`/`scanWithFrame` so the emitter falls back to Phase 2.  This fixes `stencilLocal` and `stencilConst` — they fall to Phase 2 in ReleaseFast (still correct, just not Phase 1 speed).
+
+2. **`scan2WithFrame` dual-NEXT-hole scanner** (`stencils.zig`): Scans for two consecutive NEXT holes and returns a `StencilInfo` where `next_offset` is the first hole and `branch_offset` is the second.  The full region between them (including the slow-path BLR code) is included in `size`, making all branches self-contained within the copied blob.
+
+3. **Secondary NEXT hole patching in the emitter** (`emit.zig`): For non-branch stencils that have a `branch_offset` (i.e., type-spec Apply2 in ReleaseFast), the emitter registers the secondary hole as a pending branch whose `target_ip` is the very next bytecode instruction — so both holes are patched to the same successor address when that instruction is compiled.
+
+**Registration** (`vm.zig`): Each type-spec stencil is now registered as:
+```zig
+.add_ii = s.scanWithFrame(@intFromPtr(&stencilAdd_ii))
+          orelse s.scan2WithFrame(@intFromPtr(&stencilAdd_ii)),
+```
+`scanWithFrame` succeeds in Debug/ReleaseSafe (no escaping branches), `scan2WithFrame` is the fallback for ReleaseFast.
+
+**Remaining limitation**: `stencilLocal` and `stencilConst` fall back to Phase 2 in ReleaseFast.  A `scan2WithFrame`-style fix for these would require capturing the multi-arm switch as a single blob, but the else block uses backward branches that already re-enter the main path — making the region shape irregular.  The correct fix is to split `stencilRef` into a dedicated helper rather than inlining its switch into every stencil.
