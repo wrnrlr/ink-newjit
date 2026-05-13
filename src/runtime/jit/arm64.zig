@@ -123,6 +123,18 @@ pub fn ldpX19X20at16() u32 {
   return 0xA9410000 | (20 << 10) | (31 << 5) | 19;
 }
 
+// STP X19, X30, [SP, #-size]!   (pre-index; saves vm ptr + link register)
+pub fn stpX19X30(size: u7) u32 {
+  const imm7: u32 = @as(u7, @bitCast(-@as(i7, @intCast(size / 8))));
+  return 0xA9800000 | (imm7 << 15) | (30 << 10) | (31 << 5) | 19;
+}
+
+// LDP X19, X30, [SP], #size   (post-index)
+pub fn ldpX19X30(size: u7) u32 {
+  const imm7: u32 = @as(u7, @truncate(size / 8));
+  return 0xA8C00000 | (imm7 << 15) | (30 << 10) | (31 << 5) | 19;
+}
+
 // MOV X29, SP  (set frame pointer)
 pub fn movFpSp() u32 { return 0x910003FD; }
 

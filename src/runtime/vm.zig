@@ -77,6 +77,7 @@ pub const VM = struct {
   jit_apply1:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
   jit_apply2:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
   jit_assign_local:  if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
+  jit_cond_pop:      if (jit_enabled) *const fn(*VM) callconv(.c) u64  else void = if (jit_enabled) undefined else {},
   // Monomorphic inline cache: last successfully JIT-compiled lambda.
   // Avoids a hash-map lookup on every call in hot adverb loops.
   jit_ic_key: if (jit_enabled) u24                                       else void = if (jit_enabled) NO_LAMBDA else {},
@@ -116,6 +117,7 @@ pub const VM = struct {
         vm.jit_apply1       = &JitImpl.apply1Worker;
         vm.jit_apply2       = &JitImpl.apply2Worker;
         vm.jit_assign_local = &JitImpl.assignLocalWorker;
+        vm.jit_cond_pop     = &JitImpl.condPopWorker;
         vm.jit = jit_mod.JitCache.init(alloc, JitImpl.buildHandlers(), JitImpl.buildStencils(), @intFromPtr(&JitImpl.jhApply2)) catch null;
     }
 
@@ -840,6 +842,54 @@ const JitImpl = if (jit_enabled) struct {
     vm.push(.blank) catch {};
   }
 
+  // Pops the top-of-stack condition, returns 0 (false) or 1 (true) in x0.
+  // Called from stencilJumpFalse/True via vm.jit_cond_pop (LDR+BLR).
+  fn condPopWorker(vm: *VM) callconv(.c) u64 {
+    const v = vm.pop();
+    defer v.deinit(vm.alloc);
+    return if (v.isTrue()) 1 else 0;
+  }
+
+  // ── Type-specialised dyadic stencils ────────────────────────────────────
+  // Fast path: if top-two stack values are both .i, perform the op inline (no BLR).
+  // Slow path: delegates to vm.jit_apply2 for all other type combinations.
+  // Uses scanWithFrame because the slow path calls vm.jit_apply2 via BLR.
+  inline fn specDyadInt(vm: *VM, comptime op: Op) void {
+    const len = vm.stack_len;
+    const y = vm.stack[len - 1];
+    const x = vm.stack[len - 2];
+    if (x.tag() == .i and y.tag() == .i) {
+      vm.stack[len - 2] = switch (comptime op) {
+        .@"+" => V{ .i = x.i +% y.i },
+        .@"-" => V{ .i = x.i -% y.i },
+        .@"*" => V{ .i = x.i *% y.i },
+        .@"<" => V{ .b = x.i < y.i },
+        .@">" => V{ .b = x.i > y.i },
+        .@"=" => V{ .b = x.i == y.i },
+        else  => unreachable,
+      };
+      vm.stack_len = len - 1;
+    } else {
+      vm.jit_apply2(vm, @intFromEnum(op));
+    }
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
+  fn stencilAdd_ii(vm: *VM) callconv(.c) void { specDyadInt(vm, .@"+"); }
+  fn stencilSub_ii(vm: *VM) callconv(.c) void { specDyadInt(vm, .@"-"); }
+  fn stencilMul_ii(vm: *VM) callconv(.c) void { specDyadInt(vm, .@"*"); }
+  fn stencilLt_ii (vm: *VM) callconv(.c) void { specDyadInt(vm, .@"<"); }
+  fn stencilGt_ii (vm: *VM) callconv(.c) void { specDyadInt(vm, .@">"); }
+  fn stencilEq_ii (vm: *VM) callconv(.c) void { specDyadInt(vm, .@"="); }
+
   // ── CPS stencil functions ────────────────────────────────────────────────
   // Each stencil is a LEAF (no BLR) so the tail-call chain via BR X8 works.
   // NEXT hole  = MOVZ/MOVK×3/BR X8 at the end, patched to the next stencil.
@@ -1019,6 +1069,55 @@ const JitImpl = if (jit_enabled) struct {
     unreachable;
   }
 
+  // JumpFalse stencil: calls condPopWorker (→ x0 = 0 or 1), then:
+  //   CBZ X0, #+24  — if false (x0==0): skip fall-through NEXT hole, jump to taken NEXT hole
+  //   [fall-through NEXT hole: 5 words] — taken when condition is TRUE (don't jump)
+  //   [taken NEXT hole: 5 words]        — taken when condition is FALSE (do jump)
+  // Uses scan2WithFrame (two NEXT holes, frame preserved for BLR).
+  fn stencilJumpFalse(vm: *VM) callconv(.c) void {
+    const cond: u64 = vm.jit_cond_pop(vm);
+    // CBZ X0, #+24: if false (x0==0): skip fall-through NEXT hole → taken NEXT hole.
+    // Function ends with unreachable so no x8 clobber annotation needed.
+    asm volatile (
+      \\.inst 0xB40000C0   // CBZ X0, #+24
+      \\.inst 0xD29BD5A8   // Fall-through NEXT hole word 0
+      \\.inst 0xF2B7DDE8   // word 1
+      \\.inst 0xF2D95FC8   // word 2
+      \\.inst 0xF2F757C8   // word 3
+      \\.inst 0xD61F0100   // word 4: BR X8
+      \\.inst 0xD29BD5A8   // Taken NEXT hole word 0
+      \\.inst 0xF2B7DDE8   // word 1
+      \\.inst 0xF2D95FC8   // word 2
+      \\.inst 0xF2F757C8   // word 3
+      \\.inst 0xD61F0100   // word 4: BR X8
+      : : [c] "{x0}" (cond)
+    );
+    unreachable;
+  }
+
+  // JumpTrue stencil: calls condPopWorker (→ x0 = 0 or 1), then:
+  //   CBNZ X0, #+24 — if true (x0!=0): skip fall-through NEXT hole, jump to taken NEXT hole
+  //   [fall-through NEXT hole: 5 words] — taken when condition is FALSE (don't jump)
+  //   [taken NEXT hole: 5 words]        — taken when condition is TRUE (do jump)
+  fn stencilJumpTrue(vm: *VM) callconv(.c) void {
+    const cond: u64 = vm.jit_cond_pop(vm);
+    asm volatile (
+      \\.inst 0xB50000C0   // CBNZ X0, #+24
+      \\.inst 0xD29BD5A8   // Fall-through NEXT hole word 0
+      \\.inst 0xF2B7DDE8   // word 1
+      \\.inst 0xF2D95FC8   // word 2
+      \\.inst 0xF2F757C8   // word 3
+      \\.inst 0xD61F0100   // word 4: BR X8
+      \\.inst 0xD29BD5A8   // Taken NEXT hole word 0
+      \\.inst 0xF2B7DDE8   // word 1
+      \\.inst 0xF2D95FC8   // word 2
+      \\.inst 0xF2F757C8   // word 3
+      \\.inst 0xD61F0100   // word 4: BR X8
+      : : [c] "{x0}" (cond)
+    );
+    unreachable;
+  }
+
   // ── Builder helpers ──────────────────────────────────────────────────────
 
   fn buildStencils() jit_mod.StencilTable {
@@ -1032,6 +1131,14 @@ const JitImpl = if (jit_enabled) struct {
       .assign_local = s.scanWithFrame(@intFromPtr(&stencilAssignLocal)),
       .apply1       = s.scanWithFrame(@intFromPtr(&stencilApply1)),
       .apply2       = s.scanWithFrame(@intFromPtr(&stencilApply2)),
+      .jump_false   = s.scan2WithFrame(@intFromPtr(&stencilJumpFalse)),
+      .jump_true    = s.scan2WithFrame(@intFromPtr(&stencilJumpTrue)),
+      .add_ii       = s.scanWithFrame(@intFromPtr(&stencilAdd_ii)),
+      .sub_ii       = s.scanWithFrame(@intFromPtr(&stencilSub_ii)),
+      .mul_ii       = s.scanWithFrame(@intFromPtr(&stencilMul_ii)),
+      .lt_ii        = s.scanWithFrame(@intFromPtr(&stencilLt_ii)),
+      .gt_ii        = s.scanWithFrame(@intFromPtr(&stencilGt_ii)),
+      .eq_ii        = s.scanWithFrame(@intFromPtr(&stencilEq_ii)),
     };
   }
 

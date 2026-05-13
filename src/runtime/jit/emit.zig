@@ -55,6 +55,15 @@ pub const StencilTable = struct {
   assign_local: ?st.StencilInfo = null,
   apply1:       ?st.StencilInfo = null,
   apply2:       ?st.StencilInfo = null,
+  jump_false:   ?st.StencilInfo = null,
+  jump_true:    ?st.StencilInfo = null,
+  // Type-specialised dyadic stencils (int op int, fast path; slow path calls apply2 handler).
+  add_ii: ?st.StencilInfo = null,
+  sub_ii: ?st.StencilInfo = null,
+  mul_ii: ?st.StencilInfo = null,
+  lt_ii:  ?st.StencilInfo = null,
+  gt_ii:  ?st.StencilInfo = null,
+  eq_ii:  ?st.StencilInfo = null,
 };
 
 pub const MAX_JIT_BYTES = 128 * 1024;
@@ -80,11 +89,36 @@ pub fn emitLambda(
 
   var pending_next_hole: ?usize = null; // byte offset into `b.data` of pending NEXT hole
 
+  // Forward-branch patch records: when a branch stencil (or Jump) has a taken-hole
+  // that targets a not-yet-emitted ip, we record it here and patch it later.
+  const PendingBranch = struct { hole_off: usize, target_ip: usize };
+  var pending_branches: [16]PendingBranch = undefined;
+  var n_pending_branches: usize = 0;
+
   var ip       = start_ip;
   var stop_ip  = start_ip;
 
   while (ip < code.len) {
+    const instr_ip = ip;
     const op: OpCode = @enumFromInt(code[ip]);
+
+    // Unconditional Jump: redirect pending NEXT hole to the target — no stencil emitted.
+    if (op == .Jump) {
+      ip += 1;
+      const lo = code[ip]; ip += 1;
+      const hi = code[ip]; ip += 1;
+      const off = @as(u16, lo) | (@as(u16, hi) << 8);
+      const target_ip = ip + off;
+      if (pending_next_hole) |hole_off| {
+        if (n_pending_branches < pending_branches.len) {
+          pending_branches[n_pending_branches] = .{ .hole_off = hole_off, .target_ip = target_ip };
+          n_pending_branches += 1;
+        }
+        pending_next_hole = null;
+      }
+      stop_ip = ip;
+      continue;
+    }
 
     // Determine if this op has a stencil and read its operand bytes.
     const maybe_info: ?st.StencilInfo = switch (op) {
@@ -95,7 +129,24 @@ pub fn emitLambda(
       .LocalLast   => stencils.local_last,
       .AssignLocal => stencils.assign_local,
       .Apply1      => stencils.apply1,
-      .Apply2      => stencils.apply2,
+      .Apply2      => blk: {
+        // Peek at the op byte to select a type-specialised stencil if one exists.
+        if (ip + 1 < code.len) {
+          const spec: ?st.StencilInfo = switch (code[ip + 1]) {
+            @intFromEnum(@import("../tape.zig").Op.@"+") => stencils.add_ii,
+            @intFromEnum(@import("../tape.zig").Op.@"-") => stencils.sub_ii,
+            @intFromEnum(@import("../tape.zig").Op.@"*") => stencils.mul_ii,
+            @intFromEnum(@import("../tape.zig").Op.@"<") => stencils.lt_ii,
+            @intFromEnum(@import("../tape.zig").Op.@">") => stencils.gt_ii,
+            @intFromEnum(@import("../tape.zig").Op.@"=") => stencils.eq_ii,
+            else => null,
+          };
+          if (spec) |s| break :blk s;
+        }
+        break :blk stencils.apply2;
+      },
+      .JumpFalse   => stencils.jump_false,
+      .JumpTrue    => stencils.jump_true,
       else         => null,
     };
 
@@ -103,13 +154,15 @@ pub fn emitLambda(
 
     ip += 1; // consume the opcode byte
 
+    const is_branch = (op == .JumpFalse or op == .JumpTrue);
+
     // Read operand bytes (before consuming ip further for the next iteration).
     const operand: u16 = switch (op) {
       .Const, .Local, .LocalLast, .AssignLocal, .Apply1, .Apply2 => blk: {
         const v = code[ip]; ip += 1;
         break :blk v;
       },
-      .Int => blk: {
+      .Int, .JumpFalse, .JumpTrue => blk: {
         const lo = code[ip]; ip += 1;
         const hi = code[ip]; ip += 1;
         break :blk @as(u16, lo) | (@as(u16, hi) << 8);
@@ -117,13 +170,28 @@ pub fn emitLambda(
       else => 0,
     };
 
+    // For branch ops, compute the taken target bytecode ip.
+    const target_ip: usize = if (is_branch) ip + operand else 0;
+
     // The start of this stencil copy in the output buffer.
     const copy_start = b.pos;
 
-    // Patch the PREVIOUS stencil's NEXT hole to jump HERE.
+    // Patch the sequential (fall-through) pending NEXT hole to jump HERE.
     if (pending_next_hole) |hole_off| {
       st.patchNext(b.data, hole_off, @intFromPtr(b.data.ptr) + copy_start);
       pending_next_hole = null;
+    }
+
+    // Patch any forward branches whose target_ip is this instruction.
+    var k: usize = 0;
+    while (k < n_pending_branches) {
+      if (pending_branches[k].target_ip == instr_ip) {
+        st.patchNext(b.data, pending_branches[k].hole_off, @intFromPtr(b.data.ptr) + copy_start);
+        n_pending_branches -= 1;
+        pending_branches[k] = pending_branches[n_pending_branches];
+      } else {
+        k += 1;
+      }
     }
 
     // Copy stencil bytes from text segment into JIT buffer.
@@ -131,13 +199,26 @@ pub fn emitLambda(
     @memcpy(b.data[b.pos..][0..info.size], src[0..info.size]);
     b.pos += info.size;
 
-    // Patch operand hole (if the stencil has one).
+    // Patch operand hole (not present on branch stencils).
     if (info.operand_offset) |op_off| {
       st.patchOperand(b.data, copy_start + op_off, operand);
     }
 
-    // Remember where this stencil's NEXT hole is for the next iteration.
-    pending_next_hole = copy_start + info.next_offset;
+    // Set up pending holes for the next iteration.
+    if (is_branch) {
+      // Fall-through NEXT hole: entered when the condition does NOT trigger the jump.
+      pending_next_hole = copy_start + info.next_offset;
+      // Taken NEXT hole: forward branch to the jump target.
+      if (info.branch_offset) |branch_off| {
+        if (n_pending_branches < pending_branches.len) {
+          pending_branches[n_pending_branches] = .{ .hole_off = copy_start + branch_off, .target_ip = target_ip };
+          n_pending_branches += 1;
+        }
+      }
+    } else {
+      pending_next_hole = copy_start + info.next_offset;
+    }
+
     stop_ip = ip;
   }
 
@@ -150,6 +231,11 @@ pub fn emitLambda(
     st.patchNext(b.data, hole_off, @intFromPtr(b.data.ptr) + handler_start);
   }
 
+  // Patch any remaining forward branches (targets within Phase 2 bytecode range).
+  for (pending_branches[0..n_pending_branches]) |pb| {
+    st.patchNext(b.data, pb.hole_off, @intFromPtr(b.data.ptr) + handler_start);
+  }
+
   // If Phase 1 compiled everything (ip reached end with no remaining ops),
   // we still need to emit at least a RET so the caller can return.
   // In practice this only happens for trivially-empty or Return-less bytecode
@@ -160,9 +246,7 @@ pub fn emitLambda(
   }
 
   // Prologue for the handler section.
-  b.emit(a64.stpFpLr(32));        // stp x29, x30, [sp, #-32]!
-  b.emit(a64.stpX19X20at16());    // stp x19, x20, [sp, #16]
-  b.emit(a64.movFpSp());           // mov x29, sp
+  b.emit(a64.stpX19X30(16));      // stp x19, x30, [sp, #-16]!
   b.emit(a64.mov(.x19, .x0));     // save vm in x19
 
   // Emit handler calls for each remaining op.
@@ -249,8 +333,7 @@ pub fn emitLambda(
   }
 
   // Epilogue for the handler section.
-  b.emit(a64.ldpX19X20at16());
-  b.emit(a64.ldpFpLr(32));
+  b.emit(a64.ldpX19X30(16));
   b.emit(a64.ret());
 
   return .{ .size = b.pos, .stop_ip = stop_ip };

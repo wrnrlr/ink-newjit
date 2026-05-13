@@ -36,12 +36,14 @@ const NEXT_WORDS = [5]u32{ 0xD29BD5A8, 0xF2B7DDE8, 0xF2D95FC8, 0xF2F757C8, 0xD61
 pub const StencilInfo = struct {
   /// Pointer to the stencil's machine code in the text segment.
   bytes: [*]const u8,
-  /// Number of bytes to copy (includes the 5-word NEXT hole).
+  /// Number of bytes to copy (includes the 5-word NEXT hole, or both holes for branch stencils).
   size:  usize,
   /// Byte offset of the OPERAND hole within `bytes` (if present).
   operand_offset: ?usize,
-  /// Byte offset of the first word of the NEXT hole within `bytes`.
+  /// Byte offset of the first word of the (fall-through) NEXT hole within `bytes`.
   next_offset: usize,
+  /// Byte offset of the second (taken) NEXT hole — only set for branch stencils.
+  branch_offset: ?usize = null,
 };
 
 /// Scan without skipping any prologue — for stencils that call other functions
@@ -151,4 +153,45 @@ pub fn patchNext(data: []u8, hole_off: usize, target: usize) void {
 pub fn patchOperand(data: []u8, hole_off: usize, value: u16) void {
   const ptr: *u32 = @alignCast(@ptrCast(data.ptr + hole_off));
   ptr.* = 0xD2800001 | (@as(u32, value) << 5); // MOVZ X1, #value
+}
+
+/// Alias for patchNext — patches the taken (second) NEXT hole of a branch stencil.
+pub const patchBranch = patchNext;
+
+/// Scan a function for TWO NEXT holes (for branch stencils with fall-through + taken paths).
+/// Does not skip the compiler prologue (like scanWithFrame) since branch stencils use BLR.
+/// Returns StencilInfo with next_offset = first hole, branch_offset = second hole.
+pub fn scan2WithFrame(fn_addr: usize) ?StencilInfo {
+  const MAX_WORDS = 256;
+  const p: [*]const u32 = @ptrFromInt(fn_addr);
+  var operand_off: ?usize = null;
+  var first_next: ?usize = null;
+
+  var i: usize = 0;
+  while (i < MAX_WORDS) : (i += 1) {
+    const w = p[i];
+    if (w == OPERAND_SIG) {
+      if (operand_off == null) operand_off = i * 4;
+      continue;
+    }
+    if (w == NEXT_SIG and i + 4 < MAX_WORDS) {
+      if (p[i+1] == NEXT_WORDS[1] and p[i+2] == NEXT_WORDS[2] and
+          p[i+3] == NEXT_WORDS[3] and p[i+4] == NEXT_WORDS[4])
+      {
+        if (first_next == null) {
+          first_next = i * 4;
+          i += 4; // skip remaining 4 words of this hole; loop will add 1
+        } else {
+          return .{
+            .bytes          = @ptrFromInt(fn_addr),
+            .size           = (i + 5) * 4,
+            .operand_offset = operand_off,
+            .next_offset    = first_next.?,
+            .branch_offset  = i * 4,
+          };
+        }
+      }
+    }
+  }
+  return null;
 }
