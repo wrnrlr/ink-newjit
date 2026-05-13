@@ -56,6 +56,7 @@ pub const Compiler = struct {
       try opt.optimize(&self.scope.ir, root_id);
       _ = try opt.inlineLambdas(&self.scope.ir, self.fn_tables);
       try opt.optimize(&self.scope.ir, root_id);
+      _ = try opt.liftInvariants(&self.scope.ir);
       try opt.livenessLocals(&self.scope.ir);
       try self.lower();
     }
@@ -587,6 +588,7 @@ pub const Compiler = struct {
       try opt.optimize(&scope_ptr.ir, root_id);
       _ = try opt.inlineLambdas(&scope_ptr.ir, self.fn_tables);
       try opt.optimize(&scope_ptr.ir, root_id);
+      _ = try opt.liftInvariants(&scope_ptr.ir);
       try opt.livenessLocals(&scope_ptr.ir);
       try self.lower();
       break :blk a;

@@ -239,8 +239,24 @@ pub const Optimizer = struct {
     return changed;
   }
 
-  pub fn liftInvariants(self: *Optimizer, lambda: *value.LambdaEntry, outer_ir: *ir.IR) !bool {
-    _ = self; _ = lambda; _ = outer_ir;
+  // LICM stub — not yet implemented.
+  //
+  // True loop-invariant code motion requires either a DUP instruction (to
+  // keep a copy of the first load on the stack while the original is
+  // consumed) or a temp-local round-trip (Global X; AssignLocal T; Local T
+  // at the first site, Local T at subsequent sites).  Neither can be
+  // expressed by simply marking duplicate IR instructions dead, because the
+  // stack machine expects every push to be paired with a matching pop at the
+  // right depth.  The transformation requires modifying the lowering pass to
+  // emit the AssignLocal/Local pair, which in turn requires tracking "cache
+  // slot" metadata per Global instruction — a larger refactor than the
+  // benefit justifies at this stage.
+  //
+  // For now, constant folding already eliminates the most common invariant
+  // sub-expressions (literals, constant-only arithmetic), and the JIT
+  // stencil path for Local is already faster than the Global handler path.
+  pub fn liftInvariants(self: *Optimizer, lambda_ir: *ir.IR) !bool {
+    _ = self; _ = lambda_ir;
     return false;
   }
 
