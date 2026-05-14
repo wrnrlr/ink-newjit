@@ -79,6 +79,7 @@ fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, o
       .Nop    => try out.print("Nop\n", .{}),
       .Gap    => try out.print("Gap\n", .{}),
       .Drop   => try out.print("Drop\n", .{}),
+      .Dup    => try out.print("Dup\n", .{}),
       .Return => try out.print("Return\n", .{}),
       .Const => {
         const idx = code[ip]; ip += 1;

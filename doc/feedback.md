@@ -1,5 +1,75 @@
 # JIT / Optimizer Implementation Feedback
 
+## What was completed (Tasks 12–15)
+
+12. Float type-specialised stencils — extended `specDyadInt` → `specDyad`, adding a float×float fast-path branch alongside the existing int×int branch.  All six arithmetic ops (add/sub/mul/lt/gt/eq) now cover both type pairs in a single stencil function; no separate `_ff` functions needed, no emitter changes.
+
+13. DUP opcode — new `Dup` entry in `OpCode`, interpreter handler (`opDup`), JIT handler stub (`jhDup`), and pure-leaf stencil (`stencilDup`, uses `stencilRef` for correct refcounting).  Wired into Phase 1 (stencil) and Phase 2 (handler call).  The optimizer does not yet emit DUP; it is infrastructure for future CSE passes.
+
+14. Global stencil — `stencilGlobal` with scalar fast-path: `.i`, `.f`, `.b`, `.blank` are pushed inline without a refcount increment.  Heap types call `globalWorker` via the new `vm.jit_global` function pointer (same pattern as `jit_apply2`).  Registered with `scanWithFrame orelse scan2WithFrame` for ReleaseFast compatibility.
+
+15. LICM via temp-local — fully implemented `liftInvariants`: added `cache_slot: ?u8` to `IRInst` and `extra_locals: u8` to `IR`.  The pass scans each lambda for duplicate `Global` reads of the same index with no intervening write, allocates a fresh local slot, and converts subsequent reads to `Local` instructions.  `lowerInst` expands a cached Global to `Global X; AssignLocal T; Local T`.  `compileLambda` now adds `extra_locals` to the lambda frame's `locals` count.
+
+---
+
+## Bugs unexpectedly found
+
+### liftInvariants running on top-level code (two test failures)
+
+**Symptom**: Two tests failed after LICM was implemented: `test.list assign` produced `(;3)` instead of `4 6`, and `test.do not reuse the left argument` produced an empty string instead of `1 2 3`.
+
+**Root cause**: The previous session had wired `liftInvariants` into both `compile()` (top-level code path) and `compileLambda()`.  While the pass was a stub (always returned false) this was harmless.  Once implemented, the top-level call became dangerous: top-level code runs in the initial frame with `base = 0` and no reserved local slots — the VM never calls `callLambda` for top-level code, so no blank slots are pushed.  When LICM assigned cache slot 0 and the lowering emitted `AssignLocal 0`, it wrote to `stack[0]`, which is also the bottom of the evaluation stack → silent corruption.
+
+**Fix**: Removed the `liftInvariants` call from `compile()`.  The pass now only runs inside `compileLambda()`, where the frame layout is guaranteed by `callLambda`'s blank-pushing.
+
+### ListAssignGlobal not treated as a write barrier
+
+**Symptom**: Latent — would have produced stale global reads for expressions like `(a;b)*:2; a` where a list assignment modifies a previously cached global.
+
+**Root cause**: The LICM scan only broke on `AssignGlobal` when looking for writes that invalidate a cached global.  `ListAssignGlobal` (emitted for patterns like `(a;b)*:2`) can write any global in the list but was invisible to the scan.  Similarly, `Amend` and `Dmend` can modify global state through references.
+
+**Fix**: Added `ListAssignGlobal`, `Amend`, and `Dmend` as unconditional break conditions in both the duplicate-detection scan and the conversion loop inside `liftInvariants`.
+
+---
+
+## What can still be improved
+
+### stencilRef in ReleaseFast — systemic problem
+
+`stencilLocal`, `stencilConst`, and the new `stencilDup` all inline `stencilRef`, which contains a multi-arm `switch` over the value tag.  In ReleaseFast, Zig places some switch arms after the NEXT hole, creating escaping branches that `hasEscapingBranch` rejects — those stencils fall back to Phase 2 in release builds.
+
+The correct fix is to stop inlining `stencilRef` into leaf stencils and instead call a helper via a function pointer stored in the VM struct (like `jit_global`).  Concretely: add `jit_ref: *const fn(V) callconv(.c) V` to VM, implemented by a regular `refWorker` function.  Each affected stencil calls `vm.jit_ref(v)` via LDR+BLR instead of the inlined switch.  This makes the stencil bodies position-independent at the cost of one indirect call per heap-type load — acceptable since the call only happens for array/string values, not scalars.
+
+Until this is fixed, `stencilLocal`, `stencilConst`, and `stencilDup` are Phase 2 fallbacks in ReleaseFast, which is the configuration that matters for production performance.
+
+### stencilGlobal: heap globals still Phase 2
+
+For array globals the `globalWorker` path is taken.  In array code, globals are often large vectors (e.g., a dataset loaded at startup).  The refcount increment for heap values requires reading the type tag and branching — same issue as `stencilRef`.  Once the `jit_ref` helper above exists, `stencilGlobal` can call it instead of branching to `globalWorker`, keeping all globals (scalar and array) in Phase 1.
+
+### DUP not yet emitted by the optimizer
+
+DUP exists as a bytecode opcode and JIT stencil but is never generated by the compiler pipeline.  The natural use case is consecutive duplicate reads: the pattern `Global X; Global X` (same index, adjacent) is currently handled by LICM as `Global X; AssignLocal T; Local T; Local T` (3 instructions + 1 stencil read).  DUP would let the lowerer emit `Global X; AssignLocal T; Local T; Dup` — same semantics, but only when the two uses are truly adjacent on the stack with no interleaving.  This is a narrow optimization; measure whether it matters before implementing.
+
+### LICM scope: no loop detection
+
+`liftInvariants` deduplicates within a linear IR scan.  It does not detect loop structures (back-edges in the BB graph) and therefore does not hoist globals that appear in only one BB per iteration.  For a lambda `{x * scale}` called N times by `each`, `scale` appears only once in the IR — the deduplication never fires.  True loop-invariant hoisting requires the caller (the adverb, not the lambda) to hoist, or a CPS-level transformation that fuses the adverb's dispatch loop with the lambda body.  This is a much larger change.
+
+### CPS handler chain (fully frame-free Phase 2)
+
+Still pending.  All ~15 handler signatures change to accept a `next` continuation pointer and tail-call it instead of returning.  The `STP x19,x30 / LDP x19,x30` prologue/epilogue disappears.  Phase 1 and Phase 2 become a uniform continuation chain.  This should be done after the `stencilRef` / `jit_ref` fix above, since both touch handler structure.
+
+### Profile-guided stencil selection
+
+`specDyad` now handles int×int and float×float but still falls to the worker for mixed-type calls (e.g., `.i` + `.f`).  A lightweight type-observation counter per call site (one byte per Apply2 site in the JIT cache) would let the emitter re-JIT with a more precisely matched stencil on the second call.  The JIT cache already stores one entry per lambda; extending it to a `(JitFn, observed_type_byte)` pair is minimal overhead.
+
+### Stencil composition / generators
+
+The Copy-and-Patch paper describes fusing adjacent stencils into one blob, removing the per-stencil `BR X8` hop.  Measure the overhead first: for `{x+y}` the chain is three stencils (Local, Local, specDyad) with two `BR X8` hops before the result.  If profiling shows the hops are significant (they are each ~1 cycle on Apple Silicon, so likely not), a composed "load-local-0; load-local-1; add" stencil would be the right tool.
+
+### Array-level SIMD stencils
+
+All current stencils operate on scalar values.  For element-wise array ops (`v + w` where both are integer vectors), NEON can process 2 × i64 or 4 × i32 per cycle.  Implementing this requires the JIT emitter to know at emit-time whether the operands are arrays — either through type profiling (inline caches, see above) or a dedicated `ApplyArray2` bytecode opcode emitted by the compiler when both operands are provably arrays.  This is the largest remaining performance gap for the array language use case.
+
 ## What was completed (Tasks 1–11)
 
 1. Optimizer fixed-point convergence loop (removed arbitrary 10-iteration cap)

@@ -5,7 +5,7 @@ const ArrayList = std.ArrayList;
 const Value = @import("../noun/value.zig").V;
 
 pub const OpCode = enum(u8) {
-  Nop, Gap, Drop,
+  Nop, Gap, Drop, Dup,
 	Const, Int,                // Int: inline i16 value (avoids constant pool for small integers)
 	Global, Local, LocalLast,  // LocalLast: last use — steals slot without ref increment
 	AssignGlobal, AssignLocal, ListAssignGlobal, ListAssignLocal,

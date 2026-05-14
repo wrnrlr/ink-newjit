@@ -42,8 +42,10 @@ pub const StencilInfo = struct {
   operand_offset: ?usize,
   /// Byte offset of the first word of the (fall-through) NEXT hole within `bytes`.
   next_offset: usize,
-  /// Byte offset of the second (taken) NEXT hole — only set for branch stencils.
+  /// Byte offset of the second NEXT hole — taken path for branch stencils, or second tail in non-branch.
   branch_offset: ?usize = null,
+  /// Byte offset of the third NEXT hole — for stencils with 3 tail-duplicated paths (e.g. specDyad in ReleaseFast).
+  branch_offset2: ?usize = null,
 };
 
 /// Return true if the code words [0, next_word) contain any arm64 PC-relative
@@ -195,9 +197,54 @@ pub fn patchOperand(data: []u8, hole_off: usize, value: u16) void {
 /// Alias for patchNext — patches the taken (second) NEXT hole of a branch stencil.
 pub const patchBranch = patchNext;
 
+/// Scan a function for THREE NEXT holes.
+/// Used when ReleaseFast tail-duplicates a 3-path stencil (e.g. specDyad: int fast path,
+/// float fast path, slow BLR path each get their own NEXT hole copy).
+/// The emitter patches all three holes to the same successor address.
+pub fn scan3WithFrame(fn_addr: usize) ?StencilInfo {
+  const MAX_WORDS = 256;
+  const p: [*]const u32 = @ptrFromInt(fn_addr);
+  var operand_off: ?usize = null;
+  var first_next:  ?usize = null;
+  var second_next: ?usize = null;
+
+  var i: usize = 0;
+  while (i < MAX_WORDS) : (i += 1) {
+    const w = p[i];
+    if (w == OPERAND_SIG) {
+      if (operand_off == null) operand_off = i * 4;
+      continue;
+    }
+    if (w == NEXT_SIG and i + 4 < MAX_WORDS) {
+      if (p[i+1] == NEXT_WORDS[1] and p[i+2] == NEXT_WORDS[2] and
+          p[i+3] == NEXT_WORDS[3] and p[i+4] == NEXT_WORDS[4])
+      {
+        if (first_next == null) {
+          first_next = i * 4;
+          i += 4;
+        } else if (second_next == null) {
+          second_next = i * 4;
+          i += 4;
+        } else {
+          return .{
+            .bytes          = @ptrFromInt(fn_addr),
+            .size           = (i + 5) * 4,
+            .operand_offset = operand_off,
+            .next_offset    = first_next.?,
+            .branch_offset  = second_next.?,
+            .branch_offset2 = i * 4,
+          };
+        }
+      }
+    }
+  }
+  return null;
+}
+
 /// Scan a function for TWO NEXT holes (for branch stencils with fall-through + taken paths).
 /// Does not skip the compiler prologue (like scanWithFrame) since branch stencils use BLR.
 /// Returns StencilInfo with next_offset = first hole, branch_offset = second hole.
+/// For non-branch stencils the emitter patches both holes to the same successor address.
 pub fn scan2WithFrame(fn_addr: usize) ?StencilInfo {
   const MAX_WORDS = 256;
   const p: [*]const u32 = @ptrFromInt(fn_addr);

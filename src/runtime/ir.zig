@@ -15,7 +15,8 @@ pub const IRInst = struct {
   inputs: []const ValueId = &.{},
   is_dead: bool = false,
   is_pure: bool = false,
-  is_last: bool = false, // last use of this local variable slot
+  is_last: bool = false,      // last use of this local variable slot
+  cache_slot: ?u8 = null,     // set by liftInvariants: temp local slot for cached global
 
   pub fn deinit(self: IRInst, alloc: std.mem.Allocator) void {
     if (self.val) |v| v.deinit(alloc);
@@ -36,6 +37,7 @@ pub const IRInst = struct {
 pub const IR = struct {
   instructions: std.ArrayList(IRInst),
   alloc: std.mem.Allocator,
+  extra_locals: u8 = 0,  // slots allocated by liftInvariants; added to lambda.locals
 
   pub fn init(alloc: std.mem.Allocator) !IR {
     return .{

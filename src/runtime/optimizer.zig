@@ -239,25 +239,80 @@ pub const Optimizer = struct {
     return changed;
   }
 
-  // LICM stub — not yet implemented.
+  // Global read deduplication (intra-lambda LICM).
   //
-  // True loop-invariant code motion requires either a DUP instruction (to
-  // keep a copy of the first load on the stack while the original is
-  // consumed) or a temp-local round-trip (Global X; AssignLocal T; Local T
-  // at the first site, Local T at subsequent sites).  Neither can be
-  // expressed by simply marking duplicate IR instructions dead, because the
-  // stack machine expects every push to be paired with a matching pop at the
-  // right depth.  The transformation requires modifying the lowering pass to
-  // emit the AssignLocal/Local pair, which in turn requires tracking "cache
-  // slot" metadata per Global instruction — a larger refactor than the
-  // benefit justifies at this stage.
+  // For each Global instruction that has one or more subsequent reads of the
+  // same global index with no intervening AssignGlobal, we:
+  //   1. Assign a fresh local slot (cache_slot) to the first occurrence.
+  //   2. Convert every later occurrence to a Local read of that slot.
   //
-  // For now, constant folding already eliminates the most common invariant
-  // sub-expressions (literals, constant-only arithmetic), and the JIT
-  // stencil path for Local is already faster than the Global handler path.
+  // The lowering pass then emits the first occurrence as:
+  //   Global X; AssignLocal T; Local T   (cache + immediate read)
+  // and subsequent occurrences as:
+  //   Local T  (or LocalLast T, set by livenessLocals that runs after us)
+  //
+  // This keeps the second and later reads in Phase 1 (Local stencil) instead
+  // of falling to the Phase 2 Global handler — important for lambdas that
+  // read the same global in multiple places (e.g. {scale*x + scale*y}).
   pub fn liftInvariants(self: *Optimizer, lambda_ir: *ir.IR) !bool {
-    _ = self; _ = lambda_ir;
-    return false;
+    _ = self;
+    const insts = lambda_ir.instructions.items;
+    var changed = false;
+
+    // Find the highest local-slot index already in use so we can allocate
+    // fresh cache slots above it without colliding with compiler-assigned slots.
+    var next_slot: u8 = 0;
+    for (insts) |inst| {
+      if (inst.is_dead) continue;
+      switch (inst.op) {
+        .Local, .LocalLast, .AssignLocal => {
+          const s: u8 = @intCast(inst.arg1);
+          if (s >= next_slot) next_slot = s + 1;
+        },
+        else => {},
+      }
+    }
+
+    for (insts, 0..) |*first, i| {
+      if (first.is_dead or first.op != .Global) continue;
+      if (first.cache_slot != null) continue; // already processed
+
+      const gidx = first.arg1;
+
+      // Scan forward: is there another live read of the same global before
+      // any write to it?  ListAssignGlobal / Amend / Dmend may write any global,
+      // so they are treated as unconditional invalidations.
+      var has_dup = false;
+      for (insts[i + 1 ..]) |other| {
+        if (other.is_dead) continue;
+        if (other.op == .AssignGlobal and other.arg1 == gidx) break;
+        if (other.op == .ListAssignGlobal or other.op == .Amend or other.op == .Dmend) break;
+        if (other.op == .Global and other.arg1 == gidx) { has_dup = true; break; }
+      }
+      if (!has_dup) continue;
+
+      // Allocate a cache slot for this global.
+      const slot = next_slot;
+      next_slot += 1;
+      first.cache_slot = slot;
+      lambda_ir.extra_locals += 1;
+
+      // Convert all subsequent reads (before any intervening write) to Local.
+      for (insts[i + 1 ..]) |*other| {
+        if (other.is_dead) continue;
+        if (other.op == .AssignGlobal and other.arg1 == gidx) break;
+        if (other.op == .ListAssignGlobal or other.op == .Amend or other.op == .Dmend) break;
+        if (other.op == .Global and other.arg1 == gidx) {
+          other.op    = .Local;
+          other.arg1  = slot;
+          other.is_pure = true;
+          changed = true;
+        }
+      }
+      changed = true;
+    }
+
+    return changed;
   }
 
   // Mark the final use of each local variable with is_last=true so the

@@ -29,7 +29,7 @@ bench-micro-view:
 bench-sort:
 	zig test src/verb/sort/bench.zig
 
-info: build
+info:
 	@echo "Total lines:" && find src -name '*.zig' | xargs wc -l | tail -n 1
 	@echo "Binary size:" && du -h zig-out/bin/*
 

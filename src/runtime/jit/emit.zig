@@ -29,6 +29,7 @@ const st     = @import("stencils.zig");
 pub const Handlers = struct {
   gap:           usize,
   drop:          usize,
+  dup:           usize,
   int_:          usize,
   const_:        usize,
   global:        usize,
@@ -48,6 +49,8 @@ pub const Handlers = struct {
 /// Null entries fall back to handler calls.
 pub const StencilTable = struct {
   gap:          ?st.StencilInfo = null,
+  dup:          ?st.StencilInfo = null,
+  global:       ?st.StencilInfo = null,
   int_:         ?st.StencilInfo = null,
   const_:       ?st.StencilInfo = null,
   local:        ?st.StencilInfo = null,
@@ -123,6 +126,8 @@ pub fn emitLambda(
     // Determine if this op has a stencil and read its operand bytes.
     const maybe_info: ?st.StencilInfo = switch (op) {
       .Gap         => stencils.gap,
+      .Dup         => stencils.dup,
+      .Global      => stencils.global,
       .Int         => stencils.int_,
       .Const       => stencils.const_,
       .Local       => stencils.local,
@@ -158,7 +163,7 @@ pub fn emitLambda(
 
     // Read operand bytes (before consuming ip further for the next iteration).
     const operand: u16 = switch (op) {
-      .Const, .Local, .LocalLast, .AssignLocal, .Apply1, .Apply2 => blk: {
+      .Const, .Global, .Local, .LocalLast, .AssignLocal, .Apply1, .Apply2 => blk: {
         const v = code[ip]; ip += 1;
         break :blk v;
       },
@@ -229,6 +234,12 @@ pub fn emitLambda(
           n_pending_branches += 1;
         }
       }
+      if (info.branch_offset2) |branch_off2| {
+        if (n_pending_branches < pending_branches.len) {
+          pending_branches[n_pending_branches] = .{ .hole_off = copy_start + branch_off2, .target_ip = ip };
+          n_pending_branches += 1;
+        }
+      }
     }
 
     stop_ip = ip;
@@ -270,6 +281,7 @@ pub fn emitLambda(
       .Nop  => { b.emit(a64.nop()); stop_ip = ip; },
       .Gap  => { emitCall0(&b, h.gap);  stop_ip = ip; },
       .Drop => { emitCall0(&b, h.drop); stop_ip = ip; },
+      .Dup  => { emitCall0(&b, h.dup);  stop_ip = ip; },
       .Return => {
         emitCall0(&b, h.return_);
         stop_ip = ip;

@@ -77,6 +77,7 @@ pub const VM = struct {
   jit_apply1:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
   jit_apply2:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
   jit_assign_local:  if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
+  jit_global:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
   jit_cond_pop:      if (jit_enabled) *const fn(*VM) callconv(.c) u64  else void = if (jit_enabled) undefined else {},
   // Monomorphic inline cache: last successfully JIT-compiled lambda.
   // Avoids a hash-map lookup on every call in hot adverb loops.
@@ -117,6 +118,7 @@ pub const VM = struct {
         vm.jit_apply1       = &JitImpl.apply1Worker;
         vm.jit_apply2       = &JitImpl.apply2Worker;
         vm.jit_assign_local = &JitImpl.assignLocalWorker;
+        vm.jit_global       = &JitImpl.globalWorker;
         vm.jit_cond_pop     = &JitImpl.condPopWorker;
         vm.jit = jit_mod.JitCache.init(alloc, JitImpl.buildHandlers(), JitImpl.buildStencils(), @intFromPtr(&JitImpl.jhApply2)) catch null;
     }
@@ -716,6 +718,7 @@ pub const VM = struct {
 fn opNop(_: *VM) anyerror!void {}
 fn opGap(vm: *VM) anyerror!void { try vm.push(.blank); }
 fn opDrop(vm: *VM) anyerror!void { vm.pop().deinit(vm.alloc); }
+fn opDup(vm: *VM) anyerror!void { try vm.push(vm.peek(0).ref()); }
 fn opJumpFalse(vm: *VM) anyerror!void { try vm.doJumpWhen(false); }
 fn opJumpTrue(vm: *VM) anyerror!void  { try vm.doJumpWhen(true); }
 
@@ -725,6 +728,7 @@ const op_table: [OpCode.COUNT]OpHandler = build: {
   t[@intFromEnum(OpCode.Nop)]              = &opNop;
   t[@intFromEnum(OpCode.Gap)]              = &opGap;
   t[@intFromEnum(OpCode.Drop)]             = &opDrop;
+  t[@intFromEnum(OpCode.Dup)]              = &opDup;
   t[@intFromEnum(OpCode.Const)]            = &VM.doConst;
   t[@intFromEnum(OpCode.Int)]              = &VM.doInt;
   t[@intFromEnum(OpCode.Global)]           = &VM.doGlobal;
@@ -767,6 +771,7 @@ const JitImpl = if (jit_enabled) struct {
 
   fn jhGap(vm: *VM) callconv(.c) void { vm.push(.blank) catch {}; }
   fn jhDrop(vm: *VM) callconv(.c) void { vm.pop().deinit(vm.alloc); }
+  fn jhDup(vm: *VM) callconv(.c) void { vm.push(vm.stack[vm.stack_len - 1].ref()) catch {}; }
   fn jhInt(vm: *VM, raw: u16) callconv(.c) void {
     vm.push(.{ .i = @as(i32, @as(i16, @bitCast(raw))) }) catch {};
   }
@@ -842,6 +847,13 @@ const JitImpl = if (jit_enabled) struct {
     vm.push(.blank) catch {};
   }
 
+  // Slow path for stencilGlobal: handles heap types (refcount increment) and
+  // out-of-range indices.  Called via vm.jit_global (LDR+BLR — position-independent).
+  fn globalWorker(vm: *VM, idx: u8) callconv(.c) void {
+    while (vm.globals.items.len <= idx) vm.globals.append(vm.alloc, .blank) catch return;
+    vm.push(vm.globals.items[idx].ref()) catch {};
+  }
+
   // Pops the top-of-stack condition, returns 0 (false) or 1 (true) in x0.
   // Called from stencilJumpFalse/True via vm.jit_cond_pop (LDR+BLR).
   fn condPopWorker(vm: *VM) callconv(.c) u64 {
@@ -851,10 +863,10 @@ const JitImpl = if (jit_enabled) struct {
   }
 
   // ── Type-specialised dyadic stencils ────────────────────────────────────
-  // Fast path: if top-two stack values are both .i, perform the op inline (no BLR).
+  // Fast path: if top-two stack values are both .i or both .f, perform inline.
   // Slow path: delegates to vm.jit_apply2 for all other type combinations.
   // Uses scanWithFrame because the slow path calls vm.jit_apply2 via BLR.
-  inline fn specDyadInt(vm: *VM, comptime op: Op) void {
+  inline fn specDyad(vm: *VM, comptime op: Op) void {
     const len = vm.stack_len;
     const y = vm.stack[len - 1];
     const x = vm.stack[len - 2];
@@ -866,6 +878,17 @@ const JitImpl = if (jit_enabled) struct {
         .@"<" => V{ .b = x.i < y.i },
         .@">" => V{ .b = x.i > y.i },
         .@"=" => V{ .b = x.i == y.i },
+        else  => unreachable,
+      };
+      vm.stack_len = len - 1;
+    } else if (x.tag() == .f and y.tag() == .f) {
+      vm.stack[len - 2] = switch (comptime op) {
+        .@"+" => V{ .f = x.f + y.f },
+        .@"-" => V{ .f = x.f - y.f },
+        .@"*" => V{ .f = x.f * y.f },
+        .@"<" => V{ .b = x.f < y.f },
+        .@">" => V{ .b = x.f > y.f },
+        .@"=" => V{ .b = x.f == y.f },
         else  => unreachable,
       };
       vm.stack_len = len - 1;
@@ -883,12 +906,12 @@ const JitImpl = if (jit_enabled) struct {
     unreachable;
   }
 
-  fn stencilAdd_ii(vm: *VM) callconv(.c) void { specDyadInt(vm, .@"+"); }
-  fn stencilSub_ii(vm: *VM) callconv(.c) void { specDyadInt(vm, .@"-"); }
-  fn stencilMul_ii(vm: *VM) callconv(.c) void { specDyadInt(vm, .@"*"); }
-  fn stencilLt_ii (vm: *VM) callconv(.c) void { specDyadInt(vm, .@"<"); }
-  fn stencilGt_ii (vm: *VM) callconv(.c) void { specDyadInt(vm, .@">"); }
-  fn stencilEq_ii (vm: *VM) callconv(.c) void { specDyadInt(vm, .@"="); }
+  fn stencilAdd_ii(vm: *VM) callconv(.c) void { specDyad(vm, .@"+"); }
+  fn stencilSub_ii(vm: *VM) callconv(.c) void { specDyad(vm, .@"-"); }
+  fn stencilMul_ii(vm: *VM) callconv(.c) void { specDyad(vm, .@"*"); }
+  fn stencilLt_ii (vm: *VM) callconv(.c) void { specDyad(vm, .@"<"); }
+  fn stencilGt_ii (vm: *VM) callconv(.c) void { specDyad(vm, .@">"); }
+  fn stencilEq_ii (vm: *VM) callconv(.c) void { specDyad(vm, .@"="); }
 
   // ── CPS stencil functions ────────────────────────────────────────────────
   // Each stencil is a LEAF (no BLR) so the tail-call chain via BR X8 works.
@@ -910,6 +933,23 @@ const JitImpl = if (jit_enabled) struct {
 
   fn stencilGap(vm: *VM) callconv(.c) void {
     vm.stack[vm.stack_len] = .blank;
+    vm.stack_len += 1;
+    asm volatile (
+      \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
+      \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
+      \\.inst 0xF2D95FC8   // MOVK X8, #0xCAFE, LSL 32
+      \\.inst 0xF2F757C8   // MOVK X8, #0xBABE, LSL 48
+      \\.inst 0xD61F0100   // BR X8
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
+  // Dup stencil: duplicate top-of-stack (increment refcount, push copy).
+  // Pure leaf — no BLR needed.
+  fn stencilDup(vm: *VM) callconv(.c) void {
+    const v = stencilRef(vm.stack[vm.stack_len - 1]);
+    vm.stack[vm.stack_len] = v;
     vm.stack_len += 1;
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
@@ -1030,6 +1070,38 @@ const JitImpl = if (jit_enabled) struct {
     unreachable;
   }
 
+  // Global stencil: fast path for scalar globals (.i/.f/.b/.blank — no refcount bump).
+  // Slow path: calls vm.jit_global for heap values or out-of-range indices.
+  // Single BLR callsite ensures ReleaseFast produces at most 2 NEXT holes (fast vs slow),
+  // which scan2WithFrame can capture. Two separate callsites would yield 3 NEXT holes.
+  fn stencilGlobal(vm: *VM) callconv(.c) void {
+    var idx: u32 = undefined;
+    asm volatile (
+      \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
+      : [o] "={x1}" (idx)
+    );
+    // Compute scalar-ness with short-circuit and to guarantee one BLR callsite.
+    const scalar = idx < vm.globals.items.len and blk: {
+      const tag = vm.globals.items[idx].tag();
+      break :blk tag == .i or tag == .f or tag == .b or tag == .blank;
+    };
+    if (scalar) {
+      vm.stack[vm.stack_len] = vm.globals.items[idx];
+      vm.stack_len += 1;
+    } else {
+      vm.jit_global(vm, @as(u8, @truncate(idx)));
+    }
+    asm volatile (
+      \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
+      \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
+      \\.inst 0xF2D95FC8   // MOVK X8, #0xCAFE, LSL 32
+      \\.inst 0xF2F757C8   // MOVK X8, #0xBABE, LSL 48
+      \\.inst 0xD61F0100   // BR X8
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
   fn stencilApply1(vm: *VM) callconv(.c) void {
     var op_raw: u32 = undefined;
     asm volatile (
@@ -1124,8 +1196,10 @@ const JitImpl = if (jit_enabled) struct {
     const s = stencils_mod;
     return .{
       .gap          = s.scan(@intFromPtr(&stencilGap)),
+      .dup          = s.scan(@intFromPtr(&stencilDup)),
       .int_         = s.scan(@intFromPtr(&stencilInt)),
       .const_       = s.scan(@intFromPtr(&stencilConst)),
+      .global       = s.scanWithFrame(@intFromPtr(&stencilGlobal)) orelse s.scan2WithFrame(@intFromPtr(&stencilGlobal)),
       .local        = s.scan(@intFromPtr(&stencilLocal)),
       .local_last   = s.scan(@intFromPtr(&stencilLocalLast)),
       .assign_local = s.scanWithFrame(@intFromPtr(&stencilAssignLocal)),
@@ -1133,19 +1207,16 @@ const JitImpl = if (jit_enabled) struct {
       .apply2       = s.scanWithFrame(@intFromPtr(&stencilApply2)),
       .jump_false   = s.scan2WithFrame(@intFromPtr(&stencilJumpFalse)),
       .jump_true    = s.scan2WithFrame(@intFromPtr(&stencilJumpTrue)),
-      // In ReleaseFast the compiler splits specDyadInt into a fast path (no
-      // frame) and a slow path (frame + BLR), placing a separate NEXT hole
-      // after each.  scanWithFrame only finds the first NEXT hole and the
-      // b.ne between the two paths escapes the copied region → crash.
-      // Fallback: scan2WithFrame captures both NEXT holes and all intervening
-      // code, making branches self-contained.  The emitter patches both to
-      // the same successor address (see emit.zig dual-next handling).
-      .add_ii = s.scanWithFrame(@intFromPtr(&stencilAdd_ii)) orelse s.scan2WithFrame(@intFromPtr(&stencilAdd_ii)),
-      .sub_ii = s.scanWithFrame(@intFromPtr(&stencilSub_ii)) orelse s.scan2WithFrame(@intFromPtr(&stencilSub_ii)),
-      .mul_ii = s.scanWithFrame(@intFromPtr(&stencilMul_ii)) orelse s.scan2WithFrame(@intFromPtr(&stencilMul_ii)),
-      .lt_ii  = s.scanWithFrame(@intFromPtr(&stencilLt_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilLt_ii)),
-      .gt_ii  = s.scanWithFrame(@intFromPtr(&stencilGt_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilGt_ii)),
-      .eq_ii  = s.scanWithFrame(@intFromPtr(&stencilEq_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilEq_ii)),
+      // specDyad has 3 code paths: int fast, float fast, slow BLR.
+      // In ReleaseFast LLVM tail-duplicates the NEXT hole into each path → 3 NEXT holes.
+      // scan2WithFrame only captures 2, leaving the 3rd unpatched → SIGILL.
+      // scan3WithFrame captures all three and the emitter patches all to the same successor.
+      .add_ii = s.scanWithFrame(@intFromPtr(&stencilAdd_ii)) orelse s.scan2WithFrame(@intFromPtr(&stencilAdd_ii)) orelse s.scan3WithFrame(@intFromPtr(&stencilAdd_ii)),
+      .sub_ii = s.scanWithFrame(@intFromPtr(&stencilSub_ii)) orelse s.scan2WithFrame(@intFromPtr(&stencilSub_ii)) orelse s.scan3WithFrame(@intFromPtr(&stencilSub_ii)),
+      .mul_ii = s.scanWithFrame(@intFromPtr(&stencilMul_ii)) orelse s.scan2WithFrame(@intFromPtr(&stencilMul_ii)) orelse s.scan3WithFrame(@intFromPtr(&stencilMul_ii)),
+      .lt_ii  = s.scanWithFrame(@intFromPtr(&stencilLt_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilLt_ii))  orelse s.scan3WithFrame(@intFromPtr(&stencilLt_ii)),
+      .gt_ii  = s.scanWithFrame(@intFromPtr(&stencilGt_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilGt_ii))  orelse s.scan3WithFrame(@intFromPtr(&stencilGt_ii)),
+      .eq_ii  = s.scanWithFrame(@intFromPtr(&stencilEq_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilEq_ii))  orelse s.scan3WithFrame(@intFromPtr(&stencilEq_ii)),
     };
   }
 
@@ -1153,6 +1224,7 @@ const JitImpl = if (jit_enabled) struct {
     return .{
       .gap           = @intFromPtr(&jhGap),
       .drop          = @intFromPtr(&jhDrop),
+      .dup           = @intFromPtr(&jhDup),
       .int_          = @intFromPtr(&jhInt),
       .const_        = @intFromPtr(&jhConst),
       .global        = @intFromPtr(&jhGlobal),
