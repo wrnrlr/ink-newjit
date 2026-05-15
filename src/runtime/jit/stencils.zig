@@ -41,11 +41,15 @@ pub const StencilInfo = struct {
   /// Byte offset of the OPERAND hole within `bytes` (if present).
   operand_offset: ?usize,
   /// Byte offset of the first word of the (fall-through) NEXT hole within `bytes`.
+  /// Unused (set to 0) when is_terminal is true.
   next_offset: usize,
   /// Byte offset of the second NEXT hole — taken path for branch stencils, or second tail in non-branch.
   branch_offset: ?usize = null,
   /// Byte offset of the third NEXT hole — for stencils with 3 tail-duplicated paths (e.g. specDyad in ReleaseFast).
   branch_offset2: ?usize = null,
+  /// True for terminal stencils (e.g. Return) that end with RET instead of a NEXT hole.
+  /// The emitter must NOT set pending_next_hole after copying a terminal stencil.
+  is_terminal: bool = false,
 };
 
 /// Return true if the code words [0, next_word) contain any arm64 PC-relative
@@ -275,6 +279,30 @@ pub fn scan2WithFrame(fn_addr: usize) ?StencilInfo {
           };
         }
       }
+    }
+  }
+  return null;
+}
+
+/// Scan a function for a terminal stencil that ends with RET (0xD65F03C0).
+/// Used for the Return stencil: the JIT function ends with a proper RET instead
+/// of a NEXT hole, so Phase 2 is never entered for lambdas that end at Return.
+/// Includes the compiler prologue in the copied region (like scanWithFrame) so
+/// the BLR inside can save/restore LR correctly.
+pub fn scanTerminal(fn_addr: usize) ?StencilInfo {
+  const MAX_WORDS   = 64;
+  const RET_WORD: u32 = 0xD65F03C0;
+  const p: [*]const u32 = @ptrFromInt(fn_addr);
+
+  for (0..MAX_WORDS) |i| {
+    if (p[i] == RET_WORD) {
+      return .{
+        .bytes          = @ptrFromInt(fn_addr),
+        .size           = (i + 1) * 4, // includes the RET instruction
+        .operand_offset = null,
+        .next_offset    = 0,           // unused for terminal stencils
+        .is_terminal    = true,
+      };
     }
   }
   return null;

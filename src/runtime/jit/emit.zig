@@ -57,9 +57,12 @@ pub const StencilTable = struct {
   local_last:   ?st.StencilInfo = null,
   assign_local: ?st.StencilInfo = null,
   apply1:       ?st.StencilInfo = null,
-  apply2:       ?st.StencilInfo = null,
-  jump_false:   ?st.StencilInfo = null,
-  jump_true:    ?st.StencilInfo = null,
+  apply2:        ?st.StencilInfo = null,
+  drop:          ?st.StencilInfo = null,
+  assign_global: ?st.StencilInfo = null,
+  return_:       ?st.StencilInfo = null,
+  jump_false:    ?st.StencilInfo = null,
+  jump_true:     ?st.StencilInfo = null,
   // Type-specialised dyadic stencils (int op int, fast path; slow path calls apply2 handler).
   add_ii: ?st.StencilInfo = null,
   sub_ii: ?st.StencilInfo = null,
@@ -67,6 +70,15 @@ pub const StencilTable = struct {
   lt_ii:  ?st.StencilInfo = null,
   gt_ii:  ?st.StencilInfo = null,
   eq_ii:  ?st.StencilInfo = null,
+  // Array-level SIMD stencils (I×I and F×F). Selected by profile-guided re-JIT.
+  // Each stencil calls vm.jit_simd_array2 with the op baked in; fallback to
+  // dispatch2 for non-matching types at runtime.
+  add_II: ?st.StencilInfo = null,
+  sub_II: ?st.StencilInfo = null,
+  mul_II: ?st.StencilInfo = null,
+  add_FF: ?st.StencilInfo = null,
+  sub_FF: ?st.StencilInfo = null,
+  mul_FF: ?st.StencilInfo = null,
 };
 
 pub const MAX_JIT_BYTES = 128 * 1024;
@@ -77,11 +89,12 @@ pub const EmitResult = struct {
 };
 
 pub fn emitLambda(
-  buf:      []u8,
-  chunk:    *const Chunk,
-  start_ip: usize,
-  h:        Handlers,
-  stencils: StencilTable,
+  buf:       []u8,
+  chunk:     *const Chunk,
+  start_ip:  usize,
+  h:         Handlers,
+  stencils:  StencilTable,
+  type_hint: u8,
 ) EmitResult {
   var b   = a64.Buf{ .data = buf };
   const code = chunk.code.items;
@@ -98,8 +111,9 @@ pub fn emitLambda(
   var pending_branches: [16]PendingBranch = undefined;
   var n_pending_branches: usize = 0;
 
-  var ip       = start_ip;
-  var stop_ip  = start_ip;
+  var ip               = start_ip;
+  var stop_ip          = start_ip;
+  var terminal_emitted = false;
 
   while (ip < code.len) {
     const instr_ip = ip;
@@ -134,22 +148,48 @@ pub fn emitLambda(
       .LocalLast   => stencils.local_last,
       .AssignLocal => stencils.assign_local,
       .Apply1      => stencils.apply1,
+      .Drop        => stencils.drop,
+      .AssignGlobal => stencils.assign_global,
       .Apply2      => blk: {
-        // Peek at the op byte to select a type-specialised stencil if one exists.
+        const Iop = @import("../tape.zig").Op;
+        // Peek at the op byte to select a type-specialised stencil.
         if (ip + 1 < code.len) {
-          const spec: ?st.StencilInfo = switch (code[ip + 1]) {
-            @intFromEnum(@import("../tape.zig").Op.@"+") => stencils.add_ii,
-            @intFromEnum(@import("../tape.zig").Op.@"-") => stencils.sub_ii,
-            @intFromEnum(@import("../tape.zig").Op.@"*") => stencils.mul_ii,
-            @intFromEnum(@import("../tape.zig").Op.@"<") => stencils.lt_ii,
-            @intFromEnum(@import("../tape.zig").Op.@">") => stencils.gt_ii,
-            @intFromEnum(@import("../tape.zig").Op.@"=") => stencils.eq_ii,
+          const opbyte = code[ip + 1];
+          // Profile-guided array SIMD stencils (type_hint 3=I×I, 4=F×F).
+          // Selected on re-JIT after apply2Worker observes the type pair.
+          if (type_hint == 3) {
+            const spec: ?st.StencilInfo = switch (opbyte) {
+              @intFromEnum(Iop.@"+") => stencils.add_II,
+              @intFromEnum(Iop.@"-") => stencils.sub_II,
+              @intFromEnum(Iop.@"*") => stencils.mul_II,
+              else => null,
+            };
+            if (spec) |s| break :blk s;
+          }
+          if (type_hint == 4) {
+            const spec: ?st.StencilInfo = switch (opbyte) {
+              @intFromEnum(Iop.@"+") => stencils.add_FF,
+              @intFromEnum(Iop.@"-") => stencils.sub_FF,
+              @intFromEnum(Iop.@"*") => stencils.mul_FF,
+              else => null,
+            };
+            if (spec) |s| break :blk s;
+          }
+          // Scalar type-specialised stencils (int×int, float×float fast paths).
+          const spec: ?st.StencilInfo = switch (opbyte) {
+            @intFromEnum(Iop.@"+") => stencils.add_ii,
+            @intFromEnum(Iop.@"-") => stencils.sub_ii,
+            @intFromEnum(Iop.@"*") => stencils.mul_ii,
+            @intFromEnum(Iop.@"<") => stencils.lt_ii,
+            @intFromEnum(Iop.@">") => stencils.gt_ii,
+            @intFromEnum(Iop.@"=") => stencils.eq_ii,
             else => null,
           };
           if (spec) |s| break :blk s;
         }
         break :blk stencils.apply2;
       },
+      .Return      => stencils.return_,
       .JumpFalse   => stencils.jump_false,
       .JumpTrue    => stencils.jump_true,
       else         => null,
@@ -163,7 +203,7 @@ pub fn emitLambda(
 
     // Read operand bytes (before consuming ip further for the next iteration).
     const operand: u16 = switch (op) {
-      .Const, .Global, .Local, .LocalLast, .AssignLocal, .Apply1, .Apply2 => blk: {
+      .Const, .Global, .Local, .LocalLast, .AssignLocal, .Apply1, .Apply2, .AssignGlobal => blk: {
         const v = code[ip]; ip += 1;
         break :blk v;
       },
@@ -204,9 +244,17 @@ pub fn emitLambda(
     @memcpy(b.data[b.pos..][0..info.size], src[0..info.size]);
     b.pos += info.size;
 
-    // Patch operand hole (not present on branch stencils).
+    // Patch operand hole (not present on branch or terminal stencils).
     if (info.operand_offset) |op_off| {
       st.patchOperand(b.data, copy_start + op_off, operand);
+    }
+
+    // Terminal stencils (e.g. Return) end with RET — no NEXT hole to chain.
+    // Return immediately without emitting Phase 2.
+    if (info.is_terminal) {
+      stop_ip = ip;
+      terminal_emitted = true;
+      break;
     }
 
     // Set up pending holes for the next iteration.
@@ -244,6 +292,10 @@ pub fn emitLambda(
 
     stop_ip = ip;
   }
+
+  // Phase 1 ended with a terminal stencil (e.g. Return): the stencil's RET
+  // already returned from the JIT function.  Skip Phase 2 entirely.
+  if (terminal_emitted) return .{ .size = b.pos, .stop_ip = stop_ip };
 
   // ── Phase 2: handler section for remaining ops ────────────────────────────
   // All pending NEXT holes (from Phase 1) are patched to jump to HERE.

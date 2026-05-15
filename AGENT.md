@@ -138,7 +138,10 @@ The language parser, compiler and runtime are all written in Zig 0.16.
 - Static allocated array for `!N` with N<256.
 - Ref counting, copy on write.
 
-# Artifacts
-- `zig-out/bin/ink`
+# Building
+The JIT build needs to be tested in debug and release mode because the compiler can generate different instructions and this can throw off the JIT.
 
+- Runtime artifect: `zig-out/bin/ink`
+
+Test runtime with:
 echo "1+2" | ink

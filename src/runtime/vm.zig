@@ -80,6 +80,12 @@ pub const VM = struct {
   jit_global:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
   jit_ref:           if (jit_enabled) *const fn(*VM) callconv(.c) void    else void = if (jit_enabled) undefined else {},
   jit_cond_pop:      if (jit_enabled) *const fn(*VM) callconv(.c) u64  else void = if (jit_enabled) undefined else {},
+  jit_drop:          if (jit_enabled) *const fn(*VM) callconv(.c) void else void = if (jit_enabled) undefined else {},
+  jit_assign_global: if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
+  jit_return:        if (jit_enabled) *const fn(*VM) callconv(.c) void else void = if (jit_enabled) undefined else {},
+  // SIMD array worker: handles I×I and F×F element-wise ops via @Vector.
+  // Registered at startup; called from stencilAdd_II / stencilSub_II / stencilMul_II etc.
+  jit_simd_array2:   if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
   // Monomorphic inline cache: last successfully JIT-compiled lambda.
   // Avoids a hash-map lookup on every call in hot adverb loops.
   jit_ic_key: if (jit_enabled) u24                                       else void = if (jit_enabled) NO_LAMBDA else {},
@@ -116,12 +122,16 @@ pub const VM = struct {
     vm.compiler.* = try Compiler.init(alloc, chunk, &vm.globals_names, &vm.symbols, &vm.registry, &vm.fn_tables);
 
     if (comptime jit_enabled) {
-        vm.jit_apply1       = &JitImpl.apply1Worker;
-        vm.jit_apply2       = &JitImpl.apply2Worker;
-        vm.jit_assign_local = &JitImpl.assignLocalWorker;
-        vm.jit_global       = &JitImpl.globalWorker;
-        vm.jit_ref          = &JitImpl.refWorker;
-        vm.jit_cond_pop     = &JitImpl.condPopWorker;
+        vm.jit_apply1        = &JitImpl.apply1Worker;
+        vm.jit_apply2        = &JitImpl.apply2Worker;
+        vm.jit_assign_local  = &JitImpl.assignLocalWorker;
+        vm.jit_global        = &JitImpl.globalWorker;
+        vm.jit_ref           = &JitImpl.refWorker;
+        vm.jit_cond_pop      = &JitImpl.condPopWorker;
+        vm.jit_drop          = &JitImpl.dropWorker;
+        vm.jit_assign_global = &JitImpl.assignGlobalWorker;
+        vm.jit_return        = &JitImpl.returnWorker;
+        vm.jit_simd_array2   = &JitImpl.simdArray2Worker;
         vm.jit = jit_mod.JitCache.init(alloc, JitImpl.buildHandlers(), JitImpl.buildStencils(), @intFromPtr(&JitImpl.jhApply2)) catch null;
     }
 
@@ -241,6 +251,7 @@ pub const VM = struct {
     const entry = vm.fn_tables.lambdaAt(lambda_idx);
     const jf = vm.jit.?.getOrCompile(lambda_idx, entry.chunk) catch return false;
     frame.ip = jf.stop_ip;
+    vm.jit_ic_key = lambda_idx; // expose to apply2Worker for type observation
     jf.code(@ptrCast(vm));
     if (vm.jit_err) |e| {
       vm.jit_err = null;
@@ -268,7 +279,18 @@ pub const VM = struct {
     if (comptime jit_enabled) {
       if (vm.jit != null) {
         const lambda_idx = @as(u24, @intCast(ref.idx));
-        const jf = if (vm.jit_ic_key == lambda_idx) vm.jit_ic_jf else blk: {
+        const jf = blk: {
+          // IC hit: use cached JitFn, but invalidate if apply2Worker recorded
+          // a new type hint since the last compilation (triggers re-JIT next call).
+          if (vm.jit_ic_key == lambda_idx) {
+            if (vm.jit.?.needsRejit(lambda_idx)) {
+              _ = vm.jit.?.entries.remove(lambda_idx);
+              vm.jit_ic_jf = null;
+            } else {
+              break :blk vm.jit_ic_jf;
+            }
+          }
+          // IC miss or just invalidated — full lookup / compile.
           const entry = vm.fn_tables.lambdaAt(lambda_idx);
           const f = vm.jit.?.getOrCompile(lambda_idx, entry.chunk) catch null;
           vm.jit_ic_key = lambda_idx;
@@ -279,6 +301,9 @@ pub const VM = struct {
           vm.currentFrame().ip = j.stop_ip;
           j.code(@ptrCast(vm));
           if (vm.jit_err != null) vm.jit_err = null;
+          // After running: if apply2Worker observed new types, invalidate IC.
+          // getOrCompile will recompile with the type hint on the next call.
+          if (vm.jit.?.needsRejit(lambda_idx)) vm.jit_ic_jf = null;
           if (j.complete) return vm.pop();
         }
       }
@@ -835,10 +860,153 @@ const JitImpl = if (jit_enabled) struct {
     vm.push(dispatch.dispatch1(vm, @enumFromInt(op), a)) catch {};
   }
 
-  fn apply2Worker(vm: *VM, op: u8) callconv(.c) void {
+  fn apply2Worker(vm: *VM, op_byte: u8) callconv(.c) void {
+    // Record type observation for profile-guided re-JIT.
+    // On the first call the JIT uses general stencils; on the second call
+    // (after re-JIT) the type-matched stencil (add_II etc.) is used.
+    if (vm.jit) |*jc| {
+      const len = vm.stack_len;
+      if (len >= 2) {
+        const xt = vm.stack[len - 2].tag();
+        const yt = vm.stack[len - 1].tag();
+        const pair: u8 =
+          if (xt == .i and yt == .i) 1
+          else if (xt == .f and yt == .f) 2
+          else if (xt == .I and yt == .I) 3
+          else if (xt == .F and yt == .F) 4
+          else 0xFF;
+        if (pair != 0xFF) jc.recordTypePair(vm.jit_ic_key, pair);
+      }
+    }
     const b = vm.pop(); defer b.deinit(vm.alloc);
     const a = vm.pop(); defer a.deinit(vm.alloc);
-    vm.push(dispatch.dispatch2(vm, @enumFromInt(op), a, b)) catch {};
+    vm.push(dispatch.dispatch2(vm, @enumFromInt(op_byte), a, b)) catch {};
+  }
+
+  // ── SIMD array workers ───────────────────────────────────────────────────
+  // simdArray2Worker is the target of vm.jit_simd_array2.  It is called from
+  // the array stencils (stencilAdd_II, stencilSub_II, etc.) via LDR+BLR.
+  // Fast path: I×I or F×F with NEON @Vector(4, T) loops.
+  // Fallback: delegates to dispatch.dispatch2 for other types.
+
+  fn simdArray2Worker(vm: *VM, op_byte: u8) callconv(.c) void {
+    const op: Op = @enumFromInt(op_byte);
+    const len = vm.stack_len;
+    const y = vm.stack[len - 1];
+    const x = vm.stack[len - 2];
+    if (x == .I and y == .I) {
+      if (simdBinopII(vm, op, x.I, y.I, len)) return;
+    } else if (x == .F and y == .F) {
+      if (simdBinopFF(vm, op, x.F, y.F, len)) return;
+    }
+    // General dispatch fallback (also handles type mismatches).
+    const b = vm.pop(); defer b.deinit(vm.alloc);
+    const a = vm.pop(); defer a.deinit(vm.alloc);
+    vm.push(dispatch.dispatch2(vm, op, a, b)) catch {};
+  }
+
+  // Returns true on success (including on length-error).  Returns false to
+  // signal that dispatch.dispatch2 should handle the op (unsupported op etc).
+  fn simdBinopII(vm: *VM, op: Op, xn: N(i32), yn: N(i32), stack_len: usize) bool {
+    const xs = xn.slice();
+    const ys = yn.slice();
+    if (xs.len != ys.len) {
+      xn.deinit(vm.alloc); yn.deinit(vm.alloc);
+      vm.stack[stack_len - 2] = .{ .err = .length };
+      vm.stack_len = stack_len - 1;
+      return true;
+    }
+    switch (op) { .@"+", .@"-", .@"*" => {}, else => return false }
+    const out = N(i32).init(vm.alloc, xs.len) catch return false;
+    const os = out.slice();
+
+    const Vec = @Vector(4, i32);
+    var i: usize = 0;
+    const vn = xs.len & ~@as(usize, 3); // round down to multiple of 4
+
+    switch (op) {
+      .@"+" => {
+        while (i < vn) : (i += 4) {
+          const va: Vec = xs[i..][0..4].*;
+          const vb: Vec = ys[i..][0..4].*;
+          os[i..][0..4].* = @as([4]i32, va +% vb);
+        }
+        while (i < xs.len) : (i += 1) os[i] = xs[i] +% ys[i];
+      },
+      .@"-" => {
+        while (i < vn) : (i += 4) {
+          const va: Vec = xs[i..][0..4].*;
+          const vb: Vec = ys[i..][0..4].*;
+          os[i..][0..4].* = @as([4]i32, va -% vb);
+        }
+        while (i < xs.len) : (i += 1) os[i] = xs[i] -% ys[i];
+      },
+      .@"*" => {
+        while (i < vn) : (i += 4) {
+          const va: Vec = xs[i..][0..4].*;
+          const vb: Vec = ys[i..][0..4].*;
+          os[i..][0..4].* = @as([4]i32, va *% vb);
+        }
+        while (i < xs.len) : (i += 1) os[i] = xs[i] *% ys[i];
+      },
+      else => unreachable,
+    }
+    xn.deinit(vm.alloc);
+    yn.deinit(vm.alloc);
+    vm.stack[stack_len - 2] = .{ .I = out };
+    vm.stack_len = stack_len - 1;
+    return true;
+  }
+
+  fn simdBinopFF(vm: *VM, op: Op, xn: N(f32), yn: N(f32), stack_len: usize) bool {
+    const xs = xn.slice();
+    const ys = yn.slice();
+    if (xs.len != ys.len) {
+      xn.deinit(vm.alloc); yn.deinit(vm.alloc);
+      vm.stack[stack_len - 2] = .{ .err = .length };
+      vm.stack_len = stack_len - 1;
+      return true;
+    }
+    switch (op) { .@"+", .@"-", .@"*" => {}, else => return false }
+    const out = N(f32).init(vm.alloc, xs.len) catch return false;
+    const os = out.slice();
+
+    const Vec = @Vector(4, f32);
+    var i: usize = 0;
+    const vn = xs.len & ~@as(usize, 3);
+
+    switch (op) {
+      .@"+" => {
+        while (i < vn) : (i += 4) {
+          const va: Vec = xs[i..][0..4].*;
+          const vb: Vec = ys[i..][0..4].*;
+          os[i..][0..4].* = @as([4]f32, va + vb);
+        }
+        while (i < xs.len) : (i += 1) os[i] = xs[i] + ys[i];
+      },
+      .@"-" => {
+        while (i < vn) : (i += 4) {
+          const va: Vec = xs[i..][0..4].*;
+          const vb: Vec = ys[i..][0..4].*;
+          os[i..][0..4].* = @as([4]f32, va - vb);
+        }
+        while (i < xs.len) : (i += 1) os[i] = xs[i] - ys[i];
+      },
+      .@"*" => {
+        while (i < vn) : (i += 4) {
+          const va: Vec = xs[i..][0..4].*;
+          const vb: Vec = ys[i..][0..4].*;
+          os[i..][0..4].* = @as([4]f32, va * vb);
+        }
+        while (i < xs.len) : (i += 1) os[i] = xs[i] * ys[i];
+      },
+      else => unreachable,
+    }
+    xn.deinit(vm.alloc);
+    yn.deinit(vm.alloc);
+    vm.stack[stack_len - 2] = .{ .F = out };
+    vm.stack_len = stack_len - 1;
+    return true;
   }
 
   fn assignLocalWorker(vm: *VM, slot: u8) callconv(.c) void {
@@ -862,6 +1030,27 @@ const JitImpl = if (jit_enabled) struct {
   // branches in ReleaseFast (those stencils would otherwise fall back to Phase 2).
   fn refWorker(vm: *VM) callconv(.c) void {
     _ = vm.stack[vm.stack_len - 1].ref();
+  }
+
+  // Pop and deinit TOS.  Called by stencilDrop via vm.jit_drop (LDR+BLR).
+  fn dropWorker(vm: *VM) callconv(.c) void {
+    vm.pop().deinit(vm.alloc);
+  }
+
+  // Execute the Return bytecode op.  Called by stencilReturn via vm.jit_return.
+  // After this returns, the stencil executes RET to exit the JIT function.
+  fn returnWorker(vm: *VM) callconv(.c) void {
+    vm.doReturn() catch {};
+  }
+
+  // Assign TOS to a global slot and push .blank.
+  // Called by stencilAssignGlobal via vm.jit_assign_global (LDR+BLR).
+  fn assignGlobalWorker(vm: *VM, idx: u8) callconv(.c) void {
+    const val = vm.pop();
+    while (vm.globals.items.len <= idx) vm.globals.append(vm.alloc, .blank) catch return;
+    vm.globals.items[idx].deinit(vm.alloc);
+    vm.globals.items[idx] = val;
+    vm.push(.blank) catch {};
   }
 
   // Pops the top-of-stack condition, returns 0 (false) or 1 (true) in x0.
@@ -923,11 +1112,139 @@ const JitImpl = if (jit_enabled) struct {
   fn stencilGt_ii (vm: *VM) callconv(.c) void { specDyad(vm, .@">"); }
   fn stencilEq_ii (vm: *VM) callconv(.c) void { specDyad(vm, .@"="); }
 
+  // ── Array SIMD stencils (I×I and F×F) ───────────────────────────────────
+  // Op baked in at Zig compile time — no OPERAND hole.
+  // Uses scanWithFrame (calls vm.jit_simd_array2 via LDR+BLR — needs STP/LDP frame).
+
+  fn stencilAdd_II(vm: *VM) callconv(.c) void {
+    vm.jit_simd_array2(vm, @intFromEnum(Op.@"+"));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
+  fn stencilSub_II(vm: *VM) callconv(.c) void {
+    vm.jit_simd_array2(vm, @intFromEnum(Op.@"-"));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
+  fn stencilMul_II(vm: *VM) callconv(.c) void {
+    vm.jit_simd_array2(vm, @intFromEnum(Op.@"*"));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
+  fn stencilAdd_FF(vm: *VM) callconv(.c) void {
+    vm.jit_simd_array2(vm, @intFromEnum(Op.@"+"));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
+  fn stencilSub_FF(vm: *VM) callconv(.c) void {
+    vm.jit_simd_array2(vm, @intFromEnum(Op.@"-"));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
+  fn stencilMul_FF(vm: *VM) callconv(.c) void {
+    vm.jit_simd_array2(vm, @intFromEnum(Op.@"*"));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
   // ── CPS stencil functions ────────────────────────────────────────────────
   // Each stencil is a LEAF (no BLR) so the tail-call chain via BR X8 works.
   // NEXT hole  = MOVZ/MOVK×3/BR X8 at the end, patched to the next stencil.
   // OPERAND hole = MOVZ X1, #0xFFFF, patched with the actual operand.
 
+  // Return stencil: terminal stencil — calls doReturn then exits the JIT function.
+  // No NEXT hole; instead the function ends with a compiler-generated RET.
+  // Registered via scanTerminal (which stops at RET instead of NEXT hole).
+  // When used, Phase 1 handles the entire lambda body including Return, and
+  // Phase 2 is skipped entirely, saving the STP/LDP/RET wrapper overhead.
+  fn stencilReturn(vm: *VM) callconv(.c) void {
+    vm.jit_return(vm);
+    // Compiler emits: LDP X29,X30,[SP],#16 (epilogue) then RET here.
+    // scanTerminal includes these in the copied bytes.
+  }
+
+  // Drop stencil: pop TOS and deinit via jit_drop (handles heap types).
+  // Uses scanWithFrame because vm.jit_drop is called via LDR+BLR.
+  fn stencilDrop(vm: *VM) callconv(.c) void {
+    vm.jit_drop(vm);
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
+  // AssignGlobal stencil: OPERAND hole = u8 global index.
+  // Pops TOS, stores into globals[idx], pushes .blank.
+  // Uses scanWithFrame because vm.jit_assign_global is called via LDR+BLR.
+  fn stencilAssignGlobal(vm: *VM) callconv(.c) void {
+    var idx: u32 = undefined;
+    asm volatile (
+      \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
+      : [o] "={x1}" (idx)
+    );
+    vm.jit_assign_global(vm, @as(u8, @truncate(idx)));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
 
   fn stencilGap(vm: *VM) callconv(.c) void {
     vm.stack[vm.stack_len] = .blank;
@@ -1203,9 +1520,12 @@ const JitImpl = if (jit_enabled) struct {
       .local        = s.scanWithFrame(@intFromPtr(&stencilLocal)),
       .local_last   = s.scan(@intFromPtr(&stencilLocalLast)),
       .assign_local = s.scanWithFrame(@intFromPtr(&stencilAssignLocal)),
-      .apply1       = s.scanWithFrame(@intFromPtr(&stencilApply1)),
-      .apply2       = s.scanWithFrame(@intFromPtr(&stencilApply2)),
-      .jump_false   = s.scan2WithFrame(@intFromPtr(&stencilJumpFalse)),
+      .apply1        = s.scanWithFrame(@intFromPtr(&stencilApply1)),
+      .apply2        = s.scanWithFrame(@intFromPtr(&stencilApply2)),
+      .drop          = s.scanWithFrame(@intFromPtr(&stencilDrop)),
+      .assign_global = s.scanWithFrame(@intFromPtr(&stencilAssignGlobal)) orelse s.scan2WithFrame(@intFromPtr(&stencilAssignGlobal)),
+      .return_       = s.scanTerminal(@intFromPtr(&stencilReturn)),
+      .jump_false    = s.scan2WithFrame(@intFromPtr(&stencilJumpFalse)),
       .jump_true    = s.scan2WithFrame(@intFromPtr(&stencilJumpTrue)),
       // specDyad has 3 code paths: int fast, float fast, slow BLR.
       // In ReleaseFast LLVM tail-duplicates the NEXT hole into each path → 3 NEXT holes.
@@ -1217,6 +1537,14 @@ const JitImpl = if (jit_enabled) struct {
       .lt_ii  = s.scanWithFrame(@intFromPtr(&stencilLt_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilLt_ii))  orelse s.scan3WithFrame(@intFromPtr(&stencilLt_ii)),
       .gt_ii  = s.scanWithFrame(@intFromPtr(&stencilGt_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilGt_ii))  orelse s.scan3WithFrame(@intFromPtr(&stencilGt_ii)),
       .eq_ii  = s.scanWithFrame(@intFromPtr(&stencilEq_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilEq_ii))  orelse s.scan3WithFrame(@intFromPtr(&stencilEq_ii)),
+      // Array SIMD stencils: single BLR call to jit_simd_array2, one NEXT hole.
+      // Fallback chain handles ReleaseFast tail-duplication if it occurs.
+      .add_II = s.scanWithFrame(@intFromPtr(&stencilAdd_II)) orelse s.scan2WithFrame(@intFromPtr(&stencilAdd_II)),
+      .sub_II = s.scanWithFrame(@intFromPtr(&stencilSub_II)) orelse s.scan2WithFrame(@intFromPtr(&stencilSub_II)),
+      .mul_II = s.scanWithFrame(@intFromPtr(&stencilMul_II)) orelse s.scan2WithFrame(@intFromPtr(&stencilMul_II)),
+      .add_FF = s.scanWithFrame(@intFromPtr(&stencilAdd_FF)) orelse s.scan2WithFrame(@intFromPtr(&stencilAdd_FF)),
+      .sub_FF = s.scanWithFrame(@intFromPtr(&stencilSub_FF)) orelse s.scan2WithFrame(@intFromPtr(&stencilSub_FF)),
+      .mul_FF = s.scanWithFrame(@intFromPtr(&stencilMul_FF)) orelse s.scan2WithFrame(@intFromPtr(&stencilMul_FF)),
     };
   }
 
