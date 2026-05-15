@@ -39,6 +39,13 @@ pub const Handlers = struct {
   assign_local:  usize,
   apply1:        usize,
   apply2:        usize,
+  call:          usize,
+  tail_call:     usize,
+  apply:         usize,
+  make_partial:  usize,
+  make_list:     usize,
+  derive:        usize,
+  make_dict:     usize,
   jump:          usize,
   jump_false:    usize,
   jump_true:     usize,
@@ -60,6 +67,9 @@ pub const StencilTable = struct {
   apply2:        ?st.StencilInfo = null,
   drop:          ?st.StencilInfo = null,
   assign_global: ?st.StencilInfo = null,
+  make_list:     ?st.StencilInfo = null,
+  derive:        ?st.StencilInfo = null,
+  make_dict:     ?st.StencilInfo = null,
   return_:       ?st.StencilInfo = null,
   jump_false:    ?st.StencilInfo = null,
   jump_true:     ?st.StencilInfo = null,
@@ -76,9 +86,15 @@ pub const StencilTable = struct {
   add_II: ?st.StencilInfo = null,
   sub_II: ?st.StencilInfo = null,
   mul_II: ?st.StencilInfo = null,
+  lt_II:  ?st.StencilInfo = null,
+  gt_II:  ?st.StencilInfo = null,
+  eq_II:  ?st.StencilInfo = null,
   add_FF: ?st.StencilInfo = null,
   sub_FF: ?st.StencilInfo = null,
   mul_FF: ?st.StencilInfo = null,
+  lt_FF:  ?st.StencilInfo = null,
+  gt_FF:  ?st.StencilInfo = null,
+  eq_FF:  ?st.StencilInfo = null,
 };
 
 pub const MAX_JIT_BYTES = 128 * 1024;
@@ -119,6 +135,10 @@ pub fn emitLambda(
     const instr_ip = ip;
     const op: OpCode = @enumFromInt(code[ip]);
 
+    // Nop: no-op — advance ip and continue Phase 1 without emitting anything.
+    // OpCode.Nop rarely appears in compiled bytecode but must not force Phase 2.
+    if (op == .Nop) { ip += 1; stop_ip = ip; continue; }
+
     // Unconditional Jump: redirect pending NEXT hole to the target — no stencil emitted.
     if (op == .Jump) {
       ip += 1;
@@ -150,6 +170,9 @@ pub fn emitLambda(
       .Apply1      => stencils.apply1,
       .Drop        => stencils.drop,
       .AssignGlobal => stencils.assign_global,
+      .MakeList    => stencils.make_list,
+      .Derive      => stencils.derive,
+      .MakeDict    => stencils.make_dict,
       .Apply2      => blk: {
         const Iop = @import("../tape.zig").Op;
         // Peek at the op byte to select a type-specialised stencil.
@@ -162,6 +185,9 @@ pub fn emitLambda(
               @intFromEnum(Iop.@"+") => stencils.add_II,
               @intFromEnum(Iop.@"-") => stencils.sub_II,
               @intFromEnum(Iop.@"*") => stencils.mul_II,
+              @intFromEnum(Iop.@"<") => stencils.lt_II,
+              @intFromEnum(Iop.@">") => stencils.gt_II,
+              @intFromEnum(Iop.@"=") => stencils.eq_II,
               else => null,
             };
             if (spec) |s| break :blk s;
@@ -171,6 +197,9 @@ pub fn emitLambda(
               @intFromEnum(Iop.@"+") => stencils.add_FF,
               @intFromEnum(Iop.@"-") => stencils.sub_FF,
               @intFromEnum(Iop.@"*") => stencils.mul_FF,
+              @intFromEnum(Iop.@"<") => stencils.lt_FF,
+              @intFromEnum(Iop.@">") => stencils.gt_FF,
+              @intFromEnum(Iop.@"=") => stencils.eq_FF,
               else => null,
             };
             if (spec) |s| break :blk s;
@@ -203,7 +232,8 @@ pub fn emitLambda(
 
     // Read operand bytes (before consuming ip further for the next iteration).
     const operand: u16 = switch (op) {
-      .Const, .Global, .Local, .LocalLast, .AssignLocal, .Apply1, .Apply2, .AssignGlobal => blk: {
+      .Const, .Global, .Local, .LocalLast, .AssignLocal, .Apply1, .Apply2,
+      .AssignGlobal, .MakeList, .Derive, .MakeDict => blk: {
         const v = code[ip]; ip += 1;
         break :blk v;
       },
@@ -370,6 +400,38 @@ pub fn emitLambda(
       .Apply2 => {
         const ob = code[ip]; ip += 1;
         emitCall1u8(&b, h.apply2, ob); stop_ip = ip;
+      },
+      .Call => {
+        const argc = code[ip]; ip += 1;
+        emitCall1u8(&b, h.call, argc); stop_ip = ip;
+      },
+      .TailCall => {
+        const argc = code[ip]; ip += 1;
+        emitCall1u8(&b, h.tail_call, argc);
+        stop_ip = ip;
+        break; // TailCall is always terminal — stop Phase 2 after it.
+      },
+      .Apply => {
+        const argc = code[ip]; ip += 1;
+        emitCall1u8(&b, h.apply, argc); stop_ip = ip;
+      },
+      .MakePartial => {
+        const argc = code[ip]; ip += 1;
+        const mask = code[ip]; ip += 1;
+        const combined: u16 = (@as(u16, argc) << 8) | mask;
+        emitCall1u16(&b, h.make_partial, combined); stop_ip = ip;
+      },
+      .MakeList => {
+        const n = code[ip]; ip += 1;
+        emitCall1u8(&b, h.make_list, n); stop_ip = ip;
+      },
+      .Derive => {
+        const adv = code[ip]; ip += 1;
+        emitCall1u8(&b, h.derive, adv); stop_ip = ip;
+      },
+      .MakeDict => {
+        const n = code[ip]; ip += 1;
+        emitCall1u8(&b, h.make_dict, n); stop_ip = ip;
       },
       .Int => {
         const lo = code[ip]; ip += 1;

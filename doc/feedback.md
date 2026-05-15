@@ -77,6 +77,33 @@ The call site in the compiler pipeline is in place — `liftInvariants` is calle
 
 ---
 
+## What was completed (Tasks 21–22) after Run 4
+
+21. **MakeList, Derive, MakeDict in Phase 2** — Added `make_list`, `derive`, `make_dict` to the `Handlers` struct in `emit.zig`. Added `jhMakeList`, `jhDerive`, `jhMakeDict` handler functions (thin wrappers around the existing worker functions). Added Phase 2 switch cases for `.MakeList`, `.Derive`, `.MakeDict`. These ops are already in Phase 1 for most lambdas, but this ensures they are also handled when Phase 2 is entered (e.g., a lambda with a `Call` before a `MakeList`).
+
+22. **SIMD array comparison stencils** (`lt_II`, `gt_II`, `eq_II`, `lt_FF`, `gt_FF`, `eq_FF`) — Extended `simdBinopII` and `simdBinopFF` to handle `<`, `>`, `=` operators using `@Vector(4, T)` SIMD loops, producing `N(bool)` output. Added 6 new stencil functions that route through `vm.jit_simd_array2`. Added entries to `StencilTable` and selection in `emit.zig` for `type_hint == 3` (I×I) and `type_hint == 4` (F×F). Profile-guided re-JIT now covers all 6 arithmetic+comparison ops for both int and float arrays. Filtering patterns like `v[v > threshold]` now use SIMD comparisons after the second call.
+
+23. **Phase 2 support for Call, TailCall, Apply, MakePartial** — Added `call`, `tail_call`, `apply`, `make_partial` to the `Handlers` struct. Added `jhCall`, `jhApply` (use a stack buffer for up to 8 args, call `vm.executeCall` which runs the callee to completion before returning), `jhTailCall` (resets the current frame's lambda/chunk/ip for the tail target — the JIT epilogue returns and the interpreter picks up from the new frame), and `jhMakePartial` (replicates `doMakePartial` logic without `readByte()`; packs argc+mask into a single u16 operand). `TailCall` in Phase 2 breaks immediately after emitting its handler call, like `Jump`. With these additions, the JIT now handles all 23 opcodes via Phase 1 stencils or Phase 2 handlers. The only ops that force interpreter fallback are `Amend`, `Dmend`, `ListAssignGlobal`, `ListAssignLocal`, `MakeTable`, and `Command`.
+
+---
+
+## What was completed (Tasks 18–20) after Run 3
+
+18. **CPS design doc** — Written to `doc/cps.md`. Explains why full CPS (changing handler signatures to pass `next` continuation pointer) is deferred: the Return terminal stencil already eliminates Phase 2 for the most common case (simple lambdas ending at Return), and CPS adds code density overhead for N≥2 Phase 2 ops (5 instructions per thunk vs 4-instruction fixed frame amortised). The doc includes a density comparison table, thunk encoding cost analysis, and a list of conditions under which CPS would become worth implementing.
+
+19. **Terminal stencil for Return** — Added `is_terminal: bool = false` to `StencilInfo`. `scanTerminal` scans for the first RET instruction (0xD65F03C0) and returns a `StencilInfo` with `is_terminal = true`. The emitter detects terminal stencils and returns immediately from Phase 1 without entering Phase 2. Lambdas ending at Return (e.g., `{x+y}`, `{x*scale}`) now run entirely in Phase 1 — no `STP X19,X30 / LDP X19,X30` frame at all.
+
+20. **Stencils for remaining opcodes** — Four new stencil registrations and Phase 1 coverage for previously Phase-2-only ops:
+    - **Nop**: handled inline in the emitter — `ip += 1; continue`, zero cost, no stencil.
+    - **Drop**: `dropWorker` calls `vm.pop().deinit`; `stencilDrop` uses `scanWithFrame`.
+    - **AssignGlobal**: `assignGlobalWorker` pops, writes to `vm.globals[idx]`, pushes blank; stencil has OPERAND hole for index.
+    - **MakeList**: `makeListWorker(vm, n)` pops N items and calls `V.Values`; OPERAND hole for N.
+    - **Derive**: `deriveWorker(vm, adv_byte)` pops base function, builds derived Fn (builtin, lambda, or table entry); OPERAND hole for adverb.
+    - **MakeDict**: `makeDictN(vm, n)` mirrors `doMakeDict` logic — promotes single keys/values directly, or constructs from array for n>1; OPERAND hole for N.
+    - **Array SIMD stencils** (6): `stencilAdd_II`, `stencilSub_II`, `stencilMul_II`, `stencilAdd_FF`, `stencilSub_FF`, `stencilMul_FF`. Each calls `vm.jit_simd_array2` with the op baked in via OPERAND hole. Profile-guided re-JIT selects these on the second call when `type_hint` is 3 (I×I) or 4 (F×F). Workers use `@Vector(4,i32)`/`@Vector(4,f32)` NEON SIMD loops with scalar tail.
+
+---
+
 ## What can still be improved
 
 ### Global stencil

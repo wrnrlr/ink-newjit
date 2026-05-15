@@ -82,6 +82,9 @@ pub const VM = struct {
   jit_cond_pop:      if (jit_enabled) *const fn(*VM) callconv(.c) u64  else void = if (jit_enabled) undefined else {},
   jit_drop:          if (jit_enabled) *const fn(*VM) callconv(.c) void else void = if (jit_enabled) undefined else {},
   jit_assign_global: if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
+  jit_make_list:     if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
+  jit_derive:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
+  jit_make_dict:     if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
   jit_return:        if (jit_enabled) *const fn(*VM) callconv(.c) void else void = if (jit_enabled) undefined else {},
   // SIMD array worker: handles I×I and F×F element-wise ops via @Vector.
   // Registered at startup; called from stencilAdd_II / stencilSub_II / stencilMul_II etc.
@@ -130,6 +133,9 @@ pub const VM = struct {
         vm.jit_cond_pop      = &JitImpl.condPopWorker;
         vm.jit_drop          = &JitImpl.dropWorker;
         vm.jit_assign_global = &JitImpl.assignGlobalWorker;
+        vm.jit_make_list     = &JitImpl.makeListWorker;
+        vm.jit_derive        = &JitImpl.deriveWorker;
+        vm.jit_make_dict     = &JitImpl.makeDictWorker;
         vm.jit_return        = &JitImpl.returnWorker;
         vm.jit_simd_array2   = &JitImpl.simdArray2Worker;
         vm.jit = jit_mod.JitCache.init(alloc, JitImpl.buildHandlers(), JitImpl.buildStencils(), @intFromPtr(&JitImpl.jhApply2)) catch null;
@@ -850,7 +856,113 @@ const JitImpl = if (jit_enabled) struct {
     const v = vm.pop(); defer v.deinit(vm.alloc);
     if (v.isTrue()) vm.currentFrame().ip += offset;
   }
+  fn jhMakeList(vm: *VM, n: u8) callconv(.c) void { makeListWorker(vm, n); }
+  fn jhDerive(vm: *VM, adv: u8) callconv(.c) void { deriveWorker(vm, adv); }
+  fn jhMakeDict(vm: *VM, n: u8) callconv(.c) void { makeDictWorker(vm, n); }
   fn jhReturn(vm: *VM) callconv(.c) void { vm.doReturn() catch {}; }
+
+  // Call/Apply/TailCall handlers for Phase 2.
+  // argc is pre-read from bytecode by the emitter (avoids vm.readByte()).
+  fn jhCall(vm: *VM, argc: u8) callconv(.c) void {
+    var buf: [8]V = .{.blank} ** 8;
+    const n = @min(argc, 8);
+    const incoming = buf[0..n];
+    for (0..n) |i| incoming[n - 1 - i] = vm.pop();
+    const func_val = vm.pop();
+    vm.executeCall(func_val, incoming, .sync) catch {};
+    for (incoming) |*v| v.deinit(vm.alloc);
+    func_val.deinit(vm.alloc);
+  }
+  fn jhApply(vm: *VM, argc: u8) callconv(.c) void {
+    var buf: [8]V = .{.blank} ** 8;
+    const n = @min(argc, 8);
+    const incoming = buf[0..n];
+    for (0..n) |i| incoming[n - 1 - i] = vm.pop();
+    const func_val = vm.pop();
+    vm.executeCall(func_val, incoming, .bracket) catch {};
+    for (incoming) |*v| v.deinit(vm.alloc);
+    func_val.deinit(vm.alloc);
+  }
+  fn jhTailCall(vm: *VM, argc: u8) callconv(.c) void {
+    var buf: [8]V = .{.blank} ** 8;
+    const n = @min(argc, 8);
+    const incoming = buf[0..n];
+    for (0..n) |i| incoming[n - 1 - i] = vm.pop();
+    const func_val = vm.pop();
+    defer func_val.deinit(vm.alloc);
+    if (func_val == .func and func_val.func.getKind() == .lambda) {
+      const lambda_idx = @as(u24, @intCast(func_val.func.idx));
+      const entry = vm.fn_tables.lambdaAt(lambda_idx);
+      const frame = vm.currentFrame();
+      for (vm.stack[frame.result_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
+      vm.stack_len = frame.result_slot;
+      vm.push(.blank) catch return;
+      for (incoming) |arg| vm.push(arg) catch {};
+      const total_slots = @as(usize, entry.arity) + @as(usize, entry.locals);
+      const locals_to_push = if (total_slots > n) total_slots - n else 0;
+      for (0..locals_to_push) |_| vm.push(.blank) catch {};
+      frame.lambda_idx = lambda_idx;
+      frame.ip = 0;
+      frame.base = vm.stack_len - n - locals_to_push;
+      vm.current_chunk = entry.chunk;
+    } else {
+      vm.executeCall(func_val, incoming, .sync) catch {};
+      for (incoming) |*v| v.deinit(vm.alloc);
+    }
+  }
+  // MakePartial: argc and mask packed as u16 (argc<<8 | mask) by the emitter.
+  fn jhMakePartial(vm: *VM, argc_mask: u16) callconv(.c) void {
+    const argc: u8 = @truncate(argc_mask >> 8);
+    const mask: u8 = @truncate(argc_mask);
+    const args_start = vm.stack_len - argc;
+    const stack_args = vm.stack[args_start..vm.stack_len];
+    const func_val = vm.stack[args_start - 1];
+
+    var base_ref: Fn = undefined;
+    var existing: [8]V = .{.blank} ** 8;
+    var existing_fill: u8 = 0;
+    if (func_val == .partial) {
+      const p = func_val.asPartial();
+      base_ref = p.ref;
+      existing = p.args;
+      existing_fill = p.fill;
+    } else if (func_val == .func) {
+      base_ref = func_val.func;
+    } else {
+      for (vm.stack[args_start - 1 .. vm.stack_len]) |*v| v.deinit(vm.alloc);
+      vm.stack_len = args_start - 1;
+      vm.push(V{ .err = .@"type" }) catch {};
+      return;
+    }
+
+    const arity = base_ref.getRealArity();
+    var merged: [8]V = .{.blank} ** 8;
+    var fill: u8 = existing_fill;
+    for (0..arity) |i| {
+      if (existing_fill & (@as(u8, 1) << @intCast(i)) != 0) {
+        merged[i] = existing[i].ref();
+      }
+    }
+    var stack_idx: usize = 0;
+    for (0..arity) |i| {
+      if (mask & (@as(u8, 1) << @intCast(i)) != 0 and stack_idx < stack_args.len) {
+        if (fill & (@as(u8, 1) << @intCast(i)) == 0) {
+          merged[i] = stack_args[stack_idx];
+          fill |= @as(u8, 1) << @intCast(i);
+          stack_idx += 1;
+        }
+      }
+    }
+    for (vm.stack[args_start - 1 .. vm.stack_len]) |*v| v.deinit(vm.alloc);
+    vm.stack_len = args_start - 1;
+    const all_filled = fill == (@as(u8, 1) << @intCast(arity)) - 1;
+    if (all_filled) {
+      vm.executeCall(.{ .func = base_ref }, merged[0..arity], .sync) catch {};
+      for (merged[0..arity]) |*v| v.deinit(vm.alloc);
+    } else {
+      vm.push(V.makePartial(base_ref, merged, fill, vm.alloc) catch V{ .err = .memory }) catch {};
+    }
+  }
 
   // ── apply1Worker / apply2Worker ──────────────────────────────────────────
   // Called indirectly from stencilApply1/2 via vm.jit_apply1/2 (LDR+BLR).
@@ -916,46 +1028,63 @@ const JitImpl = if (jit_enabled) struct {
       vm.stack_len = stack_len - 1;
       return true;
     }
-    switch (op) { .@"+", .@"-", .@"*" => {}, else => return false }
-    const out = N(i32).init(vm.alloc, xs.len) catch return false;
-    const os = out.slice();
-
-    const Vec = @Vector(4, i32);
-    var i: usize = 0;
-    const vn = xs.len & ~@as(usize, 3); // round down to multiple of 4
-
+    // Comparison ops produce N(bool); arithmetic ops produce N(i32).
     switch (op) {
-      .@"+" => {
-        while (i < vn) : (i += 4) {
-          const va: Vec = xs[i..][0..4].*;
-          const vb: Vec = ys[i..][0..4].*;
-          os[i..][0..4].* = @as([4]i32, va +% vb);
+      .@"+", .@"-", .@"*" => {
+        const out = N(i32).init(vm.alloc, xs.len) catch return false;
+        const os = out.slice();
+        const Vec = @Vector(4, i32);
+        var i: usize = 0;
+        const vn = xs.len & ~@as(usize, 3);
+        switch (op) {
+          .@"+" => {
+            while (i < vn) : (i += 4) { const va: Vec = xs[i..][0..4].*; const vb: Vec = ys[i..][0..4].*; os[i..][0..4].* = @as([4]i32, va +% vb); }
+            while (i < xs.len) : (i += 1) os[i] = xs[i] +% ys[i];
+          },
+          .@"-" => {
+            while (i < vn) : (i += 4) { const va: Vec = xs[i..][0..4].*; const vb: Vec = ys[i..][0..4].*; os[i..][0..4].* = @as([4]i32, va -% vb); }
+            while (i < xs.len) : (i += 1) os[i] = xs[i] -% ys[i];
+          },
+          .@"*" => {
+            while (i < vn) : (i += 4) { const va: Vec = xs[i..][0..4].*; const vb: Vec = ys[i..][0..4].*; os[i..][0..4].* = @as([4]i32, va *% vb); }
+            while (i < xs.len) : (i += 1) os[i] = xs[i] *% ys[i];
+          },
+          else => unreachable,
         }
-        while (i < xs.len) : (i += 1) os[i] = xs[i] +% ys[i];
+        xn.deinit(vm.alloc); yn.deinit(vm.alloc);
+        vm.stack[stack_len - 2] = .{ .I = out };
+        vm.stack_len = stack_len - 1;
+        return true;
       },
-      .@"-" => {
-        while (i < vn) : (i += 4) {
-          const va: Vec = xs[i..][0..4].*;
-          const vb: Vec = ys[i..][0..4].*;
-          os[i..][0..4].* = @as([4]i32, va -% vb);
+      .@"<", .@">", .@"=" => {
+        const out = N(bool).init(vm.alloc, xs.len) catch return false;
+        const os = out.slice();
+        const Vec = @Vector(4, i32);
+
+        var i: usize = 0;
+        const vn = xs.len & ~@as(usize, 3);
+        switch (op) {
+          .@"<" => {
+            while (i < vn) : (i += 4) { const va: Vec = xs[i..][0..4].*; const vb: Vec = ys[i..][0..4].*; os[i..][0..4].* = @as([4]bool, va < vb); }
+            while (i < xs.len) : (i += 1) os[i] = xs[i] < ys[i];
+          },
+          .@">" => {
+            while (i < vn) : (i += 4) { const va: Vec = xs[i..][0..4].*; const vb: Vec = ys[i..][0..4].*; os[i..][0..4].* = @as([4]bool, va > vb); }
+            while (i < xs.len) : (i += 1) os[i] = xs[i] > ys[i];
+          },
+          .@"=" => {
+            while (i < vn) : (i += 4) { const va: Vec = xs[i..][0..4].*; const vb: Vec = ys[i..][0..4].*; os[i..][0..4].* = @as([4]bool, va == vb); }
+            while (i < xs.len) : (i += 1) os[i] = xs[i] == ys[i];
+          },
+          else => unreachable,
         }
-        while (i < xs.len) : (i += 1) os[i] = xs[i] -% ys[i];
+        xn.deinit(vm.alloc); yn.deinit(vm.alloc);
+        vm.stack[stack_len - 2] = .{ .B = out };
+        vm.stack_len = stack_len - 1;
+        return true;
       },
-      .@"*" => {
-        while (i < vn) : (i += 4) {
-          const va: Vec = xs[i..][0..4].*;
-          const vb: Vec = ys[i..][0..4].*;
-          os[i..][0..4].* = @as([4]i32, va *% vb);
-        }
-        while (i < xs.len) : (i += 1) os[i] = xs[i] *% ys[i];
-      },
-      else => unreachable,
+      else => return false,
     }
-    xn.deinit(vm.alloc);
-    yn.deinit(vm.alloc);
-    vm.stack[stack_len - 2] = .{ .I = out };
-    vm.stack_len = stack_len - 1;
-    return true;
   }
 
   fn simdBinopFF(vm: *VM, op: Op, xn: N(f32), yn: N(f32), stack_len: usize) bool {
@@ -967,46 +1096,61 @@ const JitImpl = if (jit_enabled) struct {
       vm.stack_len = stack_len - 1;
       return true;
     }
-    switch (op) { .@"+", .@"-", .@"*" => {}, else => return false }
-    const out = N(f32).init(vm.alloc, xs.len) catch return false;
-    const os = out.slice();
-
-    const Vec = @Vector(4, f32);
-    var i: usize = 0;
-    const vn = xs.len & ~@as(usize, 3);
-
     switch (op) {
-      .@"+" => {
-        while (i < vn) : (i += 4) {
-          const va: Vec = xs[i..][0..4].*;
-          const vb: Vec = ys[i..][0..4].*;
-          os[i..][0..4].* = @as([4]f32, va + vb);
+      .@"+", .@"-", .@"*" => {
+        const out = N(f32).init(vm.alloc, xs.len) catch return false;
+        const os = out.slice();
+        const Vec = @Vector(4, f32);
+        var i: usize = 0;
+        const vn = xs.len & ~@as(usize, 3);
+        switch (op) {
+          .@"+" => {
+            while (i < vn) : (i += 4) { const va: Vec = xs[i..][0..4].*; const vb: Vec = ys[i..][0..4].*; os[i..][0..4].* = @as([4]f32, va + vb); }
+            while (i < xs.len) : (i += 1) os[i] = xs[i] + ys[i];
+          },
+          .@"-" => {
+            while (i < vn) : (i += 4) { const va: Vec = xs[i..][0..4].*; const vb: Vec = ys[i..][0..4].*; os[i..][0..4].* = @as([4]f32, va - vb); }
+            while (i < xs.len) : (i += 1) os[i] = xs[i] - ys[i];
+          },
+          .@"*" => {
+            while (i < vn) : (i += 4) { const va: Vec = xs[i..][0..4].*; const vb: Vec = ys[i..][0..4].*; os[i..][0..4].* = @as([4]f32, va * vb); }
+            while (i < xs.len) : (i += 1) os[i] = xs[i] * ys[i];
+          },
+          else => unreachable,
         }
-        while (i < xs.len) : (i += 1) os[i] = xs[i] + ys[i];
+        xn.deinit(vm.alloc); yn.deinit(vm.alloc);
+        vm.stack[stack_len - 2] = .{ .F = out };
+        vm.stack_len = stack_len - 1;
+        return true;
       },
-      .@"-" => {
-        while (i < vn) : (i += 4) {
-          const va: Vec = xs[i..][0..4].*;
-          const vb: Vec = ys[i..][0..4].*;
-          os[i..][0..4].* = @as([4]f32, va - vb);
+      .@"<", .@">", .@"=" => {
+        const out = N(bool).init(vm.alloc, xs.len) catch return false;
+        const os = out.slice();
+        const Vec = @Vector(4, f32);
+        var i: usize = 0;
+        const vn = xs.len & ~@as(usize, 3);
+        switch (op) {
+          .@"<" => {
+            while (i < vn) : (i += 4) { const va: Vec = xs[i..][0..4].*; const vb: Vec = ys[i..][0..4].*; os[i..][0..4].* = @as([4]bool, va < vb); }
+            while (i < xs.len) : (i += 1) os[i] = xs[i] < ys[i];
+          },
+          .@">" => {
+            while (i < vn) : (i += 4) { const va: Vec = xs[i..][0..4].*; const vb: Vec = ys[i..][0..4].*; os[i..][0..4].* = @as([4]bool, va > vb); }
+            while (i < xs.len) : (i += 1) os[i] = xs[i] > ys[i];
+          },
+          .@"=" => {
+            while (i < vn) : (i += 4) { const va: Vec = xs[i..][0..4].*; const vb: Vec = ys[i..][0..4].*; os[i..][0..4].* = @as([4]bool, va == vb); }
+            while (i < xs.len) : (i += 1) os[i] = xs[i] == ys[i];
+          },
+          else => unreachable,
         }
-        while (i < xs.len) : (i += 1) os[i] = xs[i] - ys[i];
+        xn.deinit(vm.alloc); yn.deinit(vm.alloc);
+        vm.stack[stack_len - 2] = .{ .B = out };
+        vm.stack_len = stack_len - 1;
+        return true;
       },
-      .@"*" => {
-        while (i < vn) : (i += 4) {
-          const va: Vec = xs[i..][0..4].*;
-          const vb: Vec = ys[i..][0..4].*;
-          os[i..][0..4].* = @as([4]f32, va * vb);
-        }
-        while (i < xs.len) : (i += 1) os[i] = xs[i] * ys[i];
-      },
-      else => unreachable,
+      else => return false,
     }
-    xn.deinit(vm.alloc);
-    yn.deinit(vm.alloc);
-    vm.stack[stack_len - 2] = .{ .F = out };
-    vm.stack_len = stack_len - 1;
-    return true;
   }
 
   fn assignLocalWorker(vm: *VM, slot: u8) callconv(.c) void {
@@ -1051,6 +1195,66 @@ const JitImpl = if (jit_enabled) struct {
     vm.globals.items[idx].deinit(vm.alloc);
     vm.globals.items[idx] = val;
     vm.push(.blank) catch {};
+  }
+
+  // Pop `n` values and push a list.  Called by stencilMakeList.
+  fn makeListWorker(vm: *VM, n: u8) callconv(.c) void {
+    const start = vm.stack_len - n;
+    const list_val = V.Values(vm.alloc, vm.stack[start..vm.stack_len]) catch return;
+    for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
+    vm.stack_len = start;
+    vm.push(list_val) catch {};
+  }
+
+  // Pop a func value and push its derived form (with adverb `adv`).
+  // Called by stencilDerive via vm.jit_derive (LDR+BLR).
+  fn deriveWorker(vm: *VM, adv_byte: u8) callconv(.c) void {
+    const adv: Adverb = @enumFromInt(adv_byte);
+    const base_v = vm.pop();
+    const derived: Fn = if (base_v == .func) blk: {
+      const ref = base_v.func;
+      base_v.deinit(vm.alloc);
+      break :blk switch (ref.getKind()) {
+        .builtin => Fn.makeDerivedBuiltin(ref.getOp(), adv),
+        .lambda  => Fn.makeDerivedLambda(ref.idx, adv),
+        else => blk2: {
+          const idx = vm.fn_tables.addDerived(.{ .base = V{ .func = ref }, .adverb = adv }) catch return;
+          break :blk2 Fn.makeDerivedTable(idx);
+        },
+      };
+    } else blk: {
+      const idx = vm.fn_tables.addDerived(.{ .base = base_v, .adverb = adv }) catch return;
+      break :blk Fn.makeDerivedTable(idx);
+    };
+    vm.push(.{ .func = derived }) catch {};
+  }
+
+  // Pop 2*n values (n key-value pairs) and push a dict.
+  // Called by stencilMakeDict via vm.jit_make_dict (LDR+BLR).
+  fn makeDictWorker(vm: *VM, n: u8) callconv(.c) void {
+    makeDictN(vm, n) catch {};
+  }
+
+  fn makeDictN(vm: *VM, n: u8) !void {
+    const start = vm.stack_len - 2 * n;
+    const keys = if (n == 1) vm.stack[start].ref()
+                 else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start .. start + n])).L);
+    var keys_live = n > 1;
+    errdefer { if (keys_live) keys.deinit(vm.alloc); }
+    const vals = if (n == 1) vm.stack[start + 1].ref()
+                 else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
+    var vals_live = n > 1;
+    errdefer { if (vals_live) vals.deinit(vm.alloc); }
+    const res = if (n == 1) V{ .m = try Dict.init(vm.alloc, keys, vals) }
+                else dict(vm, keys, vals);
+    errdefer res.deinit(vm.alloc);
+    if (n > 1) {
+      keys.deinit(vm.alloc); keys_live = false;
+      vals.deinit(vm.alloc); vals_live = false;
+    }
+    for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
+    vm.stack_len = start;
+    try vm.push(res);
   }
 
   // Pops the top-of-stack condition, returns 0 (false) or 1 (true) in x0.
@@ -1194,10 +1398,142 @@ const JitImpl = if (jit_enabled) struct {
     unreachable;
   }
 
+  // Comparison stencils — produce N(bool) via simdBinopII/FF.
+  fn stencilLt_II(vm: *VM) callconv(.c) void {
+    vm.jit_simd_array2(vm, @intFromEnum(Op.@"<"));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+  fn stencilGt_II(vm: *VM) callconv(.c) void {
+    vm.jit_simd_array2(vm, @intFromEnum(Op.@">"));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+  fn stencilEq_II(vm: *VM) callconv(.c) void {
+    vm.jit_simd_array2(vm, @intFromEnum(Op.@"="));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+  fn stencilLt_FF(vm: *VM) callconv(.c) void {
+    vm.jit_simd_array2(vm, @intFromEnum(Op.@"<"));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+  fn stencilGt_FF(vm: *VM) callconv(.c) void {
+    vm.jit_simd_array2(vm, @intFromEnum(Op.@">"));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+  fn stencilEq_FF(vm: *VM) callconv(.c) void {
+    vm.jit_simd_array2(vm, @intFromEnum(Op.@"="));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
   // ── CPS stencil functions ────────────────────────────────────────────────
   // Each stencil is a LEAF (no BLR) so the tail-call chain via BR X8 works.
   // NEXT hole  = MOVZ/MOVK×3/BR X8 at the end, patched to the next stencil.
   // OPERAND hole = MOVZ X1, #0xFFFF, patched with the actual operand.
+
+  // MakeList stencil: OPERAND hole = u8 count N.  Pops N items, pushes a list.
+  fn stencilMakeList(vm: *VM) callconv(.c) void {
+    var n: u32 = undefined;
+    asm volatile (
+      \\.inst 0xD2994221
+      : [o] "={x1}" (n)
+    );
+    vm.jit_make_list(vm, @as(u8, @truncate(n)));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
+  // Derive stencil: OPERAND hole = u8 adverb enum value.
+  // Pops base func, pushes derived func (e.g. each, fold, scan variants).
+  fn stencilDerive(vm: *VM) callconv(.c) void {
+    var adv: u32 = undefined;
+    asm volatile (
+      \\.inst 0xD2994221
+      : [o] "={x1}" (adv)
+    );
+    vm.jit_derive(vm, @as(u8, @truncate(adv)));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
+
+  // MakeDict stencil: OPERAND hole = u8 count N (N key-value pairs).
+  fn stencilMakeDict(vm: *VM) callconv(.c) void {
+    var n: u32 = undefined;
+    asm volatile (
+      \\.inst 0xD2994221
+      : [o] "={x1}" (n)
+    );
+    vm.jit_make_dict(vm, @as(u8, @truncate(n)));
+    asm volatile (
+      \\.inst 0xD29BD5A8
+      \\.inst 0xF2B7DDE8
+      \\.inst 0xF2D95FC8
+      \\.inst 0xF2F757C8
+      \\.inst 0xD61F0100
+      ::: .{ .x8 = true }
+    );
+    unreachable;
+  }
 
   // Return stencil: terminal stencil — calls doReturn then exits the JIT function.
   // No NEXT hole; instead the function ends with a compiler-generated RET.
@@ -1524,6 +1860,9 @@ const JitImpl = if (jit_enabled) struct {
       .apply2        = s.scanWithFrame(@intFromPtr(&stencilApply2)),
       .drop          = s.scanWithFrame(@intFromPtr(&stencilDrop)),
       .assign_global = s.scanWithFrame(@intFromPtr(&stencilAssignGlobal)) orelse s.scan2WithFrame(@intFromPtr(&stencilAssignGlobal)),
+      .make_list     = s.scanWithFrame(@intFromPtr(&stencilMakeList)) orelse s.scan2WithFrame(@intFromPtr(&stencilMakeList)),
+      .derive        = s.scanWithFrame(@intFromPtr(&stencilDerive)) orelse s.scan2WithFrame(@intFromPtr(&stencilDerive)),
+      .make_dict     = s.scanWithFrame(@intFromPtr(&stencilMakeDict)) orelse s.scan2WithFrame(@intFromPtr(&stencilMakeDict)),
       .return_       = s.scanTerminal(@intFromPtr(&stencilReturn)),
       .jump_false    = s.scan2WithFrame(@intFromPtr(&stencilJumpFalse)),
       .jump_true    = s.scan2WithFrame(@intFromPtr(&stencilJumpTrue)),
@@ -1542,9 +1881,15 @@ const JitImpl = if (jit_enabled) struct {
       .add_II = s.scanWithFrame(@intFromPtr(&stencilAdd_II)) orelse s.scan2WithFrame(@intFromPtr(&stencilAdd_II)),
       .sub_II = s.scanWithFrame(@intFromPtr(&stencilSub_II)) orelse s.scan2WithFrame(@intFromPtr(&stencilSub_II)),
       .mul_II = s.scanWithFrame(@intFromPtr(&stencilMul_II)) orelse s.scan2WithFrame(@intFromPtr(&stencilMul_II)),
+      .lt_II  = s.scanWithFrame(@intFromPtr(&stencilLt_II))  orelse s.scan2WithFrame(@intFromPtr(&stencilLt_II)),
+      .gt_II  = s.scanWithFrame(@intFromPtr(&stencilGt_II))  orelse s.scan2WithFrame(@intFromPtr(&stencilGt_II)),
+      .eq_II  = s.scanWithFrame(@intFromPtr(&stencilEq_II))  orelse s.scan2WithFrame(@intFromPtr(&stencilEq_II)),
       .add_FF = s.scanWithFrame(@intFromPtr(&stencilAdd_FF)) orelse s.scan2WithFrame(@intFromPtr(&stencilAdd_FF)),
       .sub_FF = s.scanWithFrame(@intFromPtr(&stencilSub_FF)) orelse s.scan2WithFrame(@intFromPtr(&stencilSub_FF)),
       .mul_FF = s.scanWithFrame(@intFromPtr(&stencilMul_FF)) orelse s.scan2WithFrame(@intFromPtr(&stencilMul_FF)),
+      .lt_FF  = s.scanWithFrame(@intFromPtr(&stencilLt_FF))  orelse s.scan2WithFrame(@intFromPtr(&stencilLt_FF)),
+      .gt_FF  = s.scanWithFrame(@intFromPtr(&stencilGt_FF))  orelse s.scan2WithFrame(@intFromPtr(&stencilGt_FF)),
+      .eq_FF  = s.scanWithFrame(@intFromPtr(&stencilEq_FF))  orelse s.scan2WithFrame(@intFromPtr(&stencilEq_FF)),
     };
   }
 
@@ -1562,6 +1907,13 @@ const JitImpl = if (jit_enabled) struct {
       .assign_local  = @intFromPtr(&jhAssignLocal),
       .apply1        = @intFromPtr(&jhApply1),
       .apply2        = @intFromPtr(&jhApply2),
+      .call          = @intFromPtr(&jhCall),
+      .tail_call     = @intFromPtr(&jhTailCall),
+      .apply         = @intFromPtr(&jhApply),
+      .make_partial  = @intFromPtr(&jhMakePartial),
+      .make_list     = @intFromPtr(&jhMakeList),
+      .derive        = @intFromPtr(&jhDerive),
+      .make_dict     = @intFromPtr(&jhMakeDict),
       .jump          = @intFromPtr(&jhJump),
       .jump_false    = @intFromPtr(&jhJumpFalse),
       .jump_true     = @intFromPtr(&jhJumpTrue),
