@@ -143,5 +143,19 @@ The JIT build needs to be tested in debug and release mode because the compiler 
 
 - Runtime artifect: `zig-out/bin/ink`
 
+Make sure the runtime compiles and builds with the following options for macos arm, linux x86_64 or arm, and windows x86_64
+
+```
+zig build
+zig build -Djit=true
+zig build -Dui=true
+zig build -Djit=true -Dui=true
+
+zig build -Doptimize=ReleaseFast
+zig build -Djit=true -Doptimize=ReleaseFast
+zig build -Dui=true -Doptimize=ReleaseFast
+zig build -Djit=true -Dui=true -Doptimize=ReleaseFast
+```
+
 Test runtime with:
 echo "1+2" | ink

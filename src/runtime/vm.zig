@@ -35,6 +35,24 @@ const jit_mod = if (jit_enabled) @import("jit/jit.zig") else struct {};
 const STACK_MAX = 2048;
 const FRAMES_MAX = 64;
 
+// Vtable for JIT worker functions called from Phase-1 stencils.
+// Embedded directly in VM (not behind a pointer) so stencils reach each entry
+// with a single LDR from the VM base register (x0), same cost as before.
+const JitVtable = if (jit_enabled) struct {
+  apply1:        *const fn(*VM, u8) callconv(.c) void = undefined,
+  apply2:        *const fn(*VM, u8) callconv(.c) void = undefined,
+  simd_array2:   *const fn(*VM, u8) callconv(.c) void = undefined,
+  ref:           *const fn(*VM) callconv(.c) void    = undefined,
+  drop:          *const fn(*VM) callconv(.c) void    = undefined,
+  cond_pop:      *const fn(*VM) callconv(.c) u64     = undefined,
+  return_:       *const fn(*VM) callconv(.c) void    = undefined,
+  assign_local:  *const fn(*VM, u8) callconv(.c) void = undefined,
+  assign_global: *const fn(*VM, u8) callconv(.c) void = undefined,
+  make_list:     *const fn(*VM, u8) callconv(.c) void = undefined,
+  derive:        *const fn(*VM, u8) callconv(.c) void = undefined,
+  make_dict:     *const fn(*VM, u8) callconv(.c) void = undefined,
+} else struct {};
+
 pub const VMError = error{ StackOverflow, InvalidOpCode, RuntimeError };
 
 // lambda_idx = maxInt(u24) for top-level (no lambda)
@@ -72,27 +90,13 @@ pub const VM = struct {
   out: ?*std.Io.Writer = null,
   prng: std.Random.DefaultPrng,
   argv: V = .blank,
-  jit:        if (jit_enabled) ?jit_mod.JitCache                    else void = if (jit_enabled) null      else {},
-  jit_err:    if (jit_enabled) ?anyerror                             else void = if (jit_enabled) null      else {},
-  jit_apply1:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
-  jit_apply2:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
-  jit_assign_local:  if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
-  jit_global:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
-  jit_ref:           if (jit_enabled) *const fn(*VM) callconv(.c) void    else void = if (jit_enabled) undefined else {},
-  jit_cond_pop:      if (jit_enabled) *const fn(*VM) callconv(.c) u64  else void = if (jit_enabled) undefined else {},
-  jit_drop:          if (jit_enabled) *const fn(*VM) callconv(.c) void else void = if (jit_enabled) undefined else {},
-  jit_assign_global: if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
-  jit_make_list:     if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
-  jit_derive:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
-  jit_make_dict:     if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
-  jit_return:        if (jit_enabled) *const fn(*VM) callconv(.c) void else void = if (jit_enabled) undefined else {},
-  // SIMD array worker: handles I×I and F×F element-wise ops via @Vector.
-  // Registered at startup; called from stencilAdd_II / stencilSub_II / stencilMul_II etc.
-  jit_simd_array2:   if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
+  jit:        if (jit_enabled) ?jit_mod.JitCache else void = if (jit_enabled) null      else {},
+  jit_err:    if (jit_enabled) ?anyerror         else void = if (jit_enabled) null      else {},
+  jit_vtable: if (jit_enabled) JitVtable         else void = if (jit_enabled) .{}       else {},
   // Monomorphic inline cache: last successfully JIT-compiled lambda.
   // Avoids a hash-map lookup on every call in hot adverb loops.
-  jit_ic_key: if (jit_enabled) u24                                       else void = if (jit_enabled) NO_LAMBDA else {},
-  jit_ic_jf:  if (jit_enabled) ?jit_mod.JitFn                           else void = if (jit_enabled) null      else {},
+  jit_ic_key: if (jit_enabled) u24               else void = if (jit_enabled) NO_LAMBDA else {},
+  jit_ic_jf:  if (jit_enabled) ?jit_mod.JitFn   else void = if (jit_enabled) null      else {},
 
   pub fn aList(vm:VM) !V { return .{.L = try N(V).init(vm.alloc, 0)}; }
   pub fn aVec(vm:VM,k:K,n:usize) !V { return V.wrap(k.container(), try N(k.backing()).init(vm.alloc, n)); }
@@ -125,19 +129,7 @@ pub const VM = struct {
     vm.compiler.* = try Compiler.init(alloc, chunk, &vm.globals_names, &vm.symbols, &vm.registry, &vm.fn_tables);
 
     if (comptime jit_enabled) {
-        vm.jit_apply1        = &JitImpl.apply1Worker;
-        vm.jit_apply2        = &JitImpl.apply2Worker;
-        vm.jit_assign_local  = &JitImpl.assignLocalWorker;
-        vm.jit_global        = &JitImpl.globalWorker;
-        vm.jit_ref           = &JitImpl.refWorker;
-        vm.jit_cond_pop      = &JitImpl.condPopWorker;
-        vm.jit_drop          = &JitImpl.dropWorker;
-        vm.jit_assign_global = &JitImpl.assignGlobalWorker;
-        vm.jit_make_list     = &JitImpl.makeListWorker;
-        vm.jit_derive        = &JitImpl.deriveWorker;
-        vm.jit_make_dict     = &JitImpl.makeDictWorker;
-        vm.jit_return        = &JitImpl.returnWorker;
-        vm.jit_simd_array2   = &JitImpl.simdArray2Worker;
+        vm.jit_vtable = JitImpl.buildVtable();
         vm.jit = jit_mod.JitCache.init(alloc, JitImpl.buildHandlers(), JitImpl.buildStencils(), @intFromPtr(&JitImpl.jhApply2)) catch null;
     }
 
@@ -937,31 +929,36 @@ const JitImpl = if (jit_enabled) struct {
 
     const arity = base_ref.getRealArity();
     var merged: [8]V = .{.blank} ** 8;
-    var fill: u8 = existing_fill;
+    var fill: u8 = 0;
     for (0..arity) |i| {
       if (existing_fill & (@as(u8, 1) << @intCast(i)) != 0) {
         merged[i] = existing[i].ref();
+        fill |= @as(u8, 1) << @intCast(i);
       }
     }
-    var stack_idx: usize = 0;
+    var arg_idx: usize = 0;
     for (0..arity) |i| {
-      if (mask & (@as(u8, 1) << @intCast(i)) != 0 and stack_idx < stack_args.len) {
-        if (fill & (@as(u8, 1) << @intCast(i)) == 0) {
-          merged[i] = stack_args[stack_idx];
+      if (fill & (@as(u8, 1) << @intCast(i)) == 0) {
+        const should_fill = if (existing_fill != 0) true else ((mask >> @intCast(i)) & 1) != 0;
+        if (should_fill and arg_idx < argc) {
+          merged[i] = stack_args[arg_idx].ref();
           fill |= @as(u8, 1) << @intCast(i);
-          stack_idx += 1;
+          arg_idx += 1;
         }
       }
     }
+
+    const p = vm.partial_pool.create(vm.alloc) catch {
+      for (vm.stack[args_start - 1 .. vm.stack_len]) |*v| v.deinit(vm.alloc);
+      vm.stack_len = args_start - 1;
+      vm.push(V{ .err = .memory }) catch {};
+      return;
+    };
+    p.* = .{ .pool = &vm.partial_pool, .rc = 1, .fill = fill, .arity = arity, ._pad = 0, .ref = base_ref, .args = merged };
+
     for (vm.stack[args_start - 1 .. vm.stack_len]) |*v| v.deinit(vm.alloc);
     vm.stack_len = args_start - 1;
-    const all_filled = fill == (@as(u8, 1) << @intCast(arity)) - 1;
-    if (all_filled) {
-      vm.executeCall(.{ .func = base_ref }, merged[0..arity], .sync) catch {};
-      for (merged[0..arity]) |*v| v.deinit(vm.alloc);
-    } else {
-      vm.push(V.makePartial(base_ref, merged, fill, vm.alloc) catch V{ .err = .memory }) catch {};
-    }
+    vm.push(.{ .partial = p }) catch {};
   }
 
   // ── apply1Worker / apply2Worker ──────────────────────────────────────────
@@ -1296,7 +1293,7 @@ const JitImpl = if (jit_enabled) struct {
       };
       vm.stack_len = len - 1;
     } else {
-      vm.jit_apply2(vm, @intFromEnum(op));
+      vm.jit_vtable.apply2(vm, @intFromEnum(op));
     }
     asm volatile (
       \\.inst 0xD29BD5A8
@@ -1309,231 +1306,74 @@ const JitImpl = if (jit_enabled) struct {
     unreachable;
   }
 
-  fn stencilAdd_ii(vm: *VM) callconv(.c) void { specDyad(vm, .@"+"); }
-  fn stencilSub_ii(vm: *VM) callconv(.c) void { specDyad(vm, .@"-"); }
-  fn stencilMul_ii(vm: *VM) callconv(.c) void { specDyad(vm, .@"*"); }
-  fn stencilLt_ii (vm: *VM) callconv(.c) void { specDyad(vm, .@"<"); }
-  fn stencilGt_ii (vm: *VM) callconv(.c) void { specDyad(vm, .@">"); }
-  fn stencilEq_ii (vm: *VM) callconv(.c) void { specDyad(vm, .@"="); }
+  fn SpecDyadStencil(comptime op: Op) type {
+    return struct {
+      fn f(vm: *VM) callconv(.c) void { specDyad(vm, op); }
+    };
+  }
+  const Stencil_add_ii = SpecDyadStencil(.@"+");
+  const Stencil_sub_ii = SpecDyadStencil(.@"-");
+  const Stencil_mul_ii = SpecDyadStencil(.@"*");
+  const Stencil_lt_ii  = SpecDyadStencil(.@"<");
+  const Stencil_gt_ii  = SpecDyadStencil(.@">");
+  const Stencil_eq_ii  = SpecDyadStencil(.@"=");
 
-  // ── Array SIMD stencils (I×I and F×F) ───────────────────────────────────
-  // Op baked in at Zig compile time — no OPERAND hole.
-  // Uses scanWithFrame (calls vm.jit_simd_array2 via LDR+BLR — needs STP/LDP frame).
+  // ── Array SIMD stencils: comptime-generated, one per op ──────────────────
+  // The simd_array2 worker inspects runtime stack types (I×I or F×F).
+  // add_II and add_FF use the SAME stencil bytes (same op, same worker call).
+  fn SimdStencil(comptime op: Op) type {
+    return struct {
+      fn f(vm: *VM) callconv(.c) void {
+        vm.jit_vtable.simd_array2(vm, @intFromEnum(op));
+        asm volatile (
+          \\.inst 0xD29BD5A8
+          \\.inst 0xF2B7DDE8
+          \\.inst 0xF2D95FC8
+          \\.inst 0xF2F757C8
+          \\.inst 0xD61F0100
+          ::: .{ .x8 = true }
+        );
+        unreachable;
+      }
+    };
+  }
+  const Stencil_add_simd = SimdStencil(.@"+");
+  const Stencil_sub_simd = SimdStencil(.@"-");
+  const Stencil_mul_simd = SimdStencil(.@"*");
+  const Stencil_lt_simd  = SimdStencil(.@"<");
+  const Stencil_gt_simd  = SimdStencil(.@">");
+  const Stencil_eq_simd  = SimdStencil(.@"=");
 
-  fn stencilAdd_II(vm: *VM) callconv(.c) void {
-    vm.jit_simd_array2(vm, @intFromEnum(Op.@"+"));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
+  // Comptime generator for one-operand stencils that delegate to a vtable worker.
+  fn OpStencil(comptime vtable_field: []const u8) type {
+    return struct {
+      fn f(vm: *VM) callconv(.c) void {
+        var n: u32 = undefined;
+        asm volatile (
+          \\.inst 0xD2994221
+          : [o] "={x1}" (n)
+        );
+        @field(vm.jit_vtable, vtable_field)(vm, @as(u8, @truncate(n)));
+        asm volatile (
+          \\.inst 0xD29BD5A8
+          \\.inst 0xF2B7DDE8
+          \\.inst 0xF2D95FC8
+          \\.inst 0xF2F757C8
+          \\.inst 0xD61F0100
+          ::: .{ .x8 = true }
+        );
+        unreachable;
+      }
+    };
   }
-
-  fn stencilSub_II(vm: *VM) callconv(.c) void {
-    vm.jit_simd_array2(vm, @intFromEnum(Op.@"-"));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
-  }
-
-  fn stencilMul_II(vm: *VM) callconv(.c) void {
-    vm.jit_simd_array2(vm, @intFromEnum(Op.@"*"));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
-  }
-
-  fn stencilAdd_FF(vm: *VM) callconv(.c) void {
-    vm.jit_simd_array2(vm, @intFromEnum(Op.@"+"));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
-  }
-
-  fn stencilSub_FF(vm: *VM) callconv(.c) void {
-    vm.jit_simd_array2(vm, @intFromEnum(Op.@"-"));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
-  }
-
-  fn stencilMul_FF(vm: *VM) callconv(.c) void {
-    vm.jit_simd_array2(vm, @intFromEnum(Op.@"*"));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
-  }
-
-  // Comparison stencils — produce N(bool) via simdBinopII/FF.
-  fn stencilLt_II(vm: *VM) callconv(.c) void {
-    vm.jit_simd_array2(vm, @intFromEnum(Op.@"<"));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
-  }
-  fn stencilGt_II(vm: *VM) callconv(.c) void {
-    vm.jit_simd_array2(vm, @intFromEnum(Op.@">"));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
-  }
-  fn stencilEq_II(vm: *VM) callconv(.c) void {
-    vm.jit_simd_array2(vm, @intFromEnum(Op.@"="));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
-  }
-  fn stencilLt_FF(vm: *VM) callconv(.c) void {
-    vm.jit_simd_array2(vm, @intFromEnum(Op.@"<"));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
-  }
-  fn stencilGt_FF(vm: *VM) callconv(.c) void {
-    vm.jit_simd_array2(vm, @intFromEnum(Op.@">"));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
-  }
-  fn stencilEq_FF(vm: *VM) callconv(.c) void {
-    vm.jit_simd_array2(vm, @intFromEnum(Op.@"="));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
-  }
+  const Stencil_make_list = OpStencil("make_list");
+  const Stencil_derive     = OpStencil("derive");
+  const Stencil_make_dict  = OpStencil("make_dict");
 
   // ── CPS stencil functions ────────────────────────────────────────────────
   // Each stencil is a LEAF (no BLR) so the tail-call chain via BR X8 works.
   // NEXT hole  = MOVZ/MOVK×3/BR X8 at the end, patched to the next stencil.
   // OPERAND hole = MOVZ X1, #0xFFFF, patched with the actual operand.
-
-  // MakeList stencil: OPERAND hole = u8 count N.  Pops N items, pushes a list.
-  fn stencilMakeList(vm: *VM) callconv(.c) void {
-    var n: u32 = undefined;
-    asm volatile (
-      \\.inst 0xD2994221
-      : [o] "={x1}" (n)
-    );
-    vm.jit_make_list(vm, @as(u8, @truncate(n)));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
-  }
-
-  // Derive stencil: OPERAND hole = u8 adverb enum value.
-  // Pops base func, pushes derived func (e.g. each, fold, scan variants).
-  fn stencilDerive(vm: *VM) callconv(.c) void {
-    var adv: u32 = undefined;
-    asm volatile (
-      \\.inst 0xD2994221
-      : [o] "={x1}" (adv)
-    );
-    vm.jit_derive(vm, @as(u8, @truncate(adv)));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
-  }
-
-  // MakeDict stencil: OPERAND hole = u8 count N (N key-value pairs).
-  fn stencilMakeDict(vm: *VM) callconv(.c) void {
-    var n: u32 = undefined;
-    asm volatile (
-      \\.inst 0xD2994221
-      : [o] "={x1}" (n)
-    );
-    vm.jit_make_dict(vm, @as(u8, @truncate(n)));
-    asm volatile (
-      \\.inst 0xD29BD5A8
-      \\.inst 0xF2B7DDE8
-      \\.inst 0xF2D95FC8
-      \\.inst 0xF2F757C8
-      \\.inst 0xD61F0100
-      ::: .{ .x8 = true }
-    );
-    unreachable;
-  }
 
   // Return stencil: terminal stencil — calls doReturn then exits the JIT function.
   // No NEXT hole; instead the function ends with a compiler-generated RET.
@@ -1541,15 +1381,15 @@ const JitImpl = if (jit_enabled) struct {
   // When used, Phase 1 handles the entire lambda body including Return, and
   // Phase 2 is skipped entirely, saving the STP/LDP/RET wrapper overhead.
   fn stencilReturn(vm: *VM) callconv(.c) void {
-    vm.jit_return(vm);
+    vm.jit_vtable.return_(vm);
     // Compiler emits: LDP X29,X30,[SP],#16 (epilogue) then RET here.
     // scanTerminal includes these in the copied bytes.
   }
 
-  // Drop stencil: pop TOS and deinit via jit_drop (handles heap types).
-  // Uses scanWithFrame because vm.jit_drop is called via LDR+BLR.
+  // Drop stencil: pop TOS and deinit via jit_vtable.drop (handles heap types).
+  // Uses scanWithFrame because the drop call is via LDR+BLR.
   fn stencilDrop(vm: *VM) callconv(.c) void {
-    vm.jit_drop(vm);
+    vm.jit_vtable.drop(vm);
     asm volatile (
       \\.inst 0xD29BD5A8
       \\.inst 0xF2B7DDE8
@@ -1570,7 +1410,7 @@ const JitImpl = if (jit_enabled) struct {
       \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
       : [o] "={x1}" (idx)
     );
-    vm.jit_assign_global(vm, @as(u8, @truncate(idx)));
+    vm.jit_vtable.assign_global(vm, @as(u8, @truncate(idx)));
     asm volatile (
       \\.inst 0xD29BD5A8
       \\.inst 0xF2B7DDE8
@@ -1596,12 +1436,12 @@ const JitImpl = if (jit_enabled) struct {
     unreachable;
   }
 
-  // Dup stencil: duplicate top-of-stack (increment refcount via jit_ref, push copy).
-  // Uses scanWithFrame because vm.jit_ref is called via LDR+BLR (needs a saved frame).
+  // Dup stencil: duplicate top-of-stack (increment refcount via jit_vtable.ref, push copy).
+  // Uses scanWithFrame because the ref call is via LDR+BLR (needs a saved frame).
   fn stencilDup(vm: *VM) callconv(.c) void {
     vm.stack[vm.stack_len] = vm.stack[vm.stack_len - 1];
     vm.stack_len += 1;
-    vm.jit_ref(vm);
+    vm.jit_vtable.ref(vm);
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1632,8 +1472,8 @@ const JitImpl = if (jit_enabled) struct {
     unreachable;
   }
 
-  // Local stencil: push copy of a local slot value, refcount via jit_ref.
-  // Uses scanWithFrame because vm.jit_ref is called via LDR+BLR.
+  // Local stencil: push copy of a local slot value, refcount via jit_vtable.ref.
+  // Uses scanWithFrame because the ref call is via LDR+BLR.
   fn stencilLocal(vm: *VM) callconv(.c) void {
     var slot: u32 = undefined;
     asm volatile (
@@ -1643,7 +1483,7 @@ const JitImpl = if (jit_enabled) struct {
     const frame = &vm.frames[vm.frames_len - 1];
     vm.stack[vm.stack_len] = vm.stack[frame.base + slot];
     vm.stack_len += 1;
-    vm.jit_ref(vm);
+    vm.jit_vtable.ref(vm);
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1689,7 +1529,7 @@ const JitImpl = if (jit_enabled) struct {
       \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
       : [o] "={x1}" (slot)
     );
-    vm.jit_assign_local(vm, @as(u8, @truncate(slot)));
+    vm.jit_vtable.assign_local(vm, @as(u8, @truncate(slot)));
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1702,7 +1542,7 @@ const JitImpl = if (jit_enabled) struct {
   }
 
   // Const stencil: OPERAND hole = u8 index into vm.current_chunk.constants.
-  // Pushes the constant then bumps its refcount via jit_ref (LDR+BLR).
+  // Pushes the constant then bumps its refcount via jit_vtable.ref (LDR+BLR).
   // Uses scanWithFrame because of the BLR call.
   fn stencilConst(vm: *VM) callconv(.c) void {
     var idx: u32 = undefined;
@@ -1712,7 +1552,7 @@ const JitImpl = if (jit_enabled) struct {
     );
     vm.stack[vm.stack_len] = vm.current_chunk.constants.items[idx];
     vm.stack_len += 1;
-    vm.jit_ref(vm);
+    vm.jit_vtable.ref(vm);
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1741,7 +1581,7 @@ const JitImpl = if (jit_enabled) struct {
       vm.stack[vm.stack_len] = .blank;
     }
     vm.stack_len += 1;
-    vm.jit_ref(vm);
+    vm.jit_vtable.ref(vm);
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1759,7 +1599,7 @@ const JitImpl = if (jit_enabled) struct {
       \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
       : [o] "={x1}" (op_raw)
     );
-    vm.jit_apply1(vm, @as(u8, @truncate(op_raw)));
+    vm.jit_vtable.apply1(vm, @as(u8, @truncate(op_raw)));
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1771,7 +1611,7 @@ const JitImpl = if (jit_enabled) struct {
     unreachable;
   }
 
-  // Apply2 stencil: reads opcode from OPERAND hole, delegates to vm.jit_apply2
+  // Apply2 stencil: reads opcode from OPERAND hole, delegates to jit_vtable.apply2
   // (LDR from VM struct — position-independent when copied to JIT memory).
   // Uses scanWithFrame so the STP/LDP frame is preserved across the BLR.
   fn stencilApply2(vm: *VM) callconv(.c) void {
@@ -1780,7 +1620,7 @@ const JitImpl = if (jit_enabled) struct {
       \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
       : [o] "={x1}" (op_raw)
     );
-    vm.jit_apply2(vm, @as(u8, @truncate(op_raw)));
+    vm.jit_vtable.apply2(vm, @as(u8, @truncate(op_raw)));
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1798,7 +1638,7 @@ const JitImpl = if (jit_enabled) struct {
   //   [taken NEXT hole: 5 words]        — taken when condition is FALSE (do jump)
   // Uses scan2WithFrame (two NEXT holes, frame preserved for BLR).
   fn stencilJumpFalse(vm: *VM) callconv(.c) void {
-    const cond: u64 = vm.jit_cond_pop(vm);
+    const cond: u64 = vm.jit_vtable.cond_pop(vm);
     // CBZ X0, #+24: if false (x0==0): skip fall-through NEXT hole → taken NEXT hole.
     // Function ends with unreachable so no x8 clobber annotation needed.
     asm volatile (
@@ -1823,7 +1663,7 @@ const JitImpl = if (jit_enabled) struct {
   //   [fall-through NEXT hole: 5 words] — taken when condition is FALSE (don't jump)
   //   [taken NEXT hole: 5 words]        — taken when condition is TRUE (do jump)
   fn stencilJumpTrue(vm: *VM) callconv(.c) void {
-    const cond: u64 = vm.jit_cond_pop(vm);
+    const cond: u64 = vm.jit_vtable.cond_pop(vm);
     asm volatile (
       \\.inst 0xB50000C0   // CBNZ X0, #+24
       \\.inst 0xD29BD5A8   // Fall-through NEXT hole word 0
@@ -1843,53 +1683,85 @@ const JitImpl = if (jit_enabled) struct {
 
   // ── Builder helpers ──────────────────────────────────────────────────────
 
+  fn buildVtable() JitVtable {
+    return .{
+      .apply1        = &apply1Worker,
+      .apply2        = &apply2Worker,
+      .simd_array2   = &simdArray2Worker,
+      .ref           = &refWorker,
+      .drop          = &dropWorker,
+      .cond_pop      = &condPopWorker,
+      .return_       = &returnWorker,
+      .assign_local  = &assignLocalWorker,
+      .assign_global = &assignGlobalWorker,
+      .make_list     = &makeListWorker,
+      .derive        = &deriveWorker,
+      .make_dict     = &makeDictWorker,
+    };
+  }
+
   fn buildStencils() jit_mod.StencilTable {
     const s = stencils_mod;
+
+    // Try all scan variants in order, most restrictive first.
+    // scan3WithFrame as final fallback handles ReleaseFast tail-duplication
+    // of the NEXT hole into multiple code paths (e.g. specDyad's 3 branches).
+    const scanAll = struct {
+      fn f(fn_addr: usize) ?stencils_mod.StencilInfo {
+        return s.scanWithFrame(fn_addr)
+          orelse s.scan(fn_addr)
+          orelse s.scan2WithFrame(fn_addr)
+          orelse s.scan3WithFrame(fn_addr);
+      }
+    }.f;
+
+    const scan2 = struct {
+      fn f(fn_addr: usize) ?stencils_mod.StencilInfo {
+        return s.scan2WithFrame(fn_addr)
+          orelse s.scan3WithFrame(fn_addr);
+      }
+    }.f;
+
     return .{
-      .gap          = s.scan(@intFromPtr(&stencilGap)),
-      // dup/local/const call vm.jit_ref via LDR+BLR — must use scanWithFrame so the
-      // STP/LDP frame around the BLR is included in the copied stencil body.
-      .dup          = s.scanWithFrame(@intFromPtr(&stencilDup)),
-      .int_         = s.scan(@intFromPtr(&stencilInt)),
-      .const_       = s.scanWithFrame(@intFromPtr(&stencilConst)),
-      .global       = s.scanWithFrame(@intFromPtr(&stencilGlobal)) orelse s.scan2WithFrame(@intFromPtr(&stencilGlobal)),
-      .local        = s.scanWithFrame(@intFromPtr(&stencilLocal)),
-      .local_last   = s.scan(@intFromPtr(&stencilLocalLast)),
-      .assign_local = s.scanWithFrame(@intFromPtr(&stencilAssignLocal)),
-      .apply1        = s.scanWithFrame(@intFromPtr(&stencilApply1)),
-      .apply2        = s.scanWithFrame(@intFromPtr(&stencilApply2)),
-      .drop          = s.scanWithFrame(@intFromPtr(&stencilDrop)),
-      .assign_global = s.scanWithFrame(@intFromPtr(&stencilAssignGlobal)) orelse s.scan2WithFrame(@intFromPtr(&stencilAssignGlobal)),
-      .make_list     = s.scanWithFrame(@intFromPtr(&stencilMakeList)) orelse s.scan2WithFrame(@intFromPtr(&stencilMakeList)),
-      .derive        = s.scanWithFrame(@intFromPtr(&stencilDerive)) orelse s.scan2WithFrame(@intFromPtr(&stencilDerive)),
-      .make_dict     = s.scanWithFrame(@intFromPtr(&stencilMakeDict)) orelse s.scan2WithFrame(@intFromPtr(&stencilMakeDict)),
-      .return_       = s.scanTerminal(@intFromPtr(&stencilReturn)),
-      .jump_false    = s.scan2WithFrame(@intFromPtr(&stencilJumpFalse)),
-      .jump_true    = s.scan2WithFrame(@intFromPtr(&stencilJumpTrue)),
-      // specDyad has 3 code paths: int fast, float fast, slow BLR.
-      // In ReleaseFast LLVM tail-duplicates the NEXT hole into each path → 3 NEXT holes.
-      // scan2WithFrame only captures 2, leaving the 3rd unpatched → SIGILL.
-      // scan3WithFrame captures all three and the emitter patches all to the same successor.
-      .add_ii = s.scanWithFrame(@intFromPtr(&stencilAdd_ii)) orelse s.scan2WithFrame(@intFromPtr(&stencilAdd_ii)) orelse s.scan3WithFrame(@intFromPtr(&stencilAdd_ii)),
-      .sub_ii = s.scanWithFrame(@intFromPtr(&stencilSub_ii)) orelse s.scan2WithFrame(@intFromPtr(&stencilSub_ii)) orelse s.scan3WithFrame(@intFromPtr(&stencilSub_ii)),
-      .mul_ii = s.scanWithFrame(@intFromPtr(&stencilMul_ii)) orelse s.scan2WithFrame(@intFromPtr(&stencilMul_ii)) orelse s.scan3WithFrame(@intFromPtr(&stencilMul_ii)),
-      .lt_ii  = s.scanWithFrame(@intFromPtr(&stencilLt_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilLt_ii))  orelse s.scan3WithFrame(@intFromPtr(&stencilLt_ii)),
-      .gt_ii  = s.scanWithFrame(@intFromPtr(&stencilGt_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilGt_ii))  orelse s.scan3WithFrame(@intFromPtr(&stencilGt_ii)),
-      .eq_ii  = s.scanWithFrame(@intFromPtr(&stencilEq_ii))  orelse s.scan2WithFrame(@intFromPtr(&stencilEq_ii))  orelse s.scan3WithFrame(@intFromPtr(&stencilEq_ii)),
-      // Array SIMD stencils: single BLR call to jit_simd_array2, one NEXT hole.
-      // Fallback chain handles ReleaseFast tail-duplication if it occurs.
-      .add_II = s.scanWithFrame(@intFromPtr(&stencilAdd_II)) orelse s.scan2WithFrame(@intFromPtr(&stencilAdd_II)),
-      .sub_II = s.scanWithFrame(@intFromPtr(&stencilSub_II)) orelse s.scan2WithFrame(@intFromPtr(&stencilSub_II)),
-      .mul_II = s.scanWithFrame(@intFromPtr(&stencilMul_II)) orelse s.scan2WithFrame(@intFromPtr(&stencilMul_II)),
-      .lt_II  = s.scanWithFrame(@intFromPtr(&stencilLt_II))  orelse s.scan2WithFrame(@intFromPtr(&stencilLt_II)),
-      .gt_II  = s.scanWithFrame(@intFromPtr(&stencilGt_II))  orelse s.scan2WithFrame(@intFromPtr(&stencilGt_II)),
-      .eq_II  = s.scanWithFrame(@intFromPtr(&stencilEq_II))  orelse s.scan2WithFrame(@intFromPtr(&stencilEq_II)),
-      .add_FF = s.scanWithFrame(@intFromPtr(&stencilAdd_FF)) orelse s.scan2WithFrame(@intFromPtr(&stencilAdd_FF)),
-      .sub_FF = s.scanWithFrame(@intFromPtr(&stencilSub_FF)) orelse s.scan2WithFrame(@intFromPtr(&stencilSub_FF)),
-      .mul_FF = s.scanWithFrame(@intFromPtr(&stencilMul_FF)) orelse s.scan2WithFrame(@intFromPtr(&stencilMul_FF)),
-      .lt_FF  = s.scanWithFrame(@intFromPtr(&stencilLt_FF))  orelse s.scan2WithFrame(@intFromPtr(&stencilLt_FF)),
-      .gt_FF  = s.scanWithFrame(@intFromPtr(&stencilGt_FF))  orelse s.scan2WithFrame(@intFromPtr(&stencilGt_FF)),
-      .eq_FF  = s.scanWithFrame(@intFromPtr(&stencilEq_FF))  orelse s.scan2WithFrame(@intFromPtr(&stencilEq_FF)),
+      .gap          = s.scan(@intFromPtr(&stencilGap)) orelse s.scanWithFrame(@intFromPtr(&stencilGap)),
+      .dup          = scanAll(@intFromPtr(&stencilDup)),
+      .int_         = s.scan(@intFromPtr(&stencilInt)) orelse s.scanWithFrame(@intFromPtr(&stencilInt)),
+      .const_       = scanAll(@intFromPtr(&stencilConst)),
+      .global       = scanAll(@intFromPtr(&stencilGlobal)),
+      .local        = scanAll(@intFromPtr(&stencilLocal)),
+      .local_last   = s.scan(@intFromPtr(&stencilLocalLast)) orelse s.scanWithFrame(@intFromPtr(&stencilLocalLast)),
+      .assign_local = scanAll(@intFromPtr(&stencilAssignLocal)),
+      .apply1       = scanAll(@intFromPtr(&stencilApply1)),
+      .apply2       = scanAll(@intFromPtr(&stencilApply2)),
+      .drop         = scanAll(@intFromPtr(&stencilDrop)),
+      .assign_global = scanAll(@intFromPtr(&stencilAssignGlobal)),
+      .make_list    = scanAll(@intFromPtr(&Stencil_make_list.f)),
+      .derive       = scanAll(@intFromPtr(&Stencil_derive.f)),
+      .make_dict    = scanAll(@intFromPtr(&Stencil_make_dict.f)),
+      .return_      = s.scanTerminal(@intFromPtr(&stencilReturn)),
+      .jump_false   = scan2(@intFromPtr(&stencilJumpFalse)),
+      .jump_true    = scan2(@intFromPtr(&stencilJumpTrue)),
+      // specDyad stencils: comptime-generated, up to 3 NEXT holes from LLVM tail-dup.
+      .add_ii = scanAll(@intFromPtr(&Stencil_add_ii.f)),
+      .sub_ii = scanAll(@intFromPtr(&Stencil_sub_ii.f)),
+      .mul_ii = scanAll(@intFromPtr(&Stencil_mul_ii.f)),
+      .lt_ii  = scanAll(@intFromPtr(&Stencil_lt_ii.f)),
+      .gt_ii  = scanAll(@intFromPtr(&Stencil_gt_ii.f)),
+      .eq_ii  = scanAll(@intFromPtr(&Stencil_eq_ii.f)),
+      // SIMD array stencils: single-path, comptime-generated.
+      // II and FF variants share the same stencil (worker distinguishes at runtime).
+      .add_II = scanAll(@intFromPtr(&Stencil_add_simd.f)),
+      .sub_II = scanAll(@intFromPtr(&Stencil_sub_simd.f)),
+      .mul_II = scanAll(@intFromPtr(&Stencil_mul_simd.f)),
+      .lt_II  = scanAll(@intFromPtr(&Stencil_lt_simd.f)),
+      .gt_II  = scanAll(@intFromPtr(&Stencil_gt_simd.f)),
+      .eq_II  = scanAll(@intFromPtr(&Stencil_eq_simd.f)),
+      .add_FF = scanAll(@intFromPtr(&Stencil_add_simd.f)),
+      .sub_FF = scanAll(@intFromPtr(&Stencil_sub_simd.f)),
+      .mul_FF = scanAll(@intFromPtr(&Stencil_mul_simd.f)),
+      .lt_FF  = scanAll(@intFromPtr(&Stencil_lt_simd.f)),
+      .gt_FF  = scanAll(@intFromPtr(&Stencil_gt_simd.f)),
+      .eq_FF  = scanAll(@intFromPtr(&Stencil_eq_simd.f)),
     };
   }
 
