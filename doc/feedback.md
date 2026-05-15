@@ -32,19 +32,19 @@
 
 ---
 
+## What was completed (Tasks 16–17)
+
+16. **`jit_ref` helper** — Added `jit_ref: *const fn(*VM) callconv(.c) void` to the VM struct, implemented by `refWorker` which refcounts `vm.stack[vm.stack_len - 1]` in-place via the standard `V.ref()` call.  `stencilLocal`, `stencilConst`, and `stencilDup` now call `vm.jit_ref(vm)` via LDR+BLR instead of inlining the multi-arm `stencilRef` switch.  All three stencils are registered with `scanWithFrame` (which preserves the STP/LDP frame around the BLR).  In ReleaseFast they now produce a single linear NEXT hole — no escaping branches — so they stay in Phase 1 instead of falling back to Phase 2.  `stencilRef` was removed.
+
+17. **ReleaseFast SIGILL fix (scan3WithFrame)** — `specDyad` has three code paths (int fast, float fast, slow BLR).  In ReleaseFast, LLVM tail-duplicates the NEXT hole into all three arms, producing three sentinel sequences.  `scan2WithFrame` only captured two, leaving the third unpatched → SIGILL.  Added `branch_offset2: ?usize` to `StencilInfo` and a new `scan3WithFrame` scanner.  The emitter registers all three holes as pending branches targeting the same successor.  Fallback chain for all six arithmetic stencils is now `scanWithFrame orelse scan2WithFrame orelse scan3WithFrame`.  `stencilGlobal` was simultaneously simplified to a single BLR callsite (using `and blk:` short-circuit) to keep it at ≤2 NEXT holes.
+
+---
+
 ## What can still be improved
 
-### stencilRef in ReleaseFast — systemic problem
+### ~~stencilGlobal: heap globals still Phase 2~~ — **fixed**
 
-`stencilLocal`, `stencilConst`, and the new `stencilDup` all inline `stencilRef`, which contains a multi-arm `switch` over the value tag.  In ReleaseFast, Zig places some switch arms after the NEXT hole, creating escaping branches that `hasEscapingBranch` rejects — those stencils fall back to Phase 2 in release builds.
-
-The correct fix is to stop inlining `stencilRef` into leaf stencils and instead call a helper via a function pointer stored in the VM struct (like `jit_global`).  Concretely: add `jit_ref: *const fn(V) callconv(.c) V` to VM, implemented by a regular `refWorker` function.  Each affected stencil calls `vm.jit_ref(v)` via LDR+BLR instead of the inlined switch.  This makes the stencil bodies position-independent at the cost of one indirect call per heap-type load — acceptable since the call only happens for array/string values, not scalars.
-
-Until this is fixed, `stencilLocal`, `stencilConst`, and `stencilDup` are Phase 2 fallbacks in ReleaseFast, which is the configuration that matters for production performance.
-
-### stencilGlobal: heap globals still Phase 2
-
-For array globals the `globalWorker` path is taken.  In array code, globals are often large vectors (e.g., a dataset loaded at startup).  The refcount increment for heap values requires reading the type tag and branching — same issue as `stencilRef`.  Once the `jit_ref` helper above exists, `stencilGlobal` can call it instead of branching to `globalWorker`, keeping all globals (scalar and array) in Phase 1.
+`stencilGlobal` was rewritten to push `globals[idx]` (or `.blank` for out-of-range) unconditionally, then always call `vm.jit_ref(vm)` to bump the refcount.  For scalars `jit_ref` is a no-op; for heap types it increments the refcount.  `globalWorker` is no longer called from the stencil.  All globals now stay in Phase 1.
 
 ### DUP not yet emitted by the optimizer
 

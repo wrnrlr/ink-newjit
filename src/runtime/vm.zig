@@ -78,6 +78,7 @@ pub const VM = struct {
   jit_apply2:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
   jit_assign_local:  if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
   jit_global:        if (jit_enabled) *const fn(*VM, u8) callconv(.c) void else void = if (jit_enabled) undefined else {},
+  jit_ref:           if (jit_enabled) *const fn(*VM) callconv(.c) void    else void = if (jit_enabled) undefined else {},
   jit_cond_pop:      if (jit_enabled) *const fn(*VM) callconv(.c) u64  else void = if (jit_enabled) undefined else {},
   // Monomorphic inline cache: last successfully JIT-compiled lambda.
   // Avoids a hash-map lookup on every call in hot adverb loops.
@@ -119,6 +120,7 @@ pub const VM = struct {
         vm.jit_apply2       = &JitImpl.apply2Worker;
         vm.jit_assign_local = &JitImpl.assignLocalWorker;
         vm.jit_global       = &JitImpl.globalWorker;
+        vm.jit_ref          = &JitImpl.refWorker;
         vm.jit_cond_pop     = &JitImpl.condPopWorker;
         vm.jit = jit_mod.JitCache.init(alloc, JitImpl.buildHandlers(), JitImpl.buildStencils(), @intFromPtr(&JitImpl.jhApply2)) catch null;
     }
@@ -854,6 +856,14 @@ const JitImpl = if (jit_enabled) struct {
     vm.push(vm.globals.items[idx].ref()) catch {};
   }
 
+  // Refcount the top-of-stack value in-place.
+  // Called by stencilLocal, stencilConst, stencilDup via vm.jit_ref (LDR+BLR).
+  // Avoids inlining the switch inside stencil bodies where it causes escaping
+  // branches in ReleaseFast (those stencils would otherwise fall back to Phase 2).
+  fn refWorker(vm: *VM) callconv(.c) void {
+    _ = vm.stack[vm.stack_len - 1].ref();
+  }
+
   // Pops the top-of-stack condition, returns 0 (false) or 1 (true) in x0.
   // Called from stencilJumpFalse/True via vm.jit_cond_pop (LDR+BLR).
   fn condPopWorker(vm: *VM) callconv(.c) u64 {
@@ -918,18 +928,6 @@ const JitImpl = if (jit_enabled) struct {
   // NEXT hole  = MOVZ/MOVK×3/BR X8 at the end, patched to the next stencil.
   // OPERAND hole = MOVZ X1, #0xFFFF, patched with the actual operand.
 
-  // Inline ref for stencil leaves — avoids BL to the normal ref() helper.
-  // Skips ExtObj (.x) so the function stays a leaf.
-  inline fn stencilRef(v: V) V {
-    switch (v) {
-      .I  => |n| { if (n.ptr.rc != std.math.maxInt(u32)) n.ptr.rc += 1; },
-      inline .B, .F, .S, .C, .L => |n| n.ptr.rc += 1,
-      inline .m, .M => |n| n.ptr.rc += 1,
-      .partial => |p| p.rc += 1,
-      else => {},
-    }
-    return v;
-  }
 
   fn stencilGap(vm: *VM) callconv(.c) void {
     vm.stack[vm.stack_len] = .blank;
@@ -945,12 +943,12 @@ const JitImpl = if (jit_enabled) struct {
     unreachable;
   }
 
-  // Dup stencil: duplicate top-of-stack (increment refcount, push copy).
-  // Pure leaf — no BLR needed.
+  // Dup stencil: duplicate top-of-stack (increment refcount via jit_ref, push copy).
+  // Uses scanWithFrame because vm.jit_ref is called via LDR+BLR (needs a saved frame).
   fn stencilDup(vm: *VM) callconv(.c) void {
-    const v = stencilRef(vm.stack[vm.stack_len - 1]);
-    vm.stack[vm.stack_len] = v;
+    vm.stack[vm.stack_len] = vm.stack[vm.stack_len - 1];
     vm.stack_len += 1;
+    vm.jit_ref(vm);
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -981,6 +979,8 @@ const JitImpl = if (jit_enabled) struct {
     unreachable;
   }
 
+  // Local stencil: push copy of a local slot value, refcount via jit_ref.
+  // Uses scanWithFrame because vm.jit_ref is called via LDR+BLR.
   fn stencilLocal(vm: *VM) callconv(.c) void {
     var slot: u32 = undefined;
     asm volatile (
@@ -988,9 +988,9 @@ const JitImpl = if (jit_enabled) struct {
       : [o] "={x1}" (slot)
     );
     const frame = &vm.frames[vm.frames_len - 1];
-    const val = stencilRef(vm.stack[frame.base + slot]);
-    vm.stack[vm.stack_len] = val;
+    vm.stack[vm.stack_len] = vm.stack[frame.base + slot];
     vm.stack_len += 1;
+    vm.jit_ref(vm);
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1049,16 +1049,17 @@ const JitImpl = if (jit_enabled) struct {
   }
 
   // Const stencil: OPERAND hole = u8 index into vm.current_chunk.constants.
-  // Loads value, increments refcount via stencilRef, and pushes to stack.
+  // Pushes the constant then bumps its refcount via jit_ref (LDR+BLR).
+  // Uses scanWithFrame because of the BLR call.
   fn stencilConst(vm: *VM) callconv(.c) void {
     var idx: u32 = undefined;
     asm volatile (
       \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
       : [o] "={x1}" (idx)
     );
-    const val = stencilRef(vm.current_chunk.constants.items[idx]);
-    vm.stack[vm.stack_len] = val;
+    vm.stack[vm.stack_len] = vm.current_chunk.constants.items[idx];
     vm.stack_len += 1;
+    vm.jit_ref(vm);
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1070,27 +1071,24 @@ const JitImpl = if (jit_enabled) struct {
     unreachable;
   }
 
-  // Global stencil: fast path for scalar globals (.i/.f/.b/.blank — no refcount bump).
-  // Slow path: calls vm.jit_global for heap values or out-of-range indices.
-  // Single BLR callsite ensures ReleaseFast produces at most 2 NEXT holes (fast vs slow),
-  // which scan2WithFrame can capture. Two separate callsites would yield 3 NEXT holes.
+  // Global stencil: push the global value and bump its refcount via jit_ref.
+  // Out-of-range indices push .blank (uninitialized globals are blank by definition).
+  // jit_ref is always called — for scalars it is a no-op; for heap types it
+  // increments the refcount.  A single BLR callsite keeps all globals in Phase 1;
+  // no separate globalWorker path is needed for heap values.
   fn stencilGlobal(vm: *VM) callconv(.c) void {
     var idx: u32 = undefined;
     asm volatile (
       \\.inst 0xD2994221   // MOVZ X1, #0xCA11 — OPERAND hole
       : [o] "={x1}" (idx)
     );
-    // Compute scalar-ness with short-circuit and to guarantee one BLR callsite.
-    const scalar = idx < vm.globals.items.len and blk: {
-      const tag = vm.globals.items[idx].tag();
-      break :blk tag == .i or tag == .f or tag == .b or tag == .blank;
-    };
-    if (scalar) {
+    if (idx < vm.globals.items.len) {
       vm.stack[vm.stack_len] = vm.globals.items[idx];
-      vm.stack_len += 1;
     } else {
-      vm.jit_global(vm, @as(u8, @truncate(idx)));
+      vm.stack[vm.stack_len] = .blank;
     }
+    vm.stack_len += 1;
+    vm.jit_ref(vm);
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1196,11 +1194,13 @@ const JitImpl = if (jit_enabled) struct {
     const s = stencils_mod;
     return .{
       .gap          = s.scan(@intFromPtr(&stencilGap)),
-      .dup          = s.scan(@intFromPtr(&stencilDup)),
+      // dup/local/const call vm.jit_ref via LDR+BLR — must use scanWithFrame so the
+      // STP/LDP frame around the BLR is included in the copied stencil body.
+      .dup          = s.scanWithFrame(@intFromPtr(&stencilDup)),
       .int_         = s.scan(@intFromPtr(&stencilInt)),
-      .const_       = s.scan(@intFromPtr(&stencilConst)),
+      .const_       = s.scanWithFrame(@intFromPtr(&stencilConst)),
       .global       = s.scanWithFrame(@intFromPtr(&stencilGlobal)) orelse s.scan2WithFrame(@intFromPtr(&stencilGlobal)),
-      .local        = s.scan(@intFromPtr(&stencilLocal)),
+      .local        = s.scanWithFrame(@intFromPtr(&stencilLocal)),
       .local_last   = s.scan(@intFromPtr(&stencilLocalLast)),
       .assign_local = s.scanWithFrame(@intFromPtr(&stencilAssignLocal)),
       .apply1       = s.scanWithFrame(@intFromPtr(&stencilApply1)),
