@@ -341,6 +341,33 @@ pub fn emitLambda(
 
   // ── Phase 2: handler section for remaining ops ────────────────────────────
   // All pending NEXT holes (from Phase 1) are patched to jump to HERE.
+  //
+  // PENDING-BRANCH CONSTRAINT — read before adding two-hole stencils
+  //
+  // Every entry in pending_branches (and pending_next_hole) is patched
+  // to the SAME address: handler_start.  There is no per-branch target
+  // dispatch — all unresolved holes land at Phase 2's entry point.
+  //
+  // This is safe for non-branch stencils: their single NEXT hole always
+  // chains to the next sequential instruction, which is either compiled
+  // into the next stencil (patched inline above) or is the first Phase-2
+  // op (patched here).
+  //
+  // UNSAFE for conditional-branch stencils (JumpFalse, JumpTrue):
+  // When Phase 1 processes the true-branch body after a JumpFalse
+  // stencil, it may enqueue pending_branches entries whose target_ip
+  // points past the Phase-1 break point (e.g. a Jump → Return inside
+  // the true-branch).  Those entries are then patched here to
+  // handler_start — the ELSE-branch entry — instead of their real
+  // targets.  For a recursive function this means the base-case path
+  // silently re-enters the recursive else-branch, producing wrong
+  // results with no error.
+  //
+  // Rule: a two-hole stencil is only safe in Phase 1 when the
+  // true-branch body contains NO forward references (Jump, JumpFalse,
+  // JumpTrue) that survive past the Phase-1 break point.  In practice
+  // this cannot be guaranteed statically, so jump_false and jump_true
+  // must remain null in the StencilTable and be handled by Phase 2.
 
   const handler_start = b.pos;
 
@@ -348,7 +375,7 @@ pub fn emitLambda(
     st.patchNext(b.data, hole_off, @intFromPtr(b.data.ptr) + handler_start);
   }
 
-  // Patch any remaining forward branches (targets within Phase 2 bytecode range).
+  // All remaining pending branches land at handler_start (see constraint above).
   for (pending_branches[0..n_pending_branches]) |pb| {
     st.patchNext(b.data, pb.hole_off, @intFromPtr(b.data.ptr) + handler_start);
   }
