@@ -35,14 +35,28 @@ pub const VM = opaque {};
 extern fn __ink_hole_next(vm: *VM) callconv(.c) void;
 extern fn __ink_hole_taken(vm: *VM) callconv(.c) void;
 
-// ── Operand hole (Option A: data slot) ────────────────────────────────────────
+// ── Operand hole (Option A: direct page-relative data slot) ───────────────────
 //
 // For per-call-site immediates (constant indices, local slot numbers, etc.)
-// the stencil reads from this extern u64. The compiler emits ADRP+LDR
-// (arm64) or RIP-relative MOV (x86_64) which the extractor records as a
-// single logical "operand hole". The JIT writes the operand bytes into a
-// data slot it allocates next to each copied stencil.
+// the stencil reads from this extern u64. We use inline asm to force
+// ADRP+ADD addressing (PAGE21 + PAGEOFF12 relocations) instead of the
+// default ADRP+LDR-from-GOT (GOTLDP + GOTLDPOFF). The direct form lets the
+// JIT patch the pair to point straight at a per-stencil operand slot —
+// no GOT indirection, one fewer memory access.
 extern const __ink_hole_operand: u64;
+
+/// Load the u32 operand for this stencil from its dedicated data slot.
+/// The slot lives in the JIT buffer next to the copied stencil bytes and
+/// holds the patch value. ADRP+ADD pair is patched to that slot's address.
+inline fn loadOperand32() u32 {
+    return asm volatile (
+        \\adrp x9, ___ink_hole_operand@PAGE
+        \\add  x9, x9, ___ink_hole_operand@PAGEOFF
+        \\ldr  w9, [x9]
+        : [ret] "={x9}" (-> u32)
+        :
+        : .{ .memory = true });
+}
 
 // ── VM ABI surface ────────────────────────────────────────────────────────────
 //
@@ -68,7 +82,7 @@ pub export fn stencil_nop(vm: *VM) callconv(.c) void {
 /// Push a constant integer onto the VM stack.
 /// Reads its operand from the stencil-local data slot (Option A).
 pub export fn stencil_const_i(vm: *VM) callconv(.c) void {
-  const value: i32 = @truncate(@as(i64, @bitCast(__ink_hole_operand)));
+  const value: i32 = @bitCast(loadOperand32());
   __vm_push_i32(vm, value);
   return @call(.always_tail, __ink_hole_next, .{vm});
 }
