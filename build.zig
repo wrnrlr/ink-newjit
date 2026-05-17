@@ -4,6 +4,7 @@ pub fn build(b: *std.Build) !void {
   const target   = b.standardTargetOptions(.{});
   const optimize = b.standardOptimizeOption(.{});
   const enable_jit = b.option(bool, "jit", "Enable experimental arm64 JIT compiler") orelse false;
+  const paranoid   = b.option(bool, "paranoid", "Enable extra runtime validation (e.g. JIT stencil shape checks)") orelse false;
 
   // --- Dependencies ---
   const zglfw_dep = b.dependency("zglfw", .{ .target = target, .optimize = optimize });
@@ -51,6 +52,7 @@ pub fn build(b: *std.Build) !void {
   const test_options = b.addOptions();
   test_options.addOption(bool, "enable_ui",  false);
   test_options.addOption(bool, "enable_jit", enable_jit);
+  test_options.addOption(bool, "paranoid",   paranoid);
   test_mod.addOptions("build_options", test_options);
   test_mod.addIncludePath(b.path("src"));
   test_mod.addImport("gpu", gpu_iface_mod);
@@ -86,6 +88,7 @@ pub fn build(b: *std.Build) !void {
   runner_options.addOption(bool, "enable_ui",  enable_ui);
   runner_options.addOption(bool, "enable_gpu", enable_gpu);
   runner_options.addOption(bool, "enable_jit", enable_jit);
+  runner_options.addOption(bool, "paranoid",   paranoid);
 
   const runner_mod = b.createModule(.{
     .root_source_file = b.path("src/runner.zig"),

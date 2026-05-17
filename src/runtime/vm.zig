@@ -1738,7 +1738,7 @@ const JitImpl = if (jit_enabled) struct {
       }
     }.f;
 
-    return .{
+    const table: jit_mod.StencilTable = .{
       .gap           = s.scan(@intFromPtr(&stencilGap)) orelse s.scanWithFrame(@intFromPtr(&stencilGap)),
       .dup           = scanAll("dup",           @intFromPtr(&stencilDup)),
       .int_          = s.scan(@intFromPtr(&stencilInt)) orelse s.scanWithFrame(@intFromPtr(&stencilInt)),
@@ -1775,6 +1775,8 @@ const JitImpl = if (jit_enabled) struct {
       .eq_II  = scanAll("eq_II",  @intFromPtr(&Stencil_eq_simd.f)),
       .add_FF = null, .sub_FF = null, .mul_FF = null, .lt_FF = null, .gt_FF = null, .eq_FF = null,
     };
+    stencils_mod.validateTable(table);
+    return table;
   }
 
   fn buildHandlers() jit_mod.Handlers {

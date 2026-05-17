@@ -1,4 +1,6 @@
 // Stencil scanning and patching for Copy-and-Patch JIT.
+const std           = @import("std");
+const build_options = @import("build_options");
 //
 // Each stencil is a machine-code fragment in the text segment that:
 //   1. Does its work (push a value, etc.)
@@ -306,4 +308,52 @@ pub fn scanTerminal(fn_addr: usize) ?StencilInfo {
     }
   }
   return null;
+}
+
+/// Validate a single registered stencil for unpatched NEXT-hole sentinels.
+///
+/// Copies the stencil bytes into a scratch buffer, patches all declared holes
+/// with a harmless dummy address, then scans for any surviving NEXT_SIG words
+/// (0xD29BD5A8 = MOVZ X8, #0xDEAD).  Any survivor means the scanner captured
+/// fewer holes than actually exist in the stencil — left unpatched they would
+/// cause a SIGILL at the first hot call.
+///
+/// Panics with the stencil name and byte offset of the first unpatched hole.
+pub fn validateStencil(name: []const u8, info: StencilInfo) void {
+  if (info.is_terminal) return; // terminal stencils have no NEXT holes
+
+  var buf: [1024]u8 align(4) = undefined;
+  std.debug.assert(info.size <= buf.len);
+  @memcpy(buf[0..info.size], info.bytes[0..info.size]);
+
+  // Patch all declared holes with an address whose low 16 bits != 0xDEAD,
+  // so the patched words are guaranteed not to match NEXT_SIG themselves.
+  const dummy: usize = 1;
+  patchNext(&buf, info.next_offset, dummy);
+  if (info.branch_offset)  |off| patchNext(&buf, off, dummy);
+  if (info.branch_offset2) |off| patchNext(&buf, off, dummy);
+
+  const words: [*]const u32 = @alignCast(@ptrCast(&buf));
+  const n_words = info.size / 4;
+  for (0..n_words) |i| {
+    if (words[i] == NEXT_SIG) {
+      std.debug.panic(
+        "JIT stencil '{s}': unpatched NEXT hole at byte {d} " ++
+        "(scanner captured too few holes — try scan3WithFrame or scan2WithFrame)\n",
+        .{ name, i * 4 },
+      );
+    }
+  }
+}
+
+/// Validate all non-null entries in a StencilTable.
+/// Uses comptime field iteration so new table fields are covered automatically.
+/// No-op unless the binary was built with -Dparanoid (zero runtime cost otherwise).
+pub fn validateTable(table: anytype) void {
+  if (!build_options.paranoid) return;
+  inline for (@typeInfo(@TypeOf(table)).@"struct".fields) |field| {
+    if (@field(table, field.name)) |info| {
+      validateStencil(field.name, info);
+    }
+  }
 }
