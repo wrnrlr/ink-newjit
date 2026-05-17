@@ -310,7 +310,8 @@ pub fn scanTerminal(fn_addr: usize) ?StencilInfo {
   return null;
 }
 
-/// Validate a single registered stencil for unpatched NEXT-hole sentinels.
+/// Validate a single registered stencil for unpatched NEXT-hole sentinels,
+/// and print a one-line summary of the registration.
 ///
 /// Copies the stencil bytes into a scratch buffer, patches all declared holes
 /// with a harmless dummy address, then scans for any surviving NEXT_SIG words
@@ -320,7 +321,26 @@ pub fn scanTerminal(fn_addr: usize) ?StencilInfo {
 ///
 /// Panics with the stencil name and byte offset of the first unpatched hole.
 pub fn validateStencil(name: []const u8, info: StencilInfo) void {
-  if (info.is_terminal) return; // terminal stencils have no NEXT holes
+  // Print registration summary: address, size, hole offsets.
+  const addr = @intFromPtr(info.bytes);
+  if (info.is_terminal) {
+    std.debug.print("stencil {s:<16} [0x{x}, +{d}]  terminal\n",
+      .{ name, addr, info.size });
+    return;
+  }
+  if (info.branch_offset2) |b2| {
+    std.debug.print("stencil {s:<16} [0x{x}, +{d}]  holes=[{d}, {d}, {d}]{s}\n",
+      .{ name, addr, info.size, info.next_offset, info.branch_offset.?, b2,
+         if (info.operand_offset != null) "  (has operand)" else "" });
+  } else if (info.branch_offset) |b1| {
+    std.debug.print("stencil {s:<16} [0x{x}, +{d}]  holes=[{d}, {d}]{s}\n",
+      .{ name, addr, info.size, info.next_offset, b1,
+         if (info.operand_offset != null) "  (has operand)" else "" });
+  } else {
+    std.debug.print("stencil {s:<16} [0x{x}, +{d}]  holes=[{d}]{s}\n",
+      .{ name, addr, info.size, info.next_offset,
+         if (info.operand_offset != null) "  (has operand)" else "" });
+  }
 
   var buf: [1024]u8 align(4) = undefined;
   std.debug.assert(info.size <= buf.len);
@@ -346,14 +366,18 @@ pub fn validateStencil(name: []const u8, info: StencilInfo) void {
   }
 }
 
-/// Validate all non-null entries in a StencilTable.
+/// Validate all non-null entries in a StencilTable and print a full summary.
 /// Uses comptime field iteration so new table fields are covered automatically.
 /// No-op unless the binary was built with -Dparanoid (zero runtime cost otherwise).
 pub fn validateTable(table: anytype) void {
   if (!build_options.paranoid) return;
+  std.debug.print("── JIT stencil table ───────────────────────────────────\n", .{});
   inline for (@typeInfo(@TypeOf(table)).@"struct".fields) |field| {
     if (@field(table, field.name)) |info| {
       validateStencil(field.name, info);
+    } else {
+      std.debug.print("stencil {s:<16} (Phase 2 handler)\n", .{field.name});
     }
   }
+  std.debug.print("────────────────────────────────────────────────────────\n", .{});
 }
