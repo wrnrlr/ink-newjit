@@ -30,7 +30,7 @@ pub const Token = struct {
 
 const KEYWORD_OPS = [_][]const u8{
   "sqrt", "sqr", "exp", "log", "sin", "cos", "abs",
-  "first", "last", "count", "in", "has",
+  "first", "last", "count", "in", "has", "mod",
   "parse", "exec",
 };
 
