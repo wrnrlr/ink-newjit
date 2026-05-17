@@ -37,7 +37,7 @@ const FRAMES_MAX = 64;
 
 // Vtable for JIT worker functions called from Phase-1 stencils.
 // Embedded directly in VM (not behind a pointer) so stencils reach each entry
-// with a single LDR from the VM base register (x0), same cost as before.
+// with a single LDR from the VM base register (x0).
 const JitVtable = if (jit_enabled) struct {
   apply1:        *const fn(*VM, u8) callconv(.c) void = undefined,
   apply2:        *const fn(*VM, u8) callconv(.c) void = undefined,
@@ -1852,4 +1852,3 @@ test "large list IR" {
     try std.testing.expectEqual(@as(f32, 20.0), v19.f);
   }
 }
-

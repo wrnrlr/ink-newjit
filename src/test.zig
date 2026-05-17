@@ -199,6 +199,10 @@ test "lambda" {
 test "recursion" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("fib: {$[x<2; x; fib[x-1]+fib[x-2]]}", "");
+  try t.check("fib 0", "0");
+  try t.check("fib 1", "1");
+  try t.check("fib 2", "1");
+  try t.check("fib 3", "2");
   try t.check("fib 10", "55");
 }
 test "partial" {
