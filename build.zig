@@ -6,6 +6,54 @@ pub fn build(b: *std.Build) !void {
   const enable_jit = b.option(bool, "jit", "Enable experimental arm64 JIT compiler") orelse false;
   const paranoid   = b.option(bool, "paranoid", "Enable extra runtime validation (e.g. JIT stencil shape checks)") orelse false;
 
+  // --- AOT stencil pipeline (Phase 1) ---
+  // 1. Compile stencils_src.zig to an object file at ReleaseFast, regardless
+  //    of the parent build mode. ReleaseFast is what guarantees true tail-call
+  //    lowering and clean relocation entries.
+  // 2. Run tools/extract_stencils.zig over that .o to emit a generated
+  //    stencil_data.zig containing byte arrays + hole offsets.
+  // 3. Expose stencil_data as a module so consumers can @import("stencil_data").
+  const stencils_mod = b.createModule(.{
+    .root_source_file = b.path("src/runtime/jit/stencils_src.zig"),
+    .target = target,
+    .optimize = .ReleaseFast,
+  });
+  const stencils_obj = b.addObject(.{ .name = "stencils_src", .root_module = stencils_mod });
+
+  const extractor_mod = b.createModule(.{
+    .root_source_file = b.path("tools/extract_stencils.zig"),
+    .target = b.graph.host,
+    .optimize = .ReleaseFast,
+  });
+  const extractor_exe = b.addExecutable(.{ .name = "extract_stencils", .root_module = extractor_mod });
+
+  const extract_run = b.addRunArtifact(extractor_exe);
+  extract_run.addFileArg(stencils_obj.getEmittedBin());
+  const stencil_data_file = extract_run.addOutputFileArg("stencil_data.zig");
+
+  const stencil_data_mod = b.createModule(.{
+    .root_source_file = stencil_data_file,
+    .target = target,
+    .optimize = optimize,
+  });
+
+  const extract_step = b.step("extract-stencils", "Compile stencils_src and run the extractor");
+  extract_step.dependOn(&extract_run.step);
+
+  // Smoke test for the AOT pipeline. Runs add_ii→return through a tiny
+  // hand-coded VM and asserts the result.
+  const smoke_mod = b.createModule(.{
+    .root_source_file = b.path("tools/smoke_stencils.zig"),
+    .target = b.graph.host,
+    .optimize = .ReleaseFast,
+    .link_libc = true,
+  });
+  smoke_mod.addImport("stencil_data", stencil_data_mod);
+  const smoke_exe = b.addExecutable(.{ .name = "smoke_stencils", .root_module = smoke_mod });
+  const smoke_run = b.addRunArtifact(smoke_exe);
+  const smoke_step = b.step("smoke-stencils", "Run the Phase-1 stencil pipeline smoke test");
+  smoke_step.dependOn(&smoke_run.step);
+
   // --- Tests ---
   const test_mod = b.createModule(.{
     .root_source_file = b.path("src/test.zig"),
