@@ -1,3 +1,109 @@
+## What was completed (Run 5) — recursion timeout + full stencil table
+
+### Background
+
+Two JIT tests timed out at 10 s under `-Doptimize=ReleaseFast -Djit=true`:
+
+- **"recursion"** (`fib 10` → 55)
+- **"list assign local"** (`{(a;b):...}[]`)
+
+All other 217 tests were already passing.  The session was a continuation of prior work; the root cause had been identified but the fix not yet applied.
+
+---
+
+### Fix 1 — `noinline fn tryJit` (recursion timeout)
+
+**Root cause**: In ReleaseFast, LLVM inlines `tryJit` into `applyFn`'s while loop (`while (self.vm.frames_len > prev_frames) { if (try self.vm.tryJit()) continue; ... }`).  After inlining, the optimiser notices that one branch of the inlined body always satisfies the `continue` condition and emits a `TBNZ` back-edge that bypasses the interpreter's `runOp` call entirely — creating an infinite spin loop for any lambda that enters the JIT.
+
+**Fix**: Mark `tryJit` with `pub noinline fn tryJit`.  This forces the call to be a real BL, so the compiler can no longer fold the post-call branch into a back-edge.
+
+**Effect**: The recursion timeout disappeared immediately.  219/219 tests passed after the fix (with the stencil table still in diagnostic state).'
+
+---
+
+### Fix 2 — `jump_false = null` (JumpFalse cannot be a Phase 1 stencil)
+
+**Root cause**: When `stencilJumpFalse` is in Phase 1, the pending-branch patching at Phase-1 break time is architecturally incompatible with forward branches that target `Return` (rather than the else branch).
+
+For a recursive function like `fib`:
+```
+ip  0: Local n
+ip  2: Int 2
+ip  4: Apply2 <        ← becomes lt_ii stencil
+ip  6: JumpFalse +8    ← falls through to base case (ip 7), else jumps to ip 15
+ip  7: Local n         ← base case: push n
+ip  9: Jump +56        ← jump to Return at ip 65
+ip 15: ...             ← recursive case (Global fib, Local n, Int 1, ...)
+ip 65: Return
+```
+
+Phase 1 processes the JumpFalse stencil, then continues into the true-branch at ip 7 (`Local n`), then encounters `Jump +56`.  The emitter records the Jump's target (`Return` at ip 65) in `pending_branches`.  Phase 1 then breaks at ip 15 (Global = no stencil).
+
+**Post-break patching sends ALL `pending_branches` entries to `handler_start`** (Phase 2's entry point, which starts at ip 15 — the recursive case).  The `Jump +56`'s pending branch is also patched to `handler_start`, so the base-case path (`Local n → NEXT hole`) gets sent to the recursive computation instead of to `Return`.
+
+For `fib(10)`: the conditional check fires once (`condPop` confirms `10 < 2 = false`, correct), but the base case for all leaf calls of `fib(1)` and `fib(0)` incorrectly re-enters the recursive else-branch, producing wrong results.
+
+**Fix**: `jump_false = null` (and `jump_true = null`).  Phase 2 handles these via `jhJumpFalse`/`jhJumpTrue`, which update `frame.ip` by the offset and let the interpreter dispatch correctly.
+
+**The architectural constraint**: Phase 1 stencils with two NEXT holes (conditional branches) can only ever have *both* holes pointing forward into Phase 1, or have the else-hole be the `handler_start`.  They cannot safely handle any situation where the true-branch itself has further forward references that target a point *after* the Phase-1 break point.  Unless the emitter is redesigned to track per-pending-branch targets independently (and emit trampoline stubs for each), conditional stencils with fall-through code are unsafe in Phase 1 for anything other than the final "last branch before a terminal" pattern.
+
+---
+
+### Fix 3 — `scanTerminal` for `stencilReturn`
+
+`scanAll` tries `scan3WithFrame → scan2WithFrame → scanWithFrame → scan`.  All four look for the NEXT hole sentinel (`MOVZ X8, #0xDEAD / MOVK … / BR X8`).  `stencilReturn` ends with `RET` (no NEXT hole), so all four return `null` and `return_` was silently left as `null` in the stencil table.
+
+**Fix**: Register `return_` explicitly with `s.scanTerminal(@intFromPtr(&stencilReturn))`.  `scanTerminal` looks for `RET` and sets `is_terminal = true` so the emitter knows to end Phase 1 without entering Phase 2.
+
+---
+
+### Fix 4 — scan order: greediest first
+
+The `scanAll` helper previously tried `scanWithFrame` before `scan3WithFrame`.  In ReleaseFast, SpecDyad stencils have three NEXT holes (int fast path, float fast path, slow BLR path — LLVM tail-duplicates the hole into each arm).  If `scanWithFrame` runs first it stops at the first hole, leaving two unpatched → SIGILL.
+
+**Fix**: Reversed the order to `scan3WithFrame → scan2WithFrame → scanWithFrame → scan`, ensuring the greediest successful match wins.
+
+---
+
+### State of the JIT after Run 5
+
+- **219/219 tests pass** with `-Doptimize=ReleaseFast -Djit=true --test-timeout 10s`.
+- Full stencil table active:
+  - **Phase 1 stencils**: `gap`, `dup`, `int_`, `const_`, `global`, `local`, `local_last`, `assign_local`, `apply1`, `apply2`, `drop`, `assign_global`, `make_list`, `derive`, `make_dict`, `return_` (terminal), `add_ii`, `sub_ii`, `mul_ii`, `lt_ii`, `gt_ii`, `eq_ii`, `add_II`, `sub_II`, `mul_II`, `lt_II`, `gt_II`, `eq_II`.
+  - **Phase 2 only**: `jump_false`, `jump_true`, `call`, `tail_call`, `apply`, `make_partial`, `jump`.
+  - **Interpreter fallback**: `amend`, `dmend`, `list_assign_global`, `list_assign_local`, `make_table`, `command`.
+- `tryJit` is marked `noinline` to prevent the LLVM back-edge inlining bug.
+
+---
+
+### What could increase velocity
+
+**1. Stencil shape validation at startup (Debug build)**
+
+Add a comptime or runtime check that, for every registered stencil, all non-terminal instruction words that look like NEXT-hole sentinels have been patched by the emitter.  Currently a mis-registered stencil (wrong scan variant, wrong byte count) silently causes a SIGILL at the first hot call.  A startup validator that probes each stencil slot with a synthetic single-instruction chunk and checks that the output buffer contains no `0xBABECAFE` words would catch these in seconds rather than hours of binary-searching.
+
+**2. Stencil disassembly in debug output**
+
+The scanner (`scan`, `scanWithFrame`, etc.) knows the exact byte range it accepted.  A `--debug-jit` build flag that prints one line per stencil registration (`stencilAdd_ii: [0x…,+164] holes=[84,148,160]`) would have cut the SpecDyad 3-hole discovery time from ~2 hours to ~5 minutes.
+
+**3. Document the pending-branch constraint explicitly**
+
+The architectural rule — *Phase 1 stencils with two NEXT holes can only be safely used when the true-branch path has no forward references that survive past the Phase-1 break point* — should appear as a comment in `emit.zig` next to the post-break patching loop.  Without this, any future attempt to re-enable `jump_false` as a Phase 1 stencil will rediscover the bug from scratch.
+
+**4. Targeted regression test for the JumpFalse base-case path**
+
+A test of the form `assert (fib 3) = 2` is not enough — it also passes when the else-branch accidentally computes the right value.  A better sentinel is `assert (fib 1) = 1` and `assert (fib 0) = 1`, which specifically exercise the base-case path without any recursive accumulation masking the error.  Add these to the JIT-specific test suite as first-class regression guards.
+
+---
+
+## What can still be improved
+
+### JumpFalse / JumpTrue as Phase 1 stencils
+
+The two conditional branch stencils are currently Phase 2.  Making them Phase 1 would eliminate two `BL jhJumpFalse` calls per branch site, saving ~8 instructions per branch.  The prerequisite is redesigning the post-break pending-branch patching to track per-branch `target_ip` values and emit a small trampoline (or inline stub) for each distinct target rather than pointing all pending branches at `handler_start`.  Alternatively, a separate "branch stencil" compilation pass could split the lambda at each JumpFalse site and emit independent Phase 1 segments connected by direct BL chains — closer to the Copy-and-Patch paper's original approach.
+
+---
+
 # JIT / Optimizer Implementation Feedback
 
 ## What was completed (Tasks 1–11) after Run 1
@@ -214,8 +320,6 @@ These stencils inline `stencilRef` via a switch on the value tag.  In ReleaseFas
 **Remaining limitation**: `stencilLocal` and `stencilConst` fall back to Phase 2 in ReleaseFast.  A `scan2WithFrame`-style fix for these would require capturing the multi-arm switch as a single blob, but the else block uses backward branches that already re-enter the main path — making the region shape irregular.  The correct fix is to split `stencilRef` into a dedicated helper rather than inlining its switch into every stencil.
 
 ---
-
-## What can still be improved
 
 ### DUP not yet emitted by the optimizer
 
