@@ -60,7 +60,9 @@ pub fn N(comptime T: type) type {
     }
     pub fn n1(alloc: Alloc, x: []const T) !Self {
       const n = try Self.init(alloc, x.len);
-      if (T == V) { for (x, n.slice()) |src, *dst| dst.* = src.ref(); } else @memcpy(n.slice(), x);
+      if (T == V) {
+        for (x, n.slice()) |src, *dst| dst.* = src.ref();
+      } else @memcpy(n.slice(), x);
       return n;
     }
     pub fn fromSlice(alloc: Alloc, x: []const T) !Self {

@@ -27,9 +27,9 @@ const promote = @import("../primitive/promote.zig").promote;
 const dispatch = @import("../primitive/dispatch.zig");
 const MockWriter = @import("../util.zig").MockWriter;
 // Force-link the CPS helpers so their exported symbols survive ReleaseFast gc-sections.
-comptime {
-  _ = @import("jit/cps_helpers.zig").force_keep;
-}
+// comptime {
+//   _ = @import("jit/cps_helpers.zig").force_keep;
+// }
 
 const STACK_MAX = 2048;
 const FRAMES_MAX = 64;
