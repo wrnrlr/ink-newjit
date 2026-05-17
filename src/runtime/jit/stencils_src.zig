@@ -75,6 +75,8 @@ extern fn cps_derive(vm: *VM, op: u32) callconv(.c) void;
 extern fn cps_amend(vm: *VM, op: u32) callconv(.c) void;
 extern fn cps_dmend(vm: *VM, op: u32) callconv(.c) void;
 extern fn cps_command(vm: *VM) callconv(.c) void;
+extern fn cps_pop_truthy(vm: *VM) callconv(.c) bool;
+extern fn cps_return(vm: *VM) callconv(.c) void;
 
 // ── No-operand stencils ───────────────────────────────────────────────────────
 
@@ -190,13 +192,40 @@ pub export fn stencil_make_partial(vm: *VM) callconv(.c) void {
     return @call(.always_tail, __ink_hole_next, .{vm});
 }
 
+// ── Branch stencils ───────────────────────────────────────────────────────────
+//
+// cps_pop_truthy pops TOS and returns isTrue() for it. The stencil then
+// chooses between the `next` and `taken` continuation holes. JumpFalse
+// jumps when the value is FALSE (popped truth == false → taken).
+
+pub export fn stencil_jump_false(vm: *VM) callconv(.c) void {
+    if (cps_pop_truthy(vm)) {
+        return @call(.always_tail, __ink_hole_next, .{vm});
+    }
+    return @call(.always_tail, __ink_hole_taken, .{vm});
+}
+
+pub export fn stencil_jump_true(vm: *VM) callconv(.c) void {
+    if (cps_pop_truthy(vm)) {
+        return @call(.always_tail, __ink_hole_taken, .{vm});
+    }
+    return @call(.always_tail, __ink_hole_next, .{vm});
+}
+
+// Unconditional Jump is consumed entirely by the emitter — it produces no
+// stencil. Predecessors are rewired to point directly at the Jump target,
+// so the runtime never executes a "stencil_jump".
+
 // ── Terminal ──────────────────────────────────────────────────────────────────
-// stencil_return is the only stencil that does not end with a tail-call;
-// it returns to the C caller, ending this lambda's JIT chain. Phase 2.2b
-// wraps this with the frame-popping `cps_return` helper before the ret.
+//
+// stencil_return is the only stencil that does not end with a tail-call.
+// It runs cps_return (frame pop + cleanup + push result) and then returns
+// to the C caller, ending this lambda's JIT chain. The C caller is
+// either VM.run (for the top-level chain) or cps_call (for a lambda
+// invoked from within another chain).
 
 pub export fn stencil_return(vm: *VM) callconv(.c) void {
-    _ = vm;
+    cps_return(vm);
     return;
 }
 

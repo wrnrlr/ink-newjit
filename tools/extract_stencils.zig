@@ -268,13 +268,17 @@ fn extract(alloc: std.mem.Allocator, view: MachoView) ![]Stencil {
             fn lt(_: void, a: Hole, b: Hole) bool { return a.offset < b.offset; }
         }.lt);
 
-        // Heuristic: terminal stencils have zero relocations and end with RET
-        // (0xD65F03C0 little-endian = 0xC0 0x03 0x5F 0xD6).
-        const is_terminal = bytes.len >= 4 and
-            bytes[bytes.len - 4] == 0xC0 and
-            bytes[bytes.len - 3] == 0x03 and
-            bytes[bytes.len - 2] == 0x5F and
-            bytes[bytes.len - 1] == 0xD6;
+        // A stencil is terminal iff it has no `next`/`taken` hole — the
+        // chain ends here. Either it ends with a literal RET, or it
+        // tail-calls a runtime helper (e.g. cps_return) whose own ret
+        // unwinds to the chain caller. Both shapes are functionally
+        // equivalent from the patcher's point of view.
+        var has_next = false;
+        for (holes.items) |h| switch (h.target) {
+            .next, .taken => { has_next = true; },
+            else => {},
+        };
+        const is_terminal = !has_next;
 
         try stencils_list.append(alloc, .{
             .name = try alloc.dupe(u8, f.name),

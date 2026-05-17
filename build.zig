@@ -54,6 +54,19 @@ pub fn build(b: *std.Build) !void {
   const smoke_step = b.step("smoke-stencils", "Run the Phase-1 stencil pipeline smoke test");
   smoke_step.dependOn(&smoke_run.step);
 
+  // Phase-2.2b branch-stencil smoke test.
+  const branch_mod = b.createModule(.{
+    .root_source_file = b.path("tools/smoke_branch.zig"),
+    .target = b.graph.host,
+    .optimize = .ReleaseFast,
+    .link_libc = true,
+  });
+  branch_mod.addImport("stencil_data", stencil_data_mod);
+  const branch_exe = b.addExecutable(.{ .name = "smoke_branch", .root_module = branch_mod });
+  const branch_run = b.addRunArtifact(branch_exe);
+  const branch_step = b.step("smoke-branch", "Run the Phase-2.2b branch-stencil smoke test");
+  branch_step.dependOn(&branch_run.step);
+
   // --- Tests ---
   const test_mod = b.createModule(.{
     .root_source_file = b.path("src/test.zig"),

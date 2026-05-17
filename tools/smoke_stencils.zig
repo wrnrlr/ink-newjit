@@ -42,6 +42,14 @@ export fn __vm_pop_bool(vm: *VM) callconv(.c) bool {
     return vm.stack[vm.sp] != 0;
 }
 
+// The real cps_return lives in cps_helpers.zig and is not linked into
+// this smoke binary. The phase-2.2 stencil_return ends with `b cps_return`,
+// so the patcher needs an address to point at. Our stub is a no-op:
+// the test's `VM` is hand-rolled and has no frame to pop.
+export fn cps_return(vm: *VM) callconv(.c) void {
+    _ = vm;
+}
+
 // ── Patcher ───────────────────────────────────────────────────────────────────
 //
 // branch26: B/BL imm26. The instruction encodes (target - PC) / 4 as a
@@ -104,6 +112,7 @@ fn lookupExternal(symbol: []const u8) ?usize {
     if (std.mem.eql(u8, name, "vm_pop_i32"))  return @intFromPtr(&__vm_pop_i32);
     if (std.mem.eql(u8, name, "vm_push_i32")) return @intFromPtr(&__vm_push_i32);
     if (std.mem.eql(u8, name, "vm_pop_bool")) return @intFromPtr(&__vm_pop_bool);
+    if (std.mem.eql(u8, name, "cps_return")) return @intFromPtr(&cps_return);
     return null;
 }
 
@@ -165,12 +174,16 @@ pub fn main(_: std.process.Init.Minimal) !void {
         }
     }
 
-    // Patch every hole in every non-terminal stencil.
+    // Patch every hole in every stencil. Terminal stencils still need
+    // their external BL targets patched — only the .next/.taken links
+    // are skipped (a terminal has none anyway).
     for (places, 0..) |p, i| {
-        if (p.stencil.is_terminal) continue;
         const code_base = @intFromPtr(buf) + p.code_offset;
         const operand_addr = @intFromPtr(buf) + p.operand_slot_offset;
-        const next_addr = @intFromPtr(buf) + places[i + 1].code_offset;
+        const next_addr = if (i + 1 < places.len)
+            @intFromPtr(buf) + places[i + 1].code_offset
+        else
+            0;
         for (p.stencil.holes) |h| {
             const instr_addr = code_base + h.offset;
             switch (h.kind) {

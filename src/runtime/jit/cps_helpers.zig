@@ -373,11 +373,26 @@ pub export fn cps_command(vm: *VM) callconv(.c) void {
     pushOr(vm, result);
 }
 
+// ── Branch helper ─────────────────────────────────────────────────────────────
+//
+// JumpFalse / JumpTrue stencils call this to pop TOS and decide which
+// continuation to take. Returning `bool` (not a V) is intentional: bool
+// fits in a single C-ABI register and avoids the value-copy overhead.
+
+pub export fn cps_pop_truthy(vm: *VM) callconv(.c) bool {
+    const v = vm.pop();
+    defer v.deinit(vm.alloc);
+    return v.isTrue();
+}
+
 // ── Return (terminal stencil) ─────────────────────────────────────────────────
 //
-// Phase 2.2b will refine this when the full frame/call story lands.
-// For now, the helper does what doReturn does: pop a frame, clean up
-// locals, push the result.
+// In CPS-land each lambda is a separate JIT-compiled C function. Calling
+// a lambda is a BL to its entry; returning is a `ret`. cps_return does
+// the bookkeeping doReturn did in the interpreter: pop the result, pop
+// the frame the caller pushed for us, clean up locals between
+// [frame.result_slot, stack_len), restore the parent chunk, push the
+// result back so the caller's next stencil sees it.
 
 /// Force the linker to retain every cps_* symbol even when ReleaseFast's
 /// dead-code elimination cannot see a Zig call site. The JIT looks these
@@ -405,16 +420,17 @@ pub const force_keep = [_]*const anyopaque{
     @ptrCast(&cps_amend),
     @ptrCast(&cps_dmend),
     @ptrCast(&cps_command),
+    @ptrCast(&cps_pop_truthy),
     @ptrCast(&cps_return),
 };
 
 /// Mutable runtime anchor for the force_keep table. VM.create writes
 /// each pointer into `cps_anchor_sink` (volatile) so the optimizer is
 /// forced to preserve every function in the table.
-pub var cps_anchor_ptr: *const [22]*const anyopaque = undefined;
+pub var cps_anchor_ptr: *const [23]*const anyopaque = undefined;
 pub var cps_anchor_sink: usize = 0;
 
-pub fn anchor() *const [22]*const anyopaque {
+pub fn anchor() *const [23]*const anyopaque {
     return &force_keep;
 }
 
