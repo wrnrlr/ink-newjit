@@ -46,9 +46,6 @@ pub const Lambda = struct { a: ?Args, b: ?Seq, start: u32, end: u32 };
 pub const Cond = struct { stmts: []*Node };
 pub const Dict = struct { items: ?Items };
 pub const UTable = struct { keys: ?Items, items: ?Items };
-// pub const Select = struct { rows: ?Seq, by: ?Seq, from: Var, where: ?*Node };
-// pub const Update = struct { rows: Seq, from: Var, where: ?*Node };
-// pub const Delete = struct { from: Var, where: ?*Node };
 
 const NodeType = enum {
   terse, verb, stmt_clause, stmt_adjunct, right, bind,
