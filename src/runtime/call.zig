@@ -64,7 +64,6 @@ pub const Call = struct {
         for (args) |arg| try self.vm.push(arg.ref());
         try self.vm.callLambda(ref, args.len, res_slot);
         while (self.vm.frames_len > prev_frames) {
-          if (try self.vm.tryJit()) continue;
           const b = self.vm.readByte();
           try self.vm.runOp(@enumFromInt(b));
         }
