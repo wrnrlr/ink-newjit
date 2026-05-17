@@ -115,6 +115,18 @@ pub fn emitLambda(
   var b   = a64.Buf{ .data = buf };
   const code = chunk.code.items;
 
+  // Outer JIT-function frame: save X20/X21 (callee-saved) to the stack so
+  // we can use them to preserve the original LR (X30) and SP across Phase 1
+  // stencils.  In ReleaseFast, LLVM sometimes places a stencil function's
+  // epilogue (LDP X29,X30,[SP],#N) *after* the NEXT-hole BR X8, so that
+  // instruction is never copied into the JIT buffer.  The result: every BLR
+  // inside a Phase-1 stencil body corrupts X30 and drifts SP downward.
+  // Saving X30→X20 and SP_original→X21 here lets the Phase-2 epilogue
+  // restore both regardless of how much stencil drift occurred.
+  b.emit(a64.stpX20X21(32));       // STP X20, X21, [SP, #-32]!  (save old callee-saved regs)
+  b.emit(a64.stpX19X30At16());     // STP X19, X30, [SP, #16]    (save caller's X19 and LR on stack)
+  b.emit(a64.addX21SpPlus32());    // ADD X21, SP, #32           (SP before outer STP → X21)
+
   // ── Phase 1: stencil copy-and-patch ──────────────────────────────────────
   // For each stencil we record where in the output buffer the NEXT hole sits,
   // so we can patch it once we know the address of the following stencil.
@@ -342,10 +354,12 @@ pub fn emitLambda(
   }
 
   // If Phase 1 compiled everything (ip reached end with no remaining ops),
-  // we still need to emit at least a RET so the caller can return.
-  // In practice this only happens for trivially-empty or Return-less bytecode
-  // (shouldn't occur for well-formed lambdas).
+  // we still need to emit a return sequence.  No Phase-2 STP was emitted so
+  // we go straight to the outer-frame restore.
   if (ip >= code.len) {
+    b.emit(a64.movSpFromX21());      // MOV SP, X21  — restore original SP
+    b.emit(a64.ldpX19X30Neg16());    // LDP X19, X30, [SP, #-16]  — restore X19 and LR from stack
+    b.emit(a64.ldpX20X21Neg32());    // LDP X20, X21, [SP, #-32]  — restore old callee-saved
     b.emit(a64.ret());
     return .{ .size = b.pos, .stop_ip = stop_ip };
   }
@@ -471,7 +485,12 @@ pub fn emitLambda(
   }
 
   // Epilogue for the handler section.
+  // LDP X19,X30 unwinds Phase-2's own STP frame.  Then we restore SP via X21
+  // and load the original X19 and LR from the outer stack frame (saved at entry).
   b.emit(a64.ldpX19X30(16));
+  b.emit(a64.movSpFromX21());      // SP  = original SP (saved at function entry)
+  b.emit(a64.ldpX19X30Neg16());    // LDP X19, X30, [SP, #-16]  — restore X19 and original LR
+  b.emit(a64.ldpX20X21Neg32());    // LDP X20, X21, [SP, #-32]  — restore old callee-saved
   b.emit(a64.ret());
 
   return .{ .size = b.pos, .stop_ip = stop_ip };

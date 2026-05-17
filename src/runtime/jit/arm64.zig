@@ -140,3 +140,40 @@ pub fn movFpSp() u32 { return 0x910003FD; }
 
 // NOP
 pub fn nop() u32 { return 0xD503201F; }
+
+// STP X20, X21, [SP, #-size]!  (pre-index; saves our LR/SP scratch registers)
+pub fn stpX20X21(size: u7) u32 {
+  const imm7: u32 = @as(u7, @bitCast(-@as(i7, @intCast(size / 8))));
+  return 0xA9800000 | (imm7 << 15) | (21 << 10) | (31 << 5) | 20;
+}
+
+// LDP X20, X21, [SP, #-16]  (signed offset, no SP update — used after MOV SP,X21)
+pub fn ldpX20X21neg16() u32 {
+  // imm7 = -2 (= -16/8) as 7-bit signed = 0x7E
+  return 0xA9400000 | (0x7E << 15) | (21 << 10) | (31 << 5) | 20;
+}
+
+// ADD X21, SP, #16  — captures SP_original right after stpX20X21(16)
+// (SP was decremented by 16 by the STP, so SP+16 = original SP)
+pub fn addX21SpPlus16() u32 { return 0x910043F5; }
+
+// ADD X21, SP, #32  — captures SP_original right after stpX20X21(32)
+// (SP was decremented by 32 by the STP, so SP+32 = original SP)
+pub fn addX21SpPlus32() u32 { return 0x910083F5; }
+
+// STP X19, X30, [SP, #16]  — save caller's X19 and LR on the outer frame stack
+// (after stpX20X21(32), at [SP+16] and [SP+24])
+pub fn stpX19X30At16() u32 { return 0xA9017BF3; }
+
+// LDP X19, X30, [SP, #-16]  — restore X19 and LR from outer frame after MOV SP,X21
+// SP at that point = original SP, so [SP-16]=saved X19 and [SP-8]=saved LR
+pub fn ldpX19X30Neg16() u32 { return 0xA97F7BF3; }
+
+// LDP X20, X21, [SP, #-32]  (signed offset, no SP update — used after MOV SP,X21)
+pub fn ldpX20X21Neg32() u32 {
+  // imm7 = -4 (= -32/8) as 7-bit signed = 0x7C
+  return 0xA9400000 | (0x7C << 15) | (21 << 10) | (31 << 5) | 20;
+}
+
+// MOV SP, X21  (= ADD SP, X21, #0)  — restores SP from the saved value
+pub fn movSpFromX21() u32 { return 0x910002BF; }

@@ -130,7 +130,8 @@ pub const VM = struct {
 
     if (comptime jit_enabled) {
         vm.jit_vtable = JitImpl.buildVtable();
-        vm.jit = jit_mod.JitCache.init(alloc, JitImpl.buildHandlers(), JitImpl.buildStencils(), @intFromPtr(&JitImpl.jhApply2)) catch null;
+        const stencils = JitImpl.buildStencils();
+        vm.jit = jit_mod.JitCache.init(alloc, JitImpl.buildHandlers(), stencils, @intFromPtr(&JitImpl.jhApply2)) catch null;
     }
 
     std.Io.Threaded.global_single_threaded.allocator = alloc;
@@ -241,13 +242,14 @@ pub const VM = struct {
   // Attempt JIT execution of the current frame.  Returns true if the JIT ran
   // (caller should `continue` its dispatch loop), false if it should interpret.
   // Returns an error if a stencil stored one in vm.jit_err during execution.
-  pub fn tryJit(vm: *VM) !bool {
+  pub noinline fn tryJit(vm: *VM) !bool {
     if (comptime !jit_enabled) return false;
     const frame = vm.currentFrame();
     if (vm.jit == null or frame.lambda_idx == NO_LAMBDA or frame.ip != 0) return false;
     const lambda_idx = frame.lambda_idx;
     const entry = vm.fn_tables.lambdaAt(lambda_idx);
     const jf = vm.jit.?.getOrCompile(lambda_idx, entry.chunk) catch return false;
+    if (jf.stop_ip == 0) return false; // guard: stop_ip=0 would re-trigger tryJit forever
     frame.ip = jf.stop_ip;
     vm.jit_ic_key = lambda_idx; // expose to apply2Worker for type observation
     jf.code(@ptrCast(vm));
@@ -841,8 +843,9 @@ const JitImpl = if (jit_enabled) struct {
   }
   fn jhJump(vm: *VM, offset: u16) callconv(.c) void { vm.currentFrame().ip += offset; }
   fn jhJumpFalse(vm: *VM, offset: u16) callconv(.c) void {
+    const frame = vm.currentFrame();
     const v = vm.pop(); defer v.deinit(vm.alloc);
-    if (!v.isTrue()) vm.currentFrame().ip += offset;
+    if (!v.isTrue()) frame.ip += offset;
   }
   fn jhJumpTrue(vm: *VM, offset: u16) callconv(.c) void {
     const v = vm.pop(); defer v.deinit(vm.alloc);
@@ -851,7 +854,9 @@ const JitImpl = if (jit_enabled) struct {
   fn jhMakeList(vm: *VM, n: u8) callconv(.c) void { makeListWorker(vm, n); }
   fn jhDerive(vm: *VM, adv: u8) callconv(.c) void { deriveWorker(vm, adv); }
   fn jhMakeDict(vm: *VM, n: u8) callconv(.c) void { makeDictWorker(vm, n); }
-  fn jhReturn(vm: *VM) callconv(.c) void { vm.doReturn() catch {}; }
+  fn jhReturn(vm: *VM) callconv(.c) void {
+    vm.doReturn() catch {};
+  }
 
   // Call/Apply/TailCall handlers for Phase 2.
   // argc is pre-read from bytecode by the emitter (avoids vm.readByte()).
@@ -1295,6 +1300,7 @@ const JitImpl = if (jit_enabled) struct {
     } else {
       vm.jit_vtable.apply2(vm, @intFromEnum(op));
     }
+    asm volatile ("" :: [v] "{x0}" (vm));
     asm volatile (
       \\.inst 0xD29BD5A8
       \\.inst 0xF2B7DDE8
@@ -1325,6 +1331,7 @@ const JitImpl = if (jit_enabled) struct {
     return struct {
       fn f(vm: *VM) callconv(.c) void {
         vm.jit_vtable.simd_array2(vm, @intFromEnum(op));
+        asm volatile ("" :: [v] "{x0}" (vm));
         asm volatile (
           \\.inst 0xD29BD5A8
           \\.inst 0xF2B7DDE8
@@ -1354,6 +1361,7 @@ const JitImpl = if (jit_enabled) struct {
           : [o] "={x1}" (n)
         );
         @field(vm.jit_vtable, vtable_field)(vm, @as(u8, @truncate(n)));
+        asm volatile ("" :: [v] "{x0}" (vm));
         asm volatile (
           \\.inst 0xD29BD5A8
           \\.inst 0xF2B7DDE8
@@ -1390,6 +1398,7 @@ const JitImpl = if (jit_enabled) struct {
   // Uses scanWithFrame because the drop call is via LDR+BLR.
   fn stencilDrop(vm: *VM) callconv(.c) void {
     vm.jit_vtable.drop(vm);
+    asm volatile ("" :: [v] "{x0}" (vm));
     asm volatile (
       \\.inst 0xD29BD5A8
       \\.inst 0xF2B7DDE8
@@ -1411,6 +1420,7 @@ const JitImpl = if (jit_enabled) struct {
       : [o] "={x1}" (idx)
     );
     vm.jit_vtable.assign_global(vm, @as(u8, @truncate(idx)));
+    asm volatile ("" :: [v] "{x0}" (vm));
     asm volatile (
       \\.inst 0xD29BD5A8
       \\.inst 0xF2B7DDE8
@@ -1442,6 +1452,7 @@ const JitImpl = if (jit_enabled) struct {
     vm.stack[vm.stack_len] = vm.stack[vm.stack_len - 1];
     vm.stack_len += 1;
     vm.jit_vtable.ref(vm);
+    asm volatile ("" :: [v] "{x0}" (vm));
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1484,6 +1495,7 @@ const JitImpl = if (jit_enabled) struct {
     vm.stack[vm.stack_len] = vm.stack[frame.base + slot];
     vm.stack_len += 1;
     vm.jit_vtable.ref(vm);
+    asm volatile ("" :: [v] "{x0}" (vm));
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1530,6 +1542,7 @@ const JitImpl = if (jit_enabled) struct {
       : [o] "={x1}" (slot)
     );
     vm.jit_vtable.assign_local(vm, @as(u8, @truncate(slot)));
+    asm volatile ("" :: [v] "{x0}" (vm));
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1553,6 +1566,7 @@ const JitImpl = if (jit_enabled) struct {
     vm.stack[vm.stack_len] = vm.current_chunk.constants.items[idx];
     vm.stack_len += 1;
     vm.jit_vtable.ref(vm);
+    asm volatile ("" :: [v] "{x0}" (vm));
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1582,6 +1596,7 @@ const JitImpl = if (jit_enabled) struct {
     }
     vm.stack_len += 1;
     vm.jit_vtable.ref(vm);
+    asm volatile ("" :: [v] "{x0}" (vm));
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1600,6 +1615,7 @@ const JitImpl = if (jit_enabled) struct {
       : [o] "={x1}" (op_raw)
     );
     vm.jit_vtable.apply1(vm, @as(u8, @truncate(op_raw)));
+    asm volatile ("" :: [v] "{x0}" (vm));
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1621,6 +1637,7 @@ const JitImpl = if (jit_enabled) struct {
       : [o] "={x1}" (op_raw)
     );
     vm.jit_vtable.apply2(vm, @as(u8, @truncate(op_raw)));
+    asm volatile ("" :: [v] "{x0}" (vm));
     asm volatile (
       \\.inst 0xD29BD5A8   // MOVZ X8, #0xDEAD — NEXT hole word 0
       \\.inst 0xF2B7DDE8   // MOVK X8, #0xBEEF, LSL 16
@@ -1639,10 +1656,10 @@ const JitImpl = if (jit_enabled) struct {
   // Uses scan2WithFrame (two NEXT holes, frame preserved for BLR).
   fn stencilJumpFalse(vm: *VM) callconv(.c) void {
     const cond: u64 = vm.jit_vtable.cond_pop(vm);
-    // CBZ X0, #+24: if false (x0==0): skip fall-through NEXT hole → taken NEXT hole.
-    // Function ends with unreachable so no x8 clobber annotation needed.
+    // CBZ X1, #+24: if false (x1==0): skip fall-through NEXT hole → taken NEXT hole.
+    // X0=vm, X1=cond — next stencil sees X0=vm as required.
     asm volatile (
-      \\.inst 0xB40000C0   // CBZ X0, #+24
+      \\.inst 0xB40000C1   // CBZ X1, #+24
       \\.inst 0xD29BD5A8   // Fall-through NEXT hole word 0
       \\.inst 0xF2B7DDE8   // word 1
       \\.inst 0xF2D95FC8   // word 2
@@ -1653,7 +1670,7 @@ const JitImpl = if (jit_enabled) struct {
       \\.inst 0xF2D95FC8   // word 2
       \\.inst 0xF2F757C8   // word 3
       \\.inst 0xD61F0100   // word 4: BR X8
-      : : [c] "{x0}" (cond)
+      : : [c] "{x1}" (cond), [v] "{x0}" (vm)
     );
     unreachable;
   }
@@ -1664,8 +1681,10 @@ const JitImpl = if (jit_enabled) struct {
   //   [taken NEXT hole: 5 words]        — taken when condition is TRUE (do jump)
   fn stencilJumpTrue(vm: *VM) callconv(.c) void {
     const cond: u64 = vm.jit_vtable.cond_pop(vm);
+    // CBNZ X1, #+24: if true (x1!=0): skip fall-through NEXT hole → taken NEXT hole.
+    // X0=vm, X1=cond — next stencil sees X0=vm as required.
     asm volatile (
-      \\.inst 0xB50000C0   // CBNZ X0, #+24
+      \\.inst 0xB50000C1   // CBNZ X1, #+24
       \\.inst 0xD29BD5A8   // Fall-through NEXT hole word 0
       \\.inst 0xF2B7DDE8   // word 1
       \\.inst 0xF2D95FC8   // word 2
@@ -1676,7 +1695,7 @@ const JitImpl = if (jit_enabled) struct {
       \\.inst 0xF2D95FC8   // word 2
       \\.inst 0xF2F757C8   // word 3
       \\.inst 0xD61F0100   // word 4: BR X8
-      : : [c] "{x0}" (cond)
+      : : [c] "{x1}" (cond), [v] "{x0}" (vm)
     );
     unreachable;
   }
@@ -1703,65 +1722,58 @@ const JitImpl = if (jit_enabled) struct {
   fn buildStencils() jit_mod.StencilTable {
     const s = stencils_mod;
 
-    // Try all scan variants in order, most restrictive first.
-    // scan3WithFrame as final fallback handles ReleaseFast tail-duplication
-    // of the NEXT hole into multiple code paths (e.g. specDyad's 3 branches).
+    // Try scan variants greediest-first: in ReleaseFast, LLVM tail-duplicates
+    // the NEXT hole into each branch of a multi-path stencil (e.g. specDyad's
+    // int / float / slow paths each get their own copy).  If we try scanWithFrame
+    // first it returns after finding only the FIRST copy, leaving the others
+    // un-patched (still 0xBABECAFEBEEFDEAD), which causes a SIGSEGV at runtime.
+    // Trying scan3WithFrame first finds all copies; if fewer exist we fall back.
     const scanAll = struct {
-      fn f(fn_addr: usize) ?stencils_mod.StencilInfo {
-        return s.scanWithFrame(fn_addr)
-          orelse s.scan(fn_addr)
-          orelse s.scan2WithFrame(fn_addr)
-          orelse s.scan3WithFrame(fn_addr);
-      }
-    }.f;
-
-    const scan2 = struct {
-      fn f(fn_addr: usize) ?stencils_mod.StencilInfo {
-        return s.scan2WithFrame(fn_addr)
-          orelse s.scan3WithFrame(fn_addr);
+      fn f(_: []const u8, fn_addr: usize) ?stencils_mod.StencilInfo {
+        if (s.scan3WithFrame(fn_addr)) |r| return r;
+        if (s.scan2WithFrame(fn_addr)) |r| return r;
+        if (s.scanWithFrame(fn_addr))  |r| return r;
+        if (s.scan(fn_addr))           |r| return r;
+        return null;
       }
     }.f;
 
     return .{
-      .gap          = s.scan(@intFromPtr(&stencilGap)) orelse s.scanWithFrame(@intFromPtr(&stencilGap)),
-      .dup          = scanAll(@intFromPtr(&stencilDup)),
-      .int_         = s.scan(@intFromPtr(&stencilInt)) orelse s.scanWithFrame(@intFromPtr(&stencilInt)),
-      .const_       = scanAll(@intFromPtr(&stencilConst)),
-      .global       = scanAll(@intFromPtr(&stencilGlobal)),
-      .local        = scanAll(@intFromPtr(&stencilLocal)),
-      .local_last   = s.scan(@intFromPtr(&stencilLocalLast)) orelse s.scanWithFrame(@intFromPtr(&stencilLocalLast)),
-      .assign_local = scanAll(@intFromPtr(&stencilAssignLocal)),
-      .apply1       = scanAll(@intFromPtr(&stencilApply1)),
-      .apply2       = scanAll(@intFromPtr(&stencilApply2)),
-      .drop         = scanAll(@intFromPtr(&stencilDrop)),
-      .assign_global = scanAll(@intFromPtr(&stencilAssignGlobal)),
-      .make_list    = scanAll(@intFromPtr(&Stencil_make_list.f)),
-      .derive       = scanAll(@intFromPtr(&Stencil_derive.f)),
-      .make_dict    = scanAll(@intFromPtr(&Stencil_make_dict.f)),
-      .return_      = s.scanTerminal(@intFromPtr(&stencilReturn)),
-      .jump_false   = scan2(@intFromPtr(&stencilJumpFalse)),
-      .jump_true    = scan2(@intFromPtr(&stencilJumpTrue)),
-      // specDyad stencils: comptime-generated, up to 3 NEXT holes from LLVM tail-dup.
-      .add_ii = scanAll(@intFromPtr(&Stencil_add_ii.f)),
-      .sub_ii = scanAll(@intFromPtr(&Stencil_sub_ii.f)),
-      .mul_ii = scanAll(@intFromPtr(&Stencil_mul_ii.f)),
-      .lt_ii  = scanAll(@intFromPtr(&Stencil_lt_ii.f)),
-      .gt_ii  = scanAll(@intFromPtr(&Stencil_gt_ii.f)),
-      .eq_ii  = scanAll(@intFromPtr(&Stencil_eq_ii.f)),
-      // SIMD array stencils: single-path, comptime-generated.
-      // II and FF variants share the same stencil (worker distinguishes at runtime).
-      .add_II = scanAll(@intFromPtr(&Stencil_add_simd.f)),
-      .sub_II = scanAll(@intFromPtr(&Stencil_sub_simd.f)),
-      .mul_II = scanAll(@intFromPtr(&Stencil_mul_simd.f)),
-      .lt_II  = scanAll(@intFromPtr(&Stencil_lt_simd.f)),
-      .gt_II  = scanAll(@intFromPtr(&Stencil_gt_simd.f)),
-      .eq_II  = scanAll(@intFromPtr(&Stencil_eq_simd.f)),
-      .add_FF = scanAll(@intFromPtr(&Stencil_add_simd.f)),
-      .sub_FF = scanAll(@intFromPtr(&Stencil_sub_simd.f)),
-      .mul_FF = scanAll(@intFromPtr(&Stencil_mul_simd.f)),
-      .lt_FF  = scanAll(@intFromPtr(&Stencil_lt_simd.f)),
-      .gt_FF  = scanAll(@intFromPtr(&Stencil_gt_simd.f)),
-      .eq_FF  = scanAll(@intFromPtr(&Stencil_eq_simd.f)),
+      .gap           = s.scan(@intFromPtr(&stencilGap)) orelse s.scanWithFrame(@intFromPtr(&stencilGap)),
+      .dup           = scanAll("dup",           @intFromPtr(&stencilDup)),
+      .int_          = s.scan(@intFromPtr(&stencilInt)) orelse s.scanWithFrame(@intFromPtr(&stencilInt)),
+      .const_        = scanAll("const_",        @intFromPtr(&stencilConst)),
+      .global        = scanAll("global",        @intFromPtr(&stencilGlobal)),
+      .local         = scanAll("local",         @intFromPtr(&stencilLocal)),
+      .local_last    = s.scan(@intFromPtr(&stencilLocalLast)) orelse s.scanWithFrame(@intFromPtr(&stencilLocalLast)),
+      .assign_local  = scanAll("assign_local",  @intFromPtr(&stencilAssignLocal)),
+      .apply1        = scanAll("apply1",        @intFromPtr(&stencilApply1)),
+      .apply2        = scanAll("apply2",        @intFromPtr(&stencilApply2)),
+      .drop          = scanAll("drop",          @intFromPtr(&stencilDrop)),
+      .assign_global = scanAll("assign_global", @intFromPtr(&stencilAssignGlobal)),
+      .make_list     = scanAll("make_list",     @intFromPtr(&Stencil_make_list.f)),
+      .derive        = scanAll("derive",        @intFromPtr(&Stencil_derive.f)),
+      .make_dict     = scanAll("make_dict",     @intFromPtr(&Stencil_make_dict.f)),
+      .return_       = s.scanTerminal(@intFromPtr(&stencilReturn)),
+      // jump_false/jump_true remain null: Phase 1 stencils can't handle forward
+      // branches whose NEXT holes target Return (Phase 2 patches them all to
+      // handler_start instead, corrupting the base-case path). Phase 2's
+      // jhJumpFalse/jhJumpTrue correctly update frame.ip for the interpreter.
+      .jump_false    = null,
+      .jump_true     = null,
+      .add_ii = scanAll("add_ii", @intFromPtr(&Stencil_add_ii.f)),
+      .sub_ii = scanAll("sub_ii", @intFromPtr(&Stencil_sub_ii.f)),
+      .mul_ii = scanAll("mul_ii", @intFromPtr(&Stencil_mul_ii.f)),
+      .lt_ii  = scanAll("lt_ii",  @intFromPtr(&Stencil_lt_ii.f)),
+      .gt_ii  = scanAll("gt_ii",  @intFromPtr(&Stencil_gt_ii.f)),
+      .eq_ii  = scanAll("eq_ii",  @intFromPtr(&Stencil_eq_ii.f)),
+      .add_II = scanAll("add_II", @intFromPtr(&Stencil_add_simd.f)),
+      .sub_II = scanAll("sub_II", @intFromPtr(&Stencil_sub_simd.f)),
+      .mul_II = scanAll("mul_II", @intFromPtr(&Stencil_mul_simd.f)),
+      .lt_II  = scanAll("lt_II",  @intFromPtr(&Stencil_lt_simd.f)),
+      .gt_II  = scanAll("gt_II",  @intFromPtr(&Stencil_gt_simd.f)),
+      .eq_II  = scanAll("eq_II",  @intFromPtr(&Stencil_eq_simd.f)),
+      .add_FF = null, .sub_FF = null, .mul_FF = null, .lt_FF = null, .gt_FF = null, .eq_FF = null,
     };
   }
 
@@ -1838,3 +1850,4 @@ test "large list IR" {
     try std.testing.expectEqual(@as(f32, 20.0), v19.f);
   }
 }
+
