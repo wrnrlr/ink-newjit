@@ -4,35 +4,9 @@ const util = @import("../../util.zig");
 const Op = @import("../../runtime/tape.zig").Op;
 const dispatch = @import("../dispatch.zig");
 const promote = @import("../promote.zig").promote;
-const gpu = @import("gpu");
 const V = @import("../../noun/value.zig").V;
 const K = @import("../../noun/class.zig").K;
 const N = @import("../../noun/array.zig").N;
-
-// Threshold at which (.I, .I) elementwise dyads dispatch to the GPU
-// when a backend is attached. Below this the kernel-launch + arena
-// alloc overhead outweighs the win.
-const DYAD_GPU_THRESHOLD: usize = 4096;
-
-fn dyadOpForKOp(comptime op: Op) ?gpu.DyadOp {
-  return switch (op) {
-    .@"+" => .add,
-    .@"-" => .sub,
-    .@"*" => .mul,
-    .@"%" => .div,
-    .@"&" => .min,
-    .@"|" => .max,
-    else => null,
-  };
-}
-
-fn monadOpForKOp(comptime op: Op) ?gpu.MonadOp {
-  return switch (op) {
-    .@"-"  => .neg,
-    .abs   => .abs,
-    else   => null,
-  };
-}
 
 pub const Attr = std.builtin.Type.StructField.Attributes;
 
@@ -74,7 +48,7 @@ pub fn makeMonad(
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
   inline for (types) |xk| {
-    const maybe: ?util.MonadFn = monadKernel(operator, xk, CastType, ResultType, Impl);
+    const maybe: ?util.MonadFn = monadKernel(xk, CastType, ResultType, Impl);
     if (maybe) |handler| {
       names = names ++ .{"_" ++ @tagName(xk)};
       field_types = field_types ++ .{util.MonadFn};
@@ -101,7 +75,7 @@ pub fn makeDyad(
   };
   inline for (types) |xk| {
     inline for (types) |yk| {
-      const maybe: ?util.DyadFn = dyadKernel(operator, xk, yk, CastType, ResultType, Impl);
+      const maybe: ?util.DyadFn = dyadKernel(xk, yk, CastType, ResultType, Impl);
       if (maybe) |handler| {
         names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
         field_types = field_types ++ .{util.DyadFn};
@@ -146,7 +120,6 @@ pub fn resultKind2(comptime xk: K, comptime yk: K, comptime RT: fn (type, type) 
 // ── Numeric kernel generators ─────────────────────────────────────────────────
 
 fn monadKernel(
-  comptime op: Op,
   comptime xk: K,
   comptime CastType: fn (type) type,
   comptime ResultType: fn (type) type,
@@ -159,7 +132,7 @@ fn monadKernel(
   return &struct {
     fn kernel(vm: *VM, x: V) V {
       if (comptime xk.isAtom()) return kernelAtom(xk, C, R, rk, Impl, x);
-      if (comptime xk.isVec()) return kernelVec(op, xk, C, R, rk, Impl, vm, x);
+      if (comptime xk.isVec()) return kernelVec(xk, C, R, rk, Impl, vm, x);
       return V{ .err = .@"type" };
     }
   }.kernel;
@@ -192,7 +165,6 @@ fn kernelAtom(
 }
 
 fn kernelVec(
-  comptime op: Op,
   comptime xk: K,
   comptime C: type,
   comptime R: type,
@@ -203,18 +175,6 @@ fn kernelVec(
   const XT = xk.backing();
   const cast = Caster(C).cast;
   const vx = @field(x, @tagName(xk));
-  // GPU dispatch: I or F monad with supported op, GPU-resident,
-  // length above threshold, identity result kind.
-  if (comptime (xk == .I or xk == .F) and rk == xk and monadOpForKOp(op) != null) {
-    if (vm.gpu) |g| if (vx.isGpu() and vx.ptr.len >= DYAD_GPU_THRESHOLD) {
-      const n: u32 = @intCast(vx.ptr.len);
-      const out_range = g.allocRange(n * @sizeOf(XT)) catch return V{ .err = .memory };
-      const gop = comptime monadOpForKOp(op).?;
-      if (comptime xk == .I) g.monadI32(gop, out_range, vx.gpuRange(), n) catch return V{ .err = .memory }
-      else g.monadF32(gop, out_range, vx.gpuRange(), n) catch return V{ .err = .memory };
-      return @unionInit(V, @tagName(xk), N(XT).initGpu(g, out_range, n) catch return V{ .err = .memory });
-    };
-  }
   if (comptime R == XT and rk == xk) {
     if (vx.ptr.rc == 1) {
       for (vx.slice()) |*xv| xv.* = Impl.f(cast(xv.*));
@@ -227,7 +187,6 @@ fn kernelVec(
 }
 
 fn dyadKernel(
-  comptime operator: Op,
   comptime xk: K, comptime yk: K,
   comptime CastType: fn (type, type) type,
   comptime ResultType: fn (type, type) type,
@@ -276,18 +235,6 @@ fn dyadKernel(
         const vx = @field(x, @tagName(xk));
         const vy = @field(y, @tagName(yk));
         if (vx.ptr.len != vy.ptr.len) return V{ .err = .length };
-        // GPU dispatch: (.I, .I) or (.F, .F) elementwise on supported
-        // ops, both operands GPU-resident, length above threshold.
-        if (comptime xk == yk and (xk == .I or xk == .F) and dyadOpForKOp(operator) != null) {
-          if (vm.gpu) |g| if (vx.isGpu() and vy.isGpu() and vx.ptr.len >= DYAD_GPU_THRESHOLD) {
-            const n: u32 = @intCast(vx.ptr.len);
-            const out_range = g.allocRange(n * @sizeOf(XT)) catch return V{ .err = .memory };
-            const gop = comptime dyadOpForKOp(operator).?;
-            if (comptime xk == .I) g.dyadI32(gop, out_range, vx.gpuRange(), vy.gpuRange(), n) catch return V{ .err = .memory }
-            else g.dyadF32(gop, out_range, vx.gpuRange(), vy.gpuRange(), n) catch return V{ .err = .memory };
-            return @unionInit(V, @tagName(xk), N(XT).initGpu(g, out_range, n) catch return V{ .err = .memory });
-          };
-        }
         if (comptime R == XT and rk == xk) {
           if (vx.ptr.rc == 1) {
             for (vx.slice(), vy.slice()) |*xv, yv| xv.* = Impl.f(cast(xv.*), cast(yv));

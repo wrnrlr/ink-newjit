@@ -1,5 +1,4 @@
 const value = @import("../noun/value.zig");
-const gpu_mod = @import("gpu");
 const Op = @import("../runtime/tape.zig").Op;
 const syms = @import("../runtime/syms.zig");
 const util = @import("../util.zig");
@@ -68,28 +67,6 @@ pub fn dispatch2(vm: *VM, op: Op, x: V, y: V) V {
     else  => {},
   };
 
-  // GPU shortcut: both operands already GPU-resident — stay on GPU.
-  if (vm.gpu) |g| gpu_blk: {
-    const dyad_op: gpu_mod.DyadOp = switch (op) {
-      .@"+" => .add, .@"-" => .sub, .@"*" => .mul, .@"%" => .div,
-      .@"&" => .min, .@"|" => .max,
-      else => break :gpu_blk,
-    };
-    if (xt == .I and yt == .I and x.I.isGpu() and y.I.isGpu()) {
-      if (x.I.ptr.len != y.I.ptr.len) return V{ .err = .length };
-      const n: u32 = @intCast(x.I.ptr.len);
-      const out_range = g.allocRange(n * @sizeOf(i32)) catch return V{ .err = .memory };
-      g.dyadI32(dyad_op, out_range, x.I.gpuRange(), y.I.gpuRange(), n) catch return V{ .err = .memory };
-      return .{ .I = N(i32).initGpu(g, out_range, n) catch return V{ .err = .memory } };
-    }
-    if (xt == .F and yt == .F and x.F.isGpu() and y.F.isGpu()) {
-      if (x.F.ptr.len != y.F.ptr.len) return V{ .err = .length };
-      const n: u32 = @intCast(x.F.ptr.len);
-      const out_range = g.allocRange(n * @sizeOf(f32)) catch return V{ .err = .memory };
-      g.dyadF32(dyad_op, out_range, x.F.gpuRange(), y.F.gpuRange(), n) catch return V{ .err = .memory };
-      return .{ .F = N(f32).initGpu(g, out_range, n) catch return V{ .err = .memory } };
-    }
-  }
   const key = op.code() * K.COUNT * K.COUNT + xt.code() * K.COUNT + yt.code();
   if (verbs.dyad_table[key]) |f| return f(vm, x, y);
   if (op == .@",") return concat.apply(vm, x, y);

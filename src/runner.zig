@@ -4,9 +4,6 @@ const Repl = @import("repl.zig").Repl;
 const disasm = @import("runtime/disasm.zig");
 
 const build_options = @import("build_options");
-const enable_ui  = build_options.enable_ui;
-const enable_gpu = build_options.enable_gpu;
-const gpu_compute = if (enable_gpu) @import("gpu_compute") else void;
 
 const V = @import("noun/value.zig").V;
 const K = @import("noun/class.zig").K;
@@ -110,26 +107,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
     return;
   }
 
-  // Attach GPU compute backend when --gpu flag is present and the binary
-  // was compiled with -Dgpu=true (or -Dui=true which implies GPU support).
-  // The comptime branches ensure dead GPU code is never type-checked in
-  // non-GPU builds (gpu_compute == void when enable_gpu == false).
-  const GpuBackendT = comptime if (enable_gpu) *gpu_compute.WgpuBackend else void;
-  var gpu_backend: ?GpuBackendT = null;
-  if (comptime enable_gpu) {
-    if (gpu_flag) {
-      if (gpu_compute.WgpuBackend.create(allocator)) |b| {
-        gpu_backend = b;
-        vm.gpu = &b.ctx;
-      } else |err| {
-        std.debug.print("warning: GPU backend unavailable ({s}), running on CPU\n",
-          .{@errorName(err)});
-      }
-    }
+  if (gpu_flag) {
+    std.debug.print("warning: --gpu flag ignored (GPU support is disabled in this build)\n", .{});
   }
-  defer if (comptime enable_gpu) {
-    if (gpu_backend) |b| b.destroy();
-  };
 
   // Build argv = [exe_name, script_path?, ...extra_args]
   {
@@ -186,12 +166,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
   // Find 'loop' global — if absent, file was already evaluated; exit cleanly
   const loop_idx = vm.globals_names.get("loop") orelse return;
   if (loop_idx >= vm.globals.items.len or !vm.globals.items[loop_idx].isLambda()) return;
-  const loop_fn = vm.globals.items[loop_idx];
-
-  if (!enable_ui) {
-    std.debug.print("UI support not compiled in (rebuild with -Dui=true)\n", .{});
-    return;
-  }
-
-  try @import("runner_ui.zig").run(vm, loop_fn, allocator);
+  // UI runner removed in Phase-0 GPU strip; the loop lambda is parsed but not
+  // invoked. When the graphics stack is restored, dispatch back to runner_ui.
+  _ = vm.globals.items[loop_idx];
 }

@@ -5,44 +5,11 @@ const Op = @import("../../runtime/tape.zig").Op;
 const VM = @import("../../runtime/vm.zig").VM;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
-const gpu = @import("gpu");
 const util = @import("../../util.zig");
 const promote = @import("../promote.zig").promote;
 
-
-const EACH_GPU_THRESHOLD: usize = 4096;
-
-fn monadOpForOp(op: Op) ?gpu.MonadOp {
-  return switch (op) {
-    .@"-" => .neg,
-    .@"_" => .abs,
-    else  => null,
-  };
-}
-
 // Apply f to each element in x
 pub fn each(vm: *VM, base: V, x: V, f: util.ApplyFn) V {
-  // GPU shortcut: builtin element-wise monad on a GPU-resident I/F vector.
-  if (vm.gpu) |g| {
-    if (base.tag() == .func and base.func.getKind() == .builtin) {
-      if (monadOpForOp(base.func.getOp())) |m_op| {
-        const xt = x.tag();
-        if (xt == .I and x.I.isGpu() and x.I.ptr.len >= EACH_GPU_THRESHOLD) {
-          const n: u32 = @intCast(x.I.ptr.len);
-          const out_range = g.allocRange(n * @sizeOf(i32)) catch return V{ .err = .memory };
-          g.monadI32(m_op, out_range, x.I.gpuRange(), n) catch return V{ .err = .memory };
-          return .{ .I = N(i32).initGpu(g, out_range, n) catch return V{ .err = .memory } };
-        }
-        if (xt == .F and x.F.isGpu() and x.F.ptr.len >= EACH_GPU_THRESHOLD) {
-          const n: u32 = @intCast(x.F.ptr.len);
-          const out_range = g.allocRange(n * @sizeOf(f32)) catch return V{ .err = .memory };
-          g.monadF32(m_op, out_range, x.F.gpuRange(), n) catch return V{ .err = .memory };
-          return .{ .F = N(f32).initGpu(g, out_range, n) catch return V{ .err = .memory } };
-        }
-      }
-    }
-  }
-
   const n = x.len();
   var res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
   const is_lambda = base.tag() == .func and base.func.getKind() == .lambda;

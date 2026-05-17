@@ -228,13 +228,3 @@ test "ref counting" {
   V1.deinit(alloc);
 }
 
-// test "gpu storage init/deinit" {
-//   const alloc = std.testing.allocator;
-//   var stub = gpu.StubBackend.init(alloc);
-//   const range = GpuRange{ .buf = @enumFromInt(7), .offset = 256 };
-//   const v = try N(i32).initGpu(&stub.ctx, range, 100);
-//   try std.testing.expect(v.isGpu());
-//   try std.testing.expectEqual(@as(usize, 100), v.ptr.len);
-//   try std.testing.expectEqual(@as(u32, 256), v.gpuRange().offset);
-//   v.deinit(alloc); // alloc is unused on the gpu path; ctx.alloc is what frees
-// }

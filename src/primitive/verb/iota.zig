@@ -11,22 +11,12 @@ pub const Iota = struct {
   _i: util.MonadFn = iota,
 };
 
-// Dispatch iota to the GPU when a backend is attached and n is big
-// enough to amortize launch + arena alloc cost.
-const GPU_THRESHOLD: i32 = 4096;
-
 pub fn iota(vm: *VM, x: V) V {
   const n = x.i;
   if (n > 0 and n <= IOTA_MAX) {
     // Return a view into the static pool — zero allocation.
     return .{ .I = .{ .ptr = poolEntry(@intCast(n)) } };
   }
-  if (vm.gpu) |g| if (n >= GPU_THRESHOLD) {
-    const count: u32 = @intCast(n);
-    const range = g.allocRange(count * @sizeOf(i32)) catch return V{ .err = .memory };
-    g.iotaI32(range, count) catch return V{ .err = .memory };
-    return .{ .I = N(i32).initGpu(g, range, count) catch return V{ .err = .memory } };
-  };
   return if (x.i > 0)
     .{.I=N(i32).fromRange(vm.alloc, 0, 1, @as(usize, @intCast(x.i))) catch return V{ .err = .memory }}
   else

@@ -6,7 +6,6 @@ const OpCode = @import("tape.zig").OpCode;
 const Op = @import("tape.zig").Op;
 const Compiler = @import("compiler.zig").Compiler;
 const Registry = @import("registry.zig").Registry;
-const GpuCtx = @import("gpu").GpuCtx;
 const command = @import("command.zig");
 const FnTables = @import("fntable.zig").FnTables;
 const assert = std.debug.assert;
@@ -67,7 +66,6 @@ const Frame = struct {
 
 pub const VM = struct {
   alloc: Alloc,
-  gpu: ?*GpuCtx = null,
   parser: ?*Parser,
   compiler: *Compiler,
   chunk: *Chunk,

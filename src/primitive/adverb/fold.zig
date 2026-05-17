@@ -1,5 +1,4 @@
 const std = @import("std");
-const gpu = @import("gpu");
 const util = @import("../../util.zig");
 const Alloc = std.mem.Allocator;
 const VM = @import("../../runtime/vm.zig").VM;
@@ -9,57 +8,12 @@ const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const ArrayFlags = @import("../../noun/array.zig").ArrayFlags;
 
-const REDUCE_GPU_THRESHOLD: usize = 4096;
-
-fn reduceOpForKOp(op: Op) ?gpu.ReduceOp {
-  return switch (op) {
-    .@"+" => .add,
-    .@"*" => .mul,
-    .@"&" => .min,
-    .@"|" => .max,
-    else  => null,
-  };
-}
-
-// GPU shortcut for f/x where f is a supported builtin and x is a
-// GPU-resident I/F vector. Returns null if any precondition fails.
-fn tryGpuReduce(vm: *VM, base: V, init: ?V, x: V) ?V {
-  if (init != null) return null;
-  if (vm.gpu == null) return null;
-  if (base.tag() != .func or base.func.getKind() != .builtin) return null;
-  const r_op = reduceOpForKOp(base.func.getOp()) orelse return null;
-  const g = vm.gpu.?;
-  switch (x.tag()) {
-    .I => {
-      if (!x.I.isGpu() or x.I.ptr.len < REDUCE_GPU_THRESHOLD) return null;
-      const n: u32 = @intCast(x.I.ptr.len);
-      const out_range = g.allocRange(@sizeOf(i32)) catch return null;
-      defer g.free(out_range, @sizeOf(i32));
-      g.reduceI32(r_op, out_range, x.I.gpuRange(), n) catch return null;
-      var buf: [4]u8 = undefined;
-      g.read(out_range, &buf) catch return null;
-      return V{ .i = std.mem.readInt(i32, &buf, .little) };
-    },
-    .F => {
-      if (!x.F.isGpu() or x.F.ptr.len < REDUCE_GPU_THRESHOLD) return null;
-      const n: u32 = @intCast(x.F.ptr.len);
-      const out_range = g.allocRange(@sizeOf(f32)) catch return null;
-      defer g.free(out_range, @sizeOf(f32));
-      g.reduceF32(r_op, out_range, x.F.gpuRange(), n) catch return null;
-      var buf: [4]u8 = undefined;
-      g.read(out_range, &buf) catch return null;
-      return V{ .f = @bitCast(std.mem.readInt(u32, &buf, .little)) };
-    },
-    else => return null,
-  }
-}
-
 // CPU fast path: builtin reduce on a typed CPU array.
 // Avoids per-element boxing and function-pointer overhead.
 // LLVM auto-vectorises these simple accumulation loops.
 inline fn cpuReduce(op: Op, x: V) ?V {
   switch (x.tag()) {
-    .I => if (!x.I.isGpu()) {
+    .I => {
       const s = x.I.slice();
       if (s.len == 0) return .blank;
       switch (op) {
@@ -93,7 +47,7 @@ inline fn cpuReduce(op: Op, x: V) ?V {
         else => {},
       }
     },
-    .F => if (!x.F.isGpu()) {
+    .F => {
       const s = x.F.slice();
       if (s.len == 0) return .blank;
       switch (op) {
@@ -122,7 +76,7 @@ inline fn cpuReduce(op: Op, x: V) ?V {
         else => {},
       }
     },
-    .B => if (!x.B.isGpu()) {
+    .B => {
       const s = x.B.slice();
       if (s.len == 0) return .blank;
       switch (op) {
@@ -154,8 +108,6 @@ pub fn fold(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
   if (init == null and base.tag() == .func and base.func.getKind() == .builtin) {
     if (cpuReduce(base.func.getOp(), x)) |v| return v;
   }
-
-  if (tryGpuReduce(vm, base, init, x)) |v| return v;
 
   const n = x.len();
 

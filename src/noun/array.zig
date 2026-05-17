@@ -1,12 +1,7 @@
 const std = @import("std");
-const gpu = @import("gpu");
 const Alloc = std.mem.Allocator;
 const V = @import("value.zig").V;
 const Rc = @import("rc.zig").Rc;
-
-const GpuMeta = @import("rc.zig").GpuMeta;
-const GpuRange = @import("rc.zig").GpuRange;
-const GpuCtx = @import("rc.zig").GpuCtx;
 
 pub const ArrayFlags = struct {
   pub const immutable: u8 = 1 << 0; // do not mutate in place even at rc=1
@@ -35,43 +30,17 @@ pub fn N(comptime T: type) type {
 
     pub fn setFlag(a: Self, f: u8) void { a.ptr.flags |= f; }
     pub fn hasFlag(a: Self, f: u8) bool { return a.ptr.flags & f != 0; }
-    // Allocate a GPU-resident header. The body is a GpuMeta (no inline
-    // data); actual data lives in the ctx's wgpu arena.
-    pub fn initGpu(ctx: *GpuCtx, range: GpuRange, n: usize) !Self {
-      const total = @sizeOf(Rc) + @sizeOf(GpuMeta);
-      const buf = try ctx.alloc.alignedAlloc(u8, align_enum, total);
-      const header: *align(@alignOf(Rc)) Rc = @ptrCast(buf.ptr);
-      header.* = .{ .rc = 1, .len = @intCast(n), .loc = @intFromEnum(gpu.Loc.gpu) };
-      header.gpuMeta().* = .{ .range = range, .ctx = ctx };
-      return .{ .ptr = header };
-    }
     pub fn deinit(a: Self, alloc: Alloc) void {
       if (a.ptr.rc == std.math.maxInt(u32)) return;
       a.ptr.rc -= 1;
       if (a.ptr.rc != 0) return;
-      if (a.ptr.isGpu()) {
-        const meta = a.ptr.gpuMeta();
-        const ctx = meta.ctx.?;
-        ctx.free(meta.range, @intCast(a.ptr.len * @sizeOf(T)));
-        const total = @sizeOf(Rc) + @sizeOf(GpuMeta);
-        const base: [*]u8 = @ptrCast(a.ptr);
-        const buf: []align(alignment) u8 = @as([*]align(alignment) u8, @alignCast(base))[0..total];
-        ctx.alloc.free(buf);
-        return;
-      }
       if (T == V) for (a.slice()) |child| child.deinit(alloc);
       const total = data_offset + a.ptr.len * @sizeOf(T);
       const base: [*]u8 = @ptrCast(a.ptr);
       const buf: []align(alignment) u8 = @as([*]align(alignment) u8, @alignCast(base))[0..total];
       alloc.free(buf);
     }
-    pub fn isGpu(a: Self) bool { return a.ptr.isGpu(); }
-    pub fn gpuRange(a: Self) GpuRange {
-      std.debug.assert(a.ptr.isGpu());
-      return a.ptr.gpuMeta().range;
-    }
     pub fn slice(a: Self) []T {
-      std.debug.assert(!a.ptr.isGpu());
       const base: [*]u8 = @ptrCast(a.ptr);
       return @as([*]T, @ptrCast(@alignCast(base + data_offset)))[0..a.ptr.len];
     }
