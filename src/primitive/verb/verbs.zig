@@ -15,7 +15,6 @@ const concat = @import("concat.zig");
 const calc = @import("calc.zig");
 const sort = @import("sort.zig");
 const member = @import("member.zig");
-const string = @import("string.zig");
 
 const V = value.V;
 const N = value.N;
@@ -26,11 +25,13 @@ pub const dyad_table  = makeDyadArray(Dyads);
 
 const h = @import("helper.zig");
 const at = h.arithmetic_types;
+
 pub fn _B(comptime op: Op, comptime F: type) type { return h.makeMonad(op, h.Upcast1, h.Bool1,   F, &at); }
 pub fn _N(comptime op: Op, comptime F: type) type { return h.makeMonad(op, h.Upcast1, h.Upcast1, F, &at); }
 pub fn _F(comptime op: Op, comptime F: type) type { return h.makeMonad(op, h.Float1,  h.Float1,  F, &at); }
 pub fn _B_B(comptime op: Op, comptime f: type) type { return h.makeDyad(op, h.Bool2,   h.Bool2,   f, &at); }
 pub fn _N_N(comptime op: Op, comptime f: type) type { return h.makeDyad(op, h.Upcast2, h.Upcast2, f, &at); }
+pub fn _I_I(comptime op: Op, comptime f: type) type { return h.makeDyad(op, h.Int2, h.Int2, f, &h.integer_types); }
 pub fn _F_F(comptime op: Op, comptime f: type) type { return h.makeDyad(op, h.Float2,  h.Float2,  f, &at); }
 pub fn _X(comptime op: Op, comptime Impl: type) type { return h._X(op, Impl); }
 pub fn _I_A(comptime op: Op, comptime Impl: type) type { return h._X(op, Impl); }
@@ -56,7 +57,7 @@ const Monads = struct {
   pub const @"#x" = @import("tally.zig").Tally;
   pub const @"_c" = @import("lowercase.zig").Lowercase;
   pub const @"_n" = @import("floor.zig").Floor;
-  pub const @"9:x"   = @import("graphics.zig").Draw; // 
+  // pub const @"9:x"   = @import("graphics.zig").Draw;
   pub const @"sqrt"  = _F(.sqrt, calc.SqrtOp);
   pub const @"sqr"   = _N(.sqr,  calc.SqrOp);
   pub const @"exp"   = _F(.exp,  calc.ExpOp);
@@ -64,7 +65,7 @@ const Monads = struct {
   pub const @"sin"   = _F(.sin,  calc.SinOp);
   pub const @"cos"   = _F(.cos,  calc.CosOp);
   pub const @"abs"   = _N(.abs,  calc.AbsOp);
-  pub const @"$x"    = string.Format;
+  pub const @"$x"    = @import("format.zig").Format;
   pub const @"parse" = @import("parse.zig").Parse;
   pub const @"@x"    = @import("type.zig").Type;
 
@@ -81,14 +82,16 @@ const Monads = struct {
 const Dyads = struct {
   // Dyadic Primitives
   pub const @"N+N" = _N_N(.@"+", calc.AddOp);
-  pub const @"N-N" =  _N_N(.@"-", calc.SubOp);
-  pub const @"N*N" =  _N_N(.@"*", calc.MulOp);
-  pub const @"N%N" =  _F_F(.@"%", calc.DivOp);
-  pub const @"N&N" =  _N_N(.@"&", calc.MinOp);
-  pub const @"N|N" =  _N_N(.@"|", calc.MaxOp);
-  pub const @"X=X"  = logic.Equal;
-  pub const @"X<X"  = logic.Less;
-  pub const @"X>X"  = logic.More;
+  pub const @"N-N" = _N_N(.@"-", calc.SubOp);
+  pub const @"N*N" = _N_N(.@"*", calc.MulOp);
+  pub const @"N%N" = _F_F(.@"%", calc.DivOp);
+  pub const @"N&N" = _N_N(.@"&", calc.MinOp);
+  pub const @"N|N" = _N_N(.@"|", calc.MaxOp);
+  pub const @"X=X" = logic.Equal;
+  pub const @"X<X" = logic.Less;
+  pub const @"X>X" = logic.More;
+  pub const @"I mod I"  = _I_I(.mod, calc.ModOp);
+  
   // pub const @"x,x" = @import("pair.zig").Pair;
   pub const @"i_X"  = @import("drop.zig").Drop;
   pub const @"I_X"  = _I_A(.@"_", @import("cut.zig").Cut);

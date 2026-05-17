@@ -116,6 +116,13 @@ test "arithmetic" {
   try t.check("1+[a:1;b:2]", "[a:2;b:3]");
   try t.check("1+1 2!`a`b", "!type");
   try t.check("1 2+2 3 4", "!length");
+  try t.check("15 mod 15", "0");
+  try t.check("15 mod 3", "0");
+  try t.check("15 mod 5", "0");
+  try t.check("9 mod 5", "4");
+  try t.check("9.0 mod 5", "!type");
+  try t.check("9 mod 5.0", "!type");
+  try t.check("9.0 mod 5.0", "!type");
 }
 
 test "- neg" {

@@ -32,7 +32,7 @@ pub const Op = enum(u8) {
   @"%", @"!", @"&", @"+", @"*", @"|", @"<", @">", @"=", @"~",
   @",", @"^", @"#", @"_", @"$", @"?", @"@", @"-", @".",
   sqrt, sqr, exp, log, sin, cos, abs,
-  first, last, count, in, has, parse,
+  first, last, count, in, has, mod, parse,
   @"0:", @"1:", @"2:", @"9:",
   @":",
   exec,
