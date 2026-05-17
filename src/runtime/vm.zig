@@ -30,6 +30,12 @@ const build_options = @import("build_options");
 // JIT is only available on arm64/macOS; the flag is silently ignored elsewhere.
 const jit_enabled = build_options.enable_jit and builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos;
 const jit_mod = if (jit_enabled) @import("jit/jit.zig") else struct {};
+// Force-link the CPS helpers so their exported symbols are present in
+// the runner binary. The JIT (Phase 2.2d) looks them up by name; without
+// this anchor ReleaseFast strips all but cps_drop.
+comptime {
+  _ = @import("jit/cps_helpers.zig").force_keep;
+}
 
 const STACK_MAX = 2048;
 const FRAMES_MAX = 64;
@@ -125,6 +131,19 @@ pub const VM = struct {
     };
 
     vm.compiler.* = try Compiler.init(alloc, chunk, &vm.globals_names, &vm.symbols, &vm.registry, &vm.fn_tables);
+
+    // Force-link every cps_* helper. The JIT looks them up by name; without
+    // this runtime reference ReleaseFast strips them via gc-sections.
+    // Reading each element forces LLVM to materialize the pointer values
+    // and the optimizer cannot eliminate the loop because cps_anchor_sink
+    // is observed externally (volatile store).
+    {
+      const cps = @import("jit/cps_helpers.zig");
+      cps.cps_anchor_ptr = cps.anchor();
+      for (cps.cps_anchor_ptr.*) |fp| {
+        @as(*volatile usize, @ptrCast(&cps.cps_anchor_sink)).* = @intFromPtr(fp);
+      }
+    }
 
     if (comptime jit_enabled) {
         vm.jit_vtable = JitImpl.buildVtable();
