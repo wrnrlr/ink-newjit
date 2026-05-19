@@ -33,12 +33,9 @@ const MockWriter = @import("../util.zig").MockWriter;
 
 const STACK_MAX = 2048;
 const FRAMES_MAX = 64;
-
+const NO_LAMBDA: u24 = std.math.maxInt(u24); // lambda_idx = maxInt(u24) for top-level (no lambda)
 
 pub const VMError = error{ StackOverflow, InvalidOpCode, RuntimeError };
-
-// lambda_idx = maxInt(u24) for top-level (no lambda)
-const NO_LAMBDA: u24 = std.math.maxInt(u24);
 
 const Frame = struct {
   ip:          usize = 0,
@@ -52,10 +49,8 @@ pub const VM = struct {
   parser: ?*Parser,
   compiler: *Compiler,
   chunk: *Chunk,
-  // Fixed-capacity value stack — avoids per-push allocation after VM creation.
   stack:     [STACK_MAX]V  = undefined,
   stack_len: usize         = 0,
-  // Fixed-capacity call frame stack.
   frames:     [FRAMES_MAX]Frame = undefined,
   frames_len: usize             = 0,
   // Pool for Partial objects (partial function applications).
@@ -79,12 +74,9 @@ pub const VM = struct {
     const vm = try alloc.create(VM);
     const chunk = try alloc.create(Chunk);
     chunk.* = try Chunk.init(alloc);
-
     const parser = try alloc.create(Parser);
     parser.* = Parser.init(alloc);
-
     const symbols = Pool.init(alloc);
-
     vm.* = .{
       .alloc        = alloc,
       .parser       = parser,
@@ -99,27 +91,9 @@ pub const VM = struct {
       .ext           = ExtRegistry.init(alloc),
       .prng          = std.Random.DefaultPrng.init(0),
     };
-
     vm.compiler.* = try Compiler.init(alloc, chunk, &vm.globals_names, &vm.symbols, &vm.registry, &vm.fn_tables);
-
-    // Force-link every cps_* helper. The JIT looks them up by name; without
-    // this runtime reference ReleaseFast strips them via gc-sections.
-    // Reading each element forces LLVM to materialize the pointer values
-    // and the optimizer cannot eliminate the loop because cps_anchor_sink
-    // is observed externally (volatile store).
-    {
-      const cps = @import("jit/cps_helpers.zig");
-      cps.cps_anchor_ptr = cps.anchor();
-      for (cps.cps_anchor_ptr.*) |fp| {
-        @as(*volatile usize, @ptrCast(&cps.cps_anchor_sink)).* = @intFromPtr(fp);
-      }
-    }
-
     std.Io.Threaded.global_single_threaded.allocator = alloc;
-
-    // Initial frame for top-level code
     vm.pushFrame(.{ .base = 0, .result_slot = 0, .lambda_idx = NO_LAMBDA });
-
     return vm;
   }
 
@@ -135,7 +109,8 @@ pub const VM = struct {
     for (vm.globals.items) |*v| v.deinit(vm.alloc);
     vm.globals.deinit(vm.alloc);
 
-    var kit = vm.globals_names.keyIterator(); while (kit.next()) |k| vm.alloc.free(k.*);
+    var kit = vm.globals_names.keyIterator();
+    while (kit.next()) |k| vm.alloc.free(k.*);
     vm.globals_names.deinit();
 
     vm.partial_pool.deinit(vm.alloc);
@@ -183,31 +158,12 @@ pub const VM = struct {
     const node = try vm.parser.?.parse(txt);
     defer vm.parser.?.free(node);
 
-    // Reset chunk code for new expression
-    for (vm.chunk.constants.items) |*v| v.deinit(vm.alloc);
-    vm.chunk.constants.clearRetainingCapacity();
-    vm.chunk.code.clearRetainingCapacity();
-    
-    // Reset frames for new expression
-    vm.frames_len = 0;
-    vm.pushFrame(.{ .base = 0, .result_slot = 0, .lambda_idx = NO_LAMBDA });
-    vm.current_chunk = vm.chunk;
-
     vm.compiler.scope.reset();
     vm.compiler.text_id = text_id;
     try vm.compiler.compile(node, false);
     try vm.run();
 
-    if (vm.stack_len == 0) return .blank;
-    const res = vm.pop();
-
-    // Clear any leftovers on stack from top-level execution
-    while (vm.stack_len > 0) {
-      var v = vm.pop();
-      v.deinit(vm.alloc);
-    }
-
-    return res;
+    return vm.pop();
   }
 
   fn executeCall(vm: *VM, func: V, incoming: []const V, mode: call.CallMode) !void {
@@ -305,9 +261,8 @@ pub const VM = struct {
     const n = vm.readByte();
     const val = vm.pop();
     defer val.deinit(vm.alloc);
-    const vlen = val.len();
     const is_atom = std.meta.activeTag(val).isAtom();
-    if (vlen != n and !is_atom) {
+    if (val.len() != n and !is_atom) {
       try vm.push(.{ .err = .length });
       for (0..n) |_| _ = vm.readByte();
     } else {
@@ -548,20 +503,18 @@ pub const VM = struct {
     const start = vm.stack_len - 2 * n;
     const keys = if (n == 1) vm.stack[start].ref()
                  else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start .. start + n])).L);
-    var keys_live = n > 1;
+    const keys_live = n > 1;
     errdefer { if (keys_live) keys.deinit(vm.alloc); }
     const vals = if (n == 1) vm.stack[start + 1].ref()
                  else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
-    var vals_live = n > 1;
+    const vals_live = n > 1;
     errdefer { if (vals_live) vals.deinit(vm.alloc); }
     const res = if (n == 1) V{ .m = try Dict.init(vm.alloc, keys, vals) }
                 else dict(vm, keys, vals);
     errdefer res.deinit(vm.alloc);
-    if (n > 1) {
+    if (keys_live) {
       keys.deinit(vm.alloc);
-      keys_live = false;
       vals.deinit(vm.alloc);
-      vals_live = false;
     }
     for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
@@ -663,12 +616,12 @@ pub const VM = struct {
   fn peek(vm: *VM, distance: usize) V { return vm.stack[vm.stack_len - 1 - distance]; }
 };
 
-fn opNop(_: *VM) anyerror!void {}
-fn opGap(vm: *VM) anyerror!void { try vm.push(.blank); }
-fn opDrop(vm: *VM) anyerror!void { vm.pop().deinit(vm.alloc); }
-fn opDup(vm: *VM) anyerror!void { try vm.push(vm.peek(0).ref()); }
-fn opJumpFalse(vm: *VM) anyerror!void { try vm.doJumpWhen(false); }
-fn opJumpTrue(vm: *VM) anyerror!void  { try vm.doJumpWhen(true); }
+fn opNop(_: *VM) !void {}
+fn opGap(vm: *VM) !void { try vm.push(.blank); }
+fn opDrop(vm: *VM) !void { vm.pop().deinit(vm.alloc); }
+fn opDup(vm: *VM) !void { try vm.push(vm.peek(0).ref()); }
+fn opJumpFalse(vm: *VM) !void { try vm.doJumpWhen(false); }
+fn opJumpTrue(vm: *VM) !void  { try vm.doJumpWhen(true); }
 
 const OpHandler = *const fn(*VM) anyerror!void;
 const op_table: [OpCode.COUNT]OpHandler = build: {
@@ -705,7 +658,6 @@ const op_table: [OpCode.COUNT]OpHandler = build: {
   t[@intFromEnum(OpCode.Command)]          = &VM.doCommand;
   break :build t;
 };
-
 
 test "VM simple addition" {
   const alloc = std.testing.allocator;

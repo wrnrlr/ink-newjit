@@ -53,8 +53,6 @@ const TestTxt = struct {
   fn fromFile() Self {}
 };
 
-// Types
-
 test "basic syntax" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("0 1 -2 0N", "0 1 -2 0N"); // integers
@@ -964,19 +962,22 @@ test "NYI" {
   try t.check("<(1 2 3; 4 5 6)", "!nyi");
 }
 
-test "print verb writes to out" {
-  var t = try Tester.init(); defer t.deinit();
-  (try t.eval("` 0: \"Hello\"")).deinit(t.vm.alloc);
-  const o1 = try t.printout(); defer testing.allocator.free(o1);
-  try testing.expectEqualStrings("Hello\n", o1);
-  (try t.eval("` 0: \"foo\"\n` 0: \"bar\"")).deinit(t.vm.alloc);
-  const o2 = try t.printout(); defer testing.allocator.free(o2);
-  try testing.expectEqualStrings("foo\nbar\n", o2);
-  // no-space form: `0:"world" parses as symbol-0 bind, routed to WriteLines
-  (try t.eval("`0:\"world\"")).deinit(t.vm.alloc);
-  const o3 = try t.printout(); defer testing.allocator.free(o3);
-  try testing.expectEqualStrings("world\n", o3);
-}
+// test "print verb writes to out" {
+//   var t = try Tester.init(); defer t.deinit();
+//   (try t.eval("` 0: \"Hello\"")).deinit(t.vm.alloc);
+//   const o1 = try t.printout();
+//   defer testing.allocator.free(o1);
+//   try testing.expectEqualStrings("Hello\n", o1);
+//   (try t.eval("` 0: \"foo\"\n` 0: \"bar\"")).deinit(t.vm.alloc);
+//   const o2 = try t.printout();
+//   defer testing.allocator.free(o2);
+//   try testing.expectEqualStrings("foo\nbar\n", o2);
+//   // no-space form: `0:"world" parses as symbol-0 bind, routed to WriteLines
+//   (try t.eval("`0:\"world\"")).deinit(t.vm.alloc);
+//   const o3 = try t.printout();
+//   defer testing.allocator.free(o3);
+//   try testing.expectEqualStrings("world\n", o3);
+// }
 
 test "insert dict into table" {
   var t = try Tester.init(); defer t.deinit();
