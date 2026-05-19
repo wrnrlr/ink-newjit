@@ -549,7 +549,6 @@ pub const VM = struct {
     try vm.push(result);
   }
 
-
   pub fn callLambda(vm: *VM, ref: Fn, argc: usize, slot: usize) !void {
     if (vm.frames_len >= FRAMES_MAX) return VMError.StackOverflow;
     const idx = @as(u24, @intCast(ref.idx));
