@@ -3,6 +3,7 @@ const VM = @import("../../runtime/vm.zig").VM;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const makeWindow = @import("window.zig").makeWindow;
+const promote = @import("../promote.zig").promote;
 
 // stencil: f'[n;x] — apply f to each sliding window of size n
 // {x,"."}'[3;"abcde"] → ("abc.";"bcd.";"cde.")
@@ -23,5 +24,5 @@ pub fn stencil(vm: *VM, xn: V, base: V, x: V, callFn: anytype) V {
     const args = [_]V{win_v};
     res.slice()[i] = callFn(vm, base, &args);
   }
-  return .{ .L = res };
+  return promote(vm.alloc, res);
 }

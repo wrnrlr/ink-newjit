@@ -57,11 +57,12 @@ pub fn dropKeys(vm: *VM, x: V, y: V) V {
   @memcpy(rk.slice(), keep_keys.items);
   const rv = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
   @memcpy(rv.slice(), keep_vals.items);
-  // n>1: promote vals so e.g. char atoms collapse to a typed vector ("ac" not "a" "c")
+  // n>1: promote keys and vals so e.g. int atoms collapse to a typed vector (1 3 not (1;3))
   // n==1 non-symbol: keep as L so key and val each display as enlisted scalars (,3!,"c")
+  const keys_v: V = if (n > 1) promote(vm.alloc, rk) else .{ .L = rk };
   const vals_v: V = if (n > 1) promote(vm.alloc, rv) else .{ .L = rv };
-  const res = pair.dict(vm, .{ .L = rk }, vals_v);
-  (V{ .L = rk }).deinit(vm.alloc);
+  const res = pair.dict(vm, keys_v, vals_v);
+  keys_v.deinit(vm.alloc);
   vals_v.deinit(vm.alloc);
   return res;
 }

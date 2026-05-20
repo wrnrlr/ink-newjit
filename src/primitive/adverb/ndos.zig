@@ -2,6 +2,7 @@ const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
+const promote = @import("../promote.zig").promote;
 
 // ndos: collect init + n applications of f
 // 5(2*)\ 1 → 1 2 4 8 16 32
@@ -19,5 +20,5 @@ pub fn ndos(vm: *VM, base: V, n: i32, init: V, f: util.ApplyFn) V {
     res.slice()[i + 1] = accum.ref();
   }
   accum.deinit(vm.alloc);
-  return .{ .L = res };
+  return promote(vm.alloc, res);
 }

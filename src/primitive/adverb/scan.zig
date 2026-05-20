@@ -7,6 +7,7 @@ const util = @import("../../util.zig");
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
+const promote = @import("../promote.zig").promote;
 
 // CPU fast path: builtin prefix-scan on a typed CPU array.
 // Returns a typed N(T) result instead of N(V), avoids per-element boxing.
@@ -112,5 +113,5 @@ pub fn scan(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
     ri += 1;
   }
   accum.deinit(vm.alloc);
-  return .{ .L = res };
+  return promote(vm.alloc, res);
 }

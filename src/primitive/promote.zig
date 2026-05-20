@@ -27,19 +27,14 @@ fn castAtom(comptime tk: K, v: V) tk.backing() {
 }
 
 /// Determine the common promotable kind for a slice of atoms.
-/// Returns null if the slice is empty, contains a non-atom, or has incompatible types.
+/// Returns null if the slice is empty, contains a non-atom, or elements have different types.
 /// Does not check for .err — callers that need error propagation must check separately.
 pub fn inferKind(slice: []const V) ?K {
   if (slice.len == 0) return null;
-  var target = slice[0].tag();
+  const target = slice[0].tag();
   if (!target.isAtom()) return null;
   for (slice[1..]) |v| {
-    const k = v.tag();
-    if (!k.isAtom()) return null;
-    if (target == k) continue;
-    if (target.isNumeric() or target == .b and k.isNumeric() or k == .b) {
-      if (target.isFloat() or k.isFloat()) target = .f else target = .i;
-    } else return null;
+    if (v.tag() != target) return null;
   }
   return target;
 }

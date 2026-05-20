@@ -495,7 +495,8 @@ pub const VM = struct {
     const list_val = try V.Values(vm.alloc, values);
     for (values) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
-    try vm.push(list_val);
+    // try vm.push(list_val);
+    try vm.push(promote(vm.alloc, list_val.L));
   }
 
   fn doMakeDict(vm: *VM) !void {

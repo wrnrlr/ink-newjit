@@ -120,17 +120,8 @@ pub const TerseFormatter = struct {
           return;
         }
 
-        if (self.mode == .Text and self.allSameTypeAtoms(slice)) {
-          const is_symbol = (slice[0].tag() == .s);
-          for (slice, 0..) |item, i| {
-            if (i > 0 and !is_symbol) try w.writeAll(" ");
-            try self.formatValue(item, w);
-          }
-          return;
-        }
-
         try w.writeAll("(");
-        const is_multiline = (self.mode == .Repl) and !self.force_single_line and self.isComplex(v);
+        const is_multiline = !self.force_single_line and self.isComplex(v);
         const old_single = self.force_single_line;
         if (is_multiline) {
           self.force_single_line = true;
@@ -342,18 +333,6 @@ pub const TerseFormatter = struct {
     }
   }
 
-  fn allSameTypeAtoms(self: *Self, slice: []const V) bool {
-    _ = self;
-    if (slice.len == 0) return false;
-    const first_tag = slice[0].tag();
-    const scalar = switch (first_tag) { .b, .i, .f, .s, .c => true, else => false };
-    if (!scalar) return false;
-    for (slice[1..]) |item| {
-      if (item.tag() != first_tag) return false;
-    }
-    return true;
-  }
-
   fn isComplex(_: *Self, v: V) bool {
     return switch (v) {
       .L => |n| {
@@ -377,3 +356,15 @@ pub const TerseFormatter = struct {
     }
   }
 };
+
+test "format int" {
+  
+}
+
+test "format float" {
+  
+}
+
+test "format list" {
+  
+}
