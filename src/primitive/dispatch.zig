@@ -14,19 +14,6 @@ const Dict = @import("../noun/dict.zig").Dict;
 
 pub fn dispatch1(vm: *VM, op: Op, x: V) V {
   const xt = x.tag();
-  // Fast path: common scalar monads — avoid table lookup indirection.
-  if (xt == .i) switch (op) {
-    .@"-" => return .{ .i = -%x.i },
-    .@"~" => return .{ .b = x.i == 0 },
-    .@"#" => return .{ .i = 1 },
-    else  => {},
-  };
-  if (xt == .f) switch (op) {
-    .@"-" => return .{ .f = -x.f },
-    .@"~" => return .{ .b = x.f == 0.0 },
-    .@"#" => return .{ .i = 1 },
-    else  => {},
-  };
   const key = op.code() * K.COUNT + xt.code();
   if (verbs.monad_table[key]) |f| return f(vm, x);
   return switch (xt) {
@@ -40,33 +27,6 @@ pub fn dispatch1(vm: *VM, op: Op, x: V) V {
 pub fn dispatch2(vm: *VM, op: Op, x: V, y: V) V {
   const xt = x.tag();
   const yt = y.tag();
-
-  // Fast paths for scalar arithmetic — the hot case in fold/scan inner loops.
-  // These bypass table lookup + function-pointer indirection.
-  if (xt == .i and yt == .i) switch (op) {
-    .@"+" => return .{ .i = x.i +% y.i },
-    .@"-" => return .{ .i = x.i -% y.i },
-    .@"*" => return .{ .i = x.i *% y.i },
-    .@"&" => return .{ .i = @min(x.i, y.i) },
-    .@"|" => return .{ .i = @max(x.i, y.i) },
-    .@"<" => return .{ .b = x.i < y.i },
-    .@">" => return .{ .b = x.i > y.i },
-    .@"=" => return .{ .b = x.i == y.i },
-    else  => {},
-  };
-  if (xt == .f and yt == .f) switch (op) {
-    .@"+" => return .{ .f = x.f + y.f },
-    .@"-" => return .{ .f = x.f - y.f },
-    .@"*" => return .{ .f = x.f * y.f },
-    .@"%" => return .{ .f = x.f / y.f },
-    .@"&" => return .{ .f = @min(x.f, y.f) },
-    .@"|" => return .{ .f = @max(x.f, y.f) },
-    .@"<" => return .{ .b = x.f < y.f },
-    .@">" => return .{ .b = x.f > y.f },
-    .@"=" => return .{ .b = x.f == y.f },
-    else  => {},
-  };
-
   const key = op.code() * K.COUNT * K.COUNT + xt.code() * K.COUNT + yt.code();
   if (verbs.dyad_table[key]) |f| return f(vm, x, y);
   if (op == .@",") return concat.apply(vm, x, y);
