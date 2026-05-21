@@ -56,16 +56,16 @@ fn derived3(vm: *VM, adv: Adverb, x: V, y: V, z: V, f: util.ApplyFn) V {
   return switch (adv) {
     .@"'" => return .{.err=.nyi},
     .@"/" => {
-      if (y.tag() == .i and x.tag() == .func and x.func.getRealArity() == 1)
+      if (y.tag() == .i and x.arity() == 1)
         return adverbs.ndo(vm, x, y.i, z, f);
-      if ((y.tag() == .func or y.tag() == .partial) and x.tag() == .func)
+      if ((y.tag() == .func or y.tag() == .partial) and x.arity() >= 1)
         return adverbs.whiledo(vm, y, x, z, f);
       return adverbs.fold(vm, x, y, z, f);
     },
     .@"\\" => {
-      if (y.tag() == .i and x.tag() == .func and x.func.getRealArity() == 1)
+      if (y.tag() == .i and x.arity() == 1)
         return adverbs.ndos(vm, x, y.i, z, f);
-      if ((y.tag() == .func or y.tag() == .partial) and x.tag() == .func)
+      if ((y.tag() == .func or y.tag() == .partial) and x.arity() >= 1)
         return adverbs.whilescan(vm, y, x, z, f);
       return adverbs.scan(vm, x, y, z, f);
     },

@@ -476,19 +476,23 @@ test "fold" {
 test "scan" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("+\\1 2 3", "1 3 6");
-  try t.check("10+\\1 2 3", "11 13 16");
+  try t.check("10+\\1 2 3", "11 13 16"); // seeded
 }
 test "ndo" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("5{2*x}/1", "32");
   try t.check("0{2*x}/1", "1");
   try t.check("3{x+1}/10", "13");
+
+  try t.check("5(2*)/1", "32"); // partial not working
 }
 test "ndos" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("5{2*x}\\1", "1 2 4 8 16 32");
   try t.check("0{2*x}\\1", ",1");
   try t.check("3{x+1}\\10", "10 11 12 13");
+
+  try t.check("5(2*)\\1", "1 2 4 8 16 32"); // partial not working
 }
 test "stencil" {
   var t = try Tester.init(); defer t.deinit();

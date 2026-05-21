@@ -113,12 +113,12 @@ pub const VM = struct {
     while (kit.next()) |k| vm.alloc.free(k.*);
     vm.globals_names.deinit();
 
+    vm.fn_tables.deinit();
     vm.partial_pool.deinit(vm.alloc);
     vm.ext.deinit();
     vm.chunk.deinit();
     vm.alloc.destroy(vm.chunk);
     vm.registry.deinit();
-    vm.fn_tables.deinit();
 
     if (vm.parser) |p| {
       p.deinit();
