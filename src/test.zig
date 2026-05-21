@@ -496,19 +496,19 @@ test "ndos" {
 }
 test "while" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("(1<){$[2!x;1+3*x;-2!x]}/3", "1");
+  try t.check("(1<){$[x mod 2; 1+3*x; x div 2]}/3", "1");
 }
 test "whiles" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("(1<){$[2!x;1+3*x;-2!x]}\\3", "3 10 5 16 8 4 2 1");
+  try t.check("(1<){$[x mod 2; 1+3*x; x div 2]}\\3", "3 10 5 16 8 4 2 1");
 }
 test "converge" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("(-2!)/100", "0");
+  try t.check("{x div 2}/100", "0");
 }
 test "converges" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("(-2!)\\100", "100 50 25 12 6 3 1 0");
+  try t.check("{x div 2}\\100", "100 50 25 12 6 3 1 0");
 }
 test "stencil" {
   var t = try Tester.init(); defer t.deinit();

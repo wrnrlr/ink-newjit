@@ -167,6 +167,12 @@ Multiplication.
 #### Div `x%y`
 Division (integer divFloor for integers, float division for floats).
 
+#### Modulo `x mod y`
+Modulo operator, return remainder of x divided by y as integer
+
+#### Integer division `x div y`
+Return floor of x divided by y as integer
+
 #### Key `x!y`
 Dictionary creation.
 

@@ -6,6 +6,7 @@ pub const AddOp = struct { pub fn f(x: anytype, y: @TypeOf(x)) @TypeOf(x) { retu
 pub const SubOp = struct { pub fn f(x: anytype, y: @TypeOf(x)) @TypeOf(x) { return if (comptime @typeInfo(@TypeOf(x)) == .int) x -% y else x - y; } };
 pub const MulOp = struct { pub fn f(x: anytype, y: @TypeOf(x)) @TypeOf(x) { return if (comptime @typeInfo(@TypeOf(x)) == .int) x *% y else x * y; } };
 pub const DivOp = struct { pub fn f(x: anytype, y: @TypeOf(x)) @TypeOf(x) { return x / y; } };
+pub const DiviOp = struct { pub fn f(x: anytype, y: @TypeOf(x)) @TypeOf(x) { return @divFloor(x, y); } };
 pub const ModOp = struct { pub fn f(x: anytype, y: @TypeOf(x)) @TypeOf(x) { return @mod(x, y); } };
 pub const MinOp = struct { pub fn f(x: anytype, y: @TypeOf(x)) @TypeOf(x) { return @min(x, y); } };
 pub const MaxOp = struct { pub fn f(x: anytype, y: @TypeOf(x)) @TypeOf(x) { return @max(x, y); } };

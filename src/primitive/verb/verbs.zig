@@ -91,6 +91,7 @@ const Dyads = struct {
   pub const @"X<X" = logic.Less;
   pub const @"X>X" = logic.More;
   pub const @"I mod I"  = _I_I(.mod, calc.ModOp);
+  pub const @"I div I"  = _I_I(.div, calc.DiviOp);
   
   // pub const @"x,x" = @import("pair.zig").Pair;
   pub const @"i_X"  = @import("drop.zig").Drop;
