@@ -3,6 +3,7 @@ const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
+const promote = @import("../promote.zig").promote;
 
 // while: (cond)step/init — apply step while cond holds, return final value
 pub fn whiledo(vm: *VM, cond: V, step: V, init: V, f: util.ApplyFn) V {
@@ -33,7 +34,11 @@ pub fn whilescan(vm: *VM, cond: V, step: V, init: V, f: util.ApplyFn) V {
     const keep = cond_result.isTrue();
     cond_result.deinit(vm.alloc);
     if (!keep) {
-      cur.deinit(vm.alloc);
+      results.append(vm.alloc, cur) catch {
+        for (results.items) |v| v.deinit(vm.alloc);
+        cur.deinit(vm.alloc);
+        return V{ .err = .memory };
+      };
       break;
     }
     results.append(vm.alloc, cur.ref()) catch {
@@ -52,5 +57,5 @@ pub fn whilescan(vm: *VM, cond: V, step: V, init: V, f: util.ApplyFn) V {
     return V{ .err = .memory };
   };
   @memcpy(out.slice(), results.items);
-  return .{ .L = out };
+  return promote(vm.alloc, out);
 }

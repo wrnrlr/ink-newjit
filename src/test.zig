@@ -494,6 +494,22 @@ test "ndos" {
 
   try t.check("5(2*)\\1", "1 2 4 8 16 32"); // partial not working
 }
+test "while" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("(1<){$[2!x;1+3*x;-2!x]}/3", "1");
+}
+test "whiles" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("(1<){$[2!x;1+3*x;-2!x]}\\3", "3 10 5 16 8 4 2 1");
+}
+test "converge" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("(-2!)/100", "0");
+}
+test "converges" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("(-2!)\\100", "100 50 25 12 6 3 1 0");
+}
 test "stencil" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("3{x,\".\"}' \"abcde\"", "(\"abc.\";\"bcd.\";\"cde.\")");

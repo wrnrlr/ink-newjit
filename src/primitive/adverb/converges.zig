@@ -3,6 +3,7 @@ const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
+const promote = @import("../promote.zig").promote;
 
 // converges: collect all intermediate values until fixed point
 // f\x → x, f(x), f(f(x)), ... until result repeats
@@ -40,5 +41,5 @@ pub fn converges(vm: *VM, base: V, x: V, f: util.ApplyFn) V {
     return V{ .err = .memory };
   };
   @memcpy(out.slice(), results.items);
-  return .{ .L = out };
+  return promote(vm.alloc, out);
 }
