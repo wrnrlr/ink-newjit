@@ -82,6 +82,12 @@ p: +[;3]
 
 ## Verbs
 
+### Assigment
+
+#### Local Assign `` : ``
+
+#### Global Assign `` :: ``
+
 ### Monadic Operators `+-*!#@&|<>=?,^~$.`
 
 #### Flip `+x`
