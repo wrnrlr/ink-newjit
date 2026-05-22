@@ -1,16 +1,24 @@
-/ At the boundry E(x,y) = 0
-/ E(x,y) = 1+0.25*(E(x+1,y) + E(x-1,y) + E(x,y+1) + E(x,y-1))
-/ 4E(x,y) - E(x+1,y) - E(x-1,y) - E(x,y+1) - E(x,y-1) = 4
+/ Energy-based numeric solver (value iteration / relaxation)
+/ E(x,y) = 0 at boundary
+/ E(x,y) = 1 + 0.25*(E(n)+E(s)+E(e)+E(w)) at interior
 
 N: 10
-E: N*N # 0.0
-xy: 1+!(N-2;N-2)
+M: N-1
+E: (N*N)#0.0
 
-xy
-xy.(32+4)
+row: {x div N}
+col: {x mod N}
 
-show: 8 8 #
-show E
-(show E).4 4
+cell: {[e;i]
+  r: row i
+  c: col i
+  a: r*c
+  b: (M-r)*(M-c)
+  nb: (e@i-N)+(e@i+N)
+  sc: (e@i-1)+(e@i+1)
+  $[a*b; 1.0+0.25*(nb+sc); 0.0]}
 
-show xy
+step: {[e] cell[e;]'!N*N}
+result: step/E
+10 10 # result
+result@55
