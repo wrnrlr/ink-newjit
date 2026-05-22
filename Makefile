@@ -8,7 +8,7 @@ test:
 	time zig build test
 
 build:
-	time zig build -Dui=true
+	time zig build -Doptimize=ReleaseFast
 
 release:
 	time zig build -Doptimize=ReleaseFast -Djit=true -Dui=true
