@@ -326,7 +326,7 @@ list all states while condition holds
 
 ### Converge `f/`
 Iterate f until result stops changing
-`` ~{1+1.0%x}/1 `` -> `` 1.618033988749895 ``
+`` {1+1.0%x}/1 `` -> `` 1.618033988749895 ``
 
 ### Converges `f\`
 list successive results until convergence
