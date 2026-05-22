@@ -705,8 +705,8 @@ pub const Compiler = struct {
         return 2;
       },
       .Global => {
-        // Cached global expands to: Global X; AssignLocal T; Local T (3 × 2 bytes).
-        if (inst.cache_slot != null) return 6;
+        // Cached global expands to: Global X; AssignLocal T; Drop; Local T (2+2+1+2 = 7 bytes).
+        if (inst.cache_slot != null) return 7;
         return 2;
       },
       .Local, .AssignLocal, .AssignGlobal,
@@ -735,13 +735,15 @@ pub const Compiler = struct {
       if (inst.inputs.len == 0 or inst.inputs[0] == ir.NO_VALUE or self.scope.ir.get(inst.inputs[0]).is_dead) return;
     }
 
-    // Cached global: emit Global X; AssignLocal T; Local T instead of bare Global X.
+    // Cached global: emit Global X; AssignLocal T; Drop; Local T instead of bare Global X.
+    // AssignLocal pushes .blank (like AssignGlobal), so Drop consumes it before Local T re-reads.
     if (inst.op == .Global and inst.cache_slot != null) {
       const slot = inst.cache_slot.?;
       try chunk.writeOp(.Global);
       try chunk.write(@intCast(inst.arg1));
       try chunk.writeOp(.AssignLocal);
       try chunk.write(slot);
+      try chunk.writeOp(.Drop);
       try chunk.writeOp(.Local);
       try chunk.write(slot);
       return;
