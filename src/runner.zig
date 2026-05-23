@@ -136,9 +136,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
     const key = try vm.alloc.dupe(u8, "x");
     errdefer vm.alloc.free(key);
-    const idx: u8 = @intCast(vm.globals.items.len);
+    const idx: u8 = @intCast(vm.globals_names.count());
     try vm.globals_names.put(key, idx);
-    try vm.globals.append(vm.alloc, V{ .L = x_n });
+    vm.globals[idx].deinit(vm.alloc);
+    vm.globals[idx] = V{ .L = x_n };
   }
 
   if (script_path == null and stdin_is_tty) return runRepl(allocator, vm);
@@ -165,8 +166,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
   // Find 'loop' global — if absent, file was already evaluated; exit cleanly
   const loop_idx = vm.globals_names.get("loop") orelse return;
-  if (loop_idx >= vm.globals.items.len or !vm.globals.items[loop_idx].isLambda()) return;
+  if (!vm.globals[loop_idx].isLambda()) return;
   // UI runner removed in Phase-0 GPU strip; the loop lambda is parsed but not
   // invoked. When the graphics stack is restored, dispatch back to runner_ui.
-  _ = vm.globals.items[loop_idx];
+  _ = vm.globals[loop_idx];
 }

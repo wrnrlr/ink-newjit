@@ -30,8 +30,8 @@ pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
     while (it_v.next()) |entry| {
       const name = entry.key_ptr.*;
       const idx = entry.value_ptr.*;
-      if (idx < vm.globals.items.len) {
-        const val = vm.globals.items[idx];
+      {
+        const val = vm.globals[idx];
         if (val != .blank) {
           var mw = try MockWriter.init(vm.alloc);
           defer mw.deinit();
@@ -48,7 +48,7 @@ pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
     while (it_f.next()) |entry| {
       const name = entry.key_ptr.*;
       const idx = entry.value_ptr.*;
-      if (idx < vm.globals.items.len and vm.globals.items[idx].isLambda()) {
+      if (vm.globals[idx].isLambda()) {
         std.debug.print("{s}\n", .{name});
       }
     }

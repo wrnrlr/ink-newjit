@@ -57,7 +57,7 @@ pub const VM = struct {
   partial_pool: std.heap.MemoryPool(Partial),
 
   symbols: Pool,
-  globals: std.ArrayListUnmanaged(V) = .empty,
+  globals: [256]V = undefined,
   globals_names: std.StringHashMap(u8),
   current_chunk: *Chunk,
   registry: Registry,
@@ -92,6 +92,7 @@ pub const VM = struct {
       .prng          = std.Random.DefaultPrng.init(0),
     };
     vm.compiler.* = try Compiler.init(alloc, chunk, &vm.globals_names, &vm.symbols, &vm.registry, &vm.fn_tables);
+    @memset(&vm.globals, .blank);
     std.Io.Threaded.global_single_threaded.allocator = alloc;
     vm.pushFrame(.{ .base = 0, .result_slot = 0, .lambda_idx = NO_LAMBDA });
     return vm;
@@ -106,8 +107,7 @@ pub const VM = struct {
 
     vm.symbols.deinit();
 
-    for (vm.globals.items) |*v| v.deinit(vm.alloc);
-    vm.globals.deinit(vm.alloc);
+    for (&vm.globals) |*v| v.deinit(vm.alloc);
 
     var kit = vm.globals_names.keyIterator();
     while (kit.next()) |k| vm.alloc.free(k.*);
@@ -212,9 +212,7 @@ pub const VM = struct {
   
   fn doGlobal(vm: *VM) !void {
     const idx = vm.readByte();
-    while (vm.globals.items.len <= idx) try vm.globals.append(vm.alloc, .blank);
-    const v = vm.globals.items[idx];
-    try vm.push(v.ref());
+    try vm.push(vm.globals[idx].ref());
   }
   
   fn doInt(vm: *VM) !void {
@@ -242,9 +240,8 @@ pub const VM = struct {
   fn doAssignGlobal(vm: *VM) !void {
     const index = vm.readByte();
     const val = vm.pop();
-    while (vm.globals.items.len <= index) try vm.globals.append(vm.alloc, .blank);
-    vm.globals.items[index].deinit(vm.alloc);
-    vm.globals.items[index] = val;
+    vm.globals[index].deinit(vm.alloc);
+    vm.globals[index] = val;
     try vm.push(.blank);
   }
   
@@ -268,9 +265,8 @@ pub const VM = struct {
     } else {
       for (0..n) |i| {
         const index = vm.readByte();
-        while (vm.globals.items.len <= index) try vm.globals.append(vm.alloc, .blank);
-        vm.globals.items[index].deinit(vm.alloc);
-        vm.globals.items[index] = val.at(i);
+        vm.globals[index].deinit(vm.alloc);
+        vm.globals[index] = val.at(i);
       }
       try vm.push(.blank);
     }

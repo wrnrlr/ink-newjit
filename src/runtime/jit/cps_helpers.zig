@@ -91,14 +91,7 @@ pub export fn cps_local_last(vm: *VM, op: u32) callconv(.c) void {
 
 pub export fn cps_global(vm: *VM, op: u32) callconv(.c) void {
     const idx: u8 = @truncate(op);
-    while (vm.globals.items.len <= idx) {
-        vm.globals.append(vm.alloc, .blank) catch {
-            pushErr(vm, .memory);
-            return;
-        };
-    }
-    const v = vm.globals.items[idx];
-    pushOr(vm, v.ref());
+    pushOr(vm, vm.globals[idx].ref());
 }
 
 pub export fn cps_assign_local(vm: *VM, op: u32) callconv(.c) void {
@@ -113,15 +106,8 @@ pub export fn cps_assign_local(vm: *VM, op: u32) callconv(.c) void {
 pub export fn cps_assign_global(vm: *VM, op: u32) callconv(.c) void {
     const idx: u8 = @truncate(op);
     const val = vm.pop();
-    while (vm.globals.items.len <= idx) {
-        vm.globals.append(vm.alloc, .blank) catch {
-            val.deinit(vm.alloc);
-            pushErr(vm, .memory);
-            return;
-        };
-    }
-    vm.globals.items[idx].deinit(vm.alloc);
-    vm.globals.items[idx] = val;
+    vm.globals[idx].deinit(vm.alloc);
+    vm.globals[idx] = val;
     pushOr(vm, .blank);
 }
 

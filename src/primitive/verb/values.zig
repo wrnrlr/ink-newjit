@@ -15,8 +15,7 @@ pub const GetSymbol = struct {
 fn get_symbol(vm: *VM, x: V) V {
   const sname = vm.getSymbol(x.s);
   if (vm.globals_names.get(sname)) |idx| {
-    // assert (idx < vm.globals.items.len)
-    return vm.globals.items[idx].ref();
+    return vm.globals[idx].ref();
   }
   return V{ .err = .domain };
 }

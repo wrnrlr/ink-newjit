@@ -56,9 +56,6 @@ pub const Compiler = struct {
       try opt.optimize(&self.scope.ir, root_id);
       _ = try opt.inlineLambdas(&self.scope.ir, self.fn_tables);
       try opt.optimize(&self.scope.ir, root_id);
-      // liftInvariants is NOT called here: top-level code has no reserved local
-      // slots (callLambda never runs for the root frame), so AssignLocal would
-      // corrupt the evaluation stack.  The pass only runs inside compileLambda.
       try opt.livenessLocals(&self.scope.ir);
       try self.lower();
     }
@@ -590,13 +587,12 @@ pub const Compiler = struct {
       try opt.optimize(&scope_ptr.ir, root_id);
       _ = try opt.inlineLambdas(&scope_ptr.ir, self.fn_tables);
       try opt.optimize(&scope_ptr.ir, root_id);
-      _ = try opt.liftInvariants(&scope_ptr.ir);
       try opt.livenessLocals(&scope_ptr.ir);
       try self.lower();
       break :blk a;
     };
 
-    const locals_count = @as(u8, @intCast(scope_ptr.locals.count())) + scope_ptr.ir.extra_locals;
+    const locals_count = @as(u8, @intCast(scope_ptr.locals.count()));
     scope_ptr.deinit();
     self.alloc.destroy(scope_ptr);
     scope_owned = false;
@@ -704,11 +700,7 @@ pub const Compiler = struct {
         }
         return 2;
       },
-      .Global => {
-        // Cached global expands to: Global X; AssignLocal T; Drop; Local T (2+2+1+2 = 7 bytes).
-        if (inst.cache_slot != null) return 7;
-        return 2;
-      },
+      .Global => return 2,
       .Local, .AssignLocal, .AssignGlobal,
       .Call, .TailCall, .Apply1, .Apply2, .Apply,
       .MakeList, .MakeDict, .MakeTable, .Derive, .Amend, .Dmend,
@@ -733,20 +725,6 @@ pub const Compiler = struct {
 
     if (inst.op == .Drop) {
       if (inst.inputs.len == 0 or inst.inputs[0] == ir.NO_VALUE or self.scope.ir.get(inst.inputs[0]).is_dead) return;
-    }
-
-    // Cached global: emit Global X; AssignLocal T; Drop; Local T instead of bare Global X.
-    // AssignLocal pushes .blank (like AssignGlobal), so Drop consumes it before Local T re-reads.
-    if (inst.op == .Global and inst.cache_slot != null) {
-      const slot = inst.cache_slot.?;
-      try chunk.writeOp(.Global);
-      try chunk.write(@intCast(inst.arg1));
-      try chunk.writeOp(.AssignLocal);
-      try chunk.write(slot);
-      try chunk.writeOp(.Drop);
-      try chunk.writeOp(.Local);
-      try chunk.write(slot);
-      return;
     }
 
     // Small i32 constants: emit Int opcode + inline i16 instead of Const + pool index.
