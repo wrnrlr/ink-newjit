@@ -561,12 +561,11 @@ test "monadic verb type" {
 // Assignment
 test "name binding" {
   var t = try Tester.init(); defer t.deinit();
-  _ = try t.eval("a:10");
-  try t.check("a", "10");
+  try t.check("a:10; a", "10");
 }
 test "global assign" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("a:1;{a::2}[];a", "2");
+  try t.check("a:1; {a::2}[]; a", "2");
 }
 // test "return" {
 //   var t = try Tester.init(); defer t.deinit();
@@ -731,12 +730,12 @@ test "s$y cast y into type of s" {
   try t.check("`f$`a`b!1 2", "[a:1.0;b:2.0]");
 }
 
-// test "s$y to int/float" {
-//   var t = try Tester.init(); defer t.deinit();
-//   try t.check("`I$\"123\"", "123");
-//   try t.check("`F$\"12.3\"", "12.3");
-//   try t.check("`I$\"1.23\"", "0N");
-// }
+test "s$y to int/float" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("`I$\"123456\"", "123456");
+  try t.check("`F$\"12.3\"", "12.3");
+  try t.check("`I$\"1.23\"", "0N");
+}
 
 test "X?Y find" {
   var t = try Tester.init(); defer t.deinit();
