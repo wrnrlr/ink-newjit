@@ -18,11 +18,6 @@ inline fn cpuReduce(op: Op, x: V) ?V {
       if (s.len == 0) return .blank;
       switch (op) {
         .@"+" => {
-          // Gauss shortcut for 0-based step-1 ascending ranges (!N result).
-          if (s.len >= 2 and x.I.hasFlag(ArrayFlags.ascending) and s[0] == 0 and s[1] == 1) {
-            const n: i64 = @intCast(s.len);
-            return .{ .i = @intCast(@divExact(n * (n - 1), 2)) };
-          }
           var acc: i32 = 0;
           for (s) |v| acc +%= v;
           return .{ .i = acc };
