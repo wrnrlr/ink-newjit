@@ -16,7 +16,8 @@ cell: {[e;i]
   b: (M-r)*(M-c)
   nb: (e@i-N)+(e@i+N)
   sc: (e@i-1)+(e@i+1)
-  $[a*b; 1.0+0.25*(nb+sc); 0.0]}
+  $[a*b; 1.0+0.25*(nb+sc); 0.0]
+}
 
 step: {[e] cell[e;]'!N*N}
 result: step/E
