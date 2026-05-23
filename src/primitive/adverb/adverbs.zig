@@ -1,8 +1,8 @@
 pub const decode = @import("decode.zig").decode;
 pub const each = @import("each.zig").each;
 pub const zip = @import("zip.zig").each2;
-pub const eachleft = @import("eachleft.zig").eachleft;
-pub const eachright = @import("eachleft.zig").eachleft;
+pub const eachleft = @import("eachside.zig").eachleft;
+pub const eachright = @import("eachside.zig").eachleft;
 pub const eachprior = @import("eachprior.zig").eachprior;
 pub const encode = @import("encode.zig").encode;
 pub const fold = @import("fold.zig").fold;
