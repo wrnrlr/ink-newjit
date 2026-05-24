@@ -25,7 +25,7 @@ pub fn _X(comptime op: Op, comptime Impl: type) type {
   comptime var attrs:       []const Attr       = &.{
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
-  inline for (std.meta.fields(Impl)) |f| {
+  for (std.meta.fields(Impl)) |f| {
     const attr: Attr = .{ .default_value_ptr = f.default_value_ptr.? };
     names       = names       ++ .{f.name};
     field_types = field_types ++ .{f.type};
@@ -48,7 +48,7 @@ pub fn makeMonad(
   comptime var attrs: []const Attr = &.{
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
-  inline for (types) |xk| {
+  for (types) |xk| {
     const maybe: ?util.MonadFn = monadKernel(xk, CastType, ResultType, Impl);
     if (maybe) |handler| {
       names = names ++ .{"_" ++ @tagName(xk)};
@@ -74,8 +74,8 @@ pub fn makeDyad(
   comptime var attrs: []const Attr = &.{
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
-  inline for (types) |xk| {
-    inline for (types) |yk| {
+  for (types) |xk| {
+    for (types) |yk| {
       const maybe: ?util.DyadFn = dyadKernel(xk, yk, CastType, ResultType, Impl);
       if (maybe) |handler| {
         names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};

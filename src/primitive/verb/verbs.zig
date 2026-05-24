@@ -132,13 +132,17 @@ const Dyads = struct {
   pub const @"x exec" = @import("exec.zig").ExecDyad;
 };
 
-fn makeMonadArray(comptime Defs: type) [Op.COUNT * K.COUNT]?util.MonadFn {
+fn typeError(_: *VM, _:V) V {
+  return .{ .err = .@"type" };
+}
+
+fn makeMonadArray(comptime Defs: type) [Op.COUNT * K.COUNT]util.MonadFn {
   @setEvalBranchQuota(10000000);
-  var table: [Op.COUNT * K.COUNT]?util.MonadFn = .{null} ** (Op.COUNT * K.COUNT);
-  inline for (std.meta.declarations(Defs)) |decl| {
+  var table: [Op.COUNT * K.COUNT]util.MonadFn = .{typeError} ** (Op.COUNT * K.COUNT);
+  for (std.meta.declarations(Defs)) |decl| {
     const Verb = @field(Defs, decl.name);
     const op = verbOp(Verb) orelse continue;
-    inline for (std.meta.fields(Verb)) |f| {
+    for (std.meta.fields(Verb)) |f| {
       const sig = parseSig(f.name);
       if (sig.len == 1) {
         const key = @intFromEnum(op) * K.COUNT + sig[0].code();

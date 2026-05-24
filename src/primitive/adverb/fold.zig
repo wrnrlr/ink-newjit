@@ -6,13 +6,6 @@ const Op = @import("../../runtime/tape.zig").Op;
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
-const ArrayFlags = @import("../../noun/array.zig").ArrayFlags;
-
-// fn accumulate(op:type, s:N(type)) type {
-//   var acc: i32 = 0;
-//   for (s) |v| acc = op.f(acc, v);
-//   return V.wrap(k, acc);
-// }
 
 // CPU fast path: builtin reduce on a typed CPU array.
 // Avoids per-element boxing and function-pointer overhead.

@@ -16,13 +16,7 @@ const Dict = @import("../noun/dict.zig").Dict;
 pub fn dispatch1(vm: *VM, op: Op, x: V) V {
   const xt = x.tag();
   const key = op.code() * K.COUNT + xt.code();
-  if (verbs.monad_table[key]) |f| return f(vm, x);
-  return switch (xt) {
-    .m => fallbackDict(vm, op, x.m.av(), x.m.bv(), .m),
-    .M => fallbackDict(vm, op, x.M.av(), x.M.bv(), .M),
-    .L => fallbackList(vm, op, x),
-    else => .{ .err = .@"type" }
-  };
+  return verbs.monad_table[key](vm, x);
 }
 
 pub fn dispatch2(vm: *VM, op: Op, x: V, y: V) V {
@@ -40,34 +34,6 @@ pub fn dispatch2(vm: *VM, op: Op, x: V, y: V) V {
     return fc.apply(x, &.{y}, false) catch V{ .err = .memory };
   }
   return .{ .err = .@"type" };
-}
-
-fn fallbackDict(vm: *VM, op: Op, av: V, bv: V, comptime k: K) V {
-  const r = dispatch1(vm, op, bv);
-  if (r.tag() == .err) return r;
-  return V.wrap(k, Dict.init(vm.alloc, av.ref(), r) catch {
-    r.deinit(vm.alloc);
-    return V{ .err = .memory };
-  });
-}
-
-fn fallbackList(vm: *VM, op: Op, x: V) V {
-  // TODO cow?
-  const n = x.len();
-  const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
-  @memset(res.slice(), .blank);
-
-  for (res.slice(), 0..) |*r, i| {
-    const val = x.at(i);
-    defer val.deinit(vm.alloc);
-    const rv = dispatch1(vm, op, val);
-    if (rv.tag() == .err) {
-      (V{ .L = res }).deinit(vm.alloc);
-      return rv;
-    }
-    r.* = rv;
-  }
-  return V{ .L = res };
 }
 
 fn listDyad(vm: *VM, op: Op, x: V, y: V) V {
