@@ -132,9 +132,7 @@ const Dyads = struct {
   pub const @"x exec" = @import("exec.zig").ExecDyad;
 };
 
-fn typeError(_: *VM, _:V) V {
-  return .{ .err = .@"type" };
-}
+fn typeError(_: *VM, _:V) V { return .{ .err = .@"type" }; }
 
 fn makeMonadArray(comptime Defs: type) [Op.COUNT * K.COUNT]util.MonadFn {
   @setEvalBranchQuota(10000000);
@@ -156,10 +154,10 @@ fn makeMonadArray(comptime Defs: type) [Op.COUNT * K.COUNT]util.MonadFn {
 fn makeDyadArray(comptime Defs: type) [Op.COUNT * K.COUNT * K.COUNT]?util.DyadFn {
   @setEvalBranchQuota(10000000);
   var table: [Op.COUNT * K.COUNT * K.COUNT]?util.DyadFn = .{null} ** (Op.COUNT * K.COUNT * K.COUNT);
-  inline for (std.meta.declarations(Defs)) |decl| {
+  for (std.meta.declarations(Defs)) |decl| {
     const Verb = @field(Defs, decl.name);
     const op = verbOp(Verb) orelse continue;
-    inline for (std.meta.fields(Verb)) |f| {
+    for (std.meta.fields(Verb)) |f| {
       const sig = parseSig(f.name);
       if (sig.len == 2) {
         const key = op.code() * K.COUNT * K.COUNT + sig[0].code() * K.COUNT + sig[1].code();
@@ -172,7 +170,7 @@ fn makeDyadArray(comptime Defs: type) [Op.COUNT * K.COUNT * K.COUNT]?util.DyadFn
 
 fn verbOp(comptime Verb: type) ?Op {
   if (@hasDecl(Verb, "op")) return @as(Op, @field(Verb, "op"));
-  inline for (std.meta.fields(Verb)) |f|
+  for (std.meta.fields(Verb)) |f|
     if (comptime std.mem.eql(u8, f.name, "op"))
       return @as(Op, f.defaultValue() orelse return null);
   return null;
@@ -186,7 +184,7 @@ fn parseSig(comptime name: []const u8) []const K {
   comptime var tags: []const K = &.{};
   comptime var start: usize = 1;
   comptime var i: usize = 1;
-  inline while (i <= name.len) : (i += 1) {
+  while (i <= name.len) : (i += 1) {
     const at_boundary = (i == name.len or name[i] == '_');
     if (at_boundary and i > start) {
       const seg = name[start..i];

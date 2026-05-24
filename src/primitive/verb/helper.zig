@@ -20,19 +20,19 @@ pub const cut_types = [_]K{ .b, .i, .f, .B, .I, .F };
 /// dispatch-table builder can key it correctly.
 pub fn _X(comptime op: Op, comptime Impl: type) type {
   const op_default: Op = op;
-  comptime var names:       []const []const u8 = &.{ "op" };
-  comptime var field_types: []const type       = &.{ Op };
-  comptime var attrs:       []const Attr       = &.{
+  var names: []const []const u8 = &.{ "op" };
+  var types: []const type       = &.{ Op };
+  var attrs: []const Attr       = &.{
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
   for (std.meta.fields(Impl)) |f| {
     const attr: Attr = .{ .default_value_ptr = f.default_value_ptr.? };
-    names       = names       ++ .{f.name};
-    field_types = field_types ++ .{f.type};
-    attrs       = attrs       ++ .{attr};
+    names = names ++ .{f.name};
+    types = types ++ .{f.type};
+    attrs = attrs ++ .{attr};
   }
   const n = names.len;
-  return @Struct(.auto, null, names[0..n], &(field_types[0..n].*), &(attrs[0..n].*));
+  return @Struct(.auto, null, names[0..n], &(types[0..n].*), &(attrs[0..n].*));
 }
 
 pub fn makeMonad(
@@ -40,25 +40,25 @@ pub fn makeMonad(
   comptime CastType: fn (type) type,
   comptime ResultType: fn (type) type,
   comptime Impl: type,
-  comptime types: []const K,
+  comptime ks: []const K,
 ) type {
   const op_default: Op = operator;
-  comptime var names: []const []const u8 = &.{ "op" };
-  comptime var field_types: []const type = &.{ Op };
-  comptime var attrs: []const Attr = &.{
+  var names: []const []const u8 = &.{ "op" };
+  var types: []const type = &.{ Op };
+  var attrs: []const Attr = &.{
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
-  for (types) |xk| {
+  for (ks) |xk| {
     const maybe: ?util.MonadFn = monadKernel(xk, CastType, ResultType, Impl);
     if (maybe) |handler| {
       names = names ++ .{"_" ++ @tagName(xk)};
-      field_types = field_types ++ .{util.MonadFn};
+      types = types ++ .{util.MonadFn};
       const attr: Attr = .{ .default_value_ptr = @ptrCast(&handler) };
       attrs = attrs ++ .{attr};
     }
   }
   const n = names.len;
-  return @Struct(.auto, null, names[0..n], &(field_types[0..n].*), &(attrs[0..n].*));
+  return @Struct(.auto, null, names[0..n], &(types[0..n].*), &(attrs[0..n].*));
 }
 
 pub fn makeDyad(
@@ -69,9 +69,9 @@ pub fn makeDyad(
   comptime types: []const K,
 ) type {
   const op_default: Op = operator;
-  comptime var names: []const []const u8 = &.{ "op" };
-  comptime var field_types: []const type = &.{ Op };
-  comptime var attrs: []const Attr = &.{
+  var names: []const []const u8 = &.{ "op" };
+  var field_types: []const type = &.{ Op };
+  var attrs: []const Attr = &.{
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
   for (types) |xk| {

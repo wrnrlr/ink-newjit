@@ -1,10 +1,57 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
+const util = @import("../../util.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const promote = @import("../promote.zig").promote; // for promote() via pub fn concat()
+
+
+fn homoAtoms(k: K) util.DyadFn {
+  return struct {
+    fn f(vm:*VM, x: V, y: V) V {
+      const res = N(K).init(vm.alloc, 2) catch return V{ .err = .memory };
+      res.slice()[0] = V.unwrap(x, k);
+      res.slice()[1] = V.unwrap(y, k);
+      return V.wrap(k, res);
+    }
+  }.f;
+}
+
+fn homoVecs(k: K) util.DyadFn {
+  return struct {
+    fn f(vm:*VM, x: V, y: V) V {
+      const xv = V.unwrap(x, k);
+      const yv = V.unwrap(y, k);
+      const res = N(k.backing()).init(vm.alloc, xv.ptr.len + yv.ptr.len) catch return V{ .err = .memory };
+      @memcpy(res.slice()[0..xv.ptr.len], xv.slice());
+      @memcpy(res.slice()[xv.ptr.len..],  yv.slice());
+      return V.wrap(k, res);
+    }
+  }.f;
+}
+
+fn heteroAtoms(vm:*VM, x: V, y: V) util.DyadFn {
+  const res = N(V).init(vm.alloc, 2) catch return V{ .err = .memory };
+  res.slice()[0] = x;
+  res.slice()[1] = y;
+  return .{ .L = res };
+}
+
+// fn heteroVecs(vm:*VM, x: V, y: V) util.DyadFn {
+//   const xv = V.unwrap(x, k);
+//   const yv = V.unwrap(y, k);
+//   const res = N(V).init(vm.alloc, xv.ptr.len + yv.ptr.len) catch return V{ .err = .memory };
+//   @memcpy(res.slice()[0..xv.ptr.len], xv.slice());
+//   @memcpy(res.slice()[xv.ptr.len..],  yv.slice());
+//   return V.wrap(k, res);
+// }
+
+const Concat = struct {
+  pub const op = .@"$";
+  _s_c: util.DyadFn,
+};
 
 // Returns the shared vector kind if x and y have compatible base types, else null.
 // e.g. .i+.I → .I,  .f+.f → .F,  .i+.f → null
