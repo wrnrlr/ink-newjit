@@ -77,6 +77,7 @@ pub const K = enum(u8) {
   }
   // B → b, I → i, etc.  Caller must ensure k is a vector type.
   pub inline fn atom(comptime k: K) K {
+    std.debug.assert(k.isVec());
     return @enumFromInt(@intFromEnum(k) & ~@as(u8, VEC_BIT));
   }
 
