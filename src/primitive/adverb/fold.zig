@@ -8,6 +8,12 @@ const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const ArrayFlags = @import("../../noun/array.zig").ArrayFlags;
 
+// fn accumulate(op:type, s:N(type)) type {
+//   var acc: i32 = 0;
+//   for (s) |v| acc = op.f(acc, v);
+//   return V.wrap(k, acc);
+// }
+
 // CPU fast path: builtin reduce on a typed CPU array.
 // Avoids per-element boxing and function-pointer overhead.
 // LLVM auto-vectorises these simple accumulation loops.
@@ -18,23 +24,21 @@ inline fn cpuReduce(op: Op, x: V) ?V {
       if (s.len == 0) return .blank;
       switch (op) {
         .@"+" => {
-          var acc: i32 = 0;
-          for (s) |v| acc +%= v;
+          var acc: i32 = s[0];
+          for (s[1..]) |v| acc +%= v;
           return .{ .i = acc };
         },
         .@"*" => {
-          var acc: i32 = 1;
-          for (s) |v| acc *%= v;
+          var acc: i32 = s[0];
+          for (s[1..]) |v| acc *%= v;
           return .{ .i = acc };
         },
         .@"&" => {
-          if (x.I.hasFlag(ArrayFlags.ascending)) return .{ .i = s[0] };
           var acc = s[0];
           for (s[1..]) |v| acc = @min(acc, v);
           return .{ .i = acc };
         },
         .@"|" => {
-          if (x.I.hasFlag(ArrayFlags.ascending)) return .{ .i = s[s.len - 1] };
           var acc = s[0];
           for (s[1..]) |v| acc = @max(acc, v);
           return .{ .i = acc };
@@ -47,23 +51,21 @@ inline fn cpuReduce(op: Op, x: V) ?V {
       if (s.len == 0) return .blank;
       switch (op) {
         .@"+" => {
-          var acc: f32 = 0;
-          for (s) |v| acc += v;
+          var acc: f32 = s[0];
+          for (s[1..]) |v| acc += v;
           return .{ .f = acc };
         },
         .@"*" => {
-          var acc: f32 = 1;
-          for (s) |v| acc *= v;
+          var acc: f32 = s[0];
+          for (s[1..]) |v| acc *= v;
           return .{ .f = acc };
         },
         .@"&" => {
-          if (x.F.hasFlag(ArrayFlags.ascending)) return .{ .f = s[0] };
           var acc = s[0];
           for (s[1..]) |v| acc = @min(acc, v);
           return .{ .f = acc };
         },
         .@"|" => {
-          if (x.F.hasFlag(ArrayFlags.ascending)) return .{ .f = s[s.len - 1] };
           var acc = s[0];
           for (s[1..]) |v| acc = @max(acc, v);
           return .{ .f = acc };
