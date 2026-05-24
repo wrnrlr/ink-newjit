@@ -111,4 +111,3 @@ fn makeConcat() type {
 }
 
 pub const Concat = makeConcat();
-
