@@ -93,7 +93,7 @@ const Dyads = struct {
   pub const @"I mod I"  = _I_I(.mod, calc.ModOp);
   pub const @"I div I"  = _I_I(.div, calc.DiviOp);
   
-  // pub const @"x,x" = @import("pair.zig").Pair;
+  pub const @"x,y"  = concat.Concat;
   pub const @"i_X"  = @import("drop.zig").Drop;
   pub const @"I_X"  = _I_A(.@"_", @import("cut.zig").Cut);
   pub const @"B_X"  = @import("weedout.zig").WeedOut;
