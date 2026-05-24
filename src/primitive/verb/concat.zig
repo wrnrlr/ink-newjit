@@ -1,12 +1,10 @@
 const std = @import("std");
-const Alloc = std.mem.Allocator;
 const util = @import("../../util.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const Op = @import("../../runtime/tape.zig").Op;
-const promote = @import("../promote.zig").promote;
 const h = @import("helper.zig");
 
 // ── Kernel generators ─────────────────────────────────────────────────────────
@@ -42,8 +40,6 @@ fn homoKernel(comptime xk: K, comptime yk: K) util.DyadFn {
   const VK: K = @enumFromInt((@intFromEnum(xk) & ~@as(u8, K.VEC_BIT)) | K.VEC_BIT);
   const T = K.backing(VK);
   return &struct {
-    inline fn xlen(x: V) usize { return if (comptime xk.isAtom()) 1 else @field(x, @tagName(VK)).ptr.len; }
-    inline fn ylen(y: V) usize { return if (comptime yk.isAtom()) 1 else @field(y, @tagName(VK)).ptr.len; }
     inline fn xcopy(dst: []T, x: V) void {
       if (comptime xk.isAtom()) dst[0] = @field(x, @tagName(xk))
       else @memcpy(dst, @field(x, @tagName(VK)).slice());
@@ -53,8 +49,8 @@ fn homoKernel(comptime xk: K, comptime yk: K) util.DyadFn {
       else @memcpy(dst, @field(y, @tagName(VK)).slice());
     }
     fn f(vm: *VM, x: V, y: V) V {
-      const xl = xlen(x);
-      const yl = ylen(y);
+      const xl = x.len();
+      const yl = y.len();
       const res = N(T).init(vm.alloc, xl + yl) catch return V{ .err = .memory };
       xcopy(res.slice()[0..xl], x);
       ycopy(res.slice()[xl..], y);
@@ -116,15 +112,3 @@ fn makeConcat() type {
 
 pub const Concat = makeConcat();
 
-// ── Public helpers ────────────────────────────────────────────────────────────
-
-// Appends y to x: if y is a vector/list, its elements are merged; otherwise y is a single new element.
-// Used by amend.zig for dict key/value extension.
-pub fn concat(alloc: Alloc, x: V, y: V) V {
-  const xl = if (x.tag().isVec() or x.tag() == .L) x.len() else 1;
-  const yl = if (y.tag().isVec() or y.tag() == .L) y.len() else 1;
-  const res = N(V).init(alloc, xl + yl) catch return V{ .err = .memory };
-  for (0..xl) |i| res.slice()[i] = x.at(i);
-  for (0..yl) |i| res.slice()[xl + i] = y.at(i);
-  return promote(alloc, res);
-}

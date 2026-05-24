@@ -1,8 +1,7 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
 const util = @import("../util.zig");
-const calc = @import("verb/calc.zig");
-const concat = @import("verb/concat.zig");
+const promote = @import("promote.zig").promote;
 const V = @import("../noun/value.zig").V;
 const N = @import("../noun/array.zig").N;
 const VM = @import("../runtime/vm.zig").VM;
@@ -155,6 +154,14 @@ fn applyAt(vm: *VM, target: *V, key: V, func: V, val: V) !void {
   try setAt(vm, target, key, result);
 }
 
+fn appendOne(alloc: Alloc, arr: V, val: V) V {
+  const n = arr.len();
+  const res = N(V).init(alloc, n + 1) catch return V{ .err = .memory };
+  for (0..n) |i| res.slice()[i] = arr.at(i);
+  res.slice()[n] = val.ref();
+  return promote(alloc, res);
+}
+
 pub fn setAt(vm: *VM, target: *V, key: V, val: V) !void {
   // val is owned by this function
   errdefer val.deinit(vm.alloc);
@@ -175,8 +182,8 @@ pub fn setAt(vm: *VM, target: *V, key: V, val: V) !void {
     } else {
       try d.avPtr().cow(vm.alloc);
       try d.bvPtr().cow(vm.alloc);
-      const new_a = concat.concat(vm.alloc, d.av(), key);
-      const new_b = concat.concat(vm.alloc, d.bv(), val);
+      const new_a = appendOne(vm.alloc, d.av(), key);
+      const new_b = appendOne(vm.alloc, d.bv(), val);
       d.avPtr().deinit(vm.alloc);
       d.bvPtr().deinit(vm.alloc);
       d.avPtr().* = new_a;
