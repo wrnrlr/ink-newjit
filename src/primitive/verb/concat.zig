@@ -9,60 +9,29 @@ const Op = @import("../../runtime/tape.zig").Op;
 const promote = @import("../promote.zig").promote;
 const h = @import("helper.zig");
 
-fn scalarT(comptime vk: K) type {
-  return switch (vk) {
-    .I => i32, .F => f32, .B => bool, .S => u32, .C => u8,
-    else => @compileError("no scalar for " ++ @tagName(vk)),
-  };
-}
+// ── Kernel generators ─────────────────────────────────────────────────────────
 
-inline fn atomVal(comptime VK: K, v: V) scalarT(VK) {
-  return switch (VK) {
-    .I => v.i, .F => v.f, .B => v.b, .S => v.s, .C => @intCast(v.c),
-    else => unreachable,
-  };
-}
-
-// ── Per-combination kernel generators ────────────────────────────────────────
-
-fn listMerge(vm: *VM, x: V, y: V) V {
-  const xl = x.L.ptr.len;
-  const yl = y.L.ptr.len;
-  const res = N(V).init(vm.alloc, xl + yl) catch return V{ .err = .memory };
-  for (x.L.slice(), res.slice()[0..xl]) |v, *r| r.* = v.ref();
-  for (y.L.slice(), res.slice()[xl..])  |v, *r| r.* = v.ref();
-  return V{ .L = res };
-}
-
-fn listWithRight(comptime yk: K) util.DyadFn {
+// Handles any combination where at least one side is .L.
+fn listKernel(comptime xk: K, comptime yk: K) util.DyadFn {
   return &struct {
     fn f(vm: *VM, x: V, y: V) V {
-      const xl = x.L.ptr.len;
-      const ylen: usize = if (comptime yk.isVec()) y.len() else 1;
-      const res = N(V).init(vm.alloc, xl + ylen) catch return V{ .err = .memory };
-      for (x.L.slice(), res.slice()[0..xl]) |v, *r| r.* = v.ref();
-      if (comptime yk.isVec()) {
-        for (0..ylen) |i| res.slice()[xl + i] = y.at(i);
-      } else {
-        res.slice()[xl] = y.ref();
-      }
-      return V{ .L = res };
-    }
-  }.f;
-}
-
-fn leftWithList(comptime xk: K) util.DyadFn {
-  return &struct {
-    fn f(vm: *VM, x: V, y: V) V {
-      const xlen: usize = if (comptime xk.isVec()) x.len() else 1;
-      const yl = y.L.ptr.len;
-      const res = N(V).init(vm.alloc, xlen + yl) catch return V{ .err = .memory };
-      if (comptime xk.isVec()) {
-        for (0..xlen) |i| res.slice()[i] = x.at(i);
+      const xl: usize = x.len();
+      const yl: usize = y.len();
+      const res = N(V).init(vm.alloc, xl + yl) catch return V{ .err = .memory };
+      if (comptime xk == .L) {
+        for (x.L.slice(), res.slice()[0..xl]) |v, *r| r.* = v.ref();
+      } else if (comptime xk.isVec()) {
+        for (0..xl) |i| res.slice()[i] = x.at(i);
       } else {
         res.slice()[0] = x.ref();
       }
-      for (y.L.slice(), res.slice()[xlen..]) |v, *r| r.* = v.ref();
+      if (comptime yk == .L) {
+        for (y.L.slice(), res.slice()[xl..]) |v, *r| r.* = v.ref();
+      } else if (comptime yk.isVec()) {
+        for (0..yl) |i| res.slice()[xl + i] = y.at(i);
+      } else {
+        res.slice()[xl] = y.ref();
+      }
       return V{ .L = res };
     }
   }.f;
@@ -73,32 +42,23 @@ fn homoKernel(comptime xk: K, comptime yk: K) util.DyadFn {
   const VK: K = @enumFromInt((@intFromEnum(xk) & ~@as(u8, K.VEC_BIT)) | K.VEC_BIT);
   const T = K.backing(VK);
   return &struct {
+    inline fn xlen(x: V) usize { return if (comptime xk.isAtom()) 1 else @field(x, @tagName(VK)).ptr.len; }
+    inline fn ylen(y: V) usize { return if (comptime yk.isAtom()) 1 else @field(y, @tagName(VK)).ptr.len; }
+    inline fn xcopy(dst: []T, x: V) void {
+      if (comptime xk.isAtom()) dst[0] = @field(x, @tagName(xk))
+      else @memcpy(dst, @field(x, @tagName(VK)).slice());
+    }
+    inline fn ycopy(dst: []T, y: V) void {
+      if (comptime yk.isAtom()) dst[0] = @field(y, @tagName(yk))
+      else @memcpy(dst, @field(y, @tagName(VK)).slice());
+    }
     fn f(vm: *VM, x: V, y: V) V {
-      if (comptime xk.isAtom() and yk.isAtom()) {
-        const res = N(T).init(vm.alloc, 2) catch return V{ .err = .memory };
-        res.slice()[0] = atomVal(VK, x);
-        res.slice()[1] = atomVal(VK, y);
-        return @unionInit(V, @tagName(VK), res);
-      } else if (comptime xk.isAtom()) {
-        const yv = @field(y, @tagName(VK));
-        const res = N(T).init(vm.alloc, 1 + yv.ptr.len) catch return V{ .err = .memory };
-        res.slice()[0] = atomVal(VK, x);
-        @memcpy(res.slice()[1..], yv.slice());
-        return @unionInit(V, @tagName(VK), res);
-      } else if (comptime yk.isAtom()) {
-        const xv = @field(x, @tagName(VK));
-        const res = N(T).init(vm.alloc, xv.ptr.len + 1) catch return V{ .err = .memory };
-        @memcpy(res.slice()[0..xv.ptr.len], xv.slice());
-        res.slice()[xv.ptr.len] = atomVal(VK, y);
-        return @unionInit(V, @tagName(VK), res);
-      } else {
-        const xv = @field(x, @tagName(VK));
-        const yv = @field(y, @tagName(VK));
-        const res = N(T).init(vm.alloc, xv.ptr.len + yv.ptr.len) catch return V{ .err = .memory };
-        @memcpy(res.slice()[0..xv.ptr.len], xv.slice());
-        @memcpy(res.slice()[xv.ptr.len..],  yv.slice());
-        return @unionInit(V, @tagName(VK), res);
-      }
+      const xl = xlen(x);
+      const yl = ylen(y);
+      const res = N(T).init(vm.alloc, xl + yl) catch return V{ .err = .memory };
+      xcopy(res.slice()[0..xl], x);
+      ycopy(res.slice()[xl..], y);
+      return @unionInit(V, @tagName(VK), res);
     }
   }.f;
 }
@@ -111,12 +71,11 @@ fn heteroConcat(vm: *VM, x: V, y: V) V {
 }
 
 fn getConcatKernel(comptime xk: K, comptime yk: K) util.DyadFn {
-  if (xk == .L and yk == .L) return &listMerge;
-  if (xk == .L) return listWithRight(yk);
-  if (yk == .L) return leftWithList(xk);
-  const x_base = @intFromEnum(xk) & ~@as(u8, K.VEC_BIT);
-  const y_base = @intFromEnum(yk) & ~@as(u8, K.VEC_BIT);
-  if (x_base == y_base and x_base >= 2 and x_base <= 6) return homoKernel(xk, yk);
+  if (xk == .L or yk == .L) return listKernel(xk, yk);
+  if ((xk.isAtom() or xk.isVec()) and (yk.isAtom() or yk.isVec())) {
+    if ((@intFromEnum(xk) & ~@as(u8, K.VEC_BIT)) == (@intFromEnum(yk) & ~@as(u8, K.VEC_BIT)))
+      return homoKernel(xk, yk);
+  }
   return &heteroConcat;
 }
 
@@ -125,16 +84,17 @@ fn getConcatKernel(comptime xk: K, comptime yk: K) util.DyadFn {
 // Excludes .m and .M — those are handled by DictMerge and Insert.
 const concat_types = blk: {
   const fields = @typeInfo(K).@"enum".fields;
-  var ts: [fields.len - 2]K = undefined;
+  var ts: [fields.len]K = undefined;
   var n: usize = 0;
   for (fields) |f| {
     const k: K = @enumFromInt(f.value);
     if (k != .m and k != .M) { ts[n] = k; n += 1; }
   }
-  break :blk ts;
+  break :blk ts[0..n].*;
 };
 
 fn makeConcat() type {
+  @setEvalBranchQuota(100000);
   const op_default: Op = .@",";
   var names: []const []const u8 = &.{ "op" };
   var field_types: []const type = &.{ Op };
