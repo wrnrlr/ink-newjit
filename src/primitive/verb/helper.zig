@@ -210,19 +210,19 @@ fn dyadKernel(
     }
     fn kernel(vm: *VM, x: V, y: V) V {
       if (comptime xk.isAtom() and yk.isAtom()) {
-        const r: R = Impl.f(cast(@field(x, @tagName(xk))), cast(@field(y, @tagName(yk))));
+        const r: R = Impl.f(cast(V.unwrap(x, xk)), cast(V.unwrap(y, yk)));
         return V.wrap(rk, r);
       }
       if (comptime xk.isAtom() and yk.isVec()) {
-        const xv = cast(@field(x, @tagName(xk)));
-        const vy = @field(y, @tagName(yk));
+        const xv = cast(V.unwrap(x, xk));
+        const vy = V.unwrap(y, yk);
         const out = N(R).init(vm.alloc, vy.ptr.len) catch return V{ .err = .memory };
         for (vy.slice(), out.slice()) |yv, *r| r.* = Impl.f(xv, cast(yv));
         return V.wrap(rk, out);
       }
       if (comptime xk.isVec() and yk.isAtom()) {
-        const vx = @field(x, @tagName(xk));
-        const yv = cast(@field(y, @tagName(yk)));
+        const vx = V.unwrap(x, xk);
+        const yv = cast(V.unwrap(y, yk));
         if (comptime R == XT and rk == xk) {
           if (vx.ptr.rc == 1) {
             for (vx.slice()) |*xv| xv.* = Impl.f(cast(xv.*), yv);
