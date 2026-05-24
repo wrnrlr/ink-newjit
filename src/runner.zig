@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const VM = @import("runtime/vm.zig").VM;
 const Repl = @import("repl.zig").Repl;
 const disasm = @import("runtime/disasm.zig");
@@ -63,8 +64,8 @@ fn evalStdin(allocator: std.mem.Allocator, vm: *VM) !void {
 
 pub fn main(init: std.process.Init.Minimal) !void {
   var gpa = std.heap.DebugAllocator(.{}){};
-  defer _ = gpa.deinit();
-  const allocator = gpa.allocator();
+  defer { if (builtin.mode == .Debug) _ = gpa.deinit(); }
+  const allocator = if (builtin.mode == .Debug) gpa.allocator() else std.heap.c_allocator;
 
   var args_iter = try init.args.iterateAllocator(allocator);
   defer args_iter.deinit();
