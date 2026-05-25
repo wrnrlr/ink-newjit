@@ -90,6 +90,7 @@ const Dyads = struct {
   pub const @"X=X" = logic.Equal;
   pub const @"X<X" = logic.Less;
   pub const @"X>X" = logic.More;
+  pub const @"X~X" = @import("match.zig").Match;
   pub const @"I mod I"  = _I_I(.mod, calc.ModOp);
   pub const @"I div I"  = _I_I(.div, calc.DiviOp);
   
