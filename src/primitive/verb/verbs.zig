@@ -87,6 +87,7 @@ const Dyads = struct {
   pub const @"N%N" = _F_F(.@"%", calc.DivOp);
   pub const @"N&N" = _N_N(.@"&", calc.MinOp);
   pub const @"N|N" = _N_N(.@"|", calc.MaxOp);
+  pub const @"x!y" = pair.Pair;
   pub const @"X=X" = logic.Equal;
   pub const @"X<X" = logic.Less;
   pub const @"X>X" = logic.More;

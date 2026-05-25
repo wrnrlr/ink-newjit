@@ -104,7 +104,6 @@ fn writeLinesById(vm: *VM, x: V, y: V) V {
 
 pub const WriteLines = struct {
   pub const op = .@"0:";
-  _blank_x: util.DyadFn = writeLinesConsole,
   _s_L: util.DyadFn = writeLinesBySymbol,
   _s_C: util.DyadFn = writeLinesBySymbol,
   _s_s: util.DyadFn = writeLinesBySymbol,

@@ -26,13 +26,9 @@ pub const Marshal = struct {
   _s_I: util.DyadFn = marshal_bin_only,
   _s_F: util.DyadFn = marshal_bin_only,
   _s_S: util.DyadFn = marshal_bin_only,
-  _s_T: util.DyadFn = marshal_bin_only,
-  _s_D: util.DyadFn = marshal_bin_only,
-  _s_G: util.DyadFn = marshal_bin_only,
   _s_L: util.DyadFn = marshal_bin_only,
   _s_m: util.DyadFn = marshal_bin_only,
   _s_M: util.DyadFn = marshal_bin_only,
-  _s_a: util.DyadFn = marshal_bin_only,
 };
 
 /// Unmarshal/Deserialize: bytes -> value

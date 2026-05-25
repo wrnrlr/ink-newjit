@@ -55,10 +55,6 @@ pub const Last_Name = struct {
   _L: util.MonadFn = lastFn,
   _m: util.MonadFn = lastFn,
   _M: util.MonadFn = lastFn,
-  _y: util.MonadFn = lastFn,
-  _p: util.MonadFn = lastFn,
-  _q: util.MonadFn = lastFn,
-  _v: util.MonadFn = lastFn,
 };
 
 
