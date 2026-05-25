@@ -3,8 +3,6 @@ const Op = @import("../runtime/tape.zig").Op;
 const syms = @import("../runtime/syms.zig");
 const util = @import("../util.zig");
 const verbs = @import("verb/verbs.zig");
-const concat = @import("verb/concat.zig");
-const pair = @import("verb/pair.zig");
 const promote = @import("promote.zig").promote;
 const VM = @import("../runtime/vm.zig").VM;
 const Call = @import("../runtime/call.zig").Call;
@@ -24,7 +22,6 @@ pub fn dispatch2(vm: *VM, op: Op, x: V, y: V) V {
   const yt = y.tag();
   const key = op.code() * K.COUNT * K.COUNT + xt.code() * K.COUNT + yt.code();
   if (verbs.dyad_table[key]) |f| return f(vm, x, y);
-  if (op == .@"!") return pair.dict(vm, x, y);
   if (op == .@"~") return .{ .b = x.eq(y) };
   if (xt == .L or yt == .L or x.isDict() or y.isDict()) return listDyad(vm, op, x, y);
   if (op == .@"@" and xt == .s) return syms.apply(vm, x.s, &.{y}) catch V{ .err = .memory };
