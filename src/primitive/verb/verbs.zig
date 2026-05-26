@@ -1,11 +1,10 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const V = @import("../../noun/value.zig").V;
-const util = @import("../../util.zig");
-const Op = @import("../../runtime/tape.zig").Op;
 const K = @import("../../noun/class.zig").K;
+const V = @import("../../noun/value.zig").V;
+const Op = @import("../../runtime/tape.zig").Op;
 const VM = @import("../../runtime/vm.zig").VM;
-const dispatch_mod = @import("../dispatch.zig");
+const util = @import("../../util.zig");
 
 const selection = @import("first.zig");
 const logic = @import("logic.zig");
