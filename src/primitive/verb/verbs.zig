@@ -1,6 +1,6 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const value = @import("../../noun/value.zig");
+const V = @import("../../noun/value.zig").V;
 const util = @import("../../util.zig");
 const Op = @import("../../runtime/tape.zig").Op;
 const K = @import("../../noun/class.zig").K;
@@ -15,9 +15,6 @@ const concat = @import("concat.zig");
 const calc = @import("calc.zig");
 const sort = @import("sort.zig");
 const member = @import("member.zig");
-
-const V = value.V;
-const N = value.N;
 
 // TODO: tables can be smaller if we split monads and dyads into their own Op enum
 pub const monad_table = makeMonadArray(Monads);
@@ -122,7 +119,6 @@ const Dyads = struct {
   pub const @"X@X"  = @import("pick.zig").Pick;
   pub const @"s?x"  = @import("marshal.zig").Marshal;
   pub const @"s@x"  = @import("marshal.zig").Unmarshal;
-  // pub const @"x@y" = @import("apply.zig").ApplyN; // TODO re-enable
   // pub const @"x.y" = @import("apply.zig").ApplyN; // TODO: pick.pick reference broken
   pub const @"has"  = member.Has;
   pub const @"in"   = member.In;
