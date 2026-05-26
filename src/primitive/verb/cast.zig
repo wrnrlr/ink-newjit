@@ -4,6 +4,9 @@ const util = @import("../../util.zig");
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
+const K = @import("../../noun/class.zig").K;
+const Op = @import("../../runtime/tape.zig").Op;
+const h = @import("helper.zig");
 const eql = std.mem.eql;
 
 pub const Cast = struct {
@@ -12,14 +15,14 @@ pub const Cast = struct {
   _s_c: util.DyadFn = castChar,
   _s_i: util.DyadFn = castInt,
   _s_f: util.DyadFn = castFloat,
-  
+
   _s_C: util.DyadFn = castChars,
   _s_I: util.DyadFn = castInts,
   _s_F: util.DyadFn = castFloats,
-  
-  // _s_m: util.DyadFn = castFloats,
-  // _s_M: util.DyadFn = castFloats,
-  // _s_L: util.DyadFn = castFloats,
+
+  _s_L: util.DyadFn = h.dyadContainerKernel(.s, .L, .@"$").?,
+  _s_m: util.DyadFn = h.dyadContainerKernel(.s, .m, .@"$").?,
+  _s_M: util.DyadFn = h.dyadContainerKernel(.s, .M, .@"$").?,
 };
 
 fn castChar(vm: *VM, x: V, y: V) V {

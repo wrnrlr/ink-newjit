@@ -7,6 +7,7 @@ const promote = @import("../promote.zig").promote;
 const V = @import("../../noun/value.zig").V;
 const K = @import("../../noun/class.zig").K;
 const N = @import("../../noun/array.zig").N;
+const Dict = @import("../../noun/dict.zig").Dict;
 
 pub const Attr = std.builtin.Type.StructField.Attributes;
 
@@ -68,6 +69,7 @@ pub fn makeDyad(
   comptime Impl: type,
   comptime types: []const K,
 ) type {
+  @setEvalBranchQuota(2000000);
   const op_default: Op = operator;
   var names: []const []const u8 = &.{ "op" };
   var field_types: []const type = &.{ Op };
@@ -78,6 +80,22 @@ pub fn makeDyad(
     for (types) |yk| {
       const maybe: ?util.DyadFn = dyadKernel(xk, yk, CastType, ResultType, Impl);
       if (maybe) |handler| {
+        names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
+        field_types = field_types ++ .{util.DyadFn};
+        const attr: Attr = .{ .default_value_ptr = @ptrCast(&handler) };
+        attrs = attrs ++ .{attr};
+      }
+    }
+  }
+  const all_k = comptime blk: {
+    const fields = @typeInfo(K).@"enum".fields;
+    var ts: [fields.len]K = undefined;
+    for (fields, 0..) |f, i| ts[i] = @enumFromInt(f.value);
+    break :blk ts;
+  };
+  for (all_k) |xk| {
+    for (all_k) |yk| {
+      if (dyadContainerKernel(xk, yk, operator)) |handler| {
         names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
         field_types = field_types ++ .{util.DyadFn};
         const attr: Attr = .{ .default_value_ptr = @ptrCast(&handler) };
@@ -254,155 +272,87 @@ fn dyadKernel(
 
 // ── Container kernel generators ───────────────────────────────────────────────
 
-// fn monadContainerKernel(
-//   comptime xk: K,
-//   comptime operator: Op,
-// ) ?util.MonadFn {
-//   if (comptime xk == .L) {
-//     return &struct {
-//       fn k(vm: *VM, x: V) V {
-//         const n = x.L.ptr.len;
-//         const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
-//         @memset(res.slice(), .blank);
-//         for (res.slice(), 0..) |*r, i| {
-//           const elem = x.at(i);
-//           defer elem.deinit(vm.alloc);
-//           r.* = dispatch.dispatch1(vm, operator, elem);
-//           if (r.*.tag() == .err) return promote(vm.alloc, res) catch {
-//             (V{ .L = res }).deinit(vm.alloc);
-//             return V{ .err = .memory };
-//           };
-//         }
-//         return promote(vm.alloc, res) catch {
-//           (V{ .L = res }).deinit(vm.alloc);
-//           return V{ .err = .memory };
-//         };
-//       }
-//     }.k;
-//   }
-//   if (comptime xk == .m or xk == .M) {
-//     return &struct {
-//       fn k(vm: *VM, x: V) V {
-//         const d = @field(x, @tagName(xk));
-//         const vals = dispatch.dispatch1(vm, operator, d.bv());
-//         if (vals.tag() == .err) return vals;
-//         return @unionInit(V, @tagName(xk), value.Dict.init(vm.alloc, d.av().ref(), vals) catch {
-//           vals.deinit(vm.alloc);
-//           return V{ .err = .memory };
-//         });
-//       }
-//     }.k;
-//   }
-//   return null;
-// }
+// Generates a broadcasting kernel for (xk, yk) when at least one is L/m/M.
+// Returns null for pure scalar/vector pairs — those are handled by dyadKernel.
+//
+// Cases (checked in order, each returns on match):
+//   dict × dict  → key equality check, recurse on values, preserve x's dict type
+//   dict × other → recurse on dict values vs y (includes dict × list)
+//   other × dict → recurse on x vs dict values (includes list × dict)
+//   list × other or other × list → element-wise with length broadcasting
+pub fn dyadContainerKernel(
+  comptime xk: K,
+  comptime yk: K,
+  comptime operator: Op,
+) ?util.DyadFn {
+  const xIsDict = comptime xk.isMap();
+  const yIsDict = comptime yk.isMap();
+  const xIsList = comptime (xk == .L);
+  const yIsList = comptime (yk == .L);
+  if (!(xIsDict or yIsDict or xIsList or yIsList)) return null;
 
-// fn dyadContainerKernel(
-//   comptime xk: K,
-//   comptime yk: K,
-//   comptime operator: Op,
-// ) ?util.DyadFn {
-//   const xIsDict = comptime (xk == .m or xk == .M);
-//   const yIsDict = comptime (yk == .m or yk == .M);
-//   const xIsList = comptime (xk == .L);
-//   const yIsList = comptime (yk == .L);
-
-//   // dict op dict — keys must match, apply on values
-//   if (comptime xIsDict and yIsDict) {
-//     return &struct {
-//       fn k(vm: *VM, x: V, y: V) V {
-//         const dx = @field(x, @tagName(xk));
-//         const dy = @field(y, @tagName(yk));
-//         if (!dx.av().eq(dy.av())) return V{ .err = .length };
-//         const vals = dispatch.dispatch2(vm, operator, dx.bv(), dy.bv());
-//         if (vals.tag() == .err) return vals;
-//         return @unionInit(V, @tagName(xk), value.Dict.init(vm.alloc, dx.av().ref(), vals) catch {
-//           vals.deinit(vm.alloc);
-//           return V{ .err = .memory };
-//         });
-//       }
-//     }.k;
-//   }
-//   // dict op numeric/list — apply on dict values
-//   if (comptime xIsDict and !yIsList) {
-//     return &struct {
-//       fn k(vm: *VM, x: V, y: V) V {
-//         const d = @field(x, @tagName(xk));
-//         const vals = dispatch.dispatch2(vm, operator, d.bv(), y);
-//         if (vals.tag() == .err) return vals;
-//         return @unionInit(V, @tagName(xk), value.Dict.init(vm.alloc, d.av().ref(), vals) catch {
-//           vals.deinit(vm.alloc);
-//           return V{ .err = .memory };
-//         });
-//       }
-//     }.k;
-//   }
-//   // numeric op dict — apply on dict values
-//   if (comptime yIsDict and !xIsList) {
-//     return &struct {
-//       fn k(vm: *VM, x: V, y: V) V {
-//         const d = @field(y, @tagName(yk));
-//         const vals = dispatch.dispatch2(vm, operator, x, d.bv());
-//         if (vals.tag() == .err) return vals;
-//         return @unionInit(V, @tagName(yk), value.Dict.init(vm.alloc, d.av().ref(), vals) catch {
-//           vals.deinit(vm.alloc);
-//           return V{ .err = .memory };
-//         });
-//       }
-//     }.k;
-//   }
-//   // list op numeric/list — element-wise with broadcasting
-//   if (comptime xIsList and !yIsDict) {
-//     return &struct {
-//       fn k(vm: *VM, x: V, y: V) V {
-//         const xn = x.L.ptr.len;
-//         const yn = y.len();
-//         const n = if (xn == 1) yn else if (yn == 1) xn else if (xn == yn) xn else return V{ .err = .length };
-//         const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
-//         @memset(res.slice(), .blank);
-//         for (res.slice(), 0..) |*r, i| {
-//           const xv = if (xn == 1) x.ref() else x.at(i);
-//           defer xv.deinit(vm.alloc);
-//           const yv = if (yn == 1) y.ref() else y.at(i);
-//           defer yv.deinit(vm.alloc);
-//           r.* = dispatch.dispatch2(vm, operator, xv, yv);
-//           if (r.*.tag() == .err) return promote(vm.alloc, res) catch {
-//             (V{ .L = res }).deinit(vm.alloc);
-//             return V{ .err = .memory };
-//           };
-//         }
-//         return promote(vm.alloc, res) catch {
-//           (V{ .L = res }).deinit(vm.alloc);
-//           return V{ .err = .memory };
-//         };
-//       }
-//     }.k;
-//   }
-//   // numeric op list — element-wise with broadcasting
-//   if (comptime yIsList and !xIsDict) {
-//     return &struct {
-//       fn k(vm: *VM, x: V, y: V) V {
-//         const xn = x.len();
-//         const yn = y.L.ptr.len;
-//         const n = if (xn == 1) yn else if (yn == 1) xn else if (xn == yn) xn else return V{ .err = .length };
-//         const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
-//         @memset(res.slice(), .blank);
-//         for (res.slice(), 0..) |*r, i| {
-//           const xv = if (xn == 1) x.ref() else x.at(i);
-//           defer xv.deinit(vm.alloc);
-//           const yv = if (yn == 1) y.ref() else y.at(i);
-//           defer yv.deinit(vm.alloc);
-//           r.* = dispatch.dispatch2(vm, operator, xv, yv);
-//           if (r.*.tag() == .err) return promote(vm.alloc, res) catch {
-//             (V{ .L = res }).deinit(vm.alloc);
-//             return V{ .err = .memory };
-//           };
-//         }
-//         return promote(vm.alloc, res) catch {
-//           (V{ .L = res }).deinit(vm.alloc);
-//           return V{ .err = .memory };
-//         };
-//       }
-//     }.k;
-//   }
-//   return null; // unsupported (e.g., list op dict)
-// }
+  if (comptime xIsDict and yIsDict) {
+    return &struct {
+      fn k(vm: *VM, x: V, y: V) V {
+        const dx = @field(x, @tagName(xk));
+        const dy = @field(y, @tagName(yk));
+        if (!dx.av().eq(dy.av())) return V{ .err = .length };
+        const vals = dispatch.dispatch2(vm, operator, dx.bv(), dy.bv());
+        if (vals.tag() == .err) return vals;
+        return @unionInit(V, @tagName(xk), Dict.init(vm.alloc, dx.av().ref(), vals) catch {
+          vals.deinit(vm.alloc);
+          return V{ .err = .memory };
+        });
+      }
+    }.k;
+  }
+  if (comptime xIsDict) {
+    return &struct {
+      fn k(vm: *VM, x: V, y: V) V {
+        const d = @field(x, @tagName(xk));
+        const vals = dispatch.dispatch2(vm, operator, d.bv(), y);
+        if (vals.tag() == .err) return vals;
+        return @unionInit(V, @tagName(xk), Dict.init(vm.alloc, d.av().ref(), vals) catch {
+          vals.deinit(vm.alloc);
+          return V{ .err = .memory };
+        });
+      }
+    }.k;
+  }
+  if (comptime yIsDict) {
+    return &struct {
+      fn k(vm: *VM, x: V, y: V) V {
+        const d = @field(y, @tagName(yk));
+        const vals = dispatch.dispatch2(vm, operator, x, d.bv());
+        if (vals.tag() == .err) return vals;
+        return @unionInit(V, @tagName(yk), Dict.init(vm.alloc, d.av().ref(), vals) catch {
+          vals.deinit(vm.alloc);
+          return V{ .err = .memory };
+        });
+      }
+    }.k;
+  }
+  // at least one is L, neither is dict — element-wise with length broadcasting
+  return &struct {
+    fn k(vm: *VM, x: V, y: V) V {
+      const xn = x.len();
+      const yn = y.len();
+      const n = if (xn == 1) yn else if (yn == 1) xn else if (xn == yn) xn else return V{ .err = .length };
+      const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
+      @memset(res.slice(), .blank);
+      for (res.slice(), 0..) |*r, i| {
+        const xv = if (xn == 1) x.ref() else x.at(i);
+        defer xv.deinit(vm.alloc);
+        const yv = if (yn == 1) y.ref() else y.at(i);
+        defer yv.deinit(vm.alloc);
+        const rv = dispatch.dispatch2(vm, operator, xv, yv);
+        if (rv.tag() == .err) {
+          (V{ .L = res }).deinit(vm.alloc);
+          return rv;
+        }
+        r.* = rv;
+      }
+      return promote(vm.alloc, res);
+    }
+  }.k;
+}

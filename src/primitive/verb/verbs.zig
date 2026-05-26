@@ -155,9 +155,9 @@ fn makeMonadArray(comptime Defs: type) [Op.COUNT * K.COUNT]util.MonadFn {
   return table;
 }
 
-fn makeDyadArray(comptime Defs: type) [Op.COUNT * K.COUNT * K.COUNT]?util.DyadFn {
+fn makeDyadArray(comptime Defs: type) [Op.COUNT * K.COUNT * K.COUNT]util.DyadFn {
   @setEvalBranchQuota(10000000);
-  var table: [Op.COUNT * K.COUNT * K.COUNT]?util.DyadFn = .{null} ** (Op.COUNT * K.COUNT * K.COUNT);
+  var table: [Op.COUNT * K.COUNT * K.COUNT]util.DyadFn = .{typeError2} ** (Op.COUNT * K.COUNT * K.COUNT);
   for (std.meta.declarations(Defs)) |decl| {
     const Verb = @field(Defs, decl.name);
     const op = verbOp(Verb) orelse continue;
