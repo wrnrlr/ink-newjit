@@ -187,21 +187,125 @@ pub const VM = struct {
       vm.stack_len = res_slot;
       return V{ .err = .memory };
     };
-    while (vm.frames_len > prev_frames) {
-      const b = vm.readByte();
-      vm.runOp(@enumFromInt(b)) catch {};
-    }
+    vm.runUntil(prev_frames) catch {};
     return vm.pop();
   }
 
   fn run(vm: *VM) !void {
-    while (vm.frames_len > 0 and vm.currentFrame().ip < vm.current_chunk.code.items.len) {
-      try op_table[vm.readByte()](vm);
-    }
+    try vm.runUntil(0);
   }
 
   pub fn runOp(vm: *VM, opCode: OpCode) !void {
     try op_table[@intFromEnum(opCode)](vm);
+  }
+
+  pub fn runUntil(vm: *VM, min_frames: usize) !void {
+    while (vm.frames_len > min_frames) {
+      const frame = vm.currentFrame();
+      const code = vm.current_chunk.code.items;
+      if (frame.ip >= code.len) break;
+      const b = code[frame.ip];
+      frame.ip += 1;
+      switch (@as(OpCode, @enumFromInt(b))) {
+        .Nop => {},
+        .Gap => try vm.push(.blank),
+        .Drop => vm.pop().deinit(vm.alloc),
+        .Dup => try vm.push(vm.peek(0).ref()),
+        .Const => {
+          const idx = code[frame.ip];
+          frame.ip += 1;
+          try vm.push(vm.current_chunk.constants.items[idx].ref());
+        },
+        .Int => {
+          const raw: u16 = @as(u16, code[frame.ip]) | (@as(u16, code[frame.ip + 1]) << 8);
+          frame.ip += 2;
+          try vm.push(.{ .i = @as(i32, @as(i16, @bitCast(raw))) });
+        },
+        .Global => {
+          const idx = code[frame.ip];
+          frame.ip += 1;
+          try vm.push(vm.globals[idx].ref());
+        },
+        .Local => {
+          const idx = code[frame.ip];
+          frame.ip += 1;
+          try vm.push(vm.stack[frame.base + idx].ref());
+        },
+        .LocalLast => {
+          const idx = code[frame.ip];
+          frame.ip += 1;
+          const slot = frame.base + idx;
+          const v = vm.stack[slot];
+          vm.stack[slot] = .blank;
+          try vm.push(v);
+        },
+        .AssignGlobal => {
+          const index = code[frame.ip];
+          frame.ip += 1;
+          const val = vm.pop();
+          vm.globals[index].deinit(vm.alloc);
+          vm.globals[index] = val;
+          try vm.push(.blank);
+        },
+        .AssignLocal => {
+          const index = code[frame.ip];
+          frame.ip += 1;
+          const val = vm.pop();
+          const stack_idx = frame.base + index;
+          vm.stack[stack_idx].deinit(vm.alloc);
+          vm.stack[stack_idx] = val;
+          try vm.push(.blank);
+        },
+        .ListAssignGlobal => try vm.doListAssignGlobal(),
+        .ListAssignLocal => try vm.doListAssignLocal(),
+        .Jump => {
+          const offset: usize = @as(u16, code[frame.ip]) | (@as(u16, code[frame.ip + 1]) << 8);
+          frame.ip += 2 + offset;
+        },
+        .JumpFalse => {
+          const offset: usize = @as(u16, code[frame.ip]) | (@as(u16, code[frame.ip + 1]) << 8);
+          frame.ip += 2;
+          const v = vm.pop();
+          defer v.deinit(vm.alloc);
+          if (!v.isTrue()) frame.ip += offset;
+        },
+        .JumpTrue => {
+          const offset: usize = @as(u16, code[frame.ip]) | (@as(u16, code[frame.ip + 1]) << 8);
+          frame.ip += 2;
+          const v = vm.pop();
+          defer v.deinit(vm.alloc);
+          if (v.isTrue()) frame.ip += offset;
+        },
+        .Apply1 => {
+          const op: Op = @enumFromInt(code[frame.ip]);
+          frame.ip += 1;
+          const a = vm.pop();
+          defer a.deinit(vm.alloc);
+          try vm.push(dispatch.dispatch1(vm, op, a));
+        },
+        .Apply2 => {
+          const op: Op = @enumFromInt(code[frame.ip]);
+          frame.ip += 1;
+          const b_val = vm.pop();
+          defer b_val.deinit(vm.alloc);
+          const a_val = vm.pop();
+          defer a_val.deinit(vm.alloc);
+          try vm.push(dispatch.dispatch2(vm, op, a_val, b_val));
+        },
+        .Return => try vm.doReturn(),
+        .Call => try vm.doCallWithMode(.sync),
+        .TailCall => try vm.doTailCall(),
+        .Apply => try vm.doCallWithMode(.bracket),
+        .MakeList => try vm.doMakeList(),
+        .MakePartial => try vm.doMakePartial(),
+        .Derive => try vm.doDerive(),
+        .Amend => try vm.doAmend(),
+        .Dmend => try vm.doDmend(),
+        .MakeDict => try vm.doMakeDict(),
+        .MakeTable => try vm.doMakeTable(),
+        .Command => try vm.doCommand(),
+      }
+    }
   }
   
   fn doConst(vm: *VM) !void {
@@ -331,25 +435,46 @@ pub const VM = struct {
     const func_val = vm.pop();
     defer func_val.deinit(vm.alloc);
 
-    if (func_val == .func and func_val.func.getKind() == .lambda) {
-      const lambda_idx = @as(u24, @intCast(func_val.func.idx));
-      const entry = vm.fn_tables.lambdaAt(lambda_idx);
-      const frame = vm.currentFrame();
-      const res_slot = frame.result_slot;
+    if (func_val == .func) {
+      switch (func_val.func.getKind()) {
+        .lambda => {
+          const lambda_idx = @as(u24, @intCast(func_val.func.idx));
+          const entry = vm.fn_tables.lambdaAt(lambda_idx);
+          const frame = vm.currentFrame();
+          const res_slot = frame.result_slot;
 
-      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
-      vm.stack_len = res_slot;
+          for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
+          vm.stack_len = res_slot;
 
-      try vm.push(.blank);
-      for (incoming) |arg| try vm.push(arg);
-      const total_slots = @as(usize, entry.arity) + @as(usize, entry.locals);
-      const locals_to_push = if (total_slots > argc) total_slots - argc else 0;
-      for (0..locals_to_push) |_| try vm.push(.blank);
+          try vm.push(.blank);
+          for (incoming) |arg| try vm.push(arg);
+          const total_slots = @as(usize, entry.arity) + @as(usize, entry.locals);
+          const locals_to_push = if (total_slots > argc) total_slots - argc else 0;
+          for (0..locals_to_push) |_| try vm.push(.blank);
 
-      frame.lambda_idx = lambda_idx;
-      frame.ip = 0;
-      frame.base = vm.stack_len - argc - locals_to_push;
-      vm.current_chunk = entry.chunk;
+          frame.lambda_idx = lambda_idx;
+          frame.ip = 0;
+          frame.base = vm.stack_len - argc - locals_to_push;
+          vm.current_chunk = entry.chunk;
+        },
+        .derived_builtin => {
+          const result = call.applyDerivedBuiltin(vm, func_val.func, incoming);
+          for (incoming) |*v| v.deinit(vm.alloc);
+          try vm.push(result);
+        },
+        .builtin => {
+          const op = func_val.func.getOp();
+          const result = if (argc == 1) dispatch.dispatch1(vm, op, incoming[0])
+                         else if (argc == 2) dispatch.dispatch2(vm, op, incoming[0], incoming[1])
+                         else V{ .err = .rank };
+          for (incoming) |*v| v.deinit(vm.alloc);
+          try vm.push(result);
+        },
+        else => {
+          try vm.executeCall(func_val, incoming, .sync);
+          for (incoming) |*v| v.deinit(vm.alloc);
+        },
+      }
     } else {
       try vm.executeCall(func_val, incoming, .sync);
       for (incoming) |*v| v.deinit(vm.alloc);
@@ -366,8 +491,8 @@ pub const VM = struct {
 
   fn doCallWithMode(vm: *VM, mode: call.CallMode) !void {
     const argc = vm.readByte();
-    const incoming = try vm.alloc.alloc(V, argc);
-    defer vm.alloc.free(incoming);
+    var buf: [8]V = .{.blank} ** 8;
+    const incoming = buf[0..argc];
     for (0..argc) |i| incoming[argc - 1 - i] = vm.pop();
     const func_val = vm.pop();
     try vm.executeCall(func_val, incoming, mode);
