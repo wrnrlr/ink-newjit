@@ -2,20 +2,28 @@ const std = @import("std");
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
 const V = @import("../../noun/value.zig").V;
+const Fn = @import("../../noun/operator.zig").Fn;
 const N = @import("../../noun/array.zig").N;
 const promote = @import("../promote.zig").promote;
+
+inline fn callOne(vm: *VM, func: V, arg: V, f: util.ApplyFn) V {
+  if (func == .func and func.func.getKind() == .lambda) {
+    const args = [_]V{arg};
+    return vm.callLambdaAndRun(func.func, &args);
+  }
+  const args = [_]V{arg};
+  return f(vm, func, &args);
+}
 
 // while: (cond)step/init — apply step while cond holds, return final value
 pub fn whiledo(vm: *VM, cond: V, step: V, init: V, f: util.ApplyFn) V {
   var cur = init.ref();
   while (true) {
-    const cond_args = [_]V{cur};
-    const cond_result = f(vm, cond, &cond_args);
+    const cond_result = callOne(vm, cond, cur, f);
     const keep = cond_result.isTrue();
     cond_result.deinit(vm.alloc);
     if (!keep) return cur;
-    const step_args = [_]V{cur};
-    const next = f(vm, step, &step_args);
+    const next = callOne(vm, step, cur, f);
     cur.deinit(vm.alloc);
     cur = next;
   }
@@ -29,8 +37,7 @@ pub fn whilescan(vm: *VM, cond: V, step: V, init: V, f: util.ApplyFn) V {
 
   var cur = init.ref();
   while (true) {
-    const cond_args = [_]V{cur};
-    const cond_result = f(vm, cond, &cond_args);
+    const cond_result = callOne(vm, cond, cur, f);
     const keep = cond_result.isTrue();
     cond_result.deinit(vm.alloc);
     if (!keep) {
@@ -41,15 +48,12 @@ pub fn whilescan(vm: *VM, cond: V, step: V, init: V, f: util.ApplyFn) V {
       };
       break;
     }
-    results.append(vm.alloc, cur.ref()) catch {
+    results.append(vm.alloc, cur) catch {
       for (results.items) |v| v.deinit(vm.alloc);
       cur.deinit(vm.alloc);
       return V{ .err = .memory };
     };
-    const step_args = [_]V{cur};
-    const next = f(vm, step, &step_args);
-    cur.deinit(vm.alloc);
-    cur = next;
+    cur = callOne(vm, step, cur, f);
   }
 
   const out = N(V).init(vm.alloc, results.items.len) catch {
