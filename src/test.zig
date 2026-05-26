@@ -762,6 +762,18 @@ test ".d values" {
   try t.check(".`x`y!10 20", "10 20");
 }
 
+test "x@y apply(1)" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("f:{x}; f@42", "42");
+  try t.check("f:{x}; f@1 2 3", "1 2 3");
+  try t.check("(*:)@1 2 3", "1");
+  try t.check("1 2 3@0", "1");
+  try t.check("1 2 3@2", "3");
+  try t.check("1 2 3@2 0 1", "3 1 2");
+  try t.check("(1 2 3;4 5 6)@0", "1 2 3");
+  try t.check("(1 2 3;4 5 6)@1", "4 5 6");
+}
+
 test "x.y apply(n)" {
   var t = try Tester.init(); defer t.deinit();
   // try t.check("{x*y+1}.2 3", "8");

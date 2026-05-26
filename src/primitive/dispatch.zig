@@ -1,11 +1,9 @@
 const value = @import("../noun/value.zig");
 const Op = @import("../runtime/tape.zig").Op;
-const syms = @import("../runtime/syms.zig");
 const util = @import("../util.zig");
 const verbs = @import("verb/verbs.zig");
 const promote = @import("promote.zig").promote;
 const VM = @import("../runtime/vm.zig").VM;
-const Call = @import("../runtime/call.zig").Call;
 const K = @import("../noun/class.zig").K;
 const V = @import("../noun/value.zig").V;
 const N = @import("../noun/array.zig").N;
@@ -23,11 +21,6 @@ pub fn dispatch2(vm: *VM, op: Op, x: V, y: V) V {
   const key = op.code() * K.COUNT * K.COUNT + xt.code() * K.COUNT + yt.code();
   if (verbs.dyad_table[key]) |f| return f(vm, x, y);
   if (xt == .L or yt == .L or x.isDict() or y.isDict()) return listDyad(vm, op, x, y);
-  if (op == .@"@" and xt == .s) return syms.apply(vm, x.s, &.{y}) catch V{ .err = .memory };
-  if (op == .@"@" and (xt == .func or xt == .partial)) {
-    var fc = Call{ .vm = vm };
-    return fc.apply(x, &.{y}, false) catch V{ .err = .memory };
-  }
   return .{ .err = .@"type" };
 }
 

@@ -118,6 +118,7 @@ const Dyads = struct {
   pub const @"s$x"  = @import("cast.zig").Cast;
   pub const @"X?x"  = @import("find.zig").Find;
   pub const @"i?X"  = @import("random.zig").Random;
+  pub const @"f@y"  = @import("apply.zig").Apply;
   pub const @"X@X"  = @import("pick.zig").Pick;
   pub const @"s?x"  = @import("marshal.zig").Marshal;
   pub const @"s@x"  = @import("marshal.zig").Unmarshal;

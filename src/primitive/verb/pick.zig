@@ -31,8 +31,6 @@ pub const Pick = struct {
   _F_i: util.DyadFn = pickAtomFn,
   _S_i: util.DyadFn = pickAtomFn,
   _C_i: util.DyadFn = pickAtomFn,
-  _T_i: util.DyadFn = pickAtomFn,
-  _D_i: util.DyadFn = pickAtomFn,
   _L_i: util.DyadFn = pickAtomFn,
   _m_i: util.DyadFn = pickAtomFn,
 
@@ -41,8 +39,6 @@ pub const Pick = struct {
   _F_I: util.DyadFn = pickVecTyped(.F),
   _S_I: util.DyadFn = pickVecTyped(.S),
   _C_I: util.DyadFn = pickVecTyped(.C),
-  _T_I: util.DyadFn = pickVecFn,
-  _D_I: util.DyadFn = pickVecFn,
   _L_I: util.DyadFn = pickVecFn,
   _m_I: util.DyadFn = pickVecFn,
 
