@@ -77,6 +77,9 @@ The language parser, compiler and runtime are all written in Zig 0.16.
 
 
 # Project Overview
+- `bench` benchmarks for ink and ngn/k
+  - `alloc.k`
+  - `simulate.k` monte carlo simulation of random walks
 - `doc`
   - `bug.md` Known bugs, add new issues unrelated to the current task here
   - `spec.md` Ink language specification (WIP)
@@ -84,7 +87,7 @@ The language parser, compiler and runtime are all written in Zig 0.16.
   - `future.md` Planning of future features
 - `src`
   - `encoding`
-  - `gpu`
+  - `gpu` Work in progressm, GPU is currently disabled
     - `gpu.zig`
     - `gpu_wgpu.zig` Implements `WgpuBackend`, the WGPU backend for gpu interface
   - `graphics`
@@ -118,13 +121,12 @@ The language parser, compiler and runtime are all written in Zig 0.16.
     - `derived.zig` Derive value from an adverb phrase
     - `promote.zig` Promote between scalars, vectors and lists.
   - `runtime`
-    - `jit`
+    - `jit` Old jit implementation based on copy and patch, to be replaced with TPDE
     - `vm.zig`
   - `runner.zig`
   - `runner_ui.zig`
   - `test.zig`
 - `test`
-  - `bench` Compare throughput of different algos in ink, ngnk, bqn, q
   - `corpus` Parser tests in TxtTest format
   - `data`
   - `demo` Example of k code with cool visuals
