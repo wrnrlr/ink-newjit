@@ -26,6 +26,7 @@ const amend = @import("../primitive/amend.zig");
 const promote = @import("../primitive/promote.zig").promote;
 const dispatch = @import("../primitive/dispatch.zig");
 const MockWriter = @import("../util.zig").MockWriter;
+const SlabAlloc = @import("../noun/slab.zig").SlabAlloc;
 // Force-link the CPS helpers so their exported symbols survive ReleaseFast gc-sections.
 // comptime {
 //   _ = @import("jit/cps_helpers.zig").force_keep;
@@ -46,6 +47,7 @@ const Frame = struct {
 
 pub const VM = struct {
   alloc: Alloc,
+  slab:  SlabAlloc,
   parser: ?*Parser,
   compiler: *Compiler,
   chunk: *Chunk,
@@ -78,7 +80,8 @@ pub const VM = struct {
     parser.* = Parser.init(alloc);
     const symbols = Pool.init(alloc);
     vm.* = .{
-      .alloc        = alloc,
+      .alloc        = alloc,           // replaced below once slab is in place
+      .slab         = SlabAlloc.init(alloc),
       .parser       = parser,
       .compiler     = try alloc.create(Compiler),
       .chunk        = chunk,
@@ -91,6 +94,7 @@ pub const VM = struct {
       .ext           = ExtRegistry.init(alloc),
       .prng          = std.Random.DefaultPrng.init(0),
     };
+    vm.alloc = vm.slab.allocator();
     vm.compiler.* = try Compiler.init(alloc, chunk, &vm.globals_names, &vm.symbols, &vm.registry, &vm.fn_tables);
     @memset(&vm.globals, .blank);
     std.Io.Threaded.global_single_threaded.allocator = alloc;
@@ -125,6 +129,7 @@ pub const VM = struct {
       vm.alloc.destroy(p);
     }
 
+    vm.slab.deinit();
     vm.alloc.destroy(vm);
   }
 

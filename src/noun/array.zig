@@ -2,6 +2,7 @@ const std = @import("std");
 const Alloc = std.mem.Allocator;
 const V = @import("value.zig").V;
 const Rc = @import("rc.zig").Rc;
+const slabRound = @import("slab.zig").round;
 
 pub const ArrayFlags = struct {
   pub const immutable: u8 = 1 << 0; // do not mutate in place even at rc=1
@@ -20,7 +21,7 @@ pub fn N(comptime T: type) type {
     ptr: *align(@alignOf(Rc)) Rc,
 
     pub fn init(alloc: Alloc, n: usize) !Self {
-      const total = data_offset + n * @sizeOf(T);
+      const total = slabRound(data_offset + n * @sizeOf(T));
       const buf = try alloc.alignedAlloc(u8, align_enum, total);
       const header: *align(@alignOf(Rc)) Rc = @ptrCast(buf.ptr);
       header.* = .{ .rc = 1, .len = @intCast(n) };
@@ -35,7 +36,7 @@ pub fn N(comptime T: type) type {
       a.ptr.rc -= 1;
       if (a.ptr.rc != 0) return;
       if (T == V) for (a.slice()) |child| child.deinit(alloc);
-      const total = data_offset + a.ptr.len * @sizeOf(T);
+      const total = slabRound(data_offset + a.ptr.len * @sizeOf(T));
       const base: [*]u8 = @ptrCast(a.ptr);
       const buf: []align(alignment) u8 = @as([*]align(alignment) u8, @alignCast(base))[0..total];
       alloc.free(buf);
