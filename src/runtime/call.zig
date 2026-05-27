@@ -63,10 +63,7 @@ pub const Call = struct {
         try self.vm.push(.blank);
         for (args) |arg| try self.vm.push(arg.ref());
         try self.vm.callLambda(ref, args.len, res_slot);
-        while (self.vm.frames_len > prev_frames) {
-          const b = self.vm.readByte();
-          try self.vm.runOp(@enumFromInt(b));
-        }
+        try self.vm.runUntil(prev_frames);
         return self.vm.pop();
       },
       .adverb => {
@@ -152,6 +149,11 @@ pub const Call = struct {
     return fc.apply(f, a, false) catch V{ .err = .memory };
   }
 };
+
+pub fn applyDerivedBuiltin(vm: *VM, ref: Fn, args: []const V) V {
+  const base = V{ .func = Fn.dyad(ref.getOp()) };
+  return derived(vm, base, ref.getAdverb(), args, Call.wrapper);
+}
 
 fn makePartialFromArgs(vm: *VM, ref: Fn, args: []const V) !V {
   const arity = ref.getRealArity();
