@@ -234,6 +234,12 @@ fn dyadKernel(
       if (comptime xk.isAtom() and yk.isVec()) {
         const xv = cast(V.unwrap(x, xk));
         const vy = V.unwrap(y, yk);
+        if (comptime R == YT and rk == yk) {
+          if (vy.ptr.rc == 1) {
+            for (vy.slice()) |*yv| yv.* = Impl.f(xv, cast(yv.*));
+            return y.ref();
+          }
+        }
         const out = N(R).init(vm.alloc, vy.ptr.len) catch return V{ .err = .memory };
         for (vy.slice(), out.slice()) |yv, *r| r.* = Impl.f(xv, cast(yv));
         return V.wrap(rk, out);
@@ -259,6 +265,12 @@ fn dyadKernel(
           if (vx.ptr.rc == 1) {
             for (vx.slice(), vy.slice()) |*xv, yv| xv.* = Impl.f(cast(xv.*), cast(yv));
             return x.ref();
+          }
+        }
+        if (comptime R == YT and rk == yk) {
+          if (vy.ptr.rc == 1) {
+            for (vx.slice(), vy.slice()) |xv, *yv| yv.* = Impl.f(cast(xv), cast(yv.*));
+            return y.ref();
           }
         }
         const out = N(R).init(vm.alloc, vx.ptr.len) catch return V{ .err = .memory };

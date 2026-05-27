@@ -83,6 +83,11 @@ const Dyads = struct {
   pub const @"N%N" = _F_F(.@"%", calc.DivOp);
   pub const @"N&N" = _N_N(.@"&", calc.MinOp);
   pub const @"N|N" = _N_N(.@"|", calc.MaxOp);
+  // Bool-preserving overrides for & and | on bool operands.
+  // These override the _N_N entries for b/B pairs, keeping the result type bool
+  // so the in-place mutation optimisation in dyadKernel can fire.
+  pub const @"B&B" = h.makeDyad(.@"&", h.Bool2, h.Bool2, calc.AndOp, &.{.b, .B});
+  pub const @"B|B" = h.makeDyad(.@"|", h.Bool2, h.Bool2, calc.OrOp,  &.{.b, .B});
   pub const @"x!y" = pair.Pair;
   pub const @"X=X" = logic.Equal;
   pub const @"X<X" = logic.Less;

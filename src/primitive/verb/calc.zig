@@ -10,6 +10,8 @@ pub const DiviOp = struct { pub fn f(x: anytype, y: @TypeOf(x)) @TypeOf(x) { ret
 pub const ModOp = struct { pub fn f(x: anytype, y: @TypeOf(x)) @TypeOf(x) { return @mod(x, y); } };
 pub const MinOp = struct { pub fn f(x: anytype, y: @TypeOf(x)) @TypeOf(x) { return @min(x, y); } };
 pub const MaxOp = struct { pub fn f(x: anytype, y: @TypeOf(x)) @TypeOf(x) { return @max(x, y); } };
+pub const AndOp = struct { pub fn f(x: bool, y: bool) bool { return x and y; } };
+pub const OrOp  = struct { pub fn f(x: bool, y: bool) bool { return x or  y; } };
 
 pub const NegOp  = struct { pub fn f(x: anytype) @TypeOf(x) { return if (comptime @typeInfo(@TypeOf(x)) == .int) 0 -% x else -x; } };
 pub const SqrOp  = struct { pub fn f(x: anytype) @TypeOf(x) { return if (comptime @typeInfo(@TypeOf(x)) == .int) x *% x else x * x; } };
