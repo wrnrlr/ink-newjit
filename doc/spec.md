@@ -127,7 +127,7 @@ Returns the indices that would sort X in ascending order.
 Returns the indices that would sort X in descending order.
 
 #### Group `=X`
-Returns index lists for unique values in X.
+For each distinct value, give me the indices where it occurs.
 
 #### Unit `=i`
 Identity matrix.
