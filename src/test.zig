@@ -349,7 +349,9 @@ test "unit verb gives identity matrix" {
 }
 test "group verb" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("=1 2 1", "(0 2;,1)"); // FIXME should be: 1 2!(0 2;,1)
+  try t.check("=1 2 1", "1 2!(0 2;,1)");
+  try t.check("=`a`b`b`c", "[a:,0;b:1 2;c:,3]");
+  try t.check("=\"mississippi\"", "\"imps\"!(1 4 7 10;,0;8 9;2 3 5 6)");
 }
 test "distinct verb" {
   var t = try Tester.init(); defer t.deinit();
