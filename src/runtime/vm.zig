@@ -599,7 +599,7 @@ pub const VM = struct {
       const ref = base_v.func;
       base_v.deinit(vm.alloc);
       break :blk switch (ref.getKind()) {
-        .builtin => Fn.makeDerivedBuiltin(ref.getOp(), adv),
+        .builtin => Fn.makeDerivedBuiltinFull(ref.getOp(), adv, ref.monadic != 0),
         .lambda  => Fn.makeDerivedLambda(ref.idx, adv),
         else => blk2: {
           const idx = try vm.fn_tables.addDerived(.{ .base = V{ .func = ref }, .adverb = adv });

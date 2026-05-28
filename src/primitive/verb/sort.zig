@@ -42,6 +42,61 @@ pub const Descend = struct {
   _L: util.MonadFn = dsc,
 };
 
+fn compareV(a: V, b: V) std.math.Order {
+  const at = a.tag();
+  const bt = b.tag();
+  if (at != bt) return std.math.order(@intFromEnum(at), @intFromEnum(bt));
+  return switch (at) {
+    .i => std.math.order(a.i, b.i),
+    .f => blk: {
+      const an = std.math.isNan(a.f);
+      const bn = std.math.isNan(b.f);
+      if (an and bn) break :blk .eq;
+      if (an) break :blk .lt;
+      if (bn) break :blk .gt;
+      break :blk std.math.order(a.f, b.f);
+    },
+    .c => std.math.order(a.c, b.c),
+    .b => std.math.order(@intFromBool(a.b), @intFromBool(b.b)),
+    .s => std.math.order(a.s, b.s),
+    .I => blk: {
+      const sa = a.I.slice(); const sb = b.I.slice();
+      const n = @min(sa.len, sb.len);
+      for (sa[0..n], sb[0..n]) |ai, bi| { const o = std.math.order(ai, bi); if (o != .eq) break :blk o; }
+      break :blk std.math.order(sa.len, sb.len);
+    },
+    .F => blk: {
+      const sa = a.F.slice(); const sb = b.F.slice();
+      const n = @min(sa.len, sb.len);
+      for (sa[0..n], sb[0..n]) |ai, bi| {
+        const an2 = std.math.isNan(ai); const bn2 = std.math.isNan(bi);
+        if (an2 and bn2) continue;
+        if (an2) break :blk .lt;
+        if (bn2) break :blk .gt;
+        const o = std.math.order(ai, bi); if (o != .eq) break :blk o;
+      }
+      break :blk std.math.order(sa.len, sb.len);
+    },
+    .C => blk: {
+      const sa = a.C.slice(); const sb = b.C.slice();
+      break :blk std.mem.order(u8, sa, sb);
+    },
+    .B => blk: {
+      const sa = a.B.slice(); const sb = b.B.slice();
+      const n = @min(sa.len, sb.len);
+      for (sa[0..n], sb[0..n]) |ai, bi| { const o = std.math.order(@intFromBool(ai), @intFromBool(bi)); if (o != .eq) break :blk o; }
+      break :blk std.math.order(sa.len, sb.len);
+    },
+    .L => blk: {
+      const la = a.L.slice(); const lb = b.L.slice();
+      const n = @min(la.len, lb.len);
+      for (la[0..n], lb[0..n]) |ai, bi| { const o = compareV(ai, bi); if (o != .eq) break :blk o; }
+      break :blk std.math.order(la.len, lb.len);
+    },
+    else => .eq,
+  };
+}
+
 fn Context(comptime T: type) type {
   return struct {
     data: T,
@@ -76,8 +131,6 @@ pub fn sortIndices(alloc: Alloc, v: V, desc: bool) V {
     return .{ .I = res };
   }
 
-  if (v.tag() == .L) return .{ .err = .nyi };
-
   var indices = N(i32).init(alloc, length) catch return V{ .err = .memory };
 
   var idx_buffer = alloc.alloc(usize, length) catch {
@@ -106,6 +159,22 @@ pub fn sortIndices(alloc: Alloc, v: V, desc: bool) V {
       const Ctx = Context([]const bool);
       const ctx = Ctx{ .data = n.slice(), .desc = desc };
       timsort.sort(alloc, idx_buffer, ctx, Ctx.cmp) catch return V{ .err = .memory };
+    },
+    .L => |n| {
+      const LCtx = struct {
+        data: []const V,
+        desc: bool,
+        fn cmp(ctx: @This(), lhs: usize, rhs: usize) bool {
+          const ord = compareV(ctx.data[lhs], ctx.data[rhs]);
+          if (ctx.desc) return ord != .lt;
+          return ord != .gt;
+        }
+      };
+      const ctx = LCtx{ .data = n.slice(), .desc = desc };
+      timsort.sort(alloc, idx_buffer, ctx, LCtx.cmp) catch {
+        (V{ .I = indices }).deinit(alloc);
+        return V{ .err = .memory };
+      };
     },
     else => return .{ .err = .@"type" },
   }

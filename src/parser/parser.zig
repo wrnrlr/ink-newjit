@@ -247,6 +247,29 @@ pub const Parser = struct {
       // Save state and advance to check.
       self.advance(); // consume op
       if (self.is(.@":")) {
+        // If ':' is immediately followed by an adverb char (\, /, '), treat op: as monad
+        // and the adverb as a seeded scan/fold/each, e.g. '1<:\' = seeded scan, not bind.
+        const colon_end = self.tok.end;
+        const next_is_adverb = colon_end < self.src.len and
+          (self.src[colon_end] == '\\' or self.src[colon_end] == '/' or self.src[colon_end] == '\'');
+        if (next_is_adverb) {
+          self.advance(); // consume ':'
+          const mv = try self.arena.allocator().create(Node);
+          mv.* = .{ .monad = .{ .f = op_tok.slice(self.src) } };
+          if (self.is(.adverb_val) or self.is(.adverb)) {
+            const verb = try self.makeTerm(mv, self.tok);
+            self.advance();
+            if (self.isStmtEnd() or self.is(.comment)) {
+              const m = try self.arena.allocator().create(Node);
+              m.* = .{ .intrans = .{ .a = noun, .v = verb, .z = null } };
+              return m;
+            }
+            const b = try self.parseStmt();
+            const m = try self.arena.allocator().create(Node);
+            m.* = .{ .transit = .{ .a = noun, .v = verb, .b = b } };
+            return m;
+          }
+        }
         // compound bind: noun op ':'
         return self.parseBind(noun, op_tok.slice(self.src));
       }
@@ -366,10 +389,24 @@ pub const Parser = struct {
     if (self.is(.@":")) {
       self.advance();
       const op_str = if (verb_node.* == .verb_op) verb_node.verb_op else "";
-      // The monad value. If followed by a noun → apposit(monad, noun)
       const mv = try self.arena.allocator().create(Node);
       mv.* = .{ .monad = .{ .f = op_str } };
       self.arena.allocator().destroy(verb_node);
+      // op:\ op:/ op:' — monad immediately followed by adverb (lexer tagged \ as adverb_val after ':')
+      if (self.is(.adverb_val) or self.is(.adverb)) {
+        const verb = try self.makeTerm(mv, self.tok);
+        self.advance();
+        if (!self.isStmtEnd() and !self.is(.comment) and
+          (self.isNounStart() or self.isVerbStart()))
+        {
+          const a = try self.parseStmt();
+          const m = try self.arena.allocator().create(Node);
+          m.* = .{ .apposit = .{ .f = verb, .a = a } };
+          return m;
+        }
+        return verb;
+      }
+      // The monad value. If followed by a noun → apposit(monad, noun)
       if (!self.isStmtEnd() and !self.is(.comment) and
         (self.isNounStart() or self.isVerbStart()))
       {

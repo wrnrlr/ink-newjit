@@ -42,6 +42,13 @@ pub const Pick = struct {
   _L_I: util.DyadFn = pickVecFn,
   _m_I: util.DyadFn = pickVecFn,
 
+  // x@(y0;y1;...) → (x@y0; x@y1; ...) — index x at each element of list y
+  _B_L: util.DyadFn = pickListFn,
+  _I_L: util.DyadFn = pickListFn,
+  _F_L: util.DyadFn = pickListFn,
+  _C_L: util.DyadFn = pickListFn,
+  _L_L: util.DyadFn = pickListFn,
+
   _S_s: util.DyadFn = pickSymAtomFn,
   _S_S: util.DyadFn = pickSymVecFn,
 
@@ -54,6 +61,86 @@ pub const Pick = struct {
   _M_S: util.DyadFn = pickTableColVecFn,
 };
 
+
+fn pickTypedVec(comptime xk: K, alloc: Alloc, x: V, indices: []const i32) V {
+  const T = comptime xk.backing();
+  const src = @field(x, @tagName(xk)).slice();
+  const res = N(T).init(alloc, indices.len) catch return V{ .err = .memory };
+  for (indices, 0..) |idx, k| {
+    if (idx < 0 or idx >= @as(i32, @intCast(src.len))) {
+      res.deinit(alloc);
+      return .{ .err = .length };
+    }
+    res.slice()[k] = src[@intCast(idx)];
+  }
+  return @unionInit(V, @tagName(xk), res);
+}
+
+fn pickIntVec(alloc: Alloc, x: V, indices: []const i32) V {
+  return switch (x.tag()) {
+    .B => pickTypedVec(.B, alloc, x, indices),
+    .I => pickTypedVec(.I, alloc, x, indices),
+    .F => pickTypedVec(.F, alloc, x, indices),
+    .C => pickTypedVec(.C, alloc, x, indices),
+    .S => pickTypedVec(.S, alloc, x, indices),
+    else => blk: {
+      // Generic list: build N(V) and promote
+      const res = N(V).init(alloc, indices.len) catch break :blk V{ .err = .memory };
+      @memset(res.slice(), .blank);
+      const length = x.len();
+      for (indices, 0..) |idx, k| {
+        if (idx < 0 or idx >= @as(i32, @intCast(length))) {
+          for (res.slice()[0..k]) |*v| v.deinit(alloc);
+          res.deinit(alloc);
+          break :blk .{ .err = .length };
+        }
+        res.slice()[k] = x.at(@intCast(idx));
+      }
+      break :blk promote(alloc, res);
+    },
+  };
+}
+
+fn pickElement(alloc: Alloc, x: V, y: V) V {
+  return switch (y.tag()) {
+    .b => pickAtom(x, if (y.b) 1 else 0),
+    .i => pickAtom(x, y.i),
+    .B => pickMask(alloc, x, y.B.slice()),
+    .I => pickIntVec(alloc, x, y.I.slice()),
+    .L => blk: {
+      const items = y.L.slice();
+      const res = N(V).init(alloc, items.len) catch break :blk V{ .err = .memory };
+      @memset(res.slice(), .blank);
+      for (items, 0..) |item, k| {
+        const r = pickElement(alloc, x, item);
+        if (r.tag() == .err) {
+          for (res.slice()[0..k]) |*v| v.deinit(alloc);
+          res.deinit(alloc);
+          break :blk r;
+        }
+        res.slice()[k] = r;
+      }
+      break :blk promote(alloc, res);
+    },
+    else => .{ .err = .@"type" },
+  };
+}
+
+fn pickListFn(vm: *VM, x: V, y: V) V {
+  const items = y.L.slice();
+  const res = N(V).init(vm.alloc, items.len) catch return V{ .err = .memory };
+  @memset(res.slice(), .blank);
+  for (items, 0..) |item, k| {
+    const r = pickElement(vm.alloc, x, item);
+    if (r.tag() == .err) {
+      for (res.slice()[0..k]) |*v| v.deinit(vm.alloc);
+      res.deinit(vm.alloc);
+      return r;
+    }
+    res.slice()[k] = r;
+  }
+  return promote(vm.alloc, res);
+}
 
 fn pickBoolFn(_: *VM, x: V, y: V) V  { return x.at(if (y.b) 1 else 0); }
 fn pickMaskFn(vm: *VM, x: V, y: V) V { return pickMask(vm.alloc, x, y.B.slice()); }

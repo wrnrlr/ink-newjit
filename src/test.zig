@@ -992,9 +992,11 @@ test "json array of same-schema objects becomes table" {
 //   // try t.check("`xml$1:<`\"tmp_test_empty.xml\"", "!domain");
 // }
 
-test "NYI" {
+test "grade ascending list" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("<(1 2 3; 4 5 6)", "!nyi");
+  try t.check("<(1 2 3; 4 5 6)", "0 1");
+  try t.check("<(4 5 6; 1 2 3)", "1 0");
+  try t.check("<(\"b\";\"a\";\"c\")", "1 0 2");
 }
 
 // test "print verb writes to out" {

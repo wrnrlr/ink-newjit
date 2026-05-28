@@ -73,7 +73,7 @@ pub const Call = struct {
           if (base_v != .func) return V{ .err = .@"type" };
           const base_ref = base_v.func;
           const derived_ref = switch (base_ref.getKind()) {
-            .builtin => Fn.makeDerivedBuiltin(base_ref.getOp(), adv),
+            .builtin => Fn.makeDerivedBuiltinFull(base_ref.getOp(), adv, base_ref.monadic != 0),
             .lambda  => Fn.makeDerivedLambda(@intCast(base_ref.idx), adv),
             else => blk: {
               const idx = try self.vm.fn_tables.addDerived(.{ .base = V{ .func = base_ref }, .adverb = adv });
@@ -85,7 +85,7 @@ pub const Call = struct {
         return .{ .err = .rank };
       },
       .derived_builtin => {
-        const base = V{ .func = Fn.dyad(ref.getOp()) };
+        const base = V{ .func = if (ref.monadic != 0) Fn.monad(ref.getOp()) else Fn.dyad(ref.getOp()) };
         return derived(self.vm, base, ref.getAdverb(), args, wrapper);
       },
       .derived_lambda => {
@@ -151,7 +151,7 @@ pub const Call = struct {
 };
 
 pub fn applyDerivedBuiltin(vm: *VM, ref: Fn, args: []const V) V {
-  const base = V{ .func = Fn.dyad(ref.getOp()) };
+  const base = V{ .func = if (ref.monadic != 0) Fn.monad(ref.getOp()) else Fn.dyad(ref.getOp()) };
   return derived(vm, base, ref.getAdverb(), args, Call.wrapper);
 }
 

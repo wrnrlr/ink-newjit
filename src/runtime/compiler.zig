@@ -338,6 +338,16 @@ pub const Compiler = struct {
   }
 
   fn compileTransit(self: *Compiler, t: ast.Transit, is_tail: bool) anyerror!ir.ValueId {
+    // Seeded adverb tacit: n op:\ g where g is verb-like → lambda {n op:\ g x}
+    // e.g. '1<:\ (|1#:\)'' → '{1<:\ (|1#:\)' x}'
+    if (t.v.* == .term and isVerbLike(t.b)) {
+      var x_node = ast.Node{ .literal = .{ .@"var" = "x" } };
+      var bx_node = ast.Node{ .apposit = .{ .f = t.b, .a = &x_node } };
+      var body_node = ast.Node{ .transit = .{ .a = t.a, .v = t.v, .b = &bx_node } };
+      var body_arr = [1]*ast.Node{&body_node};
+      const lambda = ast.Lambda{ .a = null, .b = body_arr[0..], .start = 0, .end = 0 };
+      return try self.compileLambda(lambda);
+    }
     if (t.v.* == .verb_op or t.v.* == .io) {
       const op = if (t.v.* == .verb_op) t.v.verb_op else t.v.io;
       if (Op.fromString(op)) |o| {
@@ -397,6 +407,14 @@ pub const Compiler = struct {
           return id;
         }
       }
+      // Seeded adverb with no right arg: n op:\ → lambda {n op:\ x}
+      if (i.v.* == .term) {
+        var x_node = ast.Node{ .literal = .{ .@"var" = "x" } };
+        var body_node = ast.Node{ .transit = .{ .a = i.a, .v = i.v, .b = &x_node } };
+        var body_arr = [1]*ast.Node{&body_node};
+        const lambda = ast.Lambda{ .a = null, .b = body_arr[0..], .start = 0, .end = 0 };
+        return try self.compileLambda(lambda);
+      }
       var inputs: [2]ir.ValueId = undefined;
       inputs[0] = try self.compileNode(i.v, false);
       inputs[1] = try self.compileNode(i.a, false);
@@ -444,10 +462,38 @@ pub const Compiler = struct {
       const v = V{ .func = Fn.makeTrain(ops_buf[0..ops_len]) };
       return try self.emitConst(v);
     }
+    // Tacit composition: f g where both are verb-like → lambda {f (g x)}
+    if (isVerbLike(ap.f) and isVerbLike(ap.a)) {
+      return try self.compileTacitCompose(ap.f, ap.a, is_tail);
+    }
     var inputs: [2]ir.ValueId = undefined;
     inputs[0] = try self.compileNode(ap.f, false);
     inputs[1] = try self.compileNode(ap.a, false);
     return try self.emitOpWithArg(if (is_tail) .TailCall else .Call, 1, &inputs);
+  }
+
+  // Returns true if the node statically produces a function (verb-like expression).
+  fn isVerbLike(node: *ast.Node) bool {
+    return switch (node.*) {
+      .verb_op, .monad, .adverb_val => true,
+      .term => true,
+      .group => |g| isVerbLike(g.stmt),
+      .apposit => |ap| isVerbLike(ap.f) and isVerbLike(ap.a),
+      .transit => |t| isVerbLike(t.b),
+      .intrans => |i| i.z == null and i.v.* == .term,
+      else => false,
+    };
+  }
+
+  // Compiles a tacit composition {f (g x)} as a lambda.
+  fn compileTacitCompose(self: *Compiler, f_node: *ast.Node, g_node: *ast.Node, is_tail: bool) anyerror!ir.ValueId {
+    _ = is_tail;
+    var x_node = ast.Node{ .literal = .{ .@"var" = "x" } };
+    var gx_node = ast.Node{ .apposit = .{ .f = g_node, .a = &x_node } };
+    var fgx_node = ast.Node{ .apposit = .{ .f = f_node, .a = &gx_node } };
+    var body_arr = [1]*ast.Node{&fgx_node};
+    const lambda = ast.Lambda{ .a = null, .b = body_arr[0..], .start = 0, .end = 0 };
+    return try self.compileLambda(lambda);
   }
 
   // Collects single-char op bytes from a verb_op node or nested apposit of verb_ops.

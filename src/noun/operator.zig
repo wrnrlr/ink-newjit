@@ -46,6 +46,9 @@ pub const Fn = packed struct(u64) {
   pub fn makeDerivedBuiltin(op: Op, adv: Adverb) Fn {
     return .{ .kind = @intFromEnum(FnKind.derived_builtin), .monadic = 0, .arity = 1, .idx = @intFromEnum(op), .extra = @intFromEnum(adv) };
   }
+  pub fn makeDerivedBuiltinFull(op: Op, adv: Adverb, is_monadic: bool) Fn {
+    return .{ .kind = @intFromEnum(FnKind.derived_builtin), .monadic = @intFromBool(is_monadic), .arity = 1, .idx = @intFromEnum(op), .extra = @intFromEnum(adv) };
+  }
   pub fn makeDerivedLambda(lambda_idx: u24, adv: Adverb) Fn {
     return .{ .kind = @intFromEnum(FnKind.derived_lambda), .monadic = 0, .arity = 1, .idx = lambda_idx, .extra = @intFromEnum(adv) };
   }
