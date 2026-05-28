@@ -8,6 +8,19 @@ const V = value.V;
 const Op = chunk.Op;
 const OpCode = chunk.OpCode;
 
+inline fn isCall1(inst: *const ir.IRInst) bool {
+  return (inst.op == .Call or inst.op == .TailCall) and inst.arg1 == 1 and inst.inputs.len == 2;
+}
+
+// True when inst is a Const holding a builtin func reference to `op` (monad or dyad).
+fn isBuiltinConst(inst: *const ir.IRInst, op: Op) bool {
+  if (inst.op != .Const) return false;
+  const v = inst.val orelse return false;
+  if (v != .func) return false;
+  if (v.func.getKind() != .builtin) return false;
+  return v.func.getOp() == op;
+}
+
 // 256-bit set for local variable indices (max 256 locals per lambda).
 const LocalSet = struct {
   bits: [4]u64 = .{0, 0, 0, 0},
@@ -55,7 +68,70 @@ pub const Optimizer = struct {
   }
 
   pub fn optimize(self: *Optimizer, scope_ir: *ir.IR, root_id: ir.ValueId) !void {
-    while (try self.constantFolding(scope_ir) or try self.dce(scope_ir, root_id)) {}
+    while (try self.constantFolding(scope_ir) or
+           try self.peepholeIdioms(scope_ir) or
+           try self.dce(scope_ir, root_id)) {}
+  }
+
+  // Rewrites idioms that can be replaced by a single faster op.
+  //   *|x  →  last x   (avoids allocating the reversed array)
+  //
+  // The compiler emits this idiom as a chain of Call 1 ops with the verbs as
+  // function constants on the stack:
+  //   %a = Const  Fn(*)
+  //   %b = Const  Fn(|)
+  //   %c = ... x
+  //   %d = Call 1  inputs=[%b, %c]   ; |x
+  //   %e = Call 1  inputs=[%a, %d]   ; *|x
+  // Rewrite %e to Apply1 last with inputs=[%c] and mark %d dead so its
+  // bytecode is skipped. DCE then reaps %a and %b (the verb constants).
+  //
+  // We only fire when the inner Call's result has exactly one user (this
+  // outer Call), so a later use of |x is never eliminated.
+  fn peepholeIdioms(self: *Optimizer, scope_ir: *ir.IR) !bool {
+    const insts = scope_ir.instructions.items;
+    const use_count = try self.alloc.alloc(u32, insts.len);
+    defer self.alloc.free(use_count);
+    @memset(use_count, 0);
+    for (insts) |inst| {
+      if (inst.is_dead) continue;
+      for (inst.inputs) |id| {
+        if (id != ir.NO_VALUE and id < use_count.len) use_count[id] += 1;
+      }
+    }
+
+    var changed = false;
+    for (insts) |*inst| {
+      if (inst.is_dead) continue;
+      if (!isCall1(inst)) continue;
+      const f_outer_id = inst.inputs[0];
+      const inner_id   = inst.inputs[1];
+      if (f_outer_id == ir.NO_VALUE or inner_id == ir.NO_VALUE) continue;
+      if (!isBuiltinConst(scope_ir.get(f_outer_id), .@"*")) continue;
+      const inner = scope_ir.get(inner_id);
+      if (!isCall1(inner)) continue;
+      if (use_count[inner_id] != 1) continue;
+      const f_inner_id = inner.inputs[0];
+      const x_id       = inner.inputs[1];
+      if (f_inner_id == ir.NO_VALUE or x_id == ir.NO_VALUE) continue;
+      if (!isBuiltinConst(scope_ir.get(f_inner_id), .@"|")) continue;
+
+      // Rewrite outer Call → Apply1 last; consumes x from the stack.
+      const old_inputs = inst.inputs;
+      const new_inputs = try scope_ir.alloc.alloc(ir.ValueId, 1);
+      new_inputs[0] = x_id;
+      inst.inputs = new_inputs;
+      inst.op = .Apply1;
+      inst.arg1 = @intFromEnum(Op.last);
+      scope_ir.alloc.free(old_inputs);
+
+      // Inner Call's bytecode would push |x; skip it. DCE will reap the
+      // verb Const(*) and Const(|) on a subsequent pass once their last
+      // referrer is gone.
+      scope_ir.instructions.items[inner_id].is_dead = true;
+      changed = true;
+    }
+    return changed;
   }
 
   fn constantFolding(self: *Optimizer, scope_ir: *ir.IR) !bool {
