@@ -24,7 +24,24 @@ pub fn N(comptime T: type) type {
       const total = slabRound(data_offset + n * @sizeOf(T));
       const buf = try alloc.alignedAlloc(u8, align_enum, total);
       const header: *align(@alignOf(Rc)) Rc = @ptrCast(buf.ptr);
-      header.* = .{ .rc = 1, .len = @intCast(n) };
+      const cap_n: u32 = @intCast((total - data_offset) / @sizeOf(T));
+      header.* = .{ .rc = 1, .len = @intCast(n), .cap = cap_n };
+      if (comptime T == bool) header.flags = ArrayFlags.boolean;
+      return .{ .ptr = header };
+    }
+
+    // Like init but with explicit overcapacity; `min_cap` is rounded up to the
+    // next allocator-friendly size (power-of-2 above 1024, slab class below)
+    // so subsequent in-place appends are cheap.
+    pub fn initWithCap(alloc: Alloc, n: usize, min_cap: usize) !Self {
+      const target_cap = @max(n, min_cap);
+      const requested = data_offset + target_cap * @sizeOf(T);
+      const rounded = if (requested <= (1 << 10)) slabRound(requested)
+                      else std.math.ceilPowerOfTwo(usize, requested) catch requested;
+      const buf = try alloc.alignedAlloc(u8, align_enum, rounded);
+      const header: *align(@alignOf(Rc)) Rc = @ptrCast(buf.ptr);
+      const cap_n: u32 = @intCast((rounded - data_offset) / @sizeOf(T));
+      header.* = .{ .rc = 1, .len = @intCast(n), .cap = cap_n };
       if (comptime T == bool) header.flags = ArrayFlags.boolean;
       return .{ .ptr = header };
     }
@@ -36,10 +53,17 @@ pub fn N(comptime T: type) type {
       a.ptr.rc -= 1;
       if (a.ptr.rc != 0) return;
       if (T == V) for (a.slice()) |child| child.deinit(alloc);
-      const total = slabRound(data_offset + a.ptr.len * @sizeOf(T));
+      const total = data_offset + @as(usize, a.ptr.cap) * @sizeOf(T);
       const base: [*]u8 = @ptrCast(a.ptr);
       const buf: []align(alignment) u8 = @as([*]align(alignment) u8, @alignCast(base))[0..total];
       alloc.free(buf);
+    }
+
+    // Raw pointer to the data region; positions [len, cap) are valid storage
+    // but uninitialised. Callers must hold rc==1.
+    pub fn dataPtr(a: Self) [*]T {
+      const base: [*]u8 = @ptrCast(a.ptr);
+      return @as([*]T, @ptrCast(@alignCast(base + data_offset)));
     }
     pub fn slice(a: Self) []T {
       const base: [*]u8 = @ptrCast(a.ptr);

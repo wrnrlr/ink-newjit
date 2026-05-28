@@ -196,6 +196,29 @@ pub const VM = struct {
     return vm.pop();
   }
 
+  // Move-semantics variant: transfers ownership of `args` into the lambda's
+  // locals without bumping refcounts. Caller MUST NOT deinit args afterwards —
+  // the Return frame cleanup handles them. This is what lets accumulator-
+  // shaped adverb loops (ndo/fold/scan) reach rc==1 inside the lambda body so
+  // in-place mutation (e.g. concat append) can fire.
+  pub fn callLambdaAndRunMove(vm: *VM, ref: Fn, args: []const V) V {
+    const prev_frames = vm.frames_len;
+    const res_slot = vm.stack_len;
+    vm.push(.blank) catch return V{ .err = .memory };
+    for (args) |arg| vm.push(arg) catch {
+      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
+      vm.stack_len = res_slot;
+      return V{ .err = .memory };
+    };
+    vm.callLambda(ref, args.len, res_slot) catch {
+      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
+      vm.stack_len = res_slot;
+      return V{ .err = .memory };
+    };
+    vm.runUntil(prev_frames) catch {};
+    return vm.pop();
+  }
+
   fn run(vm: *VM) !void {
     try vm.runUntil(0);
   }

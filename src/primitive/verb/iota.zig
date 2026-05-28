@@ -49,7 +49,7 @@ var pool: [POOL_SIZE]u8 align(alignment) = blk: {
   var buf = [_]u8{0} ** POOL_SIZE;
   for (0..IOTA_MAX + 1) |n| {
     const off = OFFSETS[n];
-    const header = Rc{ .rc = std.math.maxInt(u32), .len = @intCast(n) };
+    const header = Rc{ .rc = std.math.maxInt(u32), .len = @intCast(n), .cap = @intCast(n) };
     const header_bytes = std.mem.toBytes(header);
     for (header_bytes, 0..) |b, j| buf[off + j] = b;
     for (0..n) |i| {

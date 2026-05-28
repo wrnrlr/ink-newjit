@@ -27,7 +27,7 @@ fn allocRc(alloc: Alloc, comptime T: type, n: usize) !*Rc {
   const header_size = std.mem.alignForward(usize, @sizeOf(Rc), @alignOf(T));
   const raw = try alloc.alloc(u8, header_size + (n * @sizeOf(T)));
   const h = @as(*Rc, @ptrCast(@alignCast(raw.ptr)));
-  h.* = .{ .rc = 1, .len = @intCast(n) };
+  h.* = .{ .rc = 1, .len = @intCast(n), .cap = @intCast(n) };
   return h;
 }
 

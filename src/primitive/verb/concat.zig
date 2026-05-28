@@ -5,6 +5,7 @@ const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const Op = @import("../../runtime/tape.zig").Op;
+const ArrayFlags = @import("../../noun/array.zig").ArrayFlags;
 const h = @import("helper.zig");
 
 // ── Kernel generators ─────────────────────────────────────────────────────────
@@ -36,6 +37,11 @@ fn listKernel(comptime xk: K, comptime yk: K) util.DyadFn {
 }
 
 // Same-base-type pair: atom+atom → vec, atom+vec → vec, vec+atom → vec, vec+vec → vec.
+//
+// Fast path (xk is a vector): if x has rc==1 and spare capacity (cap-len ≥ yl)
+// we write y into x.dataPtr()[xl..xl+yl] and bump x.len, returning x.ref().
+// This makes `x = x, e` loops O(N) amortised — geometric growth comes from
+// initWithCap on the slow path, which gives the next allocation enough headroom.
 fn homoKernel(comptime xk: K, comptime yk: K) util.DyadFn {
   const VK: K = @enumFromInt((@intFromEnum(xk) & ~@as(u8, K.VEC_BIT)) | K.VEC_BIT);
   const T = K.backing(VK);
@@ -51,7 +57,21 @@ fn homoKernel(comptime xk: K, comptime yk: K) util.DyadFn {
     fn f(vm: *VM, x: V, y: V) V {
       const xl = x.len();
       const yl = y.len();
-      const res = N(T).init(vm.alloc, xl + yl) catch return V{ .err = .memory };
+      // In-place append when xk is a vec and we own it exclusively.
+      if (comptime xk.isVec()) {
+        const xn = @field(x, @tagName(xk));
+        if (xn.ptr.rc == 1 and !xn.hasFlag(ArrayFlags.immutable) and
+            @as(usize, xn.ptr.cap) - @as(usize, xn.ptr.len) >= yl) {
+          const dst_ptr = xn.dataPtr();
+          ycopy(dst_ptr[xl .. xl + yl], y);
+          xn.ptr.len = @intCast(xl + yl);
+          return x.ref();
+        }
+      }
+      const target = xl + yl;
+      // 2× target gives the inner ceilPowerOfTwo enough room to land in the
+      // next bucket up, so the next yl appends are O(1).
+      const res = N(T).initWithCap(vm.alloc, target, target *| 2) catch return V{ .err = .memory };
       xcopy(res.slice()[0..xl], x);
       ycopy(res.slice()[xl..], y);
       return @unionInit(V, @tagName(VK), res);

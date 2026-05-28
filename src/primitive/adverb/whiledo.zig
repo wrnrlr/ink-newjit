@@ -16,16 +16,26 @@ inline fn callOne(vm: *VM, func: V, arg: V, f: util.ApplyFn) V {
 }
 
 // while: (cond)step/init — apply step while cond holds, return final value
+//
+// cond is called with a borrowed ref (we still own cur for the next iter);
+// step receives cur via move semantics when it's a lambda, so the body sees
+// rc==1 and can mutate the accumulator in place.
 pub fn whiledo(vm: *VM, cond: V, step: V, init: V, f: util.ApplyFn) V {
+  const step_is_lambda = step == .func and step.func.getKind() == .lambda;
   var cur = init.ref();
   while (true) {
     const cond_result = callOne(vm, cond, cur, f);
     const keep = cond_result.isTrue();
     cond_result.deinit(vm.alloc);
     if (!keep) return cur;
-    const next = callOne(vm, step, cur, f);
-    cur.deinit(vm.alloc);
-    cur = next;
+    if (step_is_lambda) {
+      const args = [_]V{cur};
+      cur = vm.callLambdaAndRunMove(step.func, &args);
+    } else {
+      const next = callOne(vm, step, cur, f);
+      cur.deinit(vm.alloc);
+      cur = next;
+    }
   }
 }
 

@@ -110,13 +110,14 @@ pub fn fold(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
 
   if (base.tag() == .func and base.func.getKind() == .lambda) {
     const ref = base.func;
+    // Move semantics: transfer ownership of accum and item into the lambda's
+    // locals. Inside the body, accum has rc==1 so in-place mutation kernels
+    // (concat append, arith) can fire, turning what would be O(N²) loops into
+    // O(N) amortised. The Return frame cleanup deinits the moved-in args.
     for (start..n) |i| {
       const item = x.at(i);
       const args = [_]V{ accum, item };
-      const next = vm.callLambdaAndRun(ref, &args);
-      item.deinit(vm.alloc);
-      accum.deinit(vm.alloc);
-      accum = next;
+      accum = vm.callLambdaAndRunMove(ref, &args);
     }
     return accum;
   }
