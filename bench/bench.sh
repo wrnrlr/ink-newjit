@@ -59,3 +59,11 @@ echo "ngn/k simulate"
 
 echo "ink simulate"
 ./zig-out/bin/ink bench/simulate_ink.k
+
+echo "ngn/k powerset"
+~/.k/k bench/powerset.k 10
+~/.k/k bench/powerset.k 15
+
+echo "ink powerset"
+./zig-out/bin/ink bench/powerset.k 10
+./zig-out/bin/ink bench/powerset.k 15
