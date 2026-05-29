@@ -16,7 +16,6 @@ const Fn = opmod.Fn;
 const Alloc = std.mem.Allocator;
 const Chunk = @import("tape.zig").Chunk;
 const OpCode = @import("tape.zig").OpCode;
-const Op = @import("tape.zig").Op;
 const Pool = @import("../noun/symbol.zig").Pool;
 const Registry = @import("registry.zig").Registry;
 

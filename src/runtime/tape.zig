@@ -27,34 +27,6 @@ pub const OpCode = enum(u8) {
 	pub const COUNT = @typeInfo(OpCode).@"enum".fields.len;
 };
 
-/// Op is the comprehensive (transitional) enum used by verb files'
-/// anonymous-enum-literal `op` field. After Phase 4 it covers monad-only
-/// fused-reduce verbs too (e.g. `+/`). Will be removed once all verb files
-/// are typed against Op1/Op2/Op3/Op4 directly.
-pub const Op = enum(u8) {
-  @"%", @"!", @"&", @"+", @"*", @"|", @"<", @">", @"=", @"~",
-  @",", @"^", @"#", @"_", @"$", @"?", @"@", @"-", @".",
-  sqrt, sqr, exp, log, sin, cos, abs,
-  first, last, count, in, has, mod, div, parse,
-  @"0:", @"1:", @"2:", @"9:",
-  @":",
-  exec,
-  // fused monad-only derived verbs (sum, product, min, max — see derived/*.zig)
-  @"+/", @"*/", @"|/", @"&/",
-
-  pub const COUNT = @typeInfo(Op).@"enum".fields.len;
-
-  pub fn fromString(s: []const u8) ?Op {
-    inline for (std.meta.fields(Op)) |f| {
-      if (std.mem.eql(u8, f.name, s)) return @enumFromInt(f.value);
-    }
-    return null;
-  }
-
-  pub fn toString(self: Op) []const u8 { return @tagName(self); }
-  pub inline fn code(op: Op) usize { return @intFromEnum(op); }
-};
-
 pub const BasicBlock = struct {
   start:  u32,
   end:    u32,     // exclusive — first byte of the next BB (or code.len)

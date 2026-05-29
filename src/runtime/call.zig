@@ -104,19 +104,14 @@ pub const Call = struct {
       return V{ .err = .rank };
     }
 
-    // Adverb2 (standalone adverb in 2-arg form: `\[base; arg]`)
-    if (opmod.isAdverb2Idx(idx)) {
-      // 1 arg = partial application (e.g. `\[*;]`).
-      if (args.len == 1) return makePartialFromArgs(vm, ref, args);
-      // 2 args = standard Adverb2 form: derived(base, [arg]).
-      if (args.len == 2) {
-        const adv = opmod.adverb2OfIdx(idx).toAdverb();
-        return derived_mod.derived(vm, args[0], adv, args[1..2], wrapper);
-      }
-      // 3 args = polymorphic upgrade to Adverb3 form: derived(base, [extra, arg]).
-      // The Adverb2 enum is a strict subset of Adverb3, so the conversion is safe.
+    // Standalone adverb (e.g. `\[base; arg]` or `\[seed; base; arg]`).
+    if (opmod.isAdverbIdx(idx)) {
+      if (args.len < builtin_arity) return makePartialFromArgs(vm, ref, args);
+      const adv = opmod.adverbOfIdx(idx);
+      // 2 args = monogram form: derived(base, [arg]).
+      if (args.len == 2) return derived_mod.derived(vm, args[0], adv, args[1..2], wrapper);
+      // 3 args = digram form: derived(base, [extra, arg]).
       if (args.len == 3) {
-        const adv = opmod.adverb2OfIdx(idx).toAdverb();
         const data_args = [_]V{ args[0], args[2] };
         return derived_mod.derived(vm, args[1], adv, &data_args, wrapper);
       }
@@ -126,28 +121,12 @@ pub const Call = struct {
     // Op3 (triadic builtin: amend3 / drill3)
     if (opmod.isOp3Idx(idx)) {
       if (args.len != 3) return V{ .err = .rank };
-      const op3 = opmod.op3OfIdx(idx);
-      // amend3/drill3 take their args as a mutable slice (target, idx/path, func).
       var buf = [_]V{ args[0].ref(), args[1].ref(), args[2].ref() };
       defer for (&buf) |*v| v.deinit(vm.alloc);
-      return switch (op3) {
+      return switch (opmod.op3OfIdx(idx)) {
         .amend3 => try amend_mod.amend(vm, &buf),
         .drill3 => try amend_mod.dmend(vm, &buf),
       };
-    }
-
-    // Adverb3 (digram adverb: `x F/y`)
-    if (opmod.isAdverb3Idx(idx)) {
-      if (args.len < 2) return makePartialFromArgs(vm, ref, args);
-      // For now route through derived() with the adverb's data args.
-      // The 3-form takes [extra, base, arg] but our derived() expects [base, ...].
-      // Standalone adverb3 dispatch: args = [extra, base, arg] → derived(base, [extra, arg]).
-      if (args.len == 3) {
-        const adv = opmod.adverb3OfIdx(idx).toAdverb();
-        const data_args = [_]V{ args[0], args[2] };
-        return derived_mod.derived(vm, args[1], adv, &data_args, wrapper);
-      }
-      return V{ .err = .rank };
     }
 
     // Op4 (tetradic builtin: amend4 / drill4)

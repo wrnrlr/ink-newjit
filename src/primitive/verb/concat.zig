@@ -4,7 +4,7 @@ const VM = @import("../../runtime/vm.zig").VM;
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
-const Op = @import("../../runtime/tape.zig").Op;
+const Op2 = @import("../../noun/operator.zig").Op2;
 const ArrayFlags = @import("../../noun/array.zig").ArrayFlags;
 const h = @import("helper.zig");
 
@@ -111,9 +111,9 @@ const concat_types = blk: {
 
 fn makeConcat() type {
   @setEvalBranchQuota(100000);
-  const op_default: Op = .@",";
+  const op_default: Op2 = .@",";
   var names: []const []const u8 = &.{ "op" };
-  var field_types: []const type = &.{ Op };
+  var field_types: []const type = &.{ Op2 };
   var attrs: []const h.Attr = &.{
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };

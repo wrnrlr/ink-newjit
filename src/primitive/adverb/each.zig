@@ -1,7 +1,6 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
 const K = @import("../../noun/class.zig").K;
-const Op = @import("../../runtime/tape.zig").Op;
 const VM = @import("../../runtime/vm.zig").VM;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;

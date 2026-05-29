@@ -240,12 +240,10 @@ fn fmtValue(v: V, symbols: *const Pool, out: *std.Io.Writer) anyerror!void {
           try out.print("{s}", .{opmod.op1OfIdx(idx).toString()});
         } else if (opmod.isOp2Idx(idx)) {
           try out.print("{s}", .{opmod.op2OfIdx(idx).toString()});
-        } else if (opmod.isAdverb2Idx(idx)) {
-          try out.print("{s}", .{@tagName(opmod.adverb2OfIdx(idx))});
+        } else if (opmod.isAdverbIdx(idx)) {
+          try out.print("{s}", .{@tagName(opmod.adverbOfIdx(idx))});
         } else if (opmod.isOp3Idx(idx)) {
           try out.print("{s}", .{opmod.op3OfIdx(idx).toString()});
-        } else if (opmod.isAdverb3Idx(idx)) {
-          try out.print("{s}", .{@tagName(opmod.adverb3OfIdx(idx))});
         } else if (opmod.isOp4Idx(idx)) {
           try out.print("{s}", .{opmod.op4OfIdx(idx).toString()});
         }

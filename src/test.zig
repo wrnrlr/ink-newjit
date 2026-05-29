@@ -237,7 +237,7 @@ test "partial amend" {
   // 3-arg drill (path), function completed later.
   try t.check(".[(1 2 3;4 5 6);0 1;](-:)", "(1 -2 3;4 5 6)");
   // Partial amend saved, then completed.
-  try t.check("c:(@[\"xxx\";1;]); c(_:)", "\"xxx\"");
+  try t.check("c:(@[\"aBc\";1;]); c(_:)", "\"abc\"");
 }
 test "dyadic verb" {
   var t = try Tester.init(); defer t.deinit();

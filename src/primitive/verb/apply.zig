@@ -7,7 +7,7 @@ const V = value.V;
 const Dict = value.Dict;
 const Alloc = std.mem.Allocator;
 const K = @import("../../noun/class.zig").K;
-const Op = @import("../../runtime/tape.zig").Op;
+const Op2 = @import("../../noun/operator.zig").Op2;
 const Call = @import("../../runtime/call.zig").Call;
 const syms = @import("../../runtime/syms.zig");
 const h = @import("helper.zig");
@@ -27,9 +27,9 @@ const all_k_types = blk: {
 
 fn makeApply1() type {
   @setEvalBranchQuota(100000);
-  const op_default: Op = .@"@";
+  const op_default: Op2 = .@"@";
   var names: []const []const u8 = &.{"op"};
-  var field_types: []const type = &.{Op};
+  var field_types: []const type = &.{Op2};
   var attrs: []const h.Attr = &.{
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };

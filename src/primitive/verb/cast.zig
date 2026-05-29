@@ -5,7 +5,6 @@ const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
 const K = @import("../../noun/class.zig").K;
-const Op = @import("../../runtime/tape.zig").Op;
 const h = @import("helper.zig");
 const eql = std.mem.eql;
 

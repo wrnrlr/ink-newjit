@@ -1,7 +1,6 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
 const Chunk = @import("../runtime/tape.zig").Chunk;
-const Op = @import("../runtime/tape.zig").Op;
 const ArrayFlags = @import("array.zig").ArrayFlags;
 const Rc = @import("rc.zig").Rc;
 const opmod = @import("operator.zig");

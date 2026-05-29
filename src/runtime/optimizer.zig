@@ -4,23 +4,12 @@ const value = @import("../noun/value.zig");
 const chunk = @import("tape.zig");
 const fntable = @import("fntable.zig");
 const operator = @import("../noun/operator.zig");
+const fold_mod = @import("../primitive/adverb/fold.zig");
 const V = value.V;
 const Op1 = operator.Op1;
 const Op2 = operator.Op2;
 const Adverb = operator.Adverb;
 const OpCode = chunk.OpCode;
-
-// Maps a Op2 base verb to its fused Op1 reducer (e.g. + → +/).
-// Used by peepholeIdioms to rewrite `+/x` → `Apply1 +/`.
-fn fusedReducerFor(op2: Op2) ?Op1 {
-  return switch (op2) {
-    .@"+" => .@"+/",
-    .@"*" => .@"*/",
-    .@"|" => .@"|/",
-    .@"&" => .@"&/",
-    else => null,
-  };
-}
 
 inline fn isCall1(inst: *const ir.IRInst) bool {
   return (inst.op == .Call or inst.op == .TailCall) and inst.arg1 == 1 and inst.inputs.len == 2;
@@ -139,7 +128,7 @@ pub const Optimizer = struct {
             if (v != .func) break :blk;
             if (v.func.getKind() != .callable) break :blk;
             if (!operator.isOp2Idx(v.func.idx)) break :blk;
-            const fused = fusedReducerFor(v.func.getOp2()) orelse break :blk;
+            const fused = fold_mod.fusedReducerOf(v.func.getOp2()) orelse break :blk;
 
             const old_inputs = inst.inputs;
             const new_inputs = try scope_ir.alloc.alloc(ir.ValueId, 1);

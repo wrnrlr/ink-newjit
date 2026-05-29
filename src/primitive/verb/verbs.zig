@@ -2,7 +2,6 @@ const std = @import("std");
 const Alloc = std.mem.Allocator;
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
-const Op = @import("../../runtime/tape.zig").Op;
 const Op1 = @import("../../noun/operator.zig").Op1;
 const Op2 = @import("../../noun/operator.zig").Op2;
 const VM = @import("../../runtime/vm.zig").VM;
@@ -24,15 +23,18 @@ pub const dyad_table  = makeDyadArray(Dyads);
 const h = @import("helper.zig");
 const at = h.arithmetic_types;
 
-pub fn _B(comptime op: Op, comptime F: type) type { return h.makeMonad(op, h.Upcast1, h.Bool1,   F, &at); }
-pub fn _N(comptime op: Op, comptime F: type) type { return h.makeMonad(op, h.Upcast1, h.Upcast1, F, &at); }
-pub fn _F(comptime op: Op, comptime F: type) type { return h.makeMonad(op, h.Float1,  h.Float1,  F, &at); }
-pub fn _B_B(comptime op: Op, comptime f: type) type { return h.makeDyad(op, h.Bool2,   h.Bool2,   f, &at); }
-pub fn _N_N(comptime op: Op, comptime f: type) type { return h.makeDyad(op, h.Upcast2, h.Upcast2, f, &at); }
-pub fn _I_I(comptime op: Op, comptime f: type) type { return h.makeDyad(op, h.Int2, h.Int2, f, &h.integer_types); }
-pub fn _F_F(comptime op: Op, comptime f: type) type { return h.makeDyad(op, h.Float2,  h.Float2,  f, &at); }
-pub fn _X(comptime op: Op, comptime Impl: type) type { return h._X(op, Impl); }
-pub fn _I_A(comptime op: Op, comptime Impl: type) type { return h._X(op, Impl); }
+// Monad helpers (op: Op1)
+pub fn _B(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Upcast1, h.Bool1,   F, &at); }
+pub fn _N(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Upcast1, h.Upcast1, F, &at); }
+pub fn _F(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Float1,  h.Float1,  F, &at); }
+pub fn _X1(comptime op: Op1, comptime Impl: type) type { return h._X(Op1, op, Impl); }
+
+// Dyad helpers (op: Op2)
+pub fn _B_B(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Bool2,   h.Bool2,   f, &at); }
+pub fn _N_N(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Upcast2, h.Upcast2, f, &at); }
+pub fn _I_I(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Int2, h.Int2, f, &h.integer_types); }
+pub fn _F_F(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Float2,  h.Float2,  f, &at); }
+pub fn _X2(comptime op: Op2, comptime Impl: type) type { return h._X(Op2, op, Impl); }
 
 const Monads = struct {
   // Monadic Primitives
@@ -50,7 +52,7 @@ const Monads = struct {
   pub const @"<X" = sort.Ascend;
   pub const @">X" = sort.Descend;
   pub const @"=X" = @import("group.zig").Group;
-  pub const @"=i" = _X(.@"?", @import("uniform.zig").UniformOp);
+  pub const @"=i" = _X1(.@"?", @import("uniform.zig").UniformOp);
   pub const @"~x" = _B(.@"~", logic.NotOp);
   pub const @",x" = @import("enlist.zig").Enlist;
   pub const @"^x" = @import("nulls.zig").Nulls;
@@ -109,7 +111,7 @@ const Dyads = struct {
   
   pub const @"x,y"  = concat.Concat;
   pub const @"i_X"  = @import("drop.zig").Drop;
-  pub const @"I_X"  = _I_A(.@"_", @import("cut.zig").Cut);
+  pub const @"I_X"  = _X2(.@"_", @import("cut.zig").Cut);
   pub const @"B_X"  = @import("weedout.zig").WeedOut;
   pub const @"X_i"  = @import("delete.zig").Delete;
 
@@ -149,13 +151,22 @@ const Dyads = struct {
 fn typeError1(_: *VM, _:V) V { return .{ .err = .@"type" }; }
 fn typeError2(_: *VM, _:V, _:V) V { return .{ .err = .@"type" }; }
 
+// Read the verb's `op` field — coerces the (possibly anonymous) enum literal
+// to EnumT. Compile error if the verb's op isn't a valid EnumT member.
+fn opOf(comptime Verb: type, comptime EnumT: type) ?EnumT {
+  if (@hasDecl(Verb, "op")) return @as(EnumT, @field(Verb, "op"));
+  for (std.meta.fields(Verb)) |f|
+    if (comptime std.mem.eql(u8, f.name, "op"))
+      return @as(EnumT, f.defaultValue() orelse return null);
+  return null;
+}
+
 fn makeMonadArray(comptime Defs: type) [Op1.COUNT * K.COUNT]util.MonadFn {
   @setEvalBranchQuota(10000000);
   var table: [Op1.COUNT * K.COUNT]util.MonadFn = .{typeError1} ** (Op1.COUNT * K.COUNT);
   for (std.meta.declarations(Defs)) |decl| {
     const Verb = @field(Defs, decl.name);
-    const op = verbOp(Verb) orelse continue;
-    const op1 = Op1.fromOp(op) orelse continue;
+    const op1 = opOf(Verb, Op1) orelse continue;
     for (std.meta.fields(Verb)) |f| {
       const sig = parseSig(f.name);
       if (sig.len == 1) {
@@ -172,8 +183,7 @@ fn makeDyadArray(comptime Defs: type) [Op2.COUNT * K.COUNT * K.COUNT]util.DyadFn
   var table: [Op2.COUNT * K.COUNT * K.COUNT]util.DyadFn = .{typeError2} ** (Op2.COUNT * K.COUNT * K.COUNT);
   for (std.meta.declarations(Defs)) |decl| {
     const Verb = @field(Defs, decl.name);
-    const op = verbOp(Verb) orelse continue;
-    const op2 = Op2.fromOp(op) orelse continue;
+    const op2 = opOf(Verb, Op2) orelse continue;
     for (std.meta.fields(Verb)) |f| {
       const sig = parseSig(f.name);
       if (sig.len == 2) {
@@ -183,14 +193,6 @@ fn makeDyadArray(comptime Defs: type) [Op2.COUNT * K.COUNT * K.COUNT]util.DyadFn
     }
   }
   return table;
-}
-
-fn verbOp(comptime Verb: type) ?Op {
-  if (@hasDecl(Verb, "op")) return @as(Op, @field(Verb, "op"));
-  for (std.meta.fields(Verb)) |f|
-    if (comptime std.mem.eql(u8, f.name, "op"))
-      return @as(Op, f.defaultValue() orelse return null);
-  return null;
 }
 
 // Parse "_i" → [.i], "_i_f" → [.i, .f], "_blank" → [.blank].

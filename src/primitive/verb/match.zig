@@ -3,7 +3,7 @@ const util = @import("../../util.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const V = @import("../../noun/value.zig").V;
 const K = @import("../../noun/class.zig").K;
-const Op = @import("../../runtime/tape.zig").Op;
+const Op2 = @import("../../noun/operator.zig").Op2;
 const h = @import("helper.zig");
 
 const all_k_types = blk: {
@@ -79,9 +79,9 @@ fn getMatchHandler(comptime k: K) util.DyadFn {
 
 fn makeMatch() type {
   @setEvalBranchQuota(1000000);
-  const op_default: Op = .@"~";
+  const op_default: Op2 = .@"~";
   var names: []const []const u8 = &.{"op"};
-  var field_types: []const type = &.{Op};
+  var field_types: []const type = &.{Op2};
   var attrs: []const h.Attr = &.{
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };

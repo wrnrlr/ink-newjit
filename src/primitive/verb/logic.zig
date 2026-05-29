@@ -1,7 +1,6 @@
 const std = @import("std");
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
-const Op = @import("../../runtime/tape.zig").Op;
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
 const h = @import("./helper.zig");

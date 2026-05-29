@@ -1,7 +1,6 @@
 const std = @import("std");
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
-const Op = @import("../../runtime/tape.zig").Op;
 const Op2 = @import("../../noun/operator.zig").Op2;
 const dispatch = @import("../dispatch.zig");
 const promote = @import("../promote.zig").promote;
@@ -19,11 +18,12 @@ pub const cut_types = [_]K{ .b, .i, .f, .B, .I, .F };
 
 /// Wrap a hand-written handler struct (one that already contains _* fields
 /// with default MonadFn/DyadFn values) by injecting the `op` field so the
-/// dispatch-table builder can key it correctly.
-pub fn _X(comptime op: Op, comptime Impl: type) type {
-  const op_default: Op = op;
+/// dispatch-table builder can key it correctly. EnumT is Op1 (monad) or Op2
+/// (dyad) so the dispatch-table builder gets the typed value directly.
+pub fn _X(comptime EnumT: type, comptime op: EnumT, comptime Impl: type) type {
+  const op_default: EnumT = op;
   var names: []const []const u8 = &.{ "op" };
-  var types: []const type       = &.{ Op };
+  var types: []const type       = &.{ EnumT };
   var attrs: []const Attr       = &.{
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
@@ -38,15 +38,16 @@ pub fn _X(comptime op: Op, comptime Impl: type) type {
 }
 
 pub fn makeMonad(
-  comptime operator: Op,
+  comptime operator: @import("../../noun/operator.zig").Op1,
   comptime CastType: fn (type) type,
   comptime ResultType: fn (type) type,
   comptime Impl: type,
   comptime ks: []const K,
 ) type {
-  const op_default: Op = operator;
+  const Op1 = @import("../../noun/operator.zig").Op1;
+  const op_default: Op1 = operator;
   var names: []const []const u8 = &.{ "op" };
-  var types: []const type = &.{ Op };
+  var types: []const type = &.{ Op1 };
   var attrs: []const Attr = &.{
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
@@ -64,16 +65,16 @@ pub fn makeMonad(
 }
 
 pub fn makeDyad(
-  comptime operator: Op,
+  comptime operator: Op2,
   comptime CastType: fn (type, type) type,
   comptime ResultType: fn (type, type) type,
   comptime Impl: type,
   comptime types: []const K,
 ) type {
   @setEvalBranchQuota(2000000);
-  const op_default: Op = operator;
+  const op_default: Op2 = operator;
   var names: []const []const u8 = &.{ "op" };
-  var field_types: []const type = &.{ Op };
+  var field_types: []const type = &.{ Op2 };
   var attrs: []const Attr = &.{
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
@@ -296,11 +297,9 @@ fn dyadKernel(
 pub fn dyadContainerKernel(
   comptime xk: K,
   comptime yk: K,
-  comptime operator: Op,
+  comptime operator: Op2,
 ) ?util.DyadFn {
-  // dyadContainerKernel always builds dyadic kernels — convert the
-  // comprehensive Op to its Op2 equivalent for dispatch.
-  const op2 = Op2.fromOp(operator) orelse return null;
+  const op2 = operator;
   const xIsDict = comptime xk.isMap();
   const yIsDict = comptime yk.isMap();
   const xIsList = comptime (xk == .L);

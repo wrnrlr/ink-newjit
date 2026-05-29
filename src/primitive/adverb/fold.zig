@@ -3,108 +3,34 @@ const util = @import("../../util.zig");
 const Alloc = std.mem.Allocator;
 const VM = @import("../../runtime/vm.zig").VM;
 const opmod = @import("../../noun/operator.zig");
+const Op1 = opmod.Op1;
 const Op2 = opmod.Op2;
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
+const dispatch = @import("../dispatch.zig");
 
-inline fn fnIsBuiltinDyad(f: opmod.Fn) bool {
-  return f.getKind() == .callable and opmod.isOp2Idx(f.idx);
-}
-inline fn fnIsLambda(f: opmod.Fn) bool {
-  return f.getKind() == .callable and opmod.isLambdaIdx(f.idx);
-}
-
-// CPU fast path: builtin reduce on a typed CPU array.
-// Avoids per-element boxing and function-pointer overhead.
-// LLVM auto-vectorises these simple accumulation loops.
-inline fn cpuReduce(op: Op2, x: V) ?V {
-  switch (x.tag()) {
-    .I => {
-      const s = x.I.slice();
-      if (s.len == 0) return .blank;
-      switch (op) {
-        .@"+" => {
-          var acc: i32 = s[0];
-          for (s[1..]) |v| acc +%= v;
-          return .{ .i = acc };
-        },
-        .@"*" => {
-          var acc: i32 = s[0];
-          for (s[1..]) |v| acc *%= v;
-          return .{ .i = acc };
-        },
-        .@"&" => {
-          var acc = s[0];
-          for (s[1..]) |v| acc = @min(acc, v);
-          return .{ .i = acc };
-        },
-        .@"|" => {
-          var acc = s[0];
-          for (s[1..]) |v| acc = @max(acc, v);
-          return .{ .i = acc };
-        },
-        else => {},
-      }
-    },
-    .F => {
-      const s = x.F.slice();
-      if (s.len == 0) return .blank;
-      switch (op) {
-        .@"+" => {
-          var acc: f32 = s[0];
-          for (s[1..]) |v| acc += v;
-          return .{ .f = acc };
-        },
-        .@"*" => {
-          var acc: f32 = s[0];
-          for (s[1..]) |v| acc *= v;
-          return .{ .f = acc };
-        },
-        .@"&" => {
-          var acc = s[0];
-          for (s[1..]) |v| acc = @min(acc, v);
-          return .{ .f = acc };
-        },
-        .@"|" => {
-          var acc = s[0];
-          for (s[1..]) |v| acc = @max(acc, v);
-          return .{ .f = acc };
-        },
-        else => {},
-      }
-    },
-    .B => {
-      const s = x.B.slice();
-      if (s.len == 0) return .blank;
-      switch (op) {
-        .@"+" => {
-          var acc: i32 = 0;
-          for (s) |v| if (v) { acc += 1; };
-          return .{ .i = acc };
-        },
-        .@"&" => {
-          var acc = s[0];
-          for (s[1..]) |v| acc = acc and v;
-          return .{ .b = acc };
-        },
-        .@"|" => {
-          var acc = s[0];
-          for (s[1..]) |v| acc = acc or v;
-          return .{ .b = acc };
-        },
-        else => {},
-      }
-    },
-    else => {},
-  }
-  return null;
+// Map a base Op2 to its fused Op1 reducer (or null). Single source of truth
+// shared with the optimizer's `+/x → Apply1 +/` peephole.
+pub fn fusedReducerOf(op: Op2) ?Op1 {
+  return switch (op) {
+    .@"+" => .@"+/",
+    .@"*" => .@"*/",
+    .@"|" => .@"|/",
+    .@"&" => .@"&/",
+    else => null,
+  };
 }
 
 pub fn fold(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
-  // CPU fast path: no init, builtin dyad, typed array — bypass per-element dispatch.
-  if (init == null and base.tag() == .func and fnIsBuiltinDyad(base.func)) {
-    if (cpuReduce(base.func.getOp2(), x)) |v| return v;
+  // No init + builtin dyad with a fused reducer + typed array → dispatch
+  // straight to the monad table entry. Avoids the per-element fold loop.
+  if (init == null and base.tag() == .func and base.func.getKind() == .callable
+      and opmod.isOp2Idx(base.func.idx))
+  {
+    if (fusedReducerOf(base.func.getOp2())) |op1| {
+      return dispatch.dispatch1(vm, op1, x);
+    }
   }
 
   const n = x.len();
@@ -116,7 +42,7 @@ pub fn fold(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
 
   const start: usize = if (init != null) 0 else 1;
 
-  if (base.tag() == .func and fnIsLambda(base.func)) {
+  if (base.tag() == .func and base.func.isLambda()) {
     const ref = base.func;
     // Move semantics: transfer ownership of accum and item into the lambda's
     // locals. Inside the body, accum has rc==1 so in-place mutation kernels

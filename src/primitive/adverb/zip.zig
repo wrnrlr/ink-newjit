@@ -1,5 +1,4 @@
 const std = @import("std");
-const Op = @import("../../runtime/tape.zig").Op;
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
 const promote = @import("../promote.zig").promote;

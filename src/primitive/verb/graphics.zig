@@ -41,7 +41,7 @@ fn drawPlot(vm: *VM, x: V, y: V) V {
 
 // Monad dispatch table entry: 9: L  and  9: m
 pub const Draw = struct {
-  pub const op: @import("../../runtime/tape.zig").Op = .@"9:";
+  pub const op = .@"9:";
   _L: util.MonadFn = drawMonad,
   _m: util.MonadFn = drawMonad,
   _M: util.MonadFn = drawMonad,
@@ -50,7 +50,7 @@ pub const Draw = struct {
 
 // Dyad dispatch table entries: i 9: L/m  and  data 9: spec
 pub const DrawDyad = struct {
-  pub const op: @import("../../runtime/tape.zig").Op = .@"9:";
+  pub const op = .@"9:";
   _i_L: util.DyadFn = drawDyad,
   _i_m: util.DyadFn = drawDyad,
   _i_M: util.DyadFn = drawDyad,

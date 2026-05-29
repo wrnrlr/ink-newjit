@@ -199,12 +199,10 @@ pub const TerseFormatter = struct {
           try w.writeAll(":");
         } else if (opmod.isOp2Idx(idx)) {
           try w.writeAll(opmod.op2OfIdx(idx).toString());
-        } else if (opmod.isAdverb2Idx(idx)) {
-          try w.writeAll(@tagName(opmod.adverb2OfIdx(idx)));
+        } else if (opmod.isAdverbIdx(idx)) {
+          try w.writeAll(@tagName(opmod.adverbOfIdx(idx)));
         } else if (opmod.isOp3Idx(idx)) {
           try w.writeAll(opmod.op3OfIdx(idx).toString());
-        } else if (opmod.isAdverb3Idx(idx)) {
-          try w.writeAll(@tagName(opmod.adverb3OfIdx(idx)));
         } else if (opmod.isOp4Idx(idx)) {
           try w.writeAll(opmod.op4OfIdx(idx).toString());
         }

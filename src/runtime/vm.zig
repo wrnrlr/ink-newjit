@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 const Alloc = std.mem.Allocator;
 const Chunk = @import("tape.zig").Chunk;
 const OpCode = @import("tape.zig").OpCode;
-const Op = @import("tape.zig").Op;
 const Compiler = @import("compiler.zig").Compiler;
 const Registry = @import("registry.zig").Registry;
 const command = @import("command.zig");
