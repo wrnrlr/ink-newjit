@@ -11,6 +11,8 @@ pub const OpCode = enum(u8) {
 	AssignGlobal, AssignLocal, ListAssignGlobal, ListAssignLocal,
 	Jump, JumpFalse, JumpTrue,
 	Apply1, Apply2,
+	Apply3,                  // 1-byte Op3 (amend3/drill3); pops 3 args from stack
+	Apply4,                  // 1-byte Op4 (amend4/drill4); pops 4 args from stack
 	Return,                  // return
 	Call,                    // call a lambda
 	TailCall,                // tail call a lambda
@@ -18,8 +20,6 @@ pub const OpCode = enum(u8) {
 	MakeList,                // make a list from count items on stack
 	MakePartial,             // pops func + n args, pushes partial
 	Derive,                  // derive verb from variadic (adverb) and top value
-	Amend,                   // @[target; index; function; argument]
-	Dmend,                   // .[target; path; function; argument]
 	MakeDict,                // make a dict from keys and values on stack
 	MakeTable,               // make a table from items on stack
 	Command,                 // meta command (\h \l \d \t \v \f \cd)
@@ -27,7 +27,10 @@ pub const OpCode = enum(u8) {
 	pub const COUNT = @typeInfo(OpCode).@"enum".fields.len;
 };
 
-/// Op is used to encode primitive IDs and dispatch.
+/// Op is the comprehensive (transitional) enum used by verb files'
+/// anonymous-enum-literal `op` field. After Phase 4 it covers monad-only
+/// fused-reduce verbs too (e.g. `+/`). Will be removed once all verb files
+/// are typed against Op1/Op2/Op3/Op4 directly.
 pub const Op = enum(u8) {
   @"%", @"!", @"&", @"+", @"*", @"|", @"<", @">", @"=", @"~",
   @",", @"^", @"#", @"_", @"$", @"?", @"@", @"-", @".",
@@ -36,13 +39,9 @@ pub const Op = enum(u8) {
   @"0:", @"1:", @"2:", @"9:",
   @":",
   exec,
-  
-  // special
-  // amend, drill, splice,
-  
-  // adverbs
-  // @"'", @"/", @"\\", @"':", @"/:", @"\\:",
-  
+  // fused monad-only derived verbs (sum, product, min, max — see derived/*.zig)
+  @"+/", @"*/", @"|/", @"&/",
+
   pub const COUNT = @typeInfo(Op).@"enum".fields.len;
 
   pub fn fromString(s: []const u8) ?Op {

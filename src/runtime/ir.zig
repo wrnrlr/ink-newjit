@@ -26,7 +26,7 @@ pub const IRInst = struct {
     if (self.op == .Nop and self.arg3 == 1) return true;
     return switch (self.op) {
       .AssignGlobal, .AssignLocal, .ListAssignGlobal, .ListAssignLocal,
-      .Return, .Amend, .Dmend, .Call, .TailCall, .Drop,
+      .Return, .Apply3, .Apply4, .Call, .TailCall, .Drop,
       .Jump, .JumpFalse, .JumpTrue, .Command => true,
       else => false,
     };

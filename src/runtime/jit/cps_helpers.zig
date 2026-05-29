@@ -15,9 +15,13 @@ const V = @import("../../noun/value.zig").V;
 const Err = @import("../../noun/value.zig").Err;
 const N = @import("../../noun/array.zig").N;
 const K = @import("../../noun/class.zig").K;
-const Op = @import("../tape.zig").Op;
-const Adverb = @import("../../noun/operator.zig").Adverb;
-const Fn = @import("../../noun/operator.zig").Fn;
+const opmod = @import("../../noun/operator.zig");
+const Op1 = opmod.Op1;
+const Op2 = opmod.Op2;
+const Op3 = opmod.Op3;
+const Op4 = opmod.Op4;
+const Adverb = opmod.Adverb;
+const Fn = opmod.Fn;
 const Dict = @import("../../noun/dict.zig").Dict;
 const dispatch = @import("../../primitive/dispatch.zig");
 const amend_mod = @import("../../primitive/amend.zig");
@@ -112,14 +116,14 @@ pub export fn cps_assign_global(vm: *VM, op: u32) callconv(.c) void {
 }
 
 pub export fn cps_apply1(vm: *VM, op: u32) callconv(.c) void {
-    const k: Op = @enumFromInt(@as(u8, @truncate(op)));
+    const k: Op1 = @enumFromInt(@as(u8, @truncate(op)));
     const a = vm.pop();
     defer a.deinit(vm.alloc);
     pushOr(vm, dispatch.dispatch1(vm, k, a));
 }
 
 pub export fn cps_apply2(vm: *VM, op: u32) callconv(.c) void {
-    const k: Op = @enumFromInt(@as(u8, @truncate(op)));
+    const k: Op2 = @enumFromInt(@as(u8, @truncate(op)));
     const b = vm.pop();
     defer b.deinit(vm.alloc);
     const a = vm.pop();
@@ -287,7 +291,8 @@ pub export fn cps_derive(vm: *VM, op: u32) callconv(.c) void {
         const ref = base_v.func;
         base_v.deinit(vm.alloc);
         break :blk switch (ref.getKind()) {
-            .builtin => Fn.makeDerivedBuiltin(ref.getOp(), adv),
+            .builtin => if (ref.arity == 1) Fn.makeDerivedMonad(ref.getOp1(), adv)
+                        else Fn.makeDerivedDyad(ref.getOp2(), adv),
             .lambda  => Fn.makeDerivedLambda(ref.idx, adv),
             else => blk2: {
                 const idx = vm.fn_tables.addDerived(.{ .base = V{ .func = ref }, .adverb = adv }) catch {
@@ -307,30 +312,38 @@ pub export fn cps_derive(vm: *VM, op: u32) callconv(.c) void {
     pushOr(vm, .{ .func = derived });
 }
 
-pub export fn cps_amend(vm: *VM, op: u32) callconv(.c) void {
-    const argc: u8 = @truncate(op);
-    const start = vm.stack_len - argc;
-    const res = amend_mod.amend(vm, vm.stack[start..vm.stack_len]) catch {
-        for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
+pub export fn cps_apply3(vm: *VM, op: u32) callconv(.c) void {
+    const op3: Op3 = @enumFromInt(@as(u8, @truncate(op)));
+    const start = vm.stack_len - 3;
+    const args = vm.stack[start..vm.stack_len];
+    const res = switch (op3) {
+        .amend3 => amend_mod.amend(vm, args),
+        .drill3 => amend_mod.dmend(vm, args),
+    } catch {
+        for (args) |*v| v.deinit(vm.alloc);
         vm.stack_len = start;
         pushErr(vm, .memory);
         return;
     };
-    for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
+    for (args) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     pushOr(vm, res);
 }
 
-pub export fn cps_dmend(vm: *VM, op: u32) callconv(.c) void {
-    const argc: u8 = @truncate(op);
-    const start = vm.stack_len - argc;
-    const res = amend_mod.dmend(vm, vm.stack[start..vm.stack_len]) catch {
-        for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
+pub export fn cps_apply4(vm: *VM, op: u32) callconv(.c) void {
+    const op4: Op4 = @enumFromInt(@as(u8, @truncate(op)));
+    const start = vm.stack_len - 4;
+    const args = vm.stack[start..vm.stack_len];
+    const res = switch (op4) {
+        .amend4 => amend_mod.amend(vm, args),
+        .drill4 => amend_mod.dmend(vm, args),
+    } catch {
+        for (args) |*v| v.deinit(vm.alloc);
         vm.stack_len = start;
         pushErr(vm, .memory);
         return;
     };
-    for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
+    for (args) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     pushOr(vm, res);
 }
@@ -403,8 +416,8 @@ pub const force_keep = [_]*const anyopaque{
     @ptrCast(&cps_make_table),
     @ptrCast(&cps_make_partial),
     @ptrCast(&cps_derive),
-    @ptrCast(&cps_amend),
-    @ptrCast(&cps_dmend),
+    @ptrCast(&cps_apply3),
+    @ptrCast(&cps_apply4),
     @ptrCast(&cps_command),
     @ptrCast(&cps_pop_truthy),
     @ptrCast(&cps_return),

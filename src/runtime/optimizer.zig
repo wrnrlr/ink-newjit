@@ -5,20 +5,36 @@ const chunk = @import("tape.zig");
 const fntable = @import("fntable.zig");
 const operator = @import("../noun/operator.zig");
 const V = value.V;
-const Op = chunk.Op;
+const Op1 = operator.Op1;
+const Op2 = operator.Op2;
+const Adverb = operator.Adverb;
 const OpCode = chunk.OpCode;
+
+// Maps a Op2 base verb to its fused Op1 reducer (e.g. + → +/).
+// Used by peepholeIdioms to rewrite `+/x` → `Apply1 +/`.
+fn fusedReducerFor(op2: Op2) ?Op1 {
+  return switch (op2) {
+    .@"+" => .@"+/",
+    .@"*" => .@"*/",
+    .@"|" => .@"|/",
+    .@"&" => .@"&/",
+    else => null,
+  };
+}
 
 inline fn isCall1(inst: *const ir.IRInst) bool {
   return (inst.op == .Call or inst.op == .TailCall) and inst.arg1 == 1 and inst.inputs.len == 2;
 }
 
-// True when inst is a Const holding a builtin func reference to `op` (monad or dyad).
-fn isBuiltinConst(inst: *const ir.IRInst, op: Op) bool {
+// True when inst is a Const holding a builtin dyad func reference to `op`.
+// The compiler stores verb-op values as Fn.dyad(Op2), so we match against Op2.
+fn isBuiltinDyad(inst: *const ir.IRInst, op: Op2) bool {
   if (inst.op != .Const) return false;
   const v = inst.val orelse return false;
   if (v != .func) return false;
   if (v.func.getKind() != .builtin) return false;
-  return v.func.getOp() == op;
+  if (v.func.arity != 2) return false;
+  return v.func.getOp2() == op;
 }
 
 // 256-bit set for local variable indices (max 256 locals per lambda).
@@ -104,31 +120,61 @@ pub const Optimizer = struct {
     for (insts) |*inst| {
       if (inst.is_dead) continue;
       if (!isCall1(inst)) continue;
-      const f_outer_id = inst.inputs[0];
-      const inner_id   = inst.inputs[1];
-      if (f_outer_id == ir.NO_VALUE or inner_id == ir.NO_VALUE) continue;
-      if (!isBuiltinConst(scope_ir.get(f_outer_id), .@"*")) continue;
-      const inner = scope_ir.get(inner_id);
+      const f_id = inst.inputs[0];
+      const arg_id = inst.inputs[1];
+      if (f_id == ir.NO_VALUE or arg_id == ir.NO_VALUE) continue;
+      const f_inst = scope_ir.get(f_id);
+
+      // Idiom: `+/x` (Call 1 [Derive(/), x]) → Apply1 +/ (skips derived Fn).
+      // The Derive's input must be a Const Fn.dyad(op2) for op2 ∈ {+, *, |, &}.
+      if (f_inst.op == .Derive
+          and f_inst.arg1 == @intFromEnum(Adverb.@"/")
+          and f_inst.inputs.len == 1
+          and use_count[f_id] == 1)
+      {
+        const base_id = f_inst.inputs[0];
+        if (base_id != ir.NO_VALUE) {
+          const base = scope_ir.get(base_id);
+          if (base.op == .Const) blk: {
+            const v = base.val orelse break :blk;
+            if (v != .func) break :blk;
+            if (v.func.getKind() != .builtin or v.func.arity != 2) break :blk;
+            const fused = fusedReducerFor(v.func.getOp2()) orelse break :blk;
+
+            const old_inputs = inst.inputs;
+            const new_inputs = try scope_ir.alloc.alloc(ir.ValueId, 1);
+            new_inputs[0] = arg_id;
+            inst.inputs = new_inputs;
+            inst.op = .Apply1;
+            inst.arg1 = @intFromEnum(fused);
+            scope_ir.alloc.free(old_inputs);
+
+            scope_ir.instructions.items[f_id].is_dead = true;
+            changed = true;
+            continue;
+          }
+        }
+      }
+
+      // Idiom: `*|x` → `last x`.
+      if (!isBuiltinDyad(f_inst, .@"*")) continue;
+      const inner = scope_ir.get(arg_id);
       if (!isCall1(inner)) continue;
-      if (use_count[inner_id] != 1) continue;
+      if (use_count[arg_id] != 1) continue;
       const f_inner_id = inner.inputs[0];
       const x_id       = inner.inputs[1];
       if (f_inner_id == ir.NO_VALUE or x_id == ir.NO_VALUE) continue;
-      if (!isBuiltinConst(scope_ir.get(f_inner_id), .@"|")) continue;
+      if (!isBuiltinDyad(scope_ir.get(f_inner_id), .@"|")) continue;
 
-      // Rewrite outer Call → Apply1 last; consumes x from the stack.
       const old_inputs = inst.inputs;
       const new_inputs = try scope_ir.alloc.alloc(ir.ValueId, 1);
       new_inputs[0] = x_id;
       inst.inputs = new_inputs;
       inst.op = .Apply1;
-      inst.arg1 = @intFromEnum(Op.last);
+      inst.arg1 = @intFromEnum(Op1.last);
       scope_ir.alloc.free(old_inputs);
 
-      // Inner Call's bytecode would push |x; skip it. DCE will reap the
-      // verb Const(*) and Const(|) on a subsequent pass once their last
-      // referrer is gone.
-      scope_ir.instructions.items[inner_id].is_dead = true;
+      scope_ir.instructions.items[arg_id].is_dead = true;
       changed = true;
     }
     return changed;
@@ -143,7 +189,7 @@ pub const Optimizer = struct {
         if (inst.inputs[0] == ir.NO_VALUE) continue;
         const input = scope_ir.get(inst.inputs[0]);
         if (input.op == .Const) {
-          const op = @as(Op, @enumFromInt(inst.arg1));
+          const op = @as(Op1, @enumFromInt(inst.arg1));
           if (try self.foldMonad(op, input.val.?)) |res| {
             if (inst.val) |v| v.deinit(self.alloc);
             self.alloc.free(inst.inputs);
@@ -161,7 +207,7 @@ pub const Optimizer = struct {
         const left = scope_ir.get(inst.inputs[0]);
         const right = scope_ir.get(inst.inputs[1]);
         if (left.op == .Const and right.op == .Const) {
-          const op = @as(Op, @enumFromInt(inst.arg1));
+          const op = @as(Op2, @enumFromInt(inst.arg1));
           if (try self.foldDyad(op, left.val.?, right.val.?)) |res| {
             if (inst.val) |v| v.deinit(self.alloc);
             self.alloc.free(inst.inputs);
@@ -177,7 +223,7 @@ pub const Optimizer = struct {
     return changed;
   }
 
-  fn foldMonad(self: *Optimizer, op: Op, x: V) !?V {
+  fn foldMonad(self: *Optimizer, op: Op1, x: V) !?V {
     _ = self;
     return switch (x) {
       .i => |xv| switch (op) {
@@ -199,7 +245,7 @@ pub const Optimizer = struct {
     };
   }
 
-  fn foldDyad(self: *Optimizer, op: Op, x: V, y: V) !?V {
+  fn foldDyad(self: *Optimizer, op: Op2, x: V, y: V) !?V {
     _ = self;
     if (x == .i and y == .i) {
       const xv = x.i; const yv = y.i;

@@ -1,13 +1,14 @@
 const std = @import("std");
 const value = @import("../noun/value.zig");
 const V = value.V;
-const Fn = @import("../noun/operator.zig").Fn;
-const FnKind = @import("../noun/operator.zig").FnKind;
+const opmod = @import("../noun/operator.zig");
+const Fn = opmod.Fn;
+const FnKind = opmod.FnKind;
+const Op1 = opmod.Op1;
+const Op2 = opmod.Op2;
 const Partial = @import("../noun/partial.zig").Partial;
-const Adverb = @import("../noun/operator.zig").Adverb;
+const Adverb = opmod.Adverb;
 const VM = @import("vm.zig").VM;
-const chunk = @import("tape.zig");
-const Op = chunk.Op;
 const dispatch = @import("../primitive/dispatch.zig");
 const derived = @import("../primitive/derived.zig").derived;
 const syms = @import("syms.zig");
@@ -42,16 +43,22 @@ pub const Call = struct {
 
     switch (ref.getKind()) {
       .builtin => {
-        const op = ref.getOp();
-        const monad = ref.monadic != 0;
-        if (monad) {
-          if (args.len == 1) return dispatch.dispatch1(self.vm, op, args[0]);
+        if (ref.arity == 1) {
+          if (args.len == 1) return dispatch.dispatch1(self.vm, ref.getOp1(), args[0]);
           return .{ .err = .rank };
         }
+        // arity == 2 (dyadic)
+        const op2 = ref.getOp2();
         if (has_gaps or (is_bracket and filled < ref.arity))
           return makePartialFromArgs(self.vm, ref, args);
-        if (args.len == 1) return dispatch.dispatch1(self.vm, op, args[0]);
-        if (args.len == 2) return dispatch.dispatch2(self.vm, op, args[0], args[1]);
+        if (args.len == 1) {
+          // polymorphic: dyad called with one arg → monadic equivalent if any
+          if (opmod.op2ToOp1[@intFromEnum(op2)]) |op1| {
+            return dispatch.dispatch1(self.vm, op1, args[0]);
+          }
+          return makePartialFromArgs(self.vm, ref, args);
+        }
+        if (args.len == 2) return dispatch.dispatch2(self.vm, op2, args[0], args[1]);
         return .{ .err = .rank };
       },
       .lambda => {
@@ -73,7 +80,8 @@ pub const Call = struct {
           if (base_v != .func) return V{ .err = .@"type" };
           const base_ref = base_v.func;
           const derived_ref = switch (base_ref.getKind()) {
-            .builtin => Fn.makeDerivedBuiltinFull(base_ref.getOp(), adv, base_ref.monadic != 0),
+            .builtin => if (base_ref.arity == 1) Fn.makeDerivedMonad(base_ref.getOp1(), adv)
+                        else Fn.makeDerivedDyad(base_ref.getOp2(), adv),
             .lambda  => Fn.makeDerivedLambda(@intCast(base_ref.idx), adv),
             else => blk: {
               const idx = try self.vm.fn_tables.addDerived(.{ .base = V{ .func = base_ref }, .adverb = adv });
@@ -85,7 +93,7 @@ pub const Call = struct {
         return .{ .err = .rank };
       },
       .derived_builtin => {
-        const base = V{ .func = if (ref.monadic != 0) Fn.monad(ref.getOp()) else Fn.dyad(ref.getOp()) };
+        const base = V{ .func = if (ref.arity == 1) Fn.monad(ref.getOp1()) else Fn.dyad(ref.getOp2()) };
         return derived(self.vm, base, ref.getAdverb(), args, wrapper);
       },
       .derived_lambda => {
@@ -133,7 +141,8 @@ pub const Call = struct {
     var i: usize = ops.len;
     while (i > 0) {
       i -= 1;
-      const op = Op.fromString(ops[i .. i + 1]) orelse {
+      // Trains are single-char monadic-context glyphs; lookup in Op1.
+      const op = Op1.fromString(ops[i .. i + 1]) orelse {
         res.deinit(self.vm.alloc);
         return .{ .err = .@"type" };
       };
@@ -151,7 +160,7 @@ pub const Call = struct {
 };
 
 pub fn applyDerivedBuiltin(vm: *VM, ref: Fn, args: []const V) V {
-  const base = V{ .func = if (ref.monadic != 0) Fn.monad(ref.getOp()) else Fn.dyad(ref.getOp()) };
+  const base = V{ .func = if (ref.arity == 1) Fn.monad(ref.getOp1()) else Fn.dyad(ref.getOp2()) };
   return derived(vm, base, ref.getAdverb(), args, Call.wrapper);
 }
 

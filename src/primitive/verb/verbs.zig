@@ -3,6 +3,8 @@ const Alloc = std.mem.Allocator;
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const Op = @import("../../runtime/tape.zig").Op;
+const Op1 = @import("../../noun/operator.zig").Op1;
+const Op2 = @import("../../noun/operator.zig").Op2;
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
 
@@ -15,7 +17,7 @@ const calc = @import("calc.zig");
 const sort = @import("sort.zig");
 const member = @import("member.zig");
 
-// TODO: tables can be smaller if we split monads and dyads into their own Op enum
+// Dispatch tables: monad keyed by Op1, dyad keyed by Op2.
 pub const monad_table = makeMonadArray(Monads);
 pub const dyad_table  = makeDyadArray(Dyads);
 
@@ -75,6 +77,13 @@ const Monads = struct {
   pub const @".m"  = @import("values.zig").Values;
   pub const @".s"  = @import("get.zig").GetSymbol;
   pub const exec   = @import("exec.zig").Exec;
+
+  // Fused derived verbs — direct monadic reductions over typed arrays.
+  // The optimizer rewrites `+/x` (Call+Derive) into `Apply1 +/` to hit these.
+  pub const @"sum_x"     = @import("../derived/sum.zig").Sum;
+  pub const @"product_x" = @import("../derived/product.zig").Product;
+  pub const @"min_x"     = @import("../derived/min.zig").Min;
+  pub const @"max_x"     = @import("../derived/max.zig").Max;
 };
 
 const Dyads = struct {
@@ -140,16 +149,17 @@ const Dyads = struct {
 fn typeError1(_: *VM, _:V) V { return .{ .err = .@"type" }; }
 fn typeError2(_: *VM, _:V, _:V) V { return .{ .err = .@"type" }; }
 
-fn makeMonadArray(comptime Defs: type) [Op.COUNT * K.COUNT]util.MonadFn {
+fn makeMonadArray(comptime Defs: type) [Op1.COUNT * K.COUNT]util.MonadFn {
   @setEvalBranchQuota(10000000);
-  var table: [Op.COUNT * K.COUNT]util.MonadFn = .{typeError1} ** (Op.COUNT * K.COUNT);
+  var table: [Op1.COUNT * K.COUNT]util.MonadFn = .{typeError1} ** (Op1.COUNT * K.COUNT);
   for (std.meta.declarations(Defs)) |decl| {
     const Verb = @field(Defs, decl.name);
     const op = verbOp(Verb) orelse continue;
+    const op1 = Op1.fromOp(op) orelse continue;
     for (std.meta.fields(Verb)) |f| {
       const sig = parseSig(f.name);
       if (sig.len == 1) {
-        const key = @intFromEnum(op) * K.COUNT + sig[0].code();
+        const key = @intFromEnum(op1) * K.COUNT + sig[0].code();
         table[key] = f.defaultValue().?;
       }
     }
@@ -157,16 +167,17 @@ fn makeMonadArray(comptime Defs: type) [Op.COUNT * K.COUNT]util.MonadFn {
   return table;
 }
 
-fn makeDyadArray(comptime Defs: type) [Op.COUNT * K.COUNT * K.COUNT]util.DyadFn {
+fn makeDyadArray(comptime Defs: type) [Op2.COUNT * K.COUNT * K.COUNT]util.DyadFn {
   @setEvalBranchQuota(10000000);
-  var table: [Op.COUNT * K.COUNT * K.COUNT]util.DyadFn = .{typeError2} ** (Op.COUNT * K.COUNT * K.COUNT);
+  var table: [Op2.COUNT * K.COUNT * K.COUNT]util.DyadFn = .{typeError2} ** (Op2.COUNT * K.COUNT * K.COUNT);
   for (std.meta.declarations(Defs)) |decl| {
     const Verb = @field(Defs, decl.name);
     const op = verbOp(Verb) orelse continue;
+    const op2 = Op2.fromOp(op) orelse continue;
     for (std.meta.fields(Verb)) |f| {
       const sig = parseSig(f.name);
       if (sig.len == 2) {
-        const key = op.code() * K.COUNT * K.COUNT + sig[0].code() * K.COUNT + sig[1].code();
+        const key = op2.code() * K.COUNT * K.COUNT + sig[0].code() * K.COUNT + sig[1].code();
         table[key] = f.defaultValue().?;
       }
     }

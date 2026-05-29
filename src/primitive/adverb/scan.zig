@@ -1,6 +1,6 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const Op = @import("../../runtime/tape.zig").Op;
+const Op2 = @import("../../noun/operator.zig").Op2;
 const VM = @import("../../runtime/vm.zig").VM;
 const value = @import("../../noun/value.zig");
 const util = @import("../../util.zig");
@@ -11,7 +11,7 @@ const promote = @import("../promote.zig").promote;
 
 // CPU fast path: builtin prefix-scan on a typed CPU array.
 // Returns a typed N(T) result instead of N(V), avoids per-element boxing.
-inline fn cpuScan(alloc: Alloc, op: Op, x: V) ?V {
+inline fn cpuScan(alloc: Alloc, op: Op2, x: V) ?V {
   switch (x.tag()) {
     .I => {
       const s = x.I.slice();
@@ -85,7 +85,8 @@ inline fn cpuScan(alloc: Alloc, op: Op, x: V) ?V {
 pub fn scan(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
   // CPU fast path: no init, builtin op, typed array — returns typed result.
   if (init == null and base.tag() == .func and base.func.getKind() == .builtin) {
-    if (cpuScan(vm.alloc, base.func.getOp(), x)) |v| return v;
+    if (base.func.arity == 2)
+      if (cpuScan(vm.alloc, base.func.getOp2(), x)) |v| return v;
   }
 
   const n = x.len();

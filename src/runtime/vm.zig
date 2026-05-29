@@ -13,8 +13,13 @@ const call = @import("call.zig");
 const V = @import("../noun/value.zig").V;
 const N = @import("../noun/array.zig").N;
 const K = @import("../noun/class.zig").K;
-const Fn = @import("../noun/operator.zig").Fn;
-const Adverb = @import("../noun/operator.zig").Adverb;
+const opmod = @import("../noun/operator.zig");
+const Fn = opmod.Fn;
+const Op1 = opmod.Op1;
+const Op2 = opmod.Op2;
+const Op3 = opmod.Op3;
+const Op4 = opmod.Op4;
+const Adverb = opmod.Adverb;
 const Dict = @import("../noun/dict.zig").Dict;
 const Partial = @import("../noun/partial.zig").Partial;
 const Pool = @import("../noun/symbol.zig").Pool;
@@ -305,14 +310,14 @@ pub const VM = struct {
           if (v.isTrue()) frame.ip += offset;
         },
         .Apply1 => {
-          const op: Op = @enumFromInt(code[frame.ip]);
+          const op: Op1 = @enumFromInt(code[frame.ip]);
           frame.ip += 1;
           const a = vm.pop();
           defer a.deinit(vm.alloc);
           try vm.push(dispatch.dispatch1(vm, op, a));
         },
         .Apply2 => {
-          const op: Op = @enumFromInt(code[frame.ip]);
+          const op: Op2 = @enumFromInt(code[frame.ip]);
           frame.ip += 1;
           const b_val = vm.pop();
           defer b_val.deinit(vm.alloc);
@@ -327,8 +332,8 @@ pub const VM = struct {
         .MakeList => try vm.doMakeList(),
         .MakePartial => try vm.doMakePartial(),
         .Derive => try vm.doDerive(),
-        .Amend => try vm.doAmend(),
-        .Dmend => try vm.doDmend(),
+        .Apply3 => try vm.doApply3(),
+        .Apply4 => try vm.doApply4(),
         .MakeDict => try vm.doMakeDict(),
         .MakeTable => try vm.doMakeTable(),
         .Command => try vm.doCommand(),
@@ -491,10 +496,22 @@ pub const VM = struct {
           try vm.push(result);
         },
         .builtin => {
-          const op = func_val.func.getOp();
-          const result = if (argc == 1) dispatch.dispatch1(vm, op, incoming[0])
-                         else if (argc == 2) dispatch.dispatch2(vm, op, incoming[0], incoming[1])
-                         else V{ .err = .rank };
+          const result = if (func_val.func.arity == 1) blk: {
+            const op1 = func_val.func.getOp1();
+            if (argc == 1) break :blk dispatch.dispatch1(vm, op1, incoming[0]);
+            break :blk V{ .err = .rank };
+          } else if (func_val.func.arity == 2) blk: {
+            const op2 = func_val.func.getOp2();
+            if (argc == 1) {
+              // polymorphic: dyadic builtin called with 1 arg → try monadic form
+              if (opmod.op2ToOp1[@intFromEnum(op2)]) |op1| {
+                break :blk dispatch.dispatch1(vm, op1, incoming[0]);
+              }
+              break :blk V{ .err = .rank };
+            }
+            if (argc == 2) break :blk dispatch.dispatch2(vm, op2, incoming[0], incoming[1]);
+            break :blk V{ .err = .rank };
+          } else V{ .err = .rank };
           for (incoming) |*v| v.deinit(vm.alloc);
           try vm.push(result);
         },
@@ -529,14 +546,14 @@ pub const VM = struct {
   }
   
   fn doApply1(vm: *VM) !void {
-    const op: Op = @enumFromInt(vm.readByte());
+    const op: Op1 = @enumFromInt(vm.readByte());
     const a = vm.pop();
     defer a.deinit(vm.alloc);
     try vm.push(dispatch.dispatch1(vm, op, a));
   }
 
   fn doApply2(vm: *VM) !void {
-    const op: Op = @enumFromInt(vm.readByte());
+    const op: Op2 = @enumFromInt(vm.readByte());
     const b = vm.pop();
     defer b.deinit(vm.alloc);
     const a = vm.pop();
@@ -544,20 +561,28 @@ pub const VM = struct {
     try vm.push(dispatch.dispatch2(vm, op, a, b));
   }
 
-  fn doAmend(vm: *VM) !void {
-    const argc = vm.readByte();
-    const start = vm.stack_len - argc;
-    const res = try amend.amend(vm, vm.stack[start..vm.stack_len]);
-    for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
+  fn doApply3(vm: *VM) !void {
+    const op: Op3 = @enumFromInt(vm.readByte());
+    const start = vm.stack_len - 3;
+    const args = vm.stack[start..vm.stack_len];
+    const res = switch (op) {
+      .amend3 => try amend.amend(vm, args),
+      .drill3 => try amend.dmend(vm, args),
+    };
+    for (args) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     try vm.push(res);
   }
 
-  fn doDmend(vm: *VM) !void {
-    const argc = vm.readByte();
-    const start = vm.stack_len - argc;
-    const res = try amend.dmend(vm, vm.stack[start..vm.stack_len]);
-    for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
+  fn doApply4(vm: *VM) !void {
+    const op: Op4 = @enumFromInt(vm.readByte());
+    const start = vm.stack_len - 4;
+    const args = vm.stack[start..vm.stack_len];
+    const res = switch (op) {
+      .amend4 => try amend.amend(vm, args),
+      .drill4 => try amend.dmend(vm, args),
+    };
+    for (args) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     try vm.push(res);
   }
@@ -622,7 +647,8 @@ pub const VM = struct {
       const ref = base_v.func;
       base_v.deinit(vm.alloc);
       break :blk switch (ref.getKind()) {
-        .builtin => Fn.makeDerivedBuiltinFull(ref.getOp(), adv, ref.monadic != 0),
+        .builtin => if (ref.arity == 1) Fn.makeDerivedMonad(ref.getOp1(), adv)
+                    else Fn.makeDerivedDyad(ref.getOp2(), adv),
         .lambda  => Fn.makeDerivedLambda(ref.idx, adv),
         else => blk2: {
           const idx = try vm.fn_tables.addDerived(.{ .base = V{ .func = ref }, .adverb = adv });
@@ -800,8 +826,8 @@ const op_table: [OpCode.COUNT]OpHandler = build: {
   t[@intFromEnum(OpCode.MakeList)]         = &VM.doMakeList;
   t[@intFromEnum(OpCode.MakePartial)]      = &VM.doMakePartial;
   t[@intFromEnum(OpCode.Derive)]           = &VM.doDerive;
-  t[@intFromEnum(OpCode.Amend)]            = &VM.doAmend;
-  t[@intFromEnum(OpCode.Dmend)]            = &VM.doDmend;
+  t[@intFromEnum(OpCode.Apply3)]           = &VM.doApply3;
+  t[@intFromEnum(OpCode.Apply4)]           = &VM.doApply4;
   t[@intFromEnum(OpCode.MakeDict)]         = &VM.doMakeDict;
   t[@intFromEnum(OpCode.MakeTable)]        = &VM.doMakeTable;
   t[@intFromEnum(OpCode.Command)]          = &VM.doCommand;
@@ -821,7 +847,7 @@ test "VM simple addition" {
   try vm.chunk.writeOp(.Const);
   try vm.chunk.write(c2);
   try vm.chunk.writeOp(.Apply2);
-  try vm.chunk.write(@intFromEnum(Op.@"+"));
+  try vm.chunk.write(@intFromEnum(Op2.@"+"));
   try vm.chunk.writeOp(.Return);
 
   try vm.run();

@@ -2,6 +2,7 @@ const std = @import("std");
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
 const Op = @import("../../runtime/tape.zig").Op;
+const Op2 = @import("../../noun/operator.zig").Op2;
 const dispatch = @import("../dispatch.zig");
 const promote = @import("../promote.zig").promote;
 const V = @import("../../noun/value.zig").V;
@@ -297,6 +298,9 @@ pub fn dyadContainerKernel(
   comptime yk: K,
   comptime operator: Op,
 ) ?util.DyadFn {
+  // dyadContainerKernel always builds dyadic kernels — convert the
+  // comprehensive Op to its Op2 equivalent for dispatch.
+  const op2 = Op2.fromOp(operator) orelse return null;
   const xIsDict = comptime xk.isMap();
   const yIsDict = comptime yk.isMap();
   const xIsList = comptime (xk == .L);
@@ -309,7 +313,7 @@ pub fn dyadContainerKernel(
         const dx = @field(x, @tagName(xk));
         const dy = @field(y, @tagName(yk));
         if (!dx.av().eq(dy.av())) return V{ .err = .length };
-        const vals = dispatch.dispatch2(vm, operator, dx.bv(), dy.bv());
+        const vals = dispatch.dispatch2(vm, op2, dx.bv(), dy.bv());
         if (vals.tag() == .err) return vals;
         return @unionInit(V, @tagName(xk), Dict.init(vm.alloc, dx.av().ref(), vals) catch {
           vals.deinit(vm.alloc);
@@ -322,7 +326,7 @@ pub fn dyadContainerKernel(
     return &struct {
       fn k(vm: *VM, x: V, y: V) V {
         const d = @field(x, @tagName(xk));
-        const vals = dispatch.dispatch2(vm, operator, d.bv(), y);
+        const vals = dispatch.dispatch2(vm, op2, d.bv(), y);
         if (vals.tag() == .err) return vals;
         return @unionInit(V, @tagName(xk), Dict.init(vm.alloc, d.av().ref(), vals) catch {
           vals.deinit(vm.alloc);
@@ -335,7 +339,7 @@ pub fn dyadContainerKernel(
     return &struct {
       fn k(vm: *VM, x: V, y: V) V {
         const d = @field(y, @tagName(yk));
-        const vals = dispatch.dispatch2(vm, operator, x, d.bv());
+        const vals = dispatch.dispatch2(vm, op2, x, d.bv());
         if (vals.tag() == .err) return vals;
         return @unionInit(V, @tagName(yk), Dict.init(vm.alloc, d.av().ref(), vals) catch {
           vals.deinit(vm.alloc);
@@ -357,7 +361,7 @@ pub fn dyadContainerKernel(
         defer xv.deinit(vm.alloc);
         const yv = if (yn == 1) y.ref() else y.at(i);
         defer yv.deinit(vm.alloc);
-        const rv = dispatch.dispatch2(vm, operator, xv, yv);
+        const rv = dispatch.dispatch2(vm, op2, xv, yv);
         if (rv.tag() == .err) {
           (V{ .L = res }).deinit(vm.alloc);
           return rv;

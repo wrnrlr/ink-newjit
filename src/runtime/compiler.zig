@@ -1,13 +1,18 @@
 const std = @import("std");
 const ast = @import("../parser/ast.zig");
 const value = @import("../noun/value.zig");
-const Adverb = @import("../noun/operator.zig").Adverb;
+const opmod = @import("../noun/operator.zig");
+const Adverb = opmod.Adverb;
+const Op1 = opmod.Op1;
+const Op2 = opmod.Op2;
+const Op3 = opmod.Op3;
+const Op4 = opmod.Op4;
 const ir = @import("ir.zig");
 const optimizer = @import("optimizer.zig");
 const fntable = @import("fntable.zig");
 const V = value.V;
 const N = @import("../noun/array.zig").N;
-const Fn = @import("../noun/operator.zig").Fn;
+const Fn = opmod.Fn;
 const Alloc = std.mem.Allocator;
 const Chunk = @import("tape.zig").Chunk;
 const OpCode = @import("tape.zig").OpCode;
@@ -94,18 +99,23 @@ pub const Compiler = struct {
       .utable => |u| try self.compileUTable(u),
       .pending => |p| try self.compileBind(.{ .v = p.v, .f = p.f, .a = p.a }),
       .verb_op => |op| blk: {
-        const v: V = if (Op.fromString(op)) |o|
+        // verb_op used as a value: prefer Op2 (dyadic) form so polymorphic
+        // calls can fall back to Op1 via op2ToOp1 when invoked with 1 arg.
+        // For Op1-only verbs (e.g. "sqrt", "first"), build a monadic Fn.
+        const v: V = if (Op2.fromString(op)) |o|
           .{ .func = Fn.dyad(o) }
+        else if (Op1.fromString(op)) |o|
+          .{ .func = Fn.monad(o) }
         else
           .{ .func = Fn.makeTrain(op) };
         break :blk try self.emitConst(v);
       },
       .io => |io| blk: {
-        const op = Op.fromString(io) orelse return error.UnknownOp;
+        const op = Op2.fromString(io) orelse return error.UnknownOp;
         break :blk try self.emitConst(V{ .func = Fn.dyad(op) });
       },
       .monad => |mv| blk: {
-        const op = Op.fromString(mv.f) orelse return error.UnknownOp;
+        const op = Op1.fromString(mv.f) orelse return error.UnknownOp;
         break :blk try self.emitConst(V{ .func = Fn.monad(op) });
       },
       .adverb_val => |a| try self.emitConst(V{ .func = Fn.adverb(adverbFromString(a)) }),
@@ -163,17 +173,23 @@ pub const Compiler = struct {
     const seq = if (ap.a) |s| s else &[_]*ast.Node{};
     const n: u8 = @intCast(seq.len);
 
-    // @[x;y;f] and .[x;y;f] with 3+ args compile to Amend/Dmend (no function arg on stack).
-    if (ap.f.* == .verb_op and seq.len >= 3) {
+    // @[x;i;f] (3) / @[x;i;f;v] (4) → Apply3/Apply4 with Op3/Op4 byte (no function on stack).
+    // Same for .[x;p;f] / .[x;p;f;v] → drill3 / drill4.
+    if (ap.f.* == .verb_op and (seq.len == 3 or seq.len == 4)) {
       const op_str = ap.f.verb_op;
-      const opcode: ?OpCode = if (std.mem.eql(u8, op_str, "@")) .Amend
-                              else if (std.mem.eql(u8, op_str, ".")) .Dmend
-                              else null;
-      if (opcode) |opc| {
+      const is_amend = std.mem.eql(u8, op_str, "@");
+      const is_drill = std.mem.eql(u8, op_str, ".");
+      if (is_amend or is_drill) {
         var inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, seq.len);
         defer inputs.deinit(self.alloc);
         for (seq) |x| try inputs.append(self.alloc, try self.compileNode(x, false));
-        return try self.emitOpWithArg(opc, n, inputs.items);
+        if (seq.len == 3) {
+          const op3: Op3 = if (is_amend) .amend3 else .drill3;
+          return try self.emitOpWithArg(.Apply3, @intFromEnum(op3), inputs.items);
+        } else {
+          const op4: Op4 = if (is_amend) .amend4 else .drill4;
+          return try self.emitOpWithArg(.Apply4, @intFromEnum(op4), inputs.items);
+        }
       }
     }
 
@@ -258,7 +274,7 @@ pub const Compiler = struct {
       const lhs_id = try self.compileNode(b.v, false);
       const rhs_id = try self.compileNode(b.a.?, false);
       var inputs: [2]ir.ValueId = .{ lhs_id, rhs_id };
-      return try self.emitOpWithArg(.Apply2, @intFromEnum(Op.@"0:"), &inputs);
+      return try self.emitOpWithArg(.Apply2, @intFromEnum(Op2.@"0:"), &inputs);
     }
 
     const rhs_id: ir.ValueId = if (b.a) |rhs| blk: {
@@ -350,7 +366,7 @@ pub const Compiler = struct {
     }
     if (t.v.* == .verb_op or t.v.* == .io) {
       const op = if (t.v.* == .verb_op) t.v.verb_op else t.v.io;
-      if (Op.fromString(op)) |o| {
+      if (Op2.fromString(op)) |o| {
         var inputs: [2]ir.ValueId = undefined;
         inputs[0] = try self.compileNode(t.a, false);
         inputs[1] = try self.compileNode(t.b, false);
@@ -381,7 +397,7 @@ pub const Compiler = struct {
     if (i.z) |z| {
       if (i.v.* == .verb_op or i.v.* == .io) {
         const op = if (i.v.* == .verb_op) i.v.verb_op else i.v.io;
-        if (Op.fromString(op)) |_| {
+        if (Op2.fromString(op)) |_| {
           var inputs: [2]ir.ValueId = undefined;
           inputs[0] = try self.compileNode(i.a, false);
           inputs[1] = try self.compileNode(z, false);
@@ -396,7 +412,7 @@ pub const Compiler = struct {
     } else {
       if (i.v.* == .verb_op or i.v.* == .io) {
         const op = if (i.v.* == .verb_op) i.v.verb_op else i.v.io;
-        if (Op.fromString(op)) |o| {
+        if (Op2.fromString(op)) |o| {
           // Partial dyadic symbolic or IO op: a v -> v(a, )
           const v = V{ .func = Fn.dyad(o) };
           var inputs: [2]ir.ValueId = undefined;
@@ -430,10 +446,12 @@ pub const Compiler = struct {
       return try self.compilePrimitive(p.v, 2, &inputs);
     } else {
       const arg_id = try self.compileNode(p.a, false);
-      if (Op.fromString(p.v)) |_| {
+      if (Op1.fromString(p.v) != null or Op2.fromString(p.v) != null) {
         return try self.compilePrimitive(p.v, 1, &.{arg_id});
       } else if (std.ascii.isAlphabetic(p.v[0])) {
-        const v: V = if (Op.fromString(p.v)) |o| .{ .func = Fn.dyad(o) } else .{ .func = Fn.makeTrain(p.v) };
+        const v: V = if (Op2.fromString(p.v)) |o| .{ .func = Fn.dyad(o) }
+                     else if (Op1.fromString(p.v)) |o| .{ .func = Fn.monad(o) }
+                     else .{ .func = Fn.makeTrain(p.v) };
         var inputs: [2]ir.ValueId = undefined;
         inputs[0] = try self.emitConst(v);
         inputs[1] = arg_id;
@@ -530,17 +548,22 @@ pub const Compiler = struct {
   }
 
   fn compilePrimitive(self: *Compiler, name: []const u8, arity_val: u8, inputs: []const ir.ValueId) anyerror!ir.ValueId {
-    if (Op.fromString(name)) |op| {
-      return try self.emitOpWithArg(if (arity_val == 1) .Apply1 else .Apply2, @intFromEnum(op), inputs);
-    } else {
-      const v = V{ .func = Fn.makeTrain(name) };
-      const f_id = try self.emitConst(v);
-      var call_inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, inputs.len + 1);
-      defer call_inputs.deinit(self.alloc);
-      try call_inputs.append(self.alloc, f_id);
-      for (inputs) |input| try call_inputs.append(self.alloc, input);
-      return try self.emitOpWithArg(.Apply, arity_val, call_inputs.items);
+    if (arity_val == 1) {
+      if (Op1.fromString(name)) |op| {
+        return try self.emitOpWithArg(.Apply1, @intFromEnum(op), inputs);
+      }
+    } else if (arity_val == 2) {
+      if (Op2.fromString(name)) |op| {
+        return try self.emitOpWithArg(.Apply2, @intFromEnum(op), inputs);
+      }
     }
+    const v = V{ .func = Fn.makeTrain(name) };
+    const f_id = try self.emitConst(v);
+    var call_inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, inputs.len + 1);
+    defer call_inputs.deinit(self.alloc);
+    try call_inputs.append(self.alloc, f_id);
+    for (inputs) |input| try call_inputs.append(self.alloc, input);
+    return try self.emitOpWithArg(.Apply, arity_val, call_inputs.items);
   }
 
   fn compileLambda(self: *Compiler, l: ast.Lambda) anyerror!ir.ValueId {
@@ -748,8 +771,8 @@ pub const Compiler = struct {
       },
       .Global => return 2,
       .Local, .AssignLocal, .AssignGlobal,
-      .Call, .TailCall, .Apply1, .Apply2, .Apply,
-      .MakeList, .MakeDict, .MakeTable, .Derive, .Amend, .Dmend,
+      .Call, .TailCall, .Apply1, .Apply2, .Apply3, .Apply4, .Apply,
+      .MakeList, .MakeDict, .MakeTable, .Derive,
       .ListAssignLocal, .ListAssignGlobal => return 2,
       .Drop => {
         if (inst.inputs.len > 0 and inst.inputs[0] != ir.NO_VALUE and !self.scope.ir.get(inst.inputs[0]).is_dead) return 1;
@@ -793,8 +816,8 @@ pub const Compiler = struct {
 
     try chunk.writeOp(effective_op);
     switch (effective_op) {
-      .Local, .LocalLast, .Global, .AssignLocal, .AssignGlobal, .Call, .TailCall, .Apply1, .Apply2, .Apply,
-      .MakeList, .MakeDict, .MakeTable, .Derive, .Amend, .Dmend, .ListAssignLocal, .ListAssignGlobal => {
+      .Local, .LocalLast, .Global, .AssignLocal, .AssignGlobal, .Call, .TailCall, .Apply1, .Apply2, .Apply3, .Apply4, .Apply,
+      .MakeList, .MakeDict, .MakeTable, .Derive, .ListAssignLocal, .ListAssignGlobal => {
         try chunk.write(@as(u8, @intCast(inst.arg1)));
       },
       .Drop => {},

@@ -2,7 +2,7 @@ const std = @import("std");
 const util = @import("../../util.zig");
 const Alloc = std.mem.Allocator;
 const VM = @import("../../runtime/vm.zig").VM;
-const Op = @import("../../runtime/tape.zig").Op;
+const Op2 = @import("../../noun/operator.zig").Op2;
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
@@ -10,7 +10,7 @@ const N = @import("../../noun/array.zig").N;
 // CPU fast path: builtin reduce on a typed CPU array.
 // Avoids per-element boxing and function-pointer overhead.
 // LLVM auto-vectorises these simple accumulation loops.
-inline fn cpuReduce(op: Op, x: V) ?V {
+inline fn cpuReduce(op: Op2, x: V) ?V {
   switch (x.tag()) {
     .I => {
       const s = x.I.slice();
@@ -94,9 +94,9 @@ inline fn cpuReduce(op: Op, x: V) ?V {
 }
 
 pub fn fold(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
-  // CPU fast path: no init, builtin op, typed array — bypass per-element dispatch.
-  if (init == null and base.tag() == .func and base.func.getKind() == .builtin) {
-    if (cpuReduce(base.func.getOp(), x)) |v| return v;
+  // CPU fast path: no init, builtin dyad, typed array — bypass per-element dispatch.
+  if (init == null and base.tag() == .func and base.func.getKind() == .builtin and base.func.arity == 2) {
+    if (cpuReduce(base.func.getOp2(), x)) |v| return v;
   }
 
   const n = x.len();

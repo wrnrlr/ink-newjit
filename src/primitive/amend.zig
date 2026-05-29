@@ -73,7 +73,7 @@ fn drill(vm: *VM, target: V, path: V, path_idx: usize, func: V, val: V) anyerror
     if (func.tag() == .blank) return target;
     
     // Identity assignment optimization at leaf
-    if (func.tag() == .func and func.func.getKind() == .builtin and func.func.getOp() == .@":") {
+    if (func.tag() == .func and func.func.getKind() == .builtin and func.func.arity == 2 and func.func.getOp2() == .@":") {
       target.deinit(vm.alloc);
       return val.ref();
     }
@@ -126,7 +126,7 @@ fn applyAt(vm: *VM, target: *V, key: V, func: V, val: V) !void {
   // val is owned by this function
   errdefer val.deinit(vm.alloc);
 
-  if (func.tag() == .func and func.func.getKind() == .builtin and func.func.getOp() == .@":") {
+  if (func.tag() == .func and func.func.getKind() == .builtin and func.func.arity == 2 and func.func.getOp2() == .@":") {
     try setAt(vm, target, key, val);
     return;
   }

@@ -5,10 +5,14 @@ const compiler_mod = @import("compiler.zig");
 const ast        = @import("../parser/ast.zig");
 
 const OpCode   = chunk_mod.OpCode;
-const Op       = chunk_mod.Op;
 const Chunk    = chunk_mod.Chunk;
 const V        = value.V;
-const Adverb   = @import("../noun/operator.zig").Adverb;
+const opmod    = @import("../noun/operator.zig");
+const Op1      = opmod.Op1;
+const Op2      = opmod.Op2;
+const Op3      = opmod.Op3;
+const Op4      = opmod.Op4;
+const Adverb   = opmod.Adverb;
 const Pool   = @import("../noun/symbol.zig").Pool;
 const Compiler = compiler_mod.Compiler;
 const Parser   = ast.Parser;
@@ -150,11 +154,11 @@ fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, o
         try out.print("JumpTrue    → {d}\n", .{@as(i64, @intCast(ip)) + delta});
       },
       .Apply1 => {
-        const verb: Op = @enumFromInt(code[ip]); ip += 1;
+        const verb: Op1 = @enumFromInt(code[ip]); ip += 1;
         try out.print("Apply1      {s}\n", .{verb.toString()});
       },
       .Apply2 => {
-        const verb: Op = @enumFromInt(code[ip]); ip += 1;
+        const verb: Op2 = @enumFromInt(code[ip]); ip += 1;
         try out.print("Apply2      {s}\n", .{verb.toString()});
       },
       .Call     => { const n = code[ip]; ip += 1; try out.print("Call        {d}\n", .{n}); },
@@ -164,8 +168,14 @@ fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, o
       .MakeList  => { const n = code[ip]; ip += 1; try out.print("MakeList    {d}\n", .{n}); },
       .MakeDict  => { const n = code[ip]; ip += 1; try out.print("MakeDict    {d}\n", .{n}); },
       .MakeTable => { const n = code[ip]; ip += 1; try out.print("MakeTable   {d}\n", .{n}); },
-      .Amend     => { const n = code[ip]; ip += 1; try out.print("Amend       {d}\n", .{n}); },
-      .Dmend     => { const n = code[ip]; ip += 1; try out.print("Dmend       {d}\n", .{n}); },
+      .Apply3 => {
+        const op3: Op3 = @enumFromInt(code[ip]); ip += 1;
+        try out.print("Apply3      {s}\n", .{op3.toString()});
+      },
+      .Apply4 => {
+        const op4: Op4 = @enumFromInt(code[ip]); ip += 1;
+        try out.print("Apply4      {s}\n", .{op4.toString()});
+      },
       .MakePartial => {
         const argc = code[ip]; ip += 1;
         const mask = code[ip]; ip += 1;
@@ -222,10 +232,10 @@ fn fmtValue(v: V, symbols: *const Pool, out: *std.Io.Writer) anyerror!void {
     },
 
     .func => |f| switch (f.getKind()) {
-      .builtin         => try out.print("{s}", .{f.getOp().toString()}),
+      .builtin         => try out.print("{s}", .{if (f.arity == 1) f.getOp1().toString() else f.getOp2().toString()}),
       .lambda          => try out.print("λ{d}", .{f.idx}),
       .adverb          => try out.print("{s}", .{@tagName(f.getAdverb())}),
-      .derived_builtin => try out.print("{s}{s}", .{ f.getOp().toString(), @tagName(f.getAdverb()) }),
+      .derived_builtin => try out.print("{s}{s}", .{ if (f.arity == 1) f.getOp1().toString() else f.getOp2().toString(), @tagName(f.getAdverb()) }),
       .derived_lambda  => try out.print("λ{d}{s}", .{ f.idx, @tagName(f.getAdverb()) }),
       .derived_table   => try out.print("derived[{d}]", .{f.idx}),
       .train => {
