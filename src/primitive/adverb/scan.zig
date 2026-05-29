@@ -1,6 +1,7 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const Op2 = @import("../../noun/operator.zig").Op2;
+const opmod = @import("../../noun/operator.zig");
+const Op2 = opmod.Op2;
 const VM = @import("../../runtime/vm.zig").VM;
 const value = @import("../../noun/value.zig");
 const util = @import("../../util.zig");
@@ -8,6 +9,13 @@ const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const promote = @import("../promote.zig").promote;
+
+inline fn fnIsBuiltinDyad(f: opmod.Fn) bool {
+  return f.getKind() == .callable and opmod.isOp2Idx(f.idx);
+}
+inline fn fnIsLambda(f: opmod.Fn) bool {
+  return f.getKind() == .callable and opmod.isLambdaIdx(f.idx);
+}
 
 // CPU fast path: builtin prefix-scan on a typed CPU array.
 // Returns a typed N(T) result instead of N(V), avoids per-element boxing.
@@ -84,9 +92,8 @@ inline fn cpuScan(alloc: Alloc, op: Op2, x: V) ?V {
 // +\1 2 3 → 1 3 6  (n results, starting from x[0])
 pub fn scan(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
   // CPU fast path: no init, builtin op, typed array — returns typed result.
-  if (init == null and base.tag() == .func and base.func.getKind() == .builtin) {
-    if (base.func.arity == 2)
-      if (cpuScan(vm.alloc, base.func.getOp2(), x)) |v| return v;
+  if (init == null and base.tag() == .func and fnIsBuiltinDyad(base.func)) {
+    if (cpuScan(vm.alloc, base.func.getOp2(), x)) |v| return v;
   }
 
   const n = x.len();
@@ -101,7 +108,7 @@ pub fn scan(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
   if (init == null) res.slice()[0] = accum.ref();
 
   var ri: usize = if (init != null) 0 else 1;
-  const is_lambda = base.tag() == .func and base.func.getKind() == .lambda;
+  const is_lambda = base.tag() == .func and fnIsLambda(base.func);
   const lambda_ref = if (is_lambda) base.func else undefined;
   for (start..n) |i| {
     const item = x.at(i);

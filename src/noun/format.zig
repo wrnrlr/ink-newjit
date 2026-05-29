@@ -148,7 +148,8 @@ pub const TerseFormatter = struct {
       .func => |ref| try self.formatFn(ref, w),
       .partial => |p| {
         // Compact display for operator projections: 1+ or +1
-        const is_builtin = p.ref.getKind() == .builtin and p.ref.arity == 2;
+        const opmod = @import("./operator.zig");
+        const is_builtin = p.ref.getKind() == .callable and opmod.isBuiltinIdx(p.ref.idx) and p.ref.arity == 2;
         if (is_builtin and p.arity == 2) {
           const arg0_filled = p.fill & 1 != 0;
           const arg1_filled = p.fill & 2 != 0;
@@ -186,30 +187,42 @@ pub const TerseFormatter = struct {
   }
 
   fn formatFn(self: *Self, ref: Fn, w: anytype) anyerror!void {
+    const opmod = @import("./operator.zig");
     switch (ref.getKind()) {
-      .builtin => {
-        if (ref.arity == 1) {
-          try w.writeAll(ref.getOp1().toString());
+      .callable => {
+        const idx = ref.idx;
+        if (opmod.isLambdaIdx(idx)) {
+          const entry = self.vm.fn_tables.lambdaAt(opmod.lambdaIdxOf(idx));
+          try w.writeAll(self.vm.registry.getSource(entry.range));
+        } else if (opmod.isOp1Idx(idx)) {
+          try w.writeAll(opmod.op1OfIdx(idx).toString());
           try w.writeAll(":");
-        } else {
-          try w.writeAll(ref.getOp2().toString());
+        } else if (opmod.isOp2Idx(idx)) {
+          try w.writeAll(opmod.op2OfIdx(idx).toString());
+        } else if (opmod.isAdverb2Idx(idx)) {
+          try w.writeAll(@tagName(opmod.adverb2OfIdx(idx)));
+        } else if (opmod.isOp3Idx(idx)) {
+          try w.writeAll(opmod.op3OfIdx(idx).toString());
+        } else if (opmod.isAdverb3Idx(idx)) {
+          try w.writeAll(@tagName(opmod.adverb3OfIdx(idx)));
+        } else if (opmod.isOp4Idx(idx)) {
+          try w.writeAll(opmod.op4OfIdx(idx).toString());
         }
       },
-      .lambda => {
-        const entry = self.vm.fn_tables.lambdaAt(@intCast(ref.idx));
-        try w.writeAll(self.vm.registry.getSource(entry.range));
-      },
-      .adverb => try w.writeAll(adverbStr(ref.getAdverb())),
-      .derived_builtin => {
-        if (ref.arity == 1) try w.writeAll(ref.getOp1().toString())
-        else try w.writeAll(ref.getOp2().toString());
+      .derived => {
+        const base_idx = ref.idx;
+        if (opmod.isLambdaIdx(base_idx)) {
+          try w.print("{{lambda:{d}}}", .{opmod.lambdaIdxOf(base_idx)});
+        } else if (opmod.isOp1Idx(base_idx)) {
+          try w.writeAll(opmod.op1OfIdx(base_idx).toString());
+        } else if (opmod.isOp2Idx(base_idx)) {
+          try w.writeAll(opmod.op2OfIdx(base_idx).toString());
+        } else {
+          try w.print("[builtin:{d}]", .{base_idx});
+        }
         try w.writeAll(adverbStr(ref.getAdverb()));
       },
-      .derived_lambda => {
-        try w.print("{{lambda:{d}}}", .{ref.idx});
-        try w.writeAll(adverbStr(ref.getAdverb()));
-      },
-      .derived_table => {
+      .derived_data => {
         const entry = self.vm.fn_tables.derivedAt(@intCast(ref.idx));
         try self.formatValue(entry.base, w);
         try w.writeAll(adverbStr(entry.adverb));

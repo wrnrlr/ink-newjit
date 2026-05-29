@@ -27,13 +27,12 @@ inline fn isCall1(inst: *const ir.IRInst) bool {
 }
 
 // True when inst is a Const holding a builtin dyad func reference to `op`.
-// The compiler stores verb-op values as Fn.dyad(Op2), so we match against Op2.
 fn isBuiltinDyad(inst: *const ir.IRInst, op: Op2) bool {
   if (inst.op != .Const) return false;
   const v = inst.val orelse return false;
   if (v != .func) return false;
-  if (v.func.getKind() != .builtin) return false;
-  if (v.func.arity != 2) return false;
+  if (v.func.getKind() != .callable) return false;
+  if (!operator.isOp2Idx(v.func.idx)) return false;
   return v.func.getOp2() == op;
 }
 
@@ -138,7 +137,8 @@ pub const Optimizer = struct {
           if (base.op == .Const) blk: {
             const v = base.val orelse break :blk;
             if (v != .func) break :blk;
-            if (v.func.getKind() != .builtin or v.func.arity != 2) break :blk;
+            if (v.func.getKind() != .callable) break :blk;
+            if (!operator.isOp2Idx(v.func.idx)) break :blk;
             const fused = fusedReducerFor(v.func.getOp2()) orelse break :blk;
 
             const old_inputs = inst.inputs;
@@ -340,8 +340,8 @@ pub const Optimizer = struct {
       const fval = func_inst.val orelse continue;
       if (fval != .func) continue;
       const fn_ref = fval.func;
-      if (fn_ref.getKind() != .lambda) continue;
-      const lambda_idx = fn_ref.idx;
+      if (fn_ref.getKind() != .callable or !operator.isLambdaIdx(fn_ref.idx)) continue;
+      const lambda_idx = operator.lambdaIdxOf(fn_ref.idx);
       if (lambda_idx >= fn_tables.lambdas.items.len) continue;
       const entry = fn_tables.lambdas.items[lambda_idx];
       const op_byte = tryGetSimpleOp(entry.chunk, entry.arity) orelse continue;

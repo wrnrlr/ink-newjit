@@ -8,7 +8,7 @@ const promote = @import("../promote.zig").promote;
 // converges: collect all intermediate values until fixed point
 // f\x → x, f(x), f(f(x)), ... until result repeats
 pub fn converges(vm: *VM, base: V, x: V, f: util.ApplyFn) V {
-  const is_lambda = base.tag() == .func and base.func.getKind() == .lambda;
+  const is_lambda = base.tag() == .func and base.func.isLambda();
   const lambda_ref = if (is_lambda) base.func else undefined;
   var results: std.ArrayList(V) = .empty;
   defer results.deinit(vm.alloc);

@@ -291,15 +291,14 @@ pub export fn cps_derive(vm: *VM, op: u32) callconv(.c) void {
         const ref = base_v.func;
         base_v.deinit(vm.alloc);
         break :blk switch (ref.getKind()) {
-            .builtin => if (ref.arity == 1) Fn.makeDerivedMonad(ref.getOp1(), adv)
-                        else Fn.makeDerivedDyad(ref.getOp2(), adv),
-            .lambda  => Fn.makeDerivedLambda(ref.idx, adv),
+            // Any callable (builtin verb/adverb or lambda) uses its global idx.
+            .callable => Fn.makeDerived(ref.idx, ref.arity, adv),
             else => blk2: {
                 const idx = vm.fn_tables.addDerived(.{ .base = V{ .func = ref }, .adverb = adv }) catch {
                     pushErr(vm, .memory);
                     return;
                 };
-                break :blk2 Fn.makeDerivedTable(idx);
+                break :blk2 Fn.makeDerivedTable(idx, adv);
             },
         };
     } else blk: {
@@ -307,7 +306,7 @@ pub export fn cps_derive(vm: *VM, op: u32) callconv(.c) void {
             pushErr(vm, .memory);
             return;
         };
-        break :blk Fn.makeDerivedTable(idx);
+        break :blk Fn.makeDerivedTable(idx, adv);
     };
     pushOr(vm, .{ .func = derived });
 }

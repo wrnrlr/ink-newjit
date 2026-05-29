@@ -38,7 +38,7 @@ pub const V = union(K) {
   pub fn isAtom(v: V) bool { return v.tag().isAtom(); }
   pub fn isVec(v: V) bool { return v.tag().isVec(); }
   pub fn isDict(v: V) bool { return switch (v.tag()) { .m, .M => true, else => false }; }
-  pub fn isLambda(v: V) bool { return v == .func and v.func.getKind() == .lambda; }
+  pub fn isLambda(v: V) bool { return v == .func and v.func.isLambda(); }
   pub fn isPartial(v: V) bool { return v == .partial; }
   
   pub fn asPartial(v: V) *Partial { return v.partial; }

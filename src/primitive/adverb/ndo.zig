@@ -12,7 +12,7 @@ const N = @import("../../noun/array.zig").N;
 pub fn ndo(vm: *VM, base: V, n: i32, init: V, f: util.ApplyFn) V {
   if (n < 0) return .{ .err = .domain };
   var accum = init.ref();
-  if (base.tag() == .func and base.func.getKind() == .lambda) {
+  if (base.tag() == .func and base.func.isLambda()) {
     const ref = base.func;
     for (0..@intCast(n)) |_| {
       const args = [_]V{ accum };

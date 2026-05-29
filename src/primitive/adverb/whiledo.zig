@@ -7,7 +7,7 @@ const N = @import("../../noun/array.zig").N;
 const promote = @import("../promote.zig").promote;
 
 inline fn callOne(vm: *VM, func: V, arg: V, f: util.ApplyFn) V {
-  if (func == .func and func.func.getKind() == .lambda) {
+  if (func == .func and func.func.isLambda()) {
     const args = [_]V{arg};
     return vm.callLambdaAndRun(func.func, &args);
   }
@@ -21,7 +21,7 @@ inline fn callOne(vm: *VM, func: V, arg: V, f: util.ApplyFn) V {
 // step receives cur via move semantics when it's a lambda, so the body sees
 // rc==1 and can mutate the accumulator in place.
 pub fn whiledo(vm: *VM, cond: V, step: V, init: V, f: util.ApplyFn) V {
-  const step_is_lambda = step == .func and step.func.getKind() == .lambda;
+  const step_is_lambda = step == .func and step.func.isLambda();
   var cur = init.ref();
   while (true) {
     const cond_result = callOne(vm, cond, cur, f);

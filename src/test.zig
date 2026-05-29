@@ -218,6 +218,27 @@ test "partial" {
   try t.check("p 2", "3");
   try t.check("@p", "`p");
 }
+test "partial adverb" {
+  var t = try Tester.init(); defer t.deinit();
+  // Bracket form: scan(*) applied immediately.
+  try t.check("\\[*;1 2 3]", "1 2 6");
+  // Bracket form: fold(+) applied immediately.
+  try t.check("\\[+;1 2 3 4 5]", "1 3 6 10 15");
+  // Partial of an adverb saved, then completed via apposit-call.
+  try t.check("a:(\\[*;]); a 1 2 3", "1 2 6");
+  // Same partial via bracket-call.
+  try t.check("b:(\\[+;]); b[1 2 3 4 5]", "1 3 6 10 15");
+}
+test "partial amend" {
+  var t = try Tester.init(); defer t.deinit();
+  // 3-arg amend with the function slot blank, then completed.
+  try t.check("@[\"ABC\";1;](_:)", "\"AbC\"");
+  try t.check("@[1 2 3;1;](-:)", "1 -2 3");
+  // 3-arg drill (path), function completed later.
+  try t.check(".[(1 2 3;4 5 6);0 1;](-:)", "(1 -2 3;4 5 6)");
+  // Partial amend saved, then completed.
+  try t.check("c:(@[\"xxx\";1;]); c(_:)", "\"xxx\"");
+}
 test "dyadic verb" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("+", "+");

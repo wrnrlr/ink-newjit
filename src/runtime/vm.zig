@@ -469,57 +469,62 @@ pub const VM = struct {
     defer func_val.deinit(vm.alloc);
 
     if (func_val == .func) {
-      switch (func_val.func.getKind()) {
-        .lambda => {
-          const lambda_idx = @as(u24, @intCast(func_val.func.idx));
-          const entry = vm.fn_tables.lambdaAt(lambda_idx);
-          const frame = vm.currentFrame();
-          const res_slot = frame.result_slot;
+      const ref = func_val.func;
+      const kind = ref.getKind();
+      // Tail-call lambda: reuse current frame instead of pushing a new one.
+      if (kind == .callable and opmod.isLambdaIdx(ref.idx)) {
+        const lambda_idx = opmod.lambdaIdxOf(ref.idx);
+        const entry = vm.fn_tables.lambdaAt(lambda_idx);
+        const frame = vm.currentFrame();
+        const res_slot = frame.result_slot;
 
-          for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
-          vm.stack_len = res_slot;
+        for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
+        vm.stack_len = res_slot;
 
-          try vm.push(.blank);
-          for (incoming) |arg| try vm.push(arg);
-          const total_slots = @as(usize, entry.arity) + @as(usize, entry.locals);
-          const locals_to_push = if (total_slots > argc) total_slots - argc else 0;
-          for (0..locals_to_push) |_| try vm.push(.blank);
+        try vm.push(.blank);
+        for (incoming) |arg| try vm.push(arg);
+        const total_slots = @as(usize, entry.arity) + @as(usize, entry.locals);
+        const locals_to_push = if (total_slots > argc) total_slots - argc else 0;
+        for (0..locals_to_push) |_| try vm.push(.blank);
 
-          frame.lambda_idx = lambda_idx;
-          frame.ip = 0;
-          frame.base = vm.stack_len - argc - locals_to_push;
-          vm.current_chunk = entry.chunk;
-        },
-        .derived_builtin => {
-          const result = call.applyDerivedBuiltin(vm, func_val.func, incoming);
-          for (incoming) |*v| v.deinit(vm.alloc);
-          try vm.push(result);
-        },
-        .builtin => {
-          const result = if (func_val.func.arity == 1) blk: {
-            const op1 = func_val.func.getOp1();
-            if (argc == 1) break :blk dispatch.dispatch1(vm, op1, incoming[0]);
-            break :blk V{ .err = .rank };
-          } else if (func_val.func.arity == 2) blk: {
-            const op2 = func_val.func.getOp2();
-            if (argc == 1) {
-              // polymorphic: dyadic builtin called with 1 arg → try monadic form
-              if (opmod.op2ToOp1[@intFromEnum(op2)]) |op1| {
-                break :blk dispatch.dispatch1(vm, op1, incoming[0]);
-              }
-              break :blk V{ .err = .rank };
-            }
-            if (argc == 2) break :blk dispatch.dispatch2(vm, op2, incoming[0], incoming[1]);
-            break :blk V{ .err = .rank };
-          } else V{ .err = .rank };
-          for (incoming) |*v| v.deinit(vm.alloc);
-          try vm.push(result);
-        },
-        else => {
-          try vm.executeCall(func_val, incoming, .sync);
-          for (incoming) |*v| v.deinit(vm.alloc);
-        },
+        frame.lambda_idx = lambda_idx;
+        frame.ip = 0;
+        frame.base = vm.stack_len - argc - locals_to_push;
+        vm.current_chunk = entry.chunk;
+        return;
       }
+      // Builtin call: dispatch directly without allocating a Call frame.
+      if (kind == .callable and opmod.isBuiltinIdx(ref.idx)) {
+        const idx = ref.idx;
+        const result = if (opmod.isOp1Idx(idx)) blk: {
+          if (argc == 1) break :blk dispatch.dispatch1(vm, opmod.op1OfIdx(idx), incoming[0]);
+          break :blk V{ .err = .rank };
+        } else if (opmod.isOp2Idx(idx)) blk: {
+          const op2 = opmod.op2OfIdx(idx);
+          if (argc == 2) break :blk dispatch.dispatch2(vm, op2, incoming[0], incoming[1]);
+          if (argc == 1) {
+            if (opmod.op2ToOp1[@intFromEnum(op2)]) |op1|
+              break :blk dispatch.dispatch1(vm, op1, incoming[0]);
+            break :blk V{ .err = .rank };
+          }
+          break :blk V{ .err = .rank };
+        } else V{ .err = .nyi }; // adverbs/Op3/Op4 via tail-call path: defer to executeCall below
+        if (result.tag() != .err or result.err != .nyi) {
+          for (incoming) |*v| v.deinit(vm.alloc);
+          try vm.push(result);
+          return;
+        }
+      }
+      // Derived (builtin or lambda base): hand to applyDerivedBuiltin.
+      if (kind == .derived) {
+        const result = call.applyDerivedBuiltin(vm, ref, incoming);
+        for (incoming) |*v| v.deinit(vm.alloc);
+        try vm.push(result);
+        return;
+      }
+      // Fallback (adverb/Op3/Op4 standalone, train, derived_data).
+      try vm.executeCall(func_val, incoming, .sync);
+      for (incoming) |*v| v.deinit(vm.alloc);
     } else {
       try vm.executeCall(func_val, incoming, .sync);
       for (incoming) |*v| v.deinit(vm.alloc);
@@ -565,6 +570,7 @@ pub const VM = struct {
     const op: Op3 = @enumFromInt(vm.readByte());
     const start = vm.stack_len - 3;
     const args = vm.stack[start..vm.stack_len];
+    if (try maybePartialApplyN(vm, Fn.triad(op), args, 3)) return;
     const res = switch (op) {
       .amend3 => try amend.amend(vm, args),
       .drill3 => try amend.dmend(vm, args),
@@ -578,6 +584,7 @@ pub const VM = struct {
     const op: Op4 = @enumFromInt(vm.readByte());
     const start = vm.stack_len - 4;
     const args = vm.stack[start..vm.stack_len];
+    if (try maybePartialApplyN(vm, Fn.tetrad(op), args, 4)) return;
     const res = switch (op) {
       .amend4 => try amend.amend(vm, args),
       .drill4 => try amend.dmend(vm, args),
@@ -585,6 +592,31 @@ pub const VM = struct {
     for (args) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     try vm.push(res);
+  }
+
+  // If `args` contains any blank slot, construct a Partial of `ref` filling
+  // the non-blank positions, push it onto the stack, and return true (caller
+  // skips its dispatch). Returns false when there are no blanks.
+  fn maybePartialApplyN(vm: *VM, ref: Fn, args: []V, arity: u8) !bool {
+    var has_blank = false;
+    for (args) |a| if (a == .blank) { has_blank = true; break; };
+    if (!has_blank) return false;
+
+    var pa: [8]V = .{.blank} ** 8;
+    var fill: u8 = 0;
+    for (args, 0..) |a, i| {
+      if (a != .blank) { pa[i] = a.ref(); fill |= @as(u8, 1) << @intCast(i); }
+    }
+    const p = try vm.partial_pool.create(vm.alloc);
+    p.* = .{
+      .pool = &vm.partial_pool, .rc = 1, .fill = fill,
+      .arity = arity, ._pad = 0, .ref = ref, .args = pa,
+    };
+    const start = vm.stack_len - args.len;
+    for (args) |*v| v.deinit(vm.alloc);
+    vm.stack_len = start;
+    try vm.push(.{ .partial = p });
+    return true;
   }
   
   fn doMakePartial(vm: *VM) !void {
@@ -647,18 +679,19 @@ pub const VM = struct {
       const ref = base_v.func;
       base_v.deinit(vm.alloc);
       break :blk switch (ref.getKind()) {
-        .builtin => if (ref.arity == 1) Fn.makeDerivedMonad(ref.getOp1(), adv)
-                    else Fn.makeDerivedDyad(ref.getOp2(), adv),
-        .lambda  => Fn.makeDerivedLambda(ref.idx, adv),
+        // Any callable (builtin verb/adverb or lambda) uses its global idx.
+        .callable => Fn.makeDerived(ref.idx, ref.arity, adv),
+        // Trains as base aren't directly representable as a single global idx;
+        // stash the base V in the derived table.
         else => blk2: {
           const idx = try vm.fn_tables.addDerived(.{ .base = V{ .func = ref }, .adverb = adv });
-          break :blk2 Fn.makeDerivedTable(idx);
+          break :blk2 Fn.makeDerivedTable(idx, adv);
         },
       };
     } else blk: {
       // Data base (e.g. I vector for radix encode/decode, C for join/split)
       const idx = try vm.fn_tables.addDerived(.{ .base = base_v, .adverb = adv });
-      break :blk Fn.makeDerivedTable(idx);
+      break :blk Fn.makeDerivedTable(idx, adv);
     };
     try vm.push(.{ .func = derived });
   }
@@ -727,7 +760,7 @@ pub const VM = struct {
 
   pub fn callLambda(vm: *VM, ref: Fn, argc: usize, slot: usize) !void {
     if (vm.frames_len >= FRAMES_MAX) return VMError.StackOverflow;
-    const idx = @as(u24, @intCast(ref.idx));
+    const idx = opmod.lambdaIdxOf(ref.idx);
     const entry = vm.fn_tables.lambdaAt(idx);
 
     const total_slots = @as(usize, entry.arity) + @as(usize, entry.locals);

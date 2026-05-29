@@ -660,8 +660,10 @@ pub const Parser = struct {
       return m;
     }
 
-    // adverb_val as group content: (') or (\)
-    if (self.is(.adverb_val)) {
+    // adverb_val as group content: (') or (\) — only fires when ')' immediately
+    // follows the adverb. Larger forms like (\[*;1 2 3]) fall through to the
+    // generic sequence parser below.
+    if (self.is(.adverb_val) and self.lex.peekNext().tt == .@")") {
       const adv = self.tok.slice(self.src);
       self.advance();
       _ = self.eat(.@")");

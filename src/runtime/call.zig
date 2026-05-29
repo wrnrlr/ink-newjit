@@ -6,11 +6,14 @@ const Fn = opmod.Fn;
 const FnKind = opmod.FnKind;
 const Op1 = opmod.Op1;
 const Op2 = opmod.Op2;
-const Partial = @import("../noun/partial.zig").Partial;
+const Op3 = opmod.Op3;
+const Op4 = opmod.Op4;
 const Adverb = opmod.Adverb;
+const Partial = @import("../noun/partial.zig").Partial;
 const VM = @import("vm.zig").VM;
 const dispatch = @import("../primitive/dispatch.zig");
-const derived = @import("../primitive/derived.zig").derived;
+const derived_mod = @import("../primitive/derived.zig");
+const amend_mod = @import("../primitive/amend.zig");
 const syms = @import("syms.zig");
 
 pub const CallMode = enum { sync, bracket };
@@ -32,7 +35,6 @@ pub const Call = struct {
   }
 
   fn applyFn(self: *Call, ref: Fn, args: []const V, is_bracket: bool) anyerror!V {
-    // In bracket calls, blank args are gaps (partial application markers)
     var filled: usize = args.len;
     var has_gaps = false;
     if (is_bracket) {
@@ -42,68 +44,11 @@ pub const Call = struct {
     }
 
     switch (ref.getKind()) {
-      .builtin => {
-        if (ref.arity == 1) {
-          if (args.len == 1) return dispatch.dispatch1(self.vm, ref.getOp1(), args[0]);
-          return .{ .err = .rank };
-        }
-        // arity == 2 (dyadic)
-        const op2 = ref.getOp2();
-        if (has_gaps or (is_bracket and filled < ref.arity))
-          return makePartialFromArgs(self.vm, ref, args);
-        if (args.len == 1) {
-          // polymorphic: dyad called with one arg → monadic equivalent if any
-          if (opmod.op2ToOp1[@intFromEnum(op2)]) |op1| {
-            return dispatch.dispatch1(self.vm, op1, args[0]);
-          }
-          return makePartialFromArgs(self.vm, ref, args);
-        }
-        if (args.len == 2) return dispatch.dispatch2(self.vm, op2, args[0], args[1]);
-        return .{ .err = .rank };
-      },
-      .lambda => {
-        const arity = ref.getRealArity();
-        if (has_gaps or (filled < arity and (is_bracket or filled > 0)))
-          return makePartialFromArgs(self.vm, ref, args);
-        const prev_frames = self.vm.frames_len;
-        const res_slot = self.vm.stack_len;
-        try self.vm.push(.blank);
-        for (args) |arg| try self.vm.push(arg.ref());
-        try self.vm.callLambda(ref, args.len, res_slot);
-        try self.vm.runUntil(prev_frames);
-        return self.vm.pop();
-      },
-      .adverb => {
-        if (args.len == 1) {
-          const adv = ref.getAdverb();
-          const base_v = args[0];
-          if (base_v != .func) return V{ .err = .@"type" };
-          const base_ref = base_v.func;
-          const derived_ref = switch (base_ref.getKind()) {
-            .builtin => if (base_ref.arity == 1) Fn.makeDerivedMonad(base_ref.getOp1(), adv)
-                        else Fn.makeDerivedDyad(base_ref.getOp2(), adv),
-            .lambda  => Fn.makeDerivedLambda(@intCast(base_ref.idx), adv),
-            else => blk: {
-              const idx = try self.vm.fn_tables.addDerived(.{ .base = V{ .func = base_ref }, .adverb = adv });
-              break :blk Fn.makeDerivedTable(idx);
-            },
-          };
-          return .{ .func = derived_ref };
-        }
-        return .{ .err = .rank };
-      },
-      .derived_builtin => {
-        const base = V{ .func = if (ref.arity == 1) Fn.monad(ref.getOp1()) else Fn.dyad(ref.getOp2()) };
-        return derived(self.vm, base, ref.getAdverb(), args, wrapper);
-      },
-      .derived_lambda => {
-        const lambda_ref = Fn.lambda(@intCast(ref.idx), self.vm.fn_tables.lambdaAt(@intCast(ref.idx)).arity);
-        const base = V{ .func = lambda_ref };
-        return derived(self.vm, base, ref.getAdverb(), args, wrapper);
-      },
-      .derived_table => {
+      .callable => return self.applyCallable(ref, args, is_bracket, filled, has_gaps),
+      .derived => return self.applyDerivedFn(ref, args),
+      .derived_data => {
         const entry = self.vm.fn_tables.derivedAt(@intCast(ref.idx));
-        return derived(self.vm, entry.base, entry.adverb, args, wrapper);
+        return derived_mod.derived(self.vm, entry.base, ref.getAdverb(), args, wrapper);
       },
       .train => {
         var buf: [7]u8 = undefined;
@@ -112,6 +57,120 @@ pub const Call = struct {
         return V{ .err = .rank };
       },
     }
+  }
+
+  // Unified dispatch for any callable (builtin verb / adverb / lambda).
+  // Range-checks `ref.idx` to pick the right execution path.
+  fn applyCallable(self: *Call, ref: Fn, args: []const V, is_bracket: bool, filled: usize, has_gaps: bool) anyerror!V {
+    const vm = self.vm;
+    const idx = ref.idx;
+
+    // User-defined lambda: idx ≥ BUILTIN_COUNT
+    if (opmod.isLambdaIdx(idx)) {
+      const arity = ref.arity;
+      if (has_gaps or (filled < arity and (is_bracket or filled > 0)))
+        return makePartialFromArgs(vm, ref, args);
+      const prev_frames = vm.frames_len;
+      const res_slot = vm.stack_len;
+      try vm.push(.blank);
+      for (args) |arg| try vm.push(arg.ref());
+      try vm.callLambda(ref, args.len, res_slot);
+      try vm.runUntil(prev_frames);
+      return vm.pop();
+    }
+
+    // Builtin verb or adverb: dispatch by idx range.
+    const builtin_arity = ref.arity;
+
+    // Partial-application check: bracket form with missing/blank args.
+    if (has_gaps or (is_bracket and filled < builtin_arity))
+      return makePartialFromArgs(vm, ref, args);
+
+    // Op1 (monadic verb)
+    if (opmod.isOp1Idx(idx)) {
+      if (args.len == 1) return dispatch.dispatch1(vm, opmod.op1OfIdx(idx), args[0]);
+      return V{ .err = .rank };
+    }
+
+    // Op2 (dyadic verb) — polymorphic: 1-arg call falls back to Op1 equivalent.
+    if (opmod.isOp2Idx(idx)) {
+      const op2 = opmod.op2OfIdx(idx);
+      if (args.len == 2) return dispatch.dispatch2(vm, op2, args[0], args[1]);
+      if (args.len == 1) {
+        if (opmod.op2ToOp1[@intFromEnum(op2)]) |op1|
+          return dispatch.dispatch1(vm, op1, args[0]);
+        return makePartialFromArgs(vm, ref, args);
+      }
+      return V{ .err = .rank };
+    }
+
+    // Adverb2 (standalone adverb in 2-arg form: `\[base; arg]`)
+    if (opmod.isAdverb2Idx(idx)) {
+      // 1 arg = partial application (e.g. `\[*;]`).
+      if (args.len == 1) return makePartialFromArgs(vm, ref, args);
+      // 2 args = standard Adverb2 form: derived(base, [arg]).
+      if (args.len == 2) {
+        const adv = opmod.adverb2OfIdx(idx).toAdverb();
+        return derived_mod.derived(vm, args[0], adv, args[1..2], wrapper);
+      }
+      // 3 args = polymorphic upgrade to Adverb3 form: derived(base, [extra, arg]).
+      // The Adverb2 enum is a strict subset of Adverb3, so the conversion is safe.
+      if (args.len == 3) {
+        const adv = opmod.adverb2OfIdx(idx).toAdverb();
+        const data_args = [_]V{ args[0], args[2] };
+        return derived_mod.derived(vm, args[1], adv, &data_args, wrapper);
+      }
+      return V{ .err = .rank };
+    }
+
+    // Op3 (triadic builtin: amend3 / drill3)
+    if (opmod.isOp3Idx(idx)) {
+      if (args.len != 3) return V{ .err = .rank };
+      const op3 = opmod.op3OfIdx(idx);
+      // amend3/drill3 take their args as a mutable slice (target, idx/path, func).
+      var buf = [_]V{ args[0].ref(), args[1].ref(), args[2].ref() };
+      defer for (&buf) |*v| v.deinit(vm.alloc);
+      return switch (op3) {
+        .amend3 => try amend_mod.amend(vm, &buf),
+        .drill3 => try amend_mod.dmend(vm, &buf),
+      };
+    }
+
+    // Adverb3 (digram adverb: `x F/y`)
+    if (opmod.isAdverb3Idx(idx)) {
+      if (args.len < 2) return makePartialFromArgs(vm, ref, args);
+      // For now route through derived() with the adverb's data args.
+      // The 3-form takes [extra, base, arg] but our derived() expects [base, ...].
+      // Standalone adverb3 dispatch: args = [extra, base, arg] → derived(base, [extra, arg]).
+      if (args.len == 3) {
+        const adv = opmod.adverb3OfIdx(idx).toAdverb();
+        const data_args = [_]V{ args[0], args[2] };
+        return derived_mod.derived(vm, args[1], adv, &data_args, wrapper);
+      }
+      return V{ .err = .rank };
+    }
+
+    // Op4 (tetradic builtin: amend4 / drill4)
+    if (opmod.isOp4Idx(idx)) {
+      if (args.len != 4) return V{ .err = .rank };
+      const op4 = opmod.op4OfIdx(idx);
+      var buf = [_]V{ args[0].ref(), args[1].ref(), args[2].ref(), args[3].ref() };
+      defer for (&buf) |*v| v.deinit(vm.alloc);
+      return switch (op4) {
+        .amend4 => try amend_mod.amend(vm, &buf),
+        .drill4 => try amend_mod.dmend(vm, &buf),
+      };
+    }
+
+    return V{ .err = .rank };
+  }
+
+  // Apply a .derived Fn (base callable + adverb).
+  fn applyDerivedFn(self: *Call, ref: Fn, args: []const V) anyerror!V {
+    const base_idx = ref.idx;
+    const adv = ref.getAdverb();
+    const base = reconstructBaseV(base_idx, ref.arity);
+    return derived_mod.derived(self.vm, base, adv, args, wrapper);
   }
 
   fn applyPartial(self: *Call, p: *Partial, args: []const V, is_bracket: bool) anyerror!V {
@@ -141,7 +200,6 @@ pub const Call = struct {
     var i: usize = ops.len;
     while (i > 0) {
       i -= 1;
-      // Trains are single-char monadic-context glyphs; lookup in Op1.
       const op = Op1.fromString(ops[i .. i + 1]) orelse {
         res.deinit(self.vm.alloc);
         return .{ .err = .@"type" };
@@ -153,15 +211,33 @@ pub const Call = struct {
     return res;
   }
 
-  fn wrapper(vm: *VM, f: V, a: []const V) V {
+  pub fn wrapper(vm: *VM, f: V, a: []const V) V {
     var fc = Call{ .vm = vm };
     return fc.apply(f, a, false) catch V{ .err = .memory };
   }
 };
 
+/// Reconstruct a callable V from a global function index. Used when a .derived
+/// Fn is dispatched and we need to hand the base to the adverb implementation.
+fn reconstructBaseV(global_idx: u32, base_arity: u8) V {
+  if (opmod.isLambdaIdx(global_idx)) {
+    // Note: caller provides the cached arity since lambda table lookup
+    // isn't available here without VM access.
+    const lambda_idx = opmod.lambdaIdxOf(global_idx);
+    return .{ .func = Fn.lambda(lambda_idx, base_arity) };
+  }
+  // Builtin: construct a Fn.callable directly with the global idx.
+  return .{ .func = .{
+    .kind = @intFromEnum(FnKind.callable),
+    .arity = @intCast(opmod.arityOfBuiltin(global_idx)),
+    .idx = @intCast(global_idx),
+    .extra = 0,
+  } };
+}
+
 pub fn applyDerivedBuiltin(vm: *VM, ref: Fn, args: []const V) V {
-  const base = V{ .func = if (ref.arity == 1) Fn.monad(ref.getOp1()) else Fn.dyad(ref.getOp2()) };
-  return derived(vm, base, ref.getAdverb(), args, Call.wrapper);
+  const base = reconstructBaseV(ref.idx, ref.arity);
+  return derived_mod.derived(vm, base, ref.getAdverb(), args, Call.wrapper);
 }
 
 fn makePartialFromArgs(vm: *VM, ref: Fn, args: []const V) !V {

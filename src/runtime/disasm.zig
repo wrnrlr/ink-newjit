@@ -232,12 +232,37 @@ fn fmtValue(v: V, symbols: *const Pool, out: *std.Io.Writer) anyerror!void {
     },
 
     .func => |f| switch (f.getKind()) {
-      .builtin         => try out.print("{s}", .{if (f.arity == 1) f.getOp1().toString() else f.getOp2().toString()}),
-      .lambda          => try out.print("λ{d}", .{f.idx}),
-      .adverb          => try out.print("{s}", .{@tagName(f.getAdverb())}),
-      .derived_builtin => try out.print("{s}{s}", .{ if (f.arity == 1) f.getOp1().toString() else f.getOp2().toString(), @tagName(f.getAdverb()) }),
-      .derived_lambda  => try out.print("λ{d}{s}", .{ f.idx, @tagName(f.getAdverb()) }),
-      .derived_table   => try out.print("derived[{d}]", .{f.idx}),
+      .callable => {
+        const idx = f.idx;
+        if (opmod.isLambdaIdx(idx)) {
+          try out.print("λ{d}", .{opmod.lambdaIdxOf(idx)});
+        } else if (opmod.isOp1Idx(idx)) {
+          try out.print("{s}", .{opmod.op1OfIdx(idx).toString()});
+        } else if (opmod.isOp2Idx(idx)) {
+          try out.print("{s}", .{opmod.op2OfIdx(idx).toString()});
+        } else if (opmod.isAdverb2Idx(idx)) {
+          try out.print("{s}", .{@tagName(opmod.adverb2OfIdx(idx))});
+        } else if (opmod.isOp3Idx(idx)) {
+          try out.print("{s}", .{opmod.op3OfIdx(idx).toString()});
+        } else if (opmod.isAdverb3Idx(idx)) {
+          try out.print("{s}", .{@tagName(opmod.adverb3OfIdx(idx))});
+        } else if (opmod.isOp4Idx(idx)) {
+          try out.print("{s}", .{opmod.op4OfIdx(idx).toString()});
+        }
+      },
+      .derived => {
+        const base_idx = f.idx;
+        if (opmod.isLambdaIdx(base_idx)) {
+          try out.print("λ{d}{s}", .{ opmod.lambdaIdxOf(base_idx), @tagName(f.getAdverb()) });
+        } else if (opmod.isOp1Idx(base_idx)) {
+          try out.print("{s}{s}", .{ opmod.op1OfIdx(base_idx).toString(), @tagName(f.getAdverb()) });
+        } else if (opmod.isOp2Idx(base_idx)) {
+          try out.print("{s}{s}", .{ opmod.op2OfIdx(base_idx).toString(), @tagName(f.getAdverb()) });
+        } else {
+          try out.print("[builtin:{d}]{s}", .{ base_idx, @tagName(f.getAdverb()) });
+        }
+      },
+      .derived_data => try out.print("derived[{d}]{s}", .{ f.idx, @tagName(f.getAdverb()) }),
       .train => {
         var buf: [7]u8 = undefined;
         try out.print("train({s})", .{f.trainOps(&buf)});

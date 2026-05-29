@@ -2,10 +2,18 @@ const std = @import("std");
 const util = @import("../../util.zig");
 const Alloc = std.mem.Allocator;
 const VM = @import("../../runtime/vm.zig").VM;
-const Op2 = @import("../../noun/operator.zig").Op2;
+const opmod = @import("../../noun/operator.zig");
+const Op2 = opmod.Op2;
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
+
+inline fn fnIsBuiltinDyad(f: opmod.Fn) bool {
+  return f.getKind() == .callable and opmod.isOp2Idx(f.idx);
+}
+inline fn fnIsLambda(f: opmod.Fn) bool {
+  return f.getKind() == .callable and opmod.isLambdaIdx(f.idx);
+}
 
 // CPU fast path: builtin reduce on a typed CPU array.
 // Avoids per-element boxing and function-pointer overhead.
@@ -95,7 +103,7 @@ inline fn cpuReduce(op: Op2, x: V) ?V {
 
 pub fn fold(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
   // CPU fast path: no init, builtin dyad, typed array — bypass per-element dispatch.
-  if (init == null and base.tag() == .func and base.func.getKind() == .builtin and base.func.arity == 2) {
+  if (init == null and base.tag() == .func and fnIsBuiltinDyad(base.func)) {
     if (cpuReduce(base.func.getOp2(), x)) |v| return v;
   }
 
@@ -108,7 +116,7 @@ pub fn fold(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
 
   const start: usize = if (init != null) 0 else 1;
 
-  if (base.tag() == .func and base.func.getKind() == .lambda) {
+  if (base.tag() == .func and fnIsLambda(base.func)) {
     const ref = base.func;
     // Move semantics: transfer ownership of accum and item into the lambda's
     // locals. Inside the body, accum has rc==1 so in-place mutation kernels
