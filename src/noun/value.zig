@@ -227,4 +227,3 @@ test "ref counting" {
   try std.testing.expectEqual(@as(usize, 1), V1.rc());
   V1.deinit(alloc);
 }
-
