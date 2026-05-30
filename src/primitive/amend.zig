@@ -80,7 +80,7 @@ fn drill(vm: *VM, target: V, path: V, path_idx: usize, func: V, val: V) anyerror
 
     var fc = Call{ .vm = vm };
     const f_args = if (val.tag() == .blank) &[_]V{target} else &[_]V{target, val};
-    const result = try fc.apply(func, f_args, false);
+    const result = fc.apply(func, f_args, false);
     target.deinit(vm.alloc);
     return result;
   }
@@ -149,7 +149,7 @@ fn applyAt(vm: *VM, target: *V, key: V, func: V, val: V) !void {
 
   var fc = Call{ .vm = vm };
   const f_args = if (val.tag() == .blank) &[_]V{current} else &[_]V{current, val};
-  const result = try fc.apply(func, f_args, false);
+  const result = fc.apply(func, f_args, false);
   val.deinit(vm.alloc);
   try setAt(vm, target, key, result);
 }

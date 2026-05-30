@@ -172,8 +172,7 @@ pub const VM = struct {
 
   fn executeCall(vm: *VM, func: V, incoming: []const V, mode: call.CallMode) !void {
     var fc = call.Call{ .vm = vm };
-    const res = try fc.apply(func, incoming, mode == .bracket);
-    try vm.push(res);
+    try vm.push(fc.apply(func, incoming, mode == .bracket));
   }
 
   fn cleanStack(vm: *VM, res_slot:usize) V {
@@ -540,8 +539,8 @@ pub const VM = struct {
     const op: Op3 = @enumFromInt(vm.readByte());
     const start = vm.stack_len - 3;
     const args = vm.stack[start..vm.stack_len];
-    if (try maybePartialApplyN(vm, Fn.triad(op), args, 3)) return;
-    const res = try dispatch.dispatch3(vm, op, args[0], args[1], args[2]);
+    const res = if (hasBlank(args)) call.makePartialFromArgs(vm, Fn.triad(op), args)
+      else dispatch.dispatch3(vm, op, args[0], args[1], args[2]);
     for (args) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     try vm.push(res);
@@ -551,29 +550,11 @@ pub const VM = struct {
     const op: Op4 = @enumFromInt(vm.readByte());
     const start = vm.stack_len - 4;
     const args = vm.stack[start..vm.stack_len];
-    if (try maybePartialApplyN(vm, Fn.tetrad(op), args, 4)) return;
-    const res = try dispatch.dispatch4(vm, op, args[0], args[1], args[2], args[3]);
+    const res = if (hasBlank(args)) call.makePartialFromArgs(vm, Fn.tetrad(op), args)
+      else dispatch.dispatch4(vm, op, args[0], args[1], args[2], args[3]);
     for (args) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     try vm.push(res);
-  }
-
-  fn maybePartialApplyN(vm: *VM, ref: Fn, args: []V, arity: u8) !bool {
-    var has_blank = false;
-    for (args) |a| if (a == .blank) { has_blank = true; break; };
-    if (!has_blank) return false;
-    var pa: [8]V = .{.blank} ** 8;
-    var fill: u8 = 0;
-    for (args, 0..) |a, i| {
-      if (a != .blank) { pa[i] = a.ref(); fill |= @as(u8, 1) << @intCast(i); }
-    }
-    const p = try vm.partial_pool.create(vm.alloc);
-    p.* = .{ .pool = &vm.partial_pool, .rc = 1, .fill = fill, .arity = arity, ._pad = 0, .ref = ref, .args = pa };
-    const start = vm.stack_len - args.len;
-    for (args) |*v| v.deinit(vm.alloc);
-    vm.stack_len = start;
-    try vm.push(.{ .partial = p });
-    return true;
   }
   
   fn doMakePartial(vm: *VM) !void {
@@ -780,6 +761,11 @@ pub const VM = struct {
 
   fn peek(vm: *VM, distance: usize) V { return vm.stack[vm.stack_len - 1 - distance]; }
 };
+
+fn hasBlank(vals:[]V) bool {
+   for (vals) |a| if (a == .blank) return true;
+   return false;
+}
 
 fn opNop(_: *VM) !void {}
 fn opGap(vm: *VM) !void { try vm.push(.blank); }

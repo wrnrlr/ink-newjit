@@ -51,7 +51,7 @@ pub const Apply = makeApply1();
 
 fn applyFnFn(vm: *VM, x: V, y: V) V {
   var fc = Call{ .vm = vm };
-  return fc.apply(x, &.{y}, false) catch V{ .err = .memory };
+  return fc.apply(x, &.{y}, false);
 }
 
 fn applySymFn(vm: *VM, x: V, y: V) V {
