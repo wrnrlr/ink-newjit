@@ -26,15 +26,10 @@ const ExtRegistry = @import("../noun/plugin.zig").ExtRegistry;
 const Parser = @import("../parser/ast.zig").Parser;
 const enlist = @import("../primitive/verb/enlist.zig").enlist;
 const dict = @import("../primitive/verb/pair.zig").dict;
-const amend = @import("../primitive/amend.zig");
 const promote = @import("../primitive/promote.zig").promote;
 const dispatch = @import("../primitive/dispatch.zig");
 const MockWriter = @import("../util.zig").MockWriter;
 const SlabAlloc = @import("../noun/slab.zig").SlabAlloc;
-// Force-link the CPS helpers so their exported symbols survive ReleaseFast gc-sections.
-// comptime {
-//   _ = @import("jit/cps_helpers.zig").force_keep;
-// }
 
 const STACK_MAX = 2048;
 const FRAMES_MAX = 64;
@@ -181,21 +176,19 @@ pub const VM = struct {
     try vm.push(res);
   }
 
+  fn cleanStack(vm: *VM, res_slot:usize) V {
+    for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
+    vm.stack_len = res_slot;
+    return V{ .err = .memory };
+  }
+
   // Direct lambda call without wrapper→apply overhead. Used by hot adverb loops.
   pub fn callLambdaAndRun(vm: *VM, ref: Fn, args: []const V) V {
     const prev_frames = vm.frames_len;
     const res_slot = vm.stack_len;
     vm.push(.blank) catch return V{ .err = .memory };
-    for (args) |arg| vm.push(arg.ref()) catch {
-      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
-      vm.stack_len = res_slot;
-      return V{ .err = .memory };
-    };
-    vm.callLambda(ref, args.len, res_slot) catch {
-      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
-      vm.stack_len = res_slot;
-      return V{ .err = .memory };
-    };
+    for (args) |arg| vm.push(arg.ref()) catch return vm.cleanStack(res_slot);
+    vm.callLambda(ref, args.len, res_slot) catch return vm.cleanStack(res_slot);
     vm.runUntil(prev_frames) catch {};
     return vm.pop();
   }
@@ -209,16 +202,8 @@ pub const VM = struct {
     const prev_frames = vm.frames_len;
     const res_slot = vm.stack_len;
     vm.push(.blank) catch return V{ .err = .memory };
-    for (args) |arg| vm.push(arg) catch {
-      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
-      vm.stack_len = res_slot;
-      return V{ .err = .memory };
-    };
-    vm.callLambda(ref, args.len, res_slot) catch {
-      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
-      vm.stack_len = res_slot;
-      return V{ .err = .memory };
-    };
+    for (args) |arg| vm.push(arg) catch return vm.cleanStack(res_slot);
+    vm.callLambda(ref, args.len, res_slot) catch return vm.cleanStack(res_slot);
     vm.runUntil(prev_frames) catch {};
     return vm.pop();
   }
@@ -308,22 +293,10 @@ pub const VM = struct {
           defer v.deinit(vm.alloc);
           if (v.isTrue()) frame.ip += offset;
         },
-        .Apply1 => {
-          const op: Op1 = @enumFromInt(code[frame.ip]);
-          frame.ip += 1;
-          const a = vm.pop();
-          defer a.deinit(vm.alloc);
-          try vm.push(dispatch.dispatch1(vm, op, a));
-        },
-        .Apply2 => {
-          const op: Op2 = @enumFromInt(code[frame.ip]);
-          frame.ip += 1;
-          const b_val = vm.pop();
-          defer b_val.deinit(vm.alloc);
-          const a_val = vm.pop();
-          defer a_val.deinit(vm.alloc);
-          try vm.push(dispatch.dispatch2(vm, op, a_val, b_val));
-        },
+        .Apply1 => try VM.doApply1(vm),
+        .Apply2 => try VM.doApply2(vm),
+        .Apply3 => try VM.doApply3(vm),
+        .Apply4 => try VM.doApply4(vm),
         .Return => try vm.doReturn(),
         .Call => try vm.doCallWithMode(.sync),
         .TailCall => try vm.doTailCall(),
@@ -331,8 +304,6 @@ pub const VM = struct {
         .MakeList => try vm.doMakeList(),
         .MakePartial => try vm.doMakePartial(),
         .Derive => try vm.doDerive(),
-        .Apply3 => try vm.doApply3(),
-        .Apply4 => try vm.doApply4(),
         .MakeDict => try vm.doMakeDict(),
         .MakeTable => try vm.doMakeTable(),
         .Command => try vm.doCommand(),
@@ -570,10 +541,7 @@ pub const VM = struct {
     const start = vm.stack_len - 3;
     const args = vm.stack[start..vm.stack_len];
     if (try maybePartialApplyN(vm, Fn.triad(op), args, 3)) return;
-    const res = switch (op) {
-      .amend3 => try amend.amend(vm, args),
-      .drill3 => try amend.dmend(vm, args),
-    };
+    const res = try dispatch.dispatch3(vm, op, args[0], args[1], args[2]);
     for (args) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     try vm.push(res);
@@ -584,33 +552,23 @@ pub const VM = struct {
     const start = vm.stack_len - 4;
     const args = vm.stack[start..vm.stack_len];
     if (try maybePartialApplyN(vm, Fn.tetrad(op), args, 4)) return;
-    const res = switch (op) {
-      .amend4 => try amend.amend(vm, args),
-      .drill4 => try amend.dmend(vm, args),
-    };
+    const res = try dispatch.dispatch4(vm, op, args[0], args[1], args[2], args[3]);
     for (args) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     try vm.push(res);
   }
 
-  // If `args` contains any blank slot, construct a Partial of `ref` filling
-  // the non-blank positions, push it onto the stack, and return true (caller
-  // skips its dispatch). Returns false when there are no blanks.
   fn maybePartialApplyN(vm: *VM, ref: Fn, args: []V, arity: u8) !bool {
     var has_blank = false;
     for (args) |a| if (a == .blank) { has_blank = true; break; };
     if (!has_blank) return false;
-
     var pa: [8]V = .{.blank} ** 8;
     var fill: u8 = 0;
     for (args, 0..) |a, i| {
       if (a != .blank) { pa[i] = a.ref(); fill |= @as(u8, 1) << @intCast(i); }
     }
     const p = try vm.partial_pool.create(vm.alloc);
-    p.* = .{
-      .pool = &vm.partial_pool, .rc = 1, .fill = fill,
-      .arity = arity, ._pad = 0, .ref = ref, .args = pa,
-    };
+    p.* = .{ .pool = &vm.partial_pool, .rc = 1, .fill = fill, .arity = arity, ._pad = 0, .ref = ref, .args = pa };
     const start = vm.stack_len - args.len;
     for (args) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
