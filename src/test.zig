@@ -186,9 +186,11 @@ test "ordering" {
 test "amend" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("@[10 20 30 40; 1; :; 99]", "10 99 30 40");
+  try t.check("@[10 20 30 40; 1; :; 7.0]", "!type");
   try t.check("@[100 103 110; 0 2; +; 5]", "105 103 115");
   try t.check("@[1 2 3 4; 0 2; :; 8 9]", "8 2 9 4");
   try t.check("@[1 2 3 4; 1 2; {x*2}]", "1 4 6 4");
+  try t.check("@[1; 0; :; 5 ]", "!type");
   try t.check("d:[a:10;b:20]; @[d; `a; +; 5]", "[a:15;b:20]");
 }
 test "drill" {

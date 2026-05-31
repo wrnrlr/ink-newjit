@@ -163,10 +163,10 @@ pub const Fn = packed struct(u64) {
   fn callable(idx: u32, fn_arity: u8) Fn {
     return .{ .kind = .callable, .arity = @intCast(fn_arity), .idx = @intCast(idx), .extra = 0 };
   }
-  pub fn monad(op: Op1)   Fn { return callable(idxForOp1(op),   1); }
-  pub fn dyad(op: Op2)    Fn { return callable(idxForOp2(op),   2); }
-  pub fn triad(op: Op3)   Fn { return callable(idxForOp3(op),   3); }
-  pub fn tetrad(op: Op4)  Fn { return callable(idxForOp4(op),   4); }
+  pub fn monad(op: Op1)  Fn { return callable(idxForOp1(op), 1); }
+  pub fn dyad(op: Op2)   Fn { return callable(idxForOp2(op), 2); }
+  pub fn triad(op: Op3)  Fn { return callable(idxForOp3(op), 3); }
+  pub fn tetrad(op: Op4) Fn { return callable(idxForOp4(op), 4); }
   /// Standalone adverb. Arity is 3 for digram-only adverbs (`/:`, `\:`),
   /// otherwise 2. The dispatch handles polymorphism (calling a 2-arity adverb
   /// with 3 args upgrades to digram form).

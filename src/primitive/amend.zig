@@ -18,7 +18,7 @@ const Call = @import("../runtime/call.zig").Call;
 //   _I_I_f_i: util.TetradFn,
 // };
 
-pub fn amend(vm: *VM, args: []V) anyerror!V {
+pub fn amend(vm: *VM, args: []V) !V {
   if (args.len < 3) return V{ .err = .rank };
 
   var target = args[0].ref();
@@ -55,7 +55,7 @@ pub fn amend(vm: *VM, args: []V) anyerror!V {
   return target;
 }
 
-pub fn dmend(vm: *VM, args: []V) anyerror!V {
+pub fn dmend(vm: *VM, args: []V) !V {
   if (args.len < 2) return V{ .err = .rank };
 
   const target = args[0].ref();
