@@ -22,16 +22,27 @@ pub fn amend(vm: *VM, args: []V) !V {
   if (args.len < 3) return V{ .err = .rank };
 
   var target = args[0].ref();
-  errdefer target.deinit(vm.alloc);
+
+  const target_tag = target.tag();
+  if (!target_tag.isVec() and target_tag != .L and !target.isDict()) {
+    target.deinit(vm.alloc);
+    return V{ .err = .@"type" };
+  }
 
   const indices = args[1];
   const func = args[2];
   const val = if (args.len > 3) args[3] else .blank;
 
-  try target.cow(vm.alloc);
+  target.cow(vm.alloc) catch {
+    target.deinit(vm.alloc);
+    return V{ .err = .memory };
+  };
 
   if (indices.isAtom()) {
-    try applyAt(vm, &target, indices, func, val.ref());
+    applyAt(vm, &target, indices, func, val.ref()) catch |e| {
+      target.deinit(vm.alloc);
+      return if (e == error.TypeError) V{ .err = .@"type" } else V{ .err = .memory };
+    };
   } else if (indices.tag().isVec()) {
     const ilen = indices.len();
     const vlen = if (val.tag() == .blank) 0 else val.len();
@@ -45,10 +56,14 @@ pub fn amend(vm: *VM, args: []V) !V {
         val.at(i)
       else
         val.ref();
-      
-      try applyAt(vm, &target, idx_v, func, item_val);
+
+      applyAt(vm, &target, idx_v, func, item_val) catch |e| {
+        target.deinit(vm.alloc);
+        return if (e == error.TypeError) V{ .err = .@"type" } else V{ .err = .memory };
+      };
     }
   } else {
+    target.deinit(vm.alloc);
     return V{ .err = .@"type" };
   }
 
@@ -127,7 +142,7 @@ fn applyAt(vm: *VM, target: *V, key: V, func: V, val: V) !void {
   // val is owned by this function
   errdefer val.deinit(vm.alloc);
 
-  if (func.tag() == .func and func.func.kind == .callable and func.func.isBuiltinFn() and opmod.isOp2Idx(func.func.idx) and func.func.getOp2() == .@":") {
+  if (func.tag() == .func and func.func.isBuiltinFn() and opmod.isOp2Idx(func.func.idx) and func.func.getOp2() == .@":") {
     try setAt(vm, target, key, val);
     return;
   }
@@ -221,7 +236,7 @@ fn setPositional(alloc: Alloc, target: *V, i: usize, val: V) !void {
   }
 
   if (needs_promotion) {
-    try promoteToGeneralList(alloc, target);
+    return error.TypeError;
   }
 
   switch (target.*) {

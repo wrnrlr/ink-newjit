@@ -21,18 +21,25 @@ pub fn dispatch2(vm: *VM, op: Op2, x: V, y: V) V {
   return verbs.dyad_table[key](vm, x, y);
 }
 
+fn amendErr(e: anyerror) V {
+  return switch (e) {
+    error.TypeError => .{ .err = .@"type" },
+    else => .{ .err = .memory },
+  };
+}
+
 pub fn dispatch3(vm: *VM, op: Op3, x: V, y: V, z: V) V {
   var args = [_]V{ x, y, z };
   return switch (op) {
-    .amend3 => amend.amend(vm, &args) catch V{ .err = .memory },
-    .drill3 => amend.dmend(vm, &args) catch V{ .err = .memory },
+    .amend3 => amend.amend(vm, &args) catch |e| amendErr(e),
+    .drill3 => amend.dmend(vm, &args) catch |e| amendErr(e),
   };
 }
 
 pub fn dispatch4(vm: *VM, op: Op4, x: V, y: V, z: V, w: V) V {
   var args = [_]V{ x, y, z, w };
   return switch (op) {
-    .amend4 => amend.amend(vm, &args) catch V{ .err = .memory },
-    .drill4 => amend.dmend(vm, &args) catch V{ .err = .memory },
+    .amend4 => amend.amend(vm, &args) catch |e| amendErr(e),
+    .drill4 => amend.dmend(vm, &args) catch |e| amendErr(e),
   };
 }

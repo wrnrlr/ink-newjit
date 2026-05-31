@@ -839,6 +839,23 @@ test "do not reuse the left argument" {
   try t.check("a: 1 2 3; b: a+1; a", "1 2 3");
 }
 
+test "identity" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check(":2.3", "2.4");
+}
+
+test "right" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("1 2:4 5", "4 5");
+}
+
+test "Dihedral group of degree 4" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("g:(:; |:; +:; |+:; +|+:; |+|:; +|+|:)", "");
+  try t.check("M: 2 2#!4", "");
+  try t.check("g@\\:M", "((0 1;2 3);(2 3;0 1);(0 2;1 3);(1 3;0 2);(1 0;3 2);(3 1;2 0);(3 2;1 0))");
+}
+
 test "csv parsing" {
   var t = try Tester.init(); defer t.deinit();
   // try t.check("`csv$\"name,age\nAlice,30\nBob,25\"", "[[]name:(\"Alice\";\"Bob\");age:30 25]");

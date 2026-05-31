@@ -16,6 +16,13 @@ const derived_mod = @import("../primitive/derived.zig");
 const amend_mod = @import("../primitive/amend.zig");
 const syms = @import("syms.zig");
 
+fn amendErr(e: anyerror) V {
+  return switch (e) {
+    error.TypeError => .{ .err = .@"type" },
+    else => .{ .err = .memory },
+  };
+}
+
 pub const CallMode = enum { sync, bracket };
 
 pub const Call = struct {
@@ -105,8 +112,8 @@ pub const Call = struct {
       var buf = [_]V{ args[0].ref(), args[1].ref(), args[2].ref() };
       defer for (&buf) |*v| v.deinit(vm.alloc);
       return switch (opmod.op3OfIdx(idx)) {
-        .amend3 => amend_mod.amend(vm, &buf) catch V{ .err = .memory },
-        .drill3 => amend_mod.dmend(vm, &buf) catch V{ .err = .memory },
+        .amend3 => amend_mod.amend(vm, &buf) catch |e| amendErr(e),
+        .drill3 => amend_mod.dmend(vm, &buf) catch |e| amendErr(e),
       };
     }
 
@@ -115,8 +122,8 @@ pub const Call = struct {
       var buf = [_]V{ args[0].ref(), args[1].ref(), args[2].ref(), args[3].ref() };
       defer for (&buf) |*v| v.deinit(vm.alloc);
       return switch (opmod.op4OfIdx(idx)) {
-        .amend4 => amend_mod.amend(vm, &buf) catch V{ .err = .memory },
-        .drill4 => amend_mod.dmend(vm, &buf) catch V{ .err = .memory },
+        .amend4 => amend_mod.amend(vm, &buf) catch |e| amendErr(e),
+        .drill4 => amend_mod.dmend(vm, &buf) catch |e| amendErr(e),
       };
     }
 

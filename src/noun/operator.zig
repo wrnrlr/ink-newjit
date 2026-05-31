@@ -18,7 +18,7 @@ pub const Adverb = enum(u8) {
 pub const Op1 = enum(u8) {
   // symbol/glyph verbs
   @"%", @"!", @"&", @"+", @"*", @"|", @"<", @">", @"=", @"~",
-  @",", @"^", @"#", @"_", @"$", @"?", @"@", @"-", @".",
+  @",", @"^", @"#", @"_", @"$", @"?", @"@", @"-", @".", @":",
   // math keywords
   sqrt, sqr, exp, log, sin, cos, abs,
   // selection keywords
@@ -145,7 +145,7 @@ pub const Fn = packed struct(u64) {
   idx:   u24,
   extra: u32,
 
-  pub fn isCallable(self: Fn) bool { return self.getKind() == .callable; }
+  pub fn isCallable(self: Fn) bool { return self.kind == .callable; }
   pub fn isLambda(self: Fn) bool { return self.kind == .callable and isLambdaIdx(self.idx); }
   pub fn isBuiltinFn(self: Fn) bool { return self.kind == .callable and isBuiltinIdx(self.idx); }
 
@@ -237,7 +237,7 @@ test "Fn size and shapes" {
   try std.testing.expect(isOp3Idx(r4.idx) and r4.getOp3() == .amend3);
 
   const r5 = Fn.makeDerived(idxForOp2(.@"+"), 2, .@"/");
-  try std.testing.expect(r5.getKind() == .derived);
+  try std.testing.expect(r5.kind == .derived);
   try std.testing.expect(r5.getAdverb() == .@"/");
 
   try std.testing.expect(op2ToOp1[@intFromEnum(Op2.@"+")] == .@"+");

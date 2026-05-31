@@ -70,6 +70,7 @@ const Monads = struct {
   pub const @"$x"    = @import("format.zig").Format;
   pub const @"parse" = @import("parse.zig").Parse;
   pub const @"@x"    = @import("type.zig").Type;
+  pub const @":x"    = @import("right.zig").Identity;
 
   pub const @"=u"  = @import("unitary.zig").Unitary;
   pub const @"?X"  = @import("distinct.zig").Distinct;
@@ -143,6 +144,7 @@ const Dyads = struct {
   pub const @"x1:x" = io.WriteBytes;
   pub const @"x2:x" = io.WriteData;
 
+  pub const @"x:y"    = @import("right.zig").Right;
   pub const @"9:x"    = @import("graphics.zig").Draw;
   pub const @"x9:x"  = @import("graphics.zig").DrawDyad;
   pub const @"x exec" = @import("exec.zig").ExecDyad;

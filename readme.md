@@ -10,3 +10,9 @@
 
 - [ngn/k jit](https://codeberg.org/fiuzeri/k/src/commit/bac6dc52fa7ed56a4ab329b5cbb7fdafe0115814/b.c)
 - [Variadic functions in Q](https://bodonferenc.github.io/2026/05/13/Variadic-Functions.html)
+
+```
+ M:2 2#!4
+ g:(::; |:; +:; |+:; +|:; +|+:; |+|:; +|+|:)
+ g@\:M
+```

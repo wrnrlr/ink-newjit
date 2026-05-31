@@ -88,7 +88,10 @@ p: +[;3]
 
 #### Global Assign `` :: ``
 
-### Monadic Operators `+-*!#@&|<>=?,^~$.`
+### Monadic Operators `:+-*!#@&|<>=?,^~$.`
+
+#### Identity `:x`
+Return right hand side
 
 #### Flip `+x`
 Transpose (flip rows/columns).
@@ -160,6 +163,9 @@ Returns the string representation of x.
 - `abs n`
 
 ### Dyadic Operators
+
+#### Right `x:y`
+Return right hand side
 
 #### Add `x+y`
 Addition.

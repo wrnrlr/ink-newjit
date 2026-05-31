@@ -318,10 +318,10 @@ pub export fn cps_apply3(vm: *VM, op: u32) callconv(.c) void {
     const res = switch (op3) {
         .amend3 => amend_mod.amend(vm, args),
         .drill3 => amend_mod.dmend(vm, args),
-    } catch {
+    } catch |e| {
         for (args) |*v| v.deinit(vm.alloc);
         vm.stack_len = start;
-        pushErr(vm, .memory);
+        pushErr(vm, if (e == error.TypeError) .@"type" else .memory);
         return;
     };
     for (args) |*v| v.deinit(vm.alloc);
@@ -336,10 +336,10 @@ pub export fn cps_apply4(vm: *VM, op: u32) callconv(.c) void {
     const res = switch (op4) {
         .amend4 => amend_mod.amend(vm, args),
         .drill4 => amend_mod.dmend(vm, args),
-    } catch {
+    } catch |e| {
         for (args) |*v| v.deinit(vm.alloc);
         vm.stack_len = start;
-        pushErr(vm, .memory);
+        pushErr(vm, if (e == error.TypeError) .@"type" else .memory);
         return;
     };
     for (args) |*v| v.deinit(vm.alloc);

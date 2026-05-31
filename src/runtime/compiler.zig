@@ -310,6 +310,10 @@ pub const Compiler = struct {
         }
         return try self.emitOpWithArg(.AssignGlobal, gop.value_ptr.*, &.{rhs_id});
       }
+    } else if (b.v.* == .literal and b.v.literal != .@"var") {
+      // Non-variable noun on LHS of ':' — dyadic right verb: x:y = y.
+      // b.v is a non-assignable expression; just return the already-compiled rhs.
+      return rhs_id;
     } else if (b.v.* == .list) {
       const list = b.v.list;
       const seq = list.seq orelse return ir.NO_VALUE;
