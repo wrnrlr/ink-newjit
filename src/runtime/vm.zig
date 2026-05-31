@@ -402,12 +402,19 @@ pub const VM = struct {
     const offset = vm.read16();
     vm.currentFrame().ip += offset;
   }
-  
-  fn doJumpWhen(vm: *VM, comptime cond: bool) !void {
+
+  fn doJumpTrue(vm: *VM) !void {
     const offset = vm.read16();
     const v = vm.pop();
     defer v.deinit(vm.alloc);
-    if (v.isTrue()==cond) vm.currentFrame().ip += offset;
+    if (v.isTrue()) vm.currentFrame().ip += offset;
+  }
+
+  fn doJumpFalse(vm: *VM) !void {
+    const offset = vm.read16();
+    const v = vm.pop();
+    defer v.deinit(vm.alloc);
+    if (!v.isTrue()) vm.currentFrame().ip += offset;
   }
 
   fn doReturn(vm: *VM) !void {
@@ -439,7 +446,7 @@ pub const VM = struct {
 
     if (func_val == .func) {
       const ref = func_val.func;
-      const kind = ref.getKind();
+      const kind = ref.kind;
       // Tail-call lambda: reuse current frame instead of pushing a new one.
       if (kind == .callable and opmod.isLambdaIdx(ref.idx)) {
         const lambda_idx = opmod.lambdaIdxOf(ref.idx);
@@ -616,7 +623,7 @@ pub const VM = struct {
     const derived: Fn = if (base_v == .func) blk: {
       const ref = base_v.func;
       base_v.deinit(vm.alloc);
-      break :blk switch (ref.getKind()) {
+      break :blk switch (ref.kind) {
         // Any callable (builtin verb/adverb or lambda) uses its global idx.
         .callable => Fn.makeDerived(ref.idx, ref.arity, adv),
         // Trains as base aren't directly representable as a single global idx;
@@ -771,8 +778,6 @@ fn opNop(_: *VM) !void {}
 fn opGap(vm: *VM) !void { try vm.push(.blank); }
 fn opDrop(vm: *VM) !void { vm.pop().deinit(vm.alloc); }
 fn opDup(vm: *VM) !void { try vm.push(vm.peek(0).ref()); }
-fn opJumpFalse(vm: *VM) !void { try vm.doJumpWhen(false); }
-fn opJumpTrue(vm: *VM) !void  { try vm.doJumpWhen(true); }
 
 const OpHandler = *const fn(*VM) anyerror!void;
 const op_table: [OpCode.COUNT]OpHandler = build: {
@@ -791,8 +796,8 @@ const op_table: [OpCode.COUNT]OpHandler = build: {
   t[@intFromEnum(OpCode.ListAssignGlobal)] = &VM.doListAssignGlobal;
   t[@intFromEnum(OpCode.ListAssignLocal)]  = &VM.doListAssignLocal;
   t[@intFromEnum(OpCode.Jump)]             = &VM.doJump;
-  t[@intFromEnum(OpCode.JumpFalse)]        = &opJumpFalse;
-  t[@intFromEnum(OpCode.JumpTrue)]         = &opJumpTrue;
+  t[@intFromEnum(OpCode.JumpFalse)]        = &VM.doJumpFalse;
+  t[@intFromEnum(OpCode.JumpTrue)]         = &VM.doJumpTrue;
   t[@intFromEnum(OpCode.Apply1)]           = &VM.doApply1;
   t[@intFromEnum(OpCode.Apply2)]           = &VM.doApply2;
   t[@intFromEnum(OpCode.Return)]           = &VM.doReturn;

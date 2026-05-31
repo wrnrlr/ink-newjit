@@ -42,7 +42,7 @@ pub const Call = struct {
       for (args) |a| if (a != .blank) { filled += 1; };
       has_gaps = filled < args.len;
     }
-    switch (ref.getKind()) {
+    switch (ref.kind) {
       .callable    => return self.applyCallable(ref, args, is_bracket, filled, has_gaps),
       .derived     => return self.applyDerivedFn(ref, args),
       .derived_data => {
@@ -181,7 +181,7 @@ fn reconstructBaseV(global_idx: u32, base_arity: u8) V {
   }
   // Builtin: construct a Fn.callable directly with the global idx.
   return .{ .func = .{
-    .kind = @intFromEnum(FnKind.callable),
+    .kind = FnKind.callable,
     .arity = @intCast(opmod.arityOfBuiltin(global_idx)),
     .idx = @intCast(global_idx),
     .extra = 0,

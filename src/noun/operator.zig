@@ -140,15 +140,14 @@ pub const op2ToOp1: [Op2.COUNT]?Op1 = blk: {
 pub const FnKind = enum(u4) { callable, derived, derived_data, train };
 
 pub const Fn = packed struct(u64) {
-  kind:  u4,
+  kind:  FnKind,
   arity: u4,    // cached; for builtins also derivable from arityOfIdx(idx)
   idx:   u24,
   extra: u32,
 
-  pub fn getKind(self: Fn) FnKind { return @enumFromInt(self.kind); }
   pub fn isCallable(self: Fn) bool { return self.getKind() == .callable; }
-  pub fn isLambda(self: Fn) bool { return self.kind == @intFromEnum(FnKind.callable) and isLambdaIdx(self.idx); }
-  pub fn isBuiltinFn(self: Fn) bool { return self.kind == @intFromEnum(FnKind.callable) and isBuiltinIdx(self.idx); }
+  pub fn isLambda(self: Fn) bool { return self.kind == .callable and isLambdaIdx(self.idx); }
+  pub fn isBuiltinFn(self: Fn) bool { return self.kind == .callable and isBuiltinIdx(self.idx); }
 
   pub fn getOp1(self: Fn) Op1       { return op1OfIdx(self.idx); }
   pub fn getOp2(self: Fn) Op2       { return op2OfIdx(self.idx); }
@@ -162,7 +161,7 @@ pub const Fn = packed struct(u64) {
   // ── Constructors ────────────────────────────────────────────────────────────
 
   fn callable(idx: u32, fn_arity: u8) Fn {
-    return .{ .kind = @intFromEnum(FnKind.callable), .arity = @intCast(fn_arity), .idx = @intCast(idx), .extra = 0 };
+    return .{ .kind = .callable, .arity = @intCast(fn_arity), .idx = @intCast(idx), .extra = 0 };
   }
   pub fn monad(op: Op1)   Fn { return callable(idxForOp1(op),   1); }
   pub fn dyad(op: Op2)    Fn { return callable(idxForOp2(op),   2); }
@@ -181,7 +180,7 @@ pub const Fn = packed struct(u64) {
 
   pub fn makeDerived(base_global_idx: u32, base_arity: u8, adv: Adverb) Fn {
     return .{
-      .kind = @intFromEnum(FnKind.derived),
+      .kind = .derived,
       .arity = @intCast(base_arity),
       .idx = @intCast(base_global_idx),
       .extra = @intFromEnum(adv),
@@ -189,7 +188,7 @@ pub const Fn = packed struct(u64) {
   }
   pub fn makeDerivedTable(tbl_idx: u24, adv: Adverb) Fn {
     return .{
-      .kind = @intFromEnum(FnKind.derived_data),
+      .kind = .derived_data,
       .arity = 1,
       .idx = tbl_idx,
       .extra = @intFromEnum(adv),
@@ -197,7 +196,7 @@ pub const Fn = packed struct(u64) {
   }
 
   pub fn makeTrain(ops: []const u8) Fn {
-    var r = Fn{ .kind = @intFromEnum(FnKind.train), .arity = @intCast(ops.len), .idx = 0, .extra = 0 };
+    var r = Fn{ .kind = .train, .arity = @intCast(ops.len), .idx = 0, .extra = 0 };
     for (ops, 0..) |op, i| {
       if (i < 3) r.idx |= @as(u24, op) << @intCast(i * 8)
       else r.extra |= @as(u32, op) << @intCast((i - 3) * 8);
@@ -214,7 +213,7 @@ pub const Fn = packed struct(u64) {
   }
 
   pub fn getRealArity(self: Fn) u8 {
-    return if (self.getKind() == .train) 1 else self.arity;
+    return if (self.kind == .train) 1 else self.arity;
   }
 };
 
@@ -222,7 +221,7 @@ test "Fn size and shapes" {
   try std.testing.expect(@sizeOf(Fn) == 8);
 
   const r1 = Fn.dyad(.@"+");
-  try std.testing.expect(r1.isCallable() and isOp2Idx(r1.idx));
+  try std.testing.expect(r1.kind == .callable and isOp2Idx(r1.idx));
   try std.testing.expect(r1.getOp2() == .@"+");
 
   const r2 = Fn.monad(.@"*");

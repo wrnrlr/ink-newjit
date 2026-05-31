@@ -149,7 +149,7 @@ pub const TerseFormatter = struct {
       .partial => |p| {
         // Compact display for operator projections: 1+ or +1
         const opmod = @import("./operator.zig");
-        const is_builtin = p.ref.getKind() == .callable and opmod.isBuiltinIdx(p.ref.idx) and p.ref.arity == 2;
+        const is_builtin = p.ref.kind == .callable and opmod.isBuiltinIdx(p.ref.idx) and p.ref.arity == 2;
         if (is_builtin and p.arity == 2) {
           const arg0_filled = p.fill & 1 != 0;
           const arg1_filled = p.fill & 2 != 0;
@@ -188,7 +188,7 @@ pub const TerseFormatter = struct {
 
   fn formatFn(self: *Self, ref: Fn, w: anytype) anyerror!void {
     const opmod = @import("./operator.zig");
-    switch (ref.getKind()) {
+    switch (ref.kind) {
       .callable => {
         const idx = ref.idx;
         if (opmod.isLambdaIdx(idx)) {

@@ -2,6 +2,7 @@ const std = @import("std");
 const Alloc = std.mem.Allocator;
 const util = @import("../util.zig");
 const promote = @import("promote.zig").promote;
+const opmod = @import("../noun/operator.zig");
 const V = @import("../noun/value.zig").V;
 const N = @import("../noun/array.zig").N;
 const VM = @import("../runtime/vm.zig").VM;
@@ -73,7 +74,7 @@ fn drill(vm: *VM, target: V, path: V, path_idx: usize, func: V, val: V) anyerror
     if (func.tag() == .blank) return target;
     
     // Identity assignment optimization at leaf
-    if (func.tag() == .func and func.func.getKind() == .callable and func.func.isBuiltinFn() and @import("../noun/operator.zig").isOp2Idx(func.func.idx) and func.func.getOp2() == .@":") {
+    if (func.tag() == .func and func.func.kind == .callable and func.func.isBuiltinFn() and opmod.isOp2Idx(func.func.idx) and func.func.getOp2() == .@":") {
       target.deinit(vm.alloc);
       return val.ref();
     }
@@ -126,7 +127,7 @@ fn applyAt(vm: *VM, target: *V, key: V, func: V, val: V) !void {
   // val is owned by this function
   errdefer val.deinit(vm.alloc);
 
-  if (func.tag() == .func and func.func.getKind() == .callable and func.func.isBuiltinFn() and @import("../noun/operator.zig").isOp2Idx(func.func.idx) and func.func.getOp2() == .@":") {
+  if (func.tag() == .func and func.func.kind == .callable and func.func.isBuiltinFn() and opmod.isOp2Idx(func.func.idx) and func.func.getOp2() == .@":") {
     try setAt(vm, target, key, val);
     return;
   }

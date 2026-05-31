@@ -20,7 +20,7 @@ fn isBuiltinDyad(inst: *const ir.IRInst, op: Op2) bool {
   if (inst.op != .Const) return false;
   const v = inst.val orelse return false;
   if (v != .func) return false;
-  if (v.func.getKind() != .callable) return false;
+  if (v.func.kind != .callable) return false;
   if (!operator.isOp2Idx(v.func.idx)) return false;
   return v.func.getOp2() == op;
 }
@@ -126,7 +126,7 @@ pub const Optimizer = struct {
           if (base.op == .Const) blk: {
             const v = base.val orelse break :blk;
             if (v != .func) break :blk;
-            if (v.func.getKind() != .callable) break :blk;
+            if (v.func.kind != .callable) break :blk;
             if (!operator.isOp2Idx(v.func.idx)) break :blk;
             const fused = fold_mod.fusedReducerOf(v.func.getOp2()) orelse break :blk;
 
@@ -329,7 +329,7 @@ pub const Optimizer = struct {
       const fval = func_inst.val orelse continue;
       if (fval != .func) continue;
       const fn_ref = fval.func;
-      if (fn_ref.getKind() != .callable or !operator.isLambdaIdx(fn_ref.idx)) continue;
+      if (fn_ref.kind != .callable or !operator.isLambdaIdx(fn_ref.idx)) continue;
       const lambda_idx = operator.lambdaIdxOf(fn_ref.idx);
       if (lambda_idx >= fn_tables.lambdas.items.len) continue;
       const entry = fn_tables.lambdas.items[lambda_idx];
