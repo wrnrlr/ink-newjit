@@ -148,6 +148,8 @@ pub const Fn = packed struct(u64) {
   pub fn isCallable(self: Fn) bool { return self.kind == .callable; }
   pub fn isLambda(self: Fn) bool { return self.kind == .callable and isLambdaIdx(self.idx); }
   pub fn isBuiltinFn(self: Fn) bool { return self.kind == .callable and isBuiltinIdx(self.idx); }
+  pub fn isOp1(self: Fn) bool { return self.kind == .callable and isOp1Idx(self.idx); }
+  pub fn isOp2(self: Fn) bool { return self.kind == .callable and isOp2Idx(self.idx); }
 
   pub fn getOp1(self: Fn) Op1       { return op1OfIdx(self.idx); }
   pub fn getOp2(self: Fn) Op2       { return op2OfIdx(self.idx); }

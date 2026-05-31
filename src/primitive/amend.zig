@@ -18,7 +18,7 @@ const Call = @import("../runtime/call.zig").Call;
 //   _I_I_f_i: util.TetradFn,
 // };
 
-pub fn amend(vm: *VM, args: []V) !V {
+pub fn amend(vm: *VM, args: []V) V {
   if (args.len < 3) return V{ .err = .rank };
 
   var target = args[0].ref();
@@ -70,7 +70,7 @@ pub fn amend(vm: *VM, args: []V) !V {
   return target;
 }
 
-pub fn dmend(vm: *VM, args: []V) !V {
+pub fn dmend(vm: *VM, args: []V) V {
   if (args.len < 2) return V{ .err = .rank };
 
   const target = args[0].ref();
@@ -78,10 +78,10 @@ pub fn dmend(vm: *VM, args: []V) !V {
   const func = if (args.len > 2) args[2] else .blank;
   const val = if (args.len > 3) args[3] else .blank;
 
-  return try drill(vm, target, path, 0, func, val);
+  return drill(vm, target, path, 0, func, val);
 }
 
-fn drill(vm: *VM, target: V, path: V, path_idx: usize, func: V, val: V) anyerror!V {
+fn drill(vm: *VM, target: V, path: V, path_idx: usize, func: V, val: V) V {
   errdefer target.deinit(vm.alloc);
 
   const path_len = if (path.tag() == .blank) 0 else path.len();
@@ -89,7 +89,7 @@ fn drill(vm: *VM, target: V, path: V, path_idx: usize, func: V, val: V) anyerror
     if (func.tag() == .blank) return target;
     
     // Identity assignment optimization at leaf
-    if (func.tag() == .func and func.func.kind == .callable and func.func.isBuiltinFn() and opmod.isOp2Idx(func.func.idx) and func.func.getOp2() == .@":") {
+    if (func.tag() == .func and func.func.isBuiltinFn() and opmod.isOp2Idx(func.func.idx) and func.func.getOp2() == .@":") {
       target.deinit(vm.alloc);
       return val.ref();
     }
@@ -102,7 +102,7 @@ fn drill(vm: *VM, target: V, path: V, path_idx: usize, func: V, val: V) anyerror
   }
 
   var mut_target = target;
-  try mut_target.cow(vm.alloc);
+  mut_target.cow(vm.alloc) catch return .{ .err=.memory };
 
   const key = path.at(path_idx);
   defer key.deinit(vm.alloc);
@@ -118,12 +118,12 @@ fn drill(vm: *VM, target: V, path: V, path_idx: usize, func: V, val: V) anyerror
     }
     break :blk if (found_idx) |idx| d.bv().at(idx) else .blank;
   } else blk: {
-    const i = try asIndex(key, mut_target.len());
+    const i = asIndex(key, mut_target.len()) catch return .{ .err=.nyi };
     break :blk mut_target.at(i);
   };
 
-  const new_item = try drill(vm, old_item, path, path_idx + 1, func, val);
-  try setAt(vm, &mut_target, key, new_item);
+  const new_item = drill(vm, old_item, path, path_idx + 1, func, val);
+  setAt(vm, &mut_target, key, new_item) catch return .{ .err=.nyi };
 
   return mut_target;
 }
