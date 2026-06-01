@@ -271,7 +271,17 @@ Some special symbols can be called with apply `s@` or call `s "Abc"` .
 
 ### Amend 
 
+```
+@[x;y;f]   amend  @["ABC";1;_:] -> "AbC"   @[2 3;1;{-x}] -> 2 -3
+@[x;y;F;z] amend  @["abc";1;:;"x"] -> "axc"   @[2 3;0;+;4] -> 6 3
+```
+
 ### Drill
+
+```
+.[x;y;f]   drill  .[("AB";"CD");1 0;_:] -> ("AB";"cD")
+.[x;y;F;z] drill  .[("ab";"cd");1 0;:;"x"] -> ("ab";"xd")
+```
 
 ## Adverbs
 An adverb is written using any of these plyph(s) `` ' / \ ': /: \: ``.
