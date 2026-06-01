@@ -4,6 +4,7 @@
 - Per lambda scratch allocator
 - I suspect — but haven't measured — that there's a meaningful tax across hot loops in `kernelVec` and similar from doing `xv.* = Impl.f(...)` style operations where each per-element step doesn't actually need refcounting, but the surrounding V manipulation still does.
 
+Functional programming with APL2
 
 ### 3Blue1Brown Puzzles
 - https://www.youtube.com/shorts/ZHXt0-_gSj4
