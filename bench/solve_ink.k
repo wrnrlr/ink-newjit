@@ -9,17 +9,19 @@ E: (N*N)#0.0
 row: {x div N}
 col: {x mod N}
 
-cell: {[e;i]
-  r: row i
-  c: col i
-  a: r*c
-  b: (M-r)*(M-c)
-  nb: (e@i-N)+(e@i+N)
-  sc: (e@i-1)+(e@i+1)
-  $[a*b; 1.0+0.25*(nb+sc); 0.0]
+cell: {
+  r: x div N; c: x mod N;
+  a: 1.0+0.25*(E c*r+1)+(E c*r-1)+(E r*c+1)+(E r*c-1)
+  E:: @[E; r*c; :; a]
 }
 
-step: {[e] cell[e;]'!N*N}
-result: step/E
-10 10 # result
-result@55
+iter: {
+  E:: @[E;]
+}
+
+cell 15
+
+/ step: {[e] cell[e;]'!N*N}
+/ result: step/E
+/ 10 10 # result
+/ result@55
