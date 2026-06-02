@@ -26,5 +26,7 @@ step: {@[x;interior;:;1.0+0.25*((x@ni)+(x@si)+(x@ei)+(x@wi))]}
 / Converge adverb: iterate step until the array stops changing
 \t result: step/E
 
-/ Center of 10x10 grid: row=5, col=5 -> flat index 55
-result@55
+/ Center of N×N grid: row=col=N div 2, flat index = half + half*N
+/ (half*N evaluated first right-to-left, then +half)
+half: N div 2
+result@half+half*N
