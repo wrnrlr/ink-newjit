@@ -74,6 +74,7 @@ Adverbs are polysemic just like verbs.
 Ink is a array programming language for high performance computing.
 It is based on the k array programming languages ngn/k and k9.
 The language parser, compiler and runtime are all written in Zig 0.16.
+The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` (drop), not an identifier. Avoid underscores in names.
 
 
 # Project Overview
