@@ -1,27 +1,7 @@
-/ Energy-based numeric solver (value iteration / relaxation)
-/ E(x,y) = 0 at boundary
-/ E(x,y) = 1 + 0.25*(E(n)+E(s)+E(e)+E(w)) at interior
-
-N: 10
-
-all: !N*N; r: all div N; c: all mod N
-interior: &~((r=0)|(r=N-1)|(c=0)|(c=N-1))
-
-ni: interior-N   / north: row-1
-si: interior+N   / south: row+1
-ei: interior+1   / east:  col+1
-wi: interior-1   / west:  col-1
-
-E: (N*N)#0.0
-
-/ One Jacobi relaxation: all interior cells updated simultaneously from
-/ the 4 pre-baked neighbor index arrays. No 2D indexing at step time.
-step: {@[x; interior; :; 1.0+0.25*((x@ni)+(x@si)+(x@ei)+(x@wi))]}
-
-/ Converge adverb: iterate step until the array stops changing
-\t result: step/E
-
-/ Center of N×N grid: row=col=N div 2, flat index = half + half*N
-/ (half*N evaluated first right-to-left, then +half)
-half: N div 2
-result@half+half*N
+N: 100; E: (N*N)#0.0 / Energy-based numeric solver (value iteration / relaxation)
+(r;c): 1+!2#N-2; I: c+N*r / E(x,y) = 0 at boundary 
+W: ((-N),N,1,-1)+/:I      / E(x,y) = 1 + 0.25*(eN+eS+eE+eW) at interior
+f: {@[x;I;:;1.+.25*+/x@W]}
+h: N div 2
+\t m:(f/E)@h+N*h
+m
