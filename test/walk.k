@@ -22,8 +22,34 @@ f: {@[x;I;:;1.+.25*+/x@W]}
 m: (f/(N*N)#0.0)@h+N*h
 m
  
+/ Up-down & left-right symmetry (4-fold): Q×Q quadrant, ~N^2/4 cells
+/ Full N=7 grid — each cell labelled with its quadrant flat index:
+/      0   1   2   3   4   5   6
+/  0   B   B   B   B   B   B   B
+/  1   B  10   9   8   9  10   B
+/  2   B   6   5   4   5   6   B
+/  3   B   2   1   0   1   2   B  ← center = flat index 0
+/  4   B   6   5   4   5   6   B
+/  5   B  10   9   8   9  10   B
+/  6   B   B   B   B   B   B   B
+/
+/       c'=0  c'=1  c'=2  c'=3(B)
+/  r'=0  [0]   [1]   [2]   B       ← center row (axis)
+/  r'=1  [4]   [5]   [6]   B
+/  r'=2  [8]   [9]  [10]   B
+/  r'=3  [B]   [B]   [B]   B       ← actual grid boundary
+
+Q: N-h; sm: N-2*h
+(r;c): !Q,Q; all: c+Q*r
+P: &(~r=r|Q-1)*(~c=c|Q-1)
+(ri;ci): (r@P; c@P)
+(nr;wc): (((ri=0)*sm)|ri-1; ((ci=0)*sm)|ci-1)
+WQ: (ci+nr*Q; ci+(ri+1)*Q; ci+1+ri*Q; wc+ri*Q)
+g: {@[x;P;:;1.+.25*+/x@WQ]}
+(g/(Q*Q)#0.)@0
+
 / Full D4 symmetry (8-fold): right-isoceles fundamental triangle ~N^2/8 cells
-/ Quadrant (up-down & left-right reflection) + diagonal E(r,c)=E(c,r)
+/ Quadrant (above) + diagonal E(r,c)=E(c,r)
 
 / Full N=7 grid — each interior cell labelled with which fundamental-domain cell holds its value:
 /     0  1  2  3  4  5  6
