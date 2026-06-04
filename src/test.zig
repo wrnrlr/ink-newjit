@@ -133,7 +133,7 @@ test "- neg" {
 
 test "logical" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("~0 1 2", "1b 0b 0b");
+  try t.check("~0 1 2", "100b");
   try t.check("~0.0", "1b");
   try t.check("1 4 & 3 2", "1 2");
   try t.check("1 4 | 3 2", "3 4");
@@ -144,13 +144,13 @@ test "logical" {
   try t.check("1>2", "0b");
   try t.check("1.0=1.0", "1b");
   try t.check("1.0<2.0", "1b");
-  try t.check("1 2 3 < 2 2 4", "1b 0b 1b");
+  try t.check("1 2 3 < 2 2 4", "101b");
   try t.check("1 2 3 has 9", "0b");
-  try t.check("1 2 3 has 2 9 1", "1b 0b 1b");
+  try t.check("1 2 3 has 2 9 1", "101b");
   try t.check("\"aeiou\" has \"e\"", "1b");
   try t.check("2 in 1 2 3", "1b");
   try t.check("9 in 1 2 3", "0b");
-  try t.check("2 9 1 in 1 2 3", "1b 0b 1b");
+  try t.check("2 9 1 in 1 2 3", "101b");
 }
 test "named math operators" {
   var t = try Tester.init(); defer t.deinit();
@@ -358,13 +358,13 @@ test "flip dict & table" {
 test "nulls verb" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("^0N", "1b");
-  try t.check("^1 0N 3", "0b 1b 0b");
+  try t.check("^1 0N 3", "010b");
 }
 test "not verb" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("~0", "1b");
   try t.check("~1", "0b");
-  try t.check("~0 1 2", "1b 0b 0b");
+  try t.check("~0 1 2", "100b");
 }
 test "unit verb gives identity matrix" {
   var t = try Tester.init(); defer t.deinit();
@@ -701,9 +701,9 @@ test "X#d take key from dictionary d" {
 
 test "null verb" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("^0 0N 2", "0b 1b 0b");
-  try t.check("^0.0 0n 2.1", "0b 1b 0b");
-  try t.check("^``a`b", "1b 0b 0b");
+  try t.check("^0 0N 2", "010b");
+  try t.check("^0.0 0n 2.1", "010b");
+  try t.check("^``a`b", "100b");
 }
 
 test "X^y without returns all elements in X not in y" {
@@ -926,7 +926,7 @@ test "json atom integer" {
   try t.check("`json@\"null\"", "");
   try t.check("`json@\"[1,2,3]\"", "1 2 3");
   try t.check("`json@\"[1.5,2.5,3.0]\"", "1.5 2.5 3.0");
-  try t.check("`json@\"[true,false,true]\"", "1b 0b 1b");
+  try t.check("`json@\"[true,false,true]\"", "101b");
   try t.check("`json@\"\"", "!domain");
 }
 

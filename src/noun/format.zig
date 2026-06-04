@@ -249,6 +249,16 @@ pub const TerseFormatter = struct {
       try w.writeAll("\"");
       return;
     }
+    if (T == bool) {
+      if (slice.len == 0) {
+        try w.writeAll("&0");
+      } else {
+        if (slice.len == 1) try w.writeAll(",");
+        for (slice) |b| try w.writeByte(if (b) '1' else '0');
+        try w.writeAll("b");
+      }
+      return;
+    }
     if (slice.len == 0) {
       try w.writeAll("&0");
     } else if (slice.len == 1) {
