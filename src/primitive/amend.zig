@@ -18,7 +18,7 @@ fn Amend3Vec(comptime k: K) type {
       const i: usize = @intCast(idx);
       var fc = Call{ .vm = vm };
       const res = fc.apply(f, &[_]V{V.wrap(rt, s[i])}, false);
-      if (res.tag() != rt) { res.deinit(vm.alloc); return error.Domain; }
+      if (res.tag() != rt) { res.deinit(vm.alloc); return error.TypeError; }
       s[i] = V.unwrap(res, rt);
     }
     fn multiple(vm: *VM, a: N(T), ix: N(i32), f: V) !void {
@@ -27,7 +27,7 @@ fn Amend3Vec(comptime k: K) type {
       for (ix.slice()) |raw_i| {
         const i: usize = @intCast(raw_i);
         const res = fc.apply(f, &[_]V{V.wrap(rt, s[i])}, false);
-        if (res.tag() != rt) { res.deinit(vm.alloc); return error.Domain; }
+        if (res.tag() != rt) { res.deinit(vm.alloc); return error.TypeError; }
         s[i] = V.unwrap(res, rt);
       }
     }
@@ -43,7 +43,7 @@ fn Amend4Vec(comptime k: K) type {
       const i: usize = @intCast(idx);
       var fc = Call{ .vm = vm };
       const res = fc.apply(f, &[_]V{ V.wrap(rt, s[i]), b }, false);
-      if (res.tag() != rt) { res.deinit(vm.alloc); return error.Domain; }
+      if (res.tag() != rt) { res.deinit(vm.alloc); return error.TypeError; }
       s[i] = V.unwrap(res, rt);
     }
     fn multiple(vm: *VM, a: N(T), ix: N(i32), f: V, b: V) !void {
@@ -55,7 +55,7 @@ fn Amend4Vec(comptime k: K) type {
         const bv = if (b_is_vec) b.at(n) else b.ref();
         defer bv.deinit(vm.alloc);
         const res = fc.apply(f, &[_]V{ V.wrap(rt, s[i]), bv }, false);
-        if (res.tag() != rt) { res.deinit(vm.alloc); return error.Domain; }
+        if (res.tag() != rt) { res.deinit(vm.alloc); return error.TypeError; }
         s[i] = V.unwrap(res, rt);
       }
     }
@@ -170,7 +170,10 @@ pub fn amend(vm: *VM, args: []V) V {
   const idx = args[1];
   const f   = args[2];
   const atom_idx = idx.tag() == .i;
-  if (!atom_idx and idx.tag() != .I) {
+  // Dict/table targets are keyed by arbitrary values (e.g. symbols), handled by
+  // amendMap; only positional (array/list) targets require an i/I index.
+  const is_map = at == .m or at == .M;
+  if (!is_map and !atom_idx and idx.tag() != .I) {
     a.deinit(vm.alloc);
     return .{ .err = .@"type" };
   }
@@ -200,7 +203,10 @@ pub fn amend(vm: *VM, args: []V) V {
     a.deinit(vm.alloc);
     return .{ .err = .rank };
   };
-  applied catch { a.deinit(vm.alloc); return .{ .err = .domain }; };
+  applied catch |e| {
+    a.deinit(vm.alloc);
+    return if (e == error.TypeError) .{ .err = .@"type" } else .{ .err = .domain };
+  };
   return a;
 }
 

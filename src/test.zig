@@ -848,12 +848,14 @@ test "do not reuse the left argument" {
 
 test "identity" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check(":2.3", "2.4");
+  try t.check(":2.3", "2.3");
 }
 
 test "right" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("1 2:4 5", "4 5");
+  // `2:` is the IO write digraph, so the numeric left arg needs a space to
+  // disambiguate the dyadic right verb `x:y`.
+  try t.check("1 2 : 4 5", "4 5");
 }
 
 test "Dihedral group of degree 4" {
