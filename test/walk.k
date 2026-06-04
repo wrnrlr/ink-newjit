@@ -15,7 +15,7 @@ avg[steps@'!100000]
 / E(x,y) = 0 at boundary 
 / E(x,y) = 1 + 0.25*(eN+eS+eE+eW) at interior
 
-N: 10; h: N div 2
+N: 11; h: N div 2
 (r;c): 1+!2#N-2; I: c+N*r
 W: ((-N),N,1,-1)+/:I
 f: {@[x;I;:;1.+.25*+/x@W]}
@@ -24,14 +24,33 @@ m
  
 / Full D4 symmetry (8-fold): right-isoceles fundamental triangle ~N^2/8 cells
 / Quadrant (up-down & left-right reflection) + diagonal E(r,c)=E(c,r)
+
+/ Full N=7 grid — each interior cell labelled with which fundamental-domain cell holds its value:
+/     0  1  2  3  4  5  6
+/ 0   B  B  B  B  B  B  B
+/ 1   B  5  4  2  4  5  B
+/ 2   B  4  3  1  3  4  B
+/ 3   B  2  1  0  1  2  B  ← center row h=3
+/ 4   B  4  3  1  3  4  B
+/ 5   B  5  4  2  4  5  B
+/ 6   B  B  B  B  B  B  B
+/              ↑
+/       center col h=3
+/ 
+/       c'=0  c'=1  c'=2  c'=3
+/ r'=0  [T0]  [T1]  [T2]  [B]
+/ r'=1  [ × ] [T3]  [T4]  [B]
+/ r'=2  [ × ] [ × ] [T5]  [B]
+/ r'=3  [ B ] [ B ] [ B ] [B]
+
 Q: N-h; sm: N-2*h
 (r;c): !Q,Q; all: c+Q*r
 sw: ~c=c|r;
-K: all+sw*(((c-r)*Q)+r-c)
-T: & (c=c|r) * (~r=r|Q-1) * (~c=c|Q-1)
+K: all+sw*(((c-r)*Q)+r-c) / canonicalisation table: for every flat index in the Q×Q array, K[i] gives the flat index of its canonical representative (the one with r′≤c′).
+T: & (c=c|r) * (~r=r|Q-1) * (~c=c|Q-1) /  indices of the fundamental domain interior cells
 (ri;ci): (r@T; c@T)
 (nr;wc): (((ri=0)*sm)|ri-1; ((ci=0)*sm)|ci-1)
-NN: (K@ci+nr*Q;K@ci+(ri+1)*Q;ci+1+ri*Q;K@wc+ri*Q)
+NN: (K@ci+nr*Q; K@ci+(ri+1)*Q; ci+1+ri*Q; K@wc+ri*Q)
 E: {@[x;T;:;1.+.25*+/x@NN]}/(Q*Q)#0.0
 E 0
 #E
