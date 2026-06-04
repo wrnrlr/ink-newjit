@@ -55,7 +55,7 @@ pub const Op2 = enum(u8) {
 
 /// Triadic primitives. Apply3 bytecode (amend3/drill3).
 pub const Op3 = enum(u8) {
-  amend3, drill3,
+  amend3, drill3, splice3,
   pub const COUNT = @typeInfo(Op3).@"enum".fields.len;
   pub fn toString(self: Op3) []const u8 { return @tagName(self); }
 };

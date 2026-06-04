@@ -4,6 +4,7 @@ const util = @import("../../util.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const V = @import("../../noun/value.zig").V;
 const dispatch = @import("../dispatch.zig");
+const reduce = @import("reduce.zig");
 
 pub const Min = struct {
   pub const op = .@"&/";
@@ -24,17 +25,13 @@ fn minB(_: *VM, x: V) V {
 fn minI(_: *VM, x: V) V {
   const s = x.I.slice();
   if (s.len == 0) return .blank;
-  var acc: i32 = s[0];
-  for (s[1..]) |v| acc = @min(acc, v);
-  return .{ .i = acc };
+  return .{ .i = reduce.min(i32, s) };
 }
 
 fn minF(_: *VM, x: V) V {
   const s = x.F.slice();
   if (s.len == 0) return .blank;
-  var acc: f32 = s[0];
-  for (s[1..]) |v| acc = @min(acc, v);
-  return .{ .f = acc };
+  return .{ .f = reduce.min(f32, s) };
 }
 
 fn minL(vm: *VM, x: V) V {

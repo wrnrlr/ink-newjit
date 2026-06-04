@@ -4,6 +4,7 @@ const Op3 = @import("../noun/operator.zig").Op3;
 const Op4 = @import("../noun/operator.zig").Op4;
 const verbs = @import("verb/verbs.zig");
 const amend = @import("amend.zig");
+const splice = @import("verb/splice.zig");
 const VM = @import("../runtime/vm.zig").VM;
 const K = @import("../noun/class.zig").K;
 const V = @import("../noun/value.zig").V;
@@ -26,6 +27,7 @@ pub fn dispatch3(vm: *VM, op: Op3, x: V, y: V, z: V) V {
   return switch (op) {
     .amend3 => amend.amend(vm, &args),
     .drill3 => amend.dmend(vm, &args),
+    .splice3 => splice.splice(vm, x, y, z),
   };
 }
 

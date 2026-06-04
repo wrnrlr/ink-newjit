@@ -193,6 +193,13 @@ test "amend" {
   try t.check("@[1; 0; :; 5 ]", "!type");
   try t.check("d:[a:10;b:20]; @[d; `a; +; 5]", "[a:15;b:20]");
 }
+test "splice" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("?[\"abcd\";1 3;\"xyz\"]", "\"axyzd\"");
+  try t.check("?[1 2 3 4;1 1;99]", "1 99 2 3 4");
+  try t.check("?[1 2 3 4;1 3;100 200]", "1 100 200 4");
+  try t.check("?[\"abcd\";0 2;\"\"]", "\"cd\"");
+}
 test "drill" {
   var t = try Tester.init(); defer t.deinit();
   try t.check(".[(1 2; 3 4); 1 0; :; 9]", "(1 2;9 4)");

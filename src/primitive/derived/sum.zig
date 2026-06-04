@@ -7,6 +7,7 @@ const util = @import("../../util.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const V = @import("../../noun/value.zig").V;
 const dispatch = @import("../dispatch.zig");
+const reduce = @import("reduce.zig");
 
 pub const Sum = struct {
   pub const op = .@"+/";
@@ -26,17 +27,13 @@ fn sumB(_: *VM, x: V) V {
 fn sumI(_: *VM, x: V) V {
   const s = x.I.slice();
   if (s.len == 0) return .blank;
-  var acc: i32 = s[0];
-  for (s[1..]) |v| acc +%= v;
-  return .{ .i = acc };
+  return .{ .i = reduce.sum(i32, s) };
 }
 
 fn sumF(_: *VM, x: V) V {
   const s = x.F.slice();
   if (s.len == 0) return .blank;
-  var acc: f32 = s[0];
-  for (s[1..]) |v| acc += v;
-  return .{ .f = acc };
+  return .{ .f = reduce.sum(f32, s) };
 }
 
 fn sumL(vm: *VM, x: V) V {

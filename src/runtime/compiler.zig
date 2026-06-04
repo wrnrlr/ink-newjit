@@ -178,12 +178,14 @@ pub const Compiler = struct {
       const op_str = ap.f.verb_op;
       const is_amend = std.mem.eql(u8, op_str, "@");
       const is_drill = std.mem.eql(u8, op_str, ".");
-      if (is_amend or is_drill) {
+      // ?[x;y;z] (3 args only) → splice. 4-arg `?` keeps the generic path.
+      const is_splice = seq.len == 3 and std.mem.eql(u8, op_str, "?");
+      if (is_amend or is_drill or is_splice) {
         var inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, seq.len);
         defer inputs.deinit(self.alloc);
         for (seq) |x| try inputs.append(self.alloc, try self.compileNode(x, false));
         if (seq.len == 3) {
-          const op3: Op3 = if (is_amend) .amend3 else .drill3;
+          const op3: Op3 = if (is_amend) .amend3 else if (is_drill) .drill3 else .splice3;
           return try self.emitOpWithArg(.Apply3, @intFromEnum(op3), inputs.items);
         } else {
           const op4: Op4 = if (is_amend) .amend4 else .drill4;

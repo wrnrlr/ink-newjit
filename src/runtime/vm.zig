@@ -94,6 +94,7 @@ pub const VM = struct {
       .prng          = std.Random.DefaultPrng.init(0),
     };
     vm.alloc = vm.slab.allocator();
+    try vm.symbols.prefill();
     vm.compiler.* = try Compiler.init(alloc, chunk, &vm.globals_names, &vm.symbols, &vm.registry, &vm.fn_tables);
     @memset(&vm.globals, .blank);
     std.Io.Threaded.global_single_threaded.allocator = alloc;
@@ -170,6 +171,32 @@ pub const VM = struct {
     return vm.pop();
   }
 
+  // Compile `txt` once, appending its bytecode to the top-level chunk, and
+  // return the ip where that bytecode begins. Paired with runFrom so callers
+  // (e.g. the `\t:n` timing command) can execute it repeatedly without paying
+  // the parse+compile+optimize cost on every iteration. Assumes the compiled
+  // text is the final code in the chunk (true for the trailing `\t` statement).
+  pub fn compileOnce(vm: *VM, txt: []const u8) !usize {
+    const text_id = try vm.registry.addText(txt);
+    const node = try vm.parser.?.parse(txt);
+    defer vm.parser.?.free(node);
+    vm.compiler.scope.reset();
+    vm.compiler.text_id = text_id;
+    const start_ip = vm.chunk.code.items.len;
+    try vm.compiler.compile(node, false);
+    return start_ip;
+  }
+
+  // Execute bytecode previously compiled at `start_ip` to completion on the
+  // persistent top-level frame, returning the result value.
+  pub fn runFrom(vm: *VM, start_ip: usize) !V {
+    vm.resetStack();
+    vm.current_chunk = vm.chunk;
+    vm.currentFrame().ip = start_ip;
+    try vm.run();
+    return vm.pop();
+  }
+
   fn executeCall(vm: *VM, func: V, incoming: []const V, mode: call.CallMode) !void {
     var fc = call.Call{ .vm = vm };
     try vm.push(fc.apply(func, incoming, mode == .bracket));
@@ -209,10 +236,6 @@ pub const VM = struct {
 
   fn run(vm: *VM) !void {
     try vm.runUntil(0);
-  }
-
-  pub fn runOp(vm: *VM, opCode: OpCode) !void {
-    try op_table[@intFromEnum(opCode)](vm);
   }
 
   pub fn runUntil(vm: *VM, min_frames: usize) !void {
@@ -310,56 +333,10 @@ pub const VM = struct {
     }
   }
   
-  fn doConst(vm: *VM) !void {
-    const idx = vm.readByte();
-    const v = vm.current_chunk.constants.items[idx];
-    try vm.push(v.ref());
-  }
-  
-  fn doGlobal(vm: *VM) !void {
-    const idx = vm.readByte();
-    try vm.push(vm.globals[idx].ref());
-  }
-  
-  fn doInt(vm: *VM) !void {
-    const raw = vm.read16();
-    const v: i32 = @as(i16, @bitCast(raw));
-    try vm.push(.{ .i = v });
-  }
-
-  fn doLocal(vm: *VM) !void {
-    const idx = vm.readByte();
-    const v = vm.stack[vm.currentFrame().base + idx];
-    try vm.push(v.ref());
-  }
-
-  // Last use of a local: steal the value from the slot (clear it, push without
-  // incrementing RC).  The slot becomes .blank so Return's cleanup is a no-op.
-  fn doLocalLast(vm: *VM) !void {
-    const idx = vm.readByte();
-    const slot = vm.currentFrame().base + idx;
-    const v = vm.stack[slot];
-    vm.stack[slot] = .blank;
-    try vm.push(v);
-  }
-  
-  fn doAssignGlobal(vm: *VM) !void {
-    const index = vm.readByte();
-    const val = vm.pop();
-    vm.globals[index].deinit(vm.alloc);
-    vm.globals[index] = val;
-    try vm.push(.blank);
-  }
-  
-  fn doAssignLocal(vm: *VM) !void {
-    const index = vm.readByte();
-    const val = vm.pop();
-    const stack_idx = vm.currentFrame().base + index;
-    vm.stack[stack_idx].deinit(vm.alloc);
-    vm.stack[stack_idx] = val;
-    try vm.push(.blank);
-  }
-  
+  // NOTE: the simple opcodes (Const/Global/Int/Local/LocalLast/Assign*/Jump*)
+  // are handled inline in the runUntil switch above; ListAssign and the
+  // structural opcodes below keep dedicated helpers because the switch calls
+  // them directly.
   fn doListAssignGlobal(vm: *VM) !void {
     const n = vm.readByte();
     const val = vm.pop();
@@ -398,25 +375,6 @@ pub const VM = struct {
     }
   }
   
-  fn doJump(vm: *VM) !void {
-    const offset = vm.read16();
-    vm.currentFrame().ip += offset;
-  }
-
-  fn doJumpTrue(vm: *VM) !void {
-    const offset = vm.read16();
-    const v = vm.pop();
-    defer v.deinit(vm.alloc);
-    if (v.isTrue()) vm.currentFrame().ip += offset;
-  }
-
-  fn doJumpFalse(vm: *VM) !void {
-    const offset = vm.read16();
-    const v = vm.pop();
-    defer v.deinit(vm.alloc);
-    if (!v.isTrue()) vm.currentFrame().ip += offset;
-  }
-
   fn doReturn(vm: *VM) !void {
     const result = vm.pop();
     const frame = vm.popFrame();
@@ -505,14 +463,6 @@ pub const VM = struct {
       try vm.executeCall(func_val, incoming, .sync);
       for (incoming) |*v| v.deinit(vm.alloc);
     }
-  }
-
-  fn doCall(vm: *VM) !void {
-    try vm.doCallWithMode(.sync);
-  }
-
-  fn doApply(vm: *VM) !void {
-    try vm.doCallWithMode(.bracket);
   }
 
   fn doCallWithMode(vm: *VM, mode: call.CallMode) !void {
@@ -773,47 +723,6 @@ fn hasBlank(vals:[]V) bool {
    for (vals) |a| if (a == .blank) return true;
    return false;
 }
-
-fn opNop(_: *VM) !void {}
-fn opGap(vm: *VM) !void { try vm.push(.blank); }
-fn opDrop(vm: *VM) !void { vm.pop().deinit(vm.alloc); }
-fn opDup(vm: *VM) !void { try vm.push(vm.peek(0).ref()); }
-
-const OpHandler = *const fn(*VM) anyerror!void;
-const op_table: [OpCode.COUNT]OpHandler = build: {
-  var t: [OpCode.COUNT]OpHandler = undefined;
-  t[@intFromEnum(OpCode.Nop)]              = &opNop;
-  t[@intFromEnum(OpCode.Gap)]              = &opGap;
-  t[@intFromEnum(OpCode.Drop)]             = &opDrop;
-  t[@intFromEnum(OpCode.Dup)]              = &opDup;
-  t[@intFromEnum(OpCode.Const)]            = &VM.doConst;
-  t[@intFromEnum(OpCode.Int)]              = &VM.doInt;
-  t[@intFromEnum(OpCode.Global)]           = &VM.doGlobal;
-  t[@intFromEnum(OpCode.Local)]            = &VM.doLocal;
-  t[@intFromEnum(OpCode.LocalLast)]        = &VM.doLocalLast;
-  t[@intFromEnum(OpCode.AssignGlobal)]     = &VM.doAssignGlobal;
-  t[@intFromEnum(OpCode.AssignLocal)]      = &VM.doAssignLocal;
-  t[@intFromEnum(OpCode.ListAssignGlobal)] = &VM.doListAssignGlobal;
-  t[@intFromEnum(OpCode.ListAssignLocal)]  = &VM.doListAssignLocal;
-  t[@intFromEnum(OpCode.Jump)]             = &VM.doJump;
-  t[@intFromEnum(OpCode.JumpFalse)]        = &VM.doJumpFalse;
-  t[@intFromEnum(OpCode.JumpTrue)]         = &VM.doJumpTrue;
-  t[@intFromEnum(OpCode.Apply1)]           = &VM.doApply1;
-  t[@intFromEnum(OpCode.Apply2)]           = &VM.doApply2;
-  t[@intFromEnum(OpCode.Return)]           = &VM.doReturn;
-  t[@intFromEnum(OpCode.Call)]             = &VM.doCall;
-  t[@intFromEnum(OpCode.TailCall)]         = &VM.doTailCall;
-  t[@intFromEnum(OpCode.Apply)]            = &VM.doApply;
-  t[@intFromEnum(OpCode.MakeList)]         = &VM.doMakeList;
-  t[@intFromEnum(OpCode.MakePartial)]      = &VM.doMakePartial;
-  t[@intFromEnum(OpCode.Derive)]           = &VM.doDerive;
-  t[@intFromEnum(OpCode.Apply3)]           = &VM.doApply3;
-  t[@intFromEnum(OpCode.Apply4)]           = &VM.doApply4;
-  t[@intFromEnum(OpCode.MakeDict)]         = &VM.doMakeDict;
-  t[@intFromEnum(OpCode.MakeTable)]        = &VM.doMakeTable;
-  t[@intFromEnum(OpCode.Command)]          = &VM.doCommand;
-  break :build t;
-};
 
 test "VM simple addition" {
   const alloc = std.testing.allocator;

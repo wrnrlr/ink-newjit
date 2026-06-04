@@ -107,6 +107,7 @@ pub const Call = struct {
       return switch (opmod.op3OfIdx(idx)) {
         .amend3 => amend_mod.amend(vm, &buf),
         .drill3 => amend_mod.dmend(vm, &buf),
+        .splice3 => @import("../primitive/verb/splice.zig").splice(vm, buf[0], buf[1], buf[2]),
       };
     }
 
