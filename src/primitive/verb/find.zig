@@ -17,10 +17,6 @@ pub const Find = struct {
   _S_S: util.DyadFn = findS_S,
   _S_L: util.DyadFn = findS_L,
   
-  // _B_b: util.DyadFn = findB_b,
-  // _B_B: util.DyadFn = findB_B,
-  // _B_L: util.DyadFn = findB_L,
-  
   _C_c: util.DyadFn = findC_c,
   _C_C: util.DyadFn = findC_C,
   _C_L: util.DyadFn = findC_L,
@@ -41,60 +37,6 @@ pub const Find = struct {
   
   // TODO support find for Dict & Table, maybe this should be part of the fallback logic.
 };
-
-fn find_vec_atom() util.DyadFn {
-  return struct {
-    fn f(_: *VM, _: V, _: V) V {
-    }
-  }.f;
-}
-
-fn find_vec_vec() util.DyadFn {
-  return struct {
-    fn f(_: *VM, _: V, _: V) V {
-    }
-  }.f;
-}
-
-fn find_list() util.DyadFn {
-  return struct {
-    fn f(_: *VM, _: V, _: V) V {
-    }
-  }.f;
-}
-
-// Bool helpers — build a 2-entry lookup from data, then index by bool
-fn boolLookup(data: []const bool) [2]i32 {
-  var idx_f: i32 = V.@"0N";
-  var idx_t: i32 = V.@"0N";
-  for (data, 0..) |v, i| {
-    if ( v and idx_t == V.@"0N") idx_t = @intCast(i);
-    if (!v and idx_f == V.@"0N") idx_f = @intCast(i);
-    if (idx_f != V.@"0N" and idx_t != V.@"0N") break;
-  }
-  return .{ idx_f, idx_t };
-}
-
-fn findB_b(vm: *VM, x: V, y: V) V {
-  _ = vm;
-  const lut = boolLookup(x.B.slice());
-  return .{ .i = lut[@intFromBool(y.b)] };
-}
-
-fn findB_B(vm: *VM, x: V, y: V) V {
-  const lut = boolLookup(x.B.slice());
-  const res = N(i32).init(vm.alloc, y.B.ptr.len) catch return V{ .err = .memory };
-  for (y.B.slice(), res.slice()) |v, *r| r.* = lut[@intFromBool(v)];
-  return .{ .I = res };
-}
-
-fn findB_L(vm: *VM, x: V, y: V) V {
-  const lut = boolLookup(x.B.slice());
-  const res = N(i32).init(vm.alloc, y.L.ptr.len) catch return V{ .err = .memory };
-  for (y.L.slice(), res.slice()) |yv, *r|
-    r.* = switch (yv) { .b => |v| lut[@intFromBool(v)], else => V.@"0N" };
-  return .{ .I = res };
-}
 
 // Char helpers — build 256-entry table of first-occurrence indices
 fn charTable(data: []const u8) [256]i32 {

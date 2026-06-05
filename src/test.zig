@@ -447,7 +447,8 @@ test "*X first" {
 }
 test "_N floor" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("_ 2.1", "2");
+  try t.check("_2.1", "2");
+  try t.check("_1.2 3.4 5.6", "1 3 5");
 }
 test "_C lowercase" {
   var t = try Tester.init(); defer t.deinit();
@@ -766,7 +767,11 @@ test "Y_i delete" {
 
 test "weed out" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("(3>0 3 2)_1 2 3", ",2"); // FIXME lhs needs to be a bitmask 
+  try t.check("(3>0 3 2)_1 2 3", ",2");   // keep where mask is false
+  try t.check("(1<0 0 0)_1 2 3", "1 2 3"); // all-false mask: keep all
+  try t.check("(0<1 1 1)_1 2 3", "&0");    // all-true mask: remove all
+  try t.check("(3>0 3 2)_1.0 2.0 3.0", ",2.0"); // float weedout
+  try t.check("(3>0 3 2)_\"abc\"", ",\"b\"");   // char weedout
 }
 
 test "$X string any verb" {

@@ -27,6 +27,7 @@ const at = h.arithmetic_types;
 pub fn _B(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Upcast1, h.Bool1,   F, &at); }
 pub fn _N(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Upcast1, h.Upcast1, F, &at); }
 pub fn _F(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Float1,  h.Float1,  F, &at); }
+pub fn _Yf(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Float1, h.Int1,   F, &at); }
 pub fn _X1(comptime op: Op1, comptime Impl: type) type { return h._X(Op1, op, Impl); }
 
 // Dyad helpers (op: Op2)
@@ -58,7 +59,7 @@ const Monads = struct {
   pub const @"^x" = @import("nulls.zig").Nulls;
   pub const @"#x" = @import("tally.zig").Tally;
   pub const @"_c" = @import("lowercase.zig").Lowercase;
-  pub const @"_n" = @import("floor.zig").Floor;
+  pub const @"_n" = h.makeMonad(.@"_", h.Float1, h.Int1, @import("floor.zig").FloorOp, &.{.f, .F});
   // pub const @"9:x"   = @import("graphics.zig").Draw;
   pub const @"sqrt"  = _F(.sqrt, calc.SqrtOp);
   pub const @"sqr"   = _N(.sqr,  calc.SqrOp);
