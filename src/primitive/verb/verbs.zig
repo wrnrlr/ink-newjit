@@ -37,6 +37,21 @@ pub fn _I_I(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.I
 pub fn _F_F(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Float2,  h.Float2,  f, &at); }
 pub fn _X2(comptime op: Op2, comptime Impl: type) type { return h._X(Op2, op, Impl); }
 
+pub fn _i_i(comptime op: Op2, comptime f: type) type { _=op; _=f; return .{}; }
+pub fn _i_I(comptime op: Op2, comptime f: type) type { _=op; _=f; return .{}; }
+pub fn _I_i(comptime op: Op2, comptime f: type) type { _=op; _=f; return .{}; }
+// pub fn _I_I(comptime op: Op2, comptime f: type) type { _=op; _=f; return .{}; }
+
+pub fn _f_f(comptime op: Op2, comptime f: type) type { _=op; _=f; return .{}; }
+pub fn _f_F(comptime op: Op2, comptime f: type) type { _=op; _=f; return .{}; }
+pub fn _F_f(comptime op: Op2, comptime f: type) type { _=op; _=f; return .{}; }
+// pub fn _F_F(comptime op: Op2, comptime f: type) type { _=op; _=f; return .{}; }
+
+pub fn _m_m(comptime op: Op2, comptime f: type) type { _=op; _=f; return .{}; }
+pub fn _m_M(comptime op: Op2, comptime f: type) type { _=op; _=f; return .{}; }
+pub fn _M_m(comptime op: Op2, comptime f: type) type { _=op; _=f; return .{}; }
+pub fn _M_M(comptime op: Op2, comptime f: type) type { _=op; _=f; return .{}; }
+
 const Monads = struct {
   // Monadic Primitives
   pub const @"+x" = @import("flip.zig").Flip;
@@ -134,7 +149,10 @@ const Dyads = struct {
   pub const @"s$x"  = @import("cast.zig").Cast;
   pub const @"X?x"  = @import("find.zig").Find;
   pub const @"i?X"  = @import("random.zig").Random;
-  pub const @"f@y"  = @import("apply.zig").Apply;
+  pub const @"f@y"  = @import("apply1.zig").Apply;
+  pub const @"m@X"  = @import("select.zig").SelectDict;
+  pub const @"M@X"  = @import("select.zig").SelectTable;
+  pub const @"x@y"  = @import("apply.zig").Apply;
   pub const @"X@X"  = @import("pick.zig").Pick;
   pub const @"s?x"  = @import("marshal.zig").Marshal;
   pub const @"s@x"  = @import("marshal.zig").Unmarshal;

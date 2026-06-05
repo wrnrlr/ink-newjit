@@ -8,8 +8,10 @@ const V = @import("../../noun/value.zig").V;
 const K = @import("../../noun/class.zig").K;
 const N = @import("../../noun/array.zig").N;
 const Dict = @import("../../noun/dict.zig").Dict;
-
 pub const Attr = std.builtin.Type.StructField.Attributes;
+
+// pub fn ID1 (_: *VN, a: V) V { return a; }
+// pub fn ID2 (_: *VM, a: V, b: V) V { return a; }
 
 pub const numeric_types    = [_]K{ .b, .i, .f, .B, .I, .F };
 pub const arithmetic_types = [_]K{ .b, .i, .f, .B, .I, .F }; //, .L, .m, .M };
