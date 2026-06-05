@@ -10,8 +10,6 @@ const V = @import("noun/value.zig").V;
 const K = @import("noun/class.zig").K;
 const N = @import("noun/array.zig").N;
 
-// ── REPL / stdin eval ─────────────────────────────────────────────────────────
-
 fn runRepl(allocator: std.mem.Allocator, vm: *VM) !void {
   var repl = Repl.init(allocator, vm);
   var buf = try std.ArrayList(u8).initCapacity(allocator, 64);
@@ -59,8 +57,6 @@ fn evalStdin(allocator: std.mem.Allocator, vm: *VM) !void {
   var repl = Repl.init(allocator, vm);
   _ = try repl.evalStream(std.mem.trim(u8, content, " \t\r\n"), &stdout_writer.interface);
 }
-
-// ── main ─────────────────────────────────────────────────────────────────────
 
 pub fn main(init: std.process.Init.Minimal) !void {
   var gpa = std.heap.DebugAllocator(.{}){};
