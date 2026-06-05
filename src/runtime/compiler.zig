@@ -93,8 +93,8 @@ pub const Compiler = struct {
       .cond => |c| try self.compileCond(c, is_tail),
       .right => |r| try self.compileNode(r.clause, is_tail),
       .list => |l| try self.compileList(l),
-      .dict => |d| try self.compileDict(d, .MakeDict),
-      .table => |t| try self.compileDict(t, .MakeTable),
+      .dict => |d| try self.compileDict(d, false),
+      .table => |t| try self.compileDict(t, true),
       .utable => |u| try self.compileUTable(u),
       .pending => |p| try self.compileBind(.{ .v = p.v, .f = p.f, .a = p.a }),
       .verb_op => |op| blk: {
@@ -152,15 +152,45 @@ pub const Compiler = struct {
     return try self.emitOpWithArg(.MakeList, n, inputs.items);
   }
   
-  fn compileDict(self: *Compiler, d: ast.Dict, op: OpCode) anyerror!ir.ValueId {
+  // Dict/table literals lower to the dict verb `!` (and `+` flip for tables)
+  // rather than dedicated opcodes:
+  //   [a:1;b:2]   →  `a`b ! (1;2)
+  //   [[]a:1 2]   →  + (`a ! 1 2)
+  // n==1 keeps the key/value scalar (matching `s!v`); n>1 builds the key and
+  // value lists with MakeList so they promote exactly as the old opcode did.
+  fn compileDict(self: *Compiler, d: ast.Dict, is_table: bool) anyerror!ir.ValueId {
     const items = d.items orelse return ir.NO_VALUE;
-    var inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, items.len * 2);
-    defer inputs.deinit(self.alloc);
-    for (items) |item|
-      try inputs.append(self.alloc, try self.emitConst(.{ .s = try self.symbols.intern(item.k) }));
-    for (items) |item|
-      try inputs.append(self.alloc, try self.compileNode(item.v, false));
-    return try self.emitOpWithArg(op, @intCast(items.len), inputs.items);
+    const n = items.len;
+    if (n == 0) return ir.NO_VALUE;
+
+    var dict_id: ir.ValueId = undefined;
+    if (n == 1) {
+      const key_id = try self.emitConst(.{ .s = try self.symbols.intern(items[0].k) });
+      const val_id = try self.compileNode(items[0].v, false);
+      var pair = [_]ir.ValueId{ key_id, val_id };
+      dict_id = try self.emitOpWithArg(.Apply2, @intFromEnum(Op2.@"!"), &pair);
+    } else {
+      var kinputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, n);
+      defer kinputs.deinit(self.alloc);
+      for (items) |item|
+        try kinputs.append(self.alloc, try self.emitConst(.{ .s = try self.symbols.intern(item.k) }));
+      const keys_id = try self.emitOpWithArg(.MakeList, @intCast(n), kinputs.items);
+
+      var vinputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, n);
+      defer vinputs.deinit(self.alloc);
+      for (items) |item|
+        try vinputs.append(self.alloc, try self.compileNode(item.v, false));
+      const vals_id = try self.emitOpWithArg(.MakeList, @intCast(n), vinputs.items);
+
+      var pair = [_]ir.ValueId{ keys_id, vals_id };
+      dict_id = try self.emitOpWithArg(.Apply2, @intFromEnum(Op2.@"!"), &pair);
+    }
+
+    if (is_table) {
+      var finputs = [_]ir.ValueId{dict_id};
+      return try self.emitOpWithArg(.Apply1, @intFromEnum(Op1.@"+"), &finputs);
+    }
+    return dict_id;
   }
 
   fn compileUTable(self: *Compiler, u: ast.UTable) anyerror!ir.ValueId {
@@ -777,7 +807,7 @@ pub const Compiler = struct {
       .Global => return 2,
       .Local, .AssignLocal, .AssignGlobal,
       .Call, .TailCall, .Apply1, .Apply2, .Apply3, .Apply4, .Apply,
-      .MakeList, .MakeDict, .MakeTable, .Derive,
+      .MakeList, .Derive,
       .ListAssignLocal, .ListAssignGlobal => return 2,
       .Drop => {
         if (inst.inputs.len > 0 and inst.inputs[0] != ir.NO_VALUE and !self.scope.ir.get(inst.inputs[0]).is_dead) return 1;
@@ -822,7 +852,7 @@ pub const Compiler = struct {
     try chunk.writeOp(effective_op);
     switch (effective_op) {
       .Local, .LocalLast, .Global, .AssignLocal, .AssignGlobal, .Call, .TailCall, .Apply1, .Apply2, .Apply3, .Apply4, .Apply,
-      .MakeList, .MakeDict, .MakeTable, .Derive, .ListAssignLocal, .ListAssignGlobal => {
+      .MakeList, .Derive, .ListAssignLocal, .ListAssignGlobal => {
         try chunk.write(@as(u8, @intCast(inst.arg1)));
       },
       .Drop => {},

@@ -21,8 +21,6 @@ pub const OpCode = enum(u8) {
 	MakeList,                // make a list from count items on stack
 	MakePartial,             // pops func + n args, pushes partial
 	Derive,                  // derive verb from variadic (adverb) and top value
-	MakeDict,                // make a dict from keys and values on stack
-	MakeTable,               // make a table from items on stack
 	Command,                 // meta command (\h \l \d \t \v \f \cd)
 
 	pub const COUNT = @typeInfo(OpCode).@"enum".fields.len;

@@ -19,13 +19,10 @@ const Op2 = opmod.Op2;
 const Op3 = opmod.Op3;
 const Op4 = opmod.Op4;
 const Adverb = opmod.Adverb;
-const Dict = @import("../noun/dict.zig").Dict;
 const Partial = @import("../noun/partial.zig").Partial;
 const Pool = @import("../noun/symbol.zig").Pool;
 const ExtRegistry = @import("../noun/plugin.zig").ExtRegistry;
 const Parser = @import("../parser/ast.zig").Parser;
-const enlist = @import("../primitive/verb/enlist.zig").enlist;
-const dict = @import("../primitive/verb/pair.zig").dict;
 const promote = @import("../primitive/promote.zig").promote;
 const dispatch = @import("../primitive/dispatch.zig");
 const fuse = @import("../primitive/derived/fuse.zig");
@@ -328,8 +325,6 @@ pub const VM = struct {
         .MakeList => try vm.doMakeList(),
         .MakePartial => try vm.doMakePartial(),
         .Derive => try vm.doDerive(),
-        .MakeDict => try vm.doMakeDict(),
-        .MakeTable => try vm.doMakeTable(),
         .Command => try vm.doCommand(),
       }
     }
@@ -615,42 +610,6 @@ pub const VM = struct {
     try vm.push(promote(vm.alloc, list_val.L));
   }
 
-  fn doMakeDict(vm: *VM) !void {
-    const n = vm.readByte();
-    const start = vm.stack_len - 2 * n;
-    const keys = if (n == 1) vm.stack[start].ref()
-                 else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start .. start + n])).L);
-    const keys_live = n > 1;
-    errdefer { if (keys_live) keys.deinit(vm.alloc); }
-    const vals = if (n == 1) vm.stack[start + 1].ref()
-                 else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
-    const vals_live = n > 1;
-    errdefer { if (vals_live) vals.deinit(vm.alloc); }
-    const res = if (n == 1) V{ .m = try Dict.init(vm.alloc, keys, vals) }
-                else dict(vm, keys, vals);
-    errdefer res.deinit(vm.alloc);
-    if (keys_live) {
-      keys.deinit(vm.alloc);
-      vals.deinit(vm.alloc);
-    }
-    for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
-    vm.stack_len = start;
-    try vm.push(res);
-  }
-
-  fn doMakeTable(vm: *VM) !void {
-    const n = vm.readByte();
-    const start = vm.stack_len - 2 * n;
-    const keys = if (n == 1) enlist(vm.alloc, vm.stack[start])
-                 else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start .. start + n])).L);
-    const vals = if (n == 1) enlist(vm.alloc, vm.stack[start + 1])
-                 else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
-    const res = V{ .M = try Dict.init(vm.alloc, keys, vals) };
-    for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
-    vm.stack_len = start;
-    try vm.push(res);
-  }
-  
   fn doCommand(vm: *VM) anyerror!void {
     var cmd_v = vm.pop();
     defer cmd_v.deinit(vm.alloc);

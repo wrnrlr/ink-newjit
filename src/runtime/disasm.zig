@@ -171,8 +171,6 @@ fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, o
       .Apply    => { const n = code[ip]; ip += 1; try out.print("Apply       {d}\n", .{n}); },
 
       .MakeList  => { const n = code[ip]; ip += 1; try out.print("MakeList    {d}\n", .{n}); },
-      .MakeDict  => { const n = code[ip]; ip += 1; try out.print("MakeDict    {d}\n", .{n}); },
-      .MakeTable => { const n = code[ip]; ip += 1; try out.print("MakeTable   {d}\n", .{n}); },
       .Apply3 => {
         const op3: Op3 = @enumFromInt(code[ip]); ip += 1;
         try out.print("Apply3      {s}\n", .{op3.toString()});
