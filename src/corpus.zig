@@ -52,8 +52,8 @@ pub fn formatSexp(n: *Node, w: W) !void {
       }
       try w.writeAll("))");
     },
-    .verb_op => try w.writeAll("(op)"),
-    .verb_io => try w.writeAll("(verb_io)"),
+    .op => try w.writeAll("(op)"),
+    .io => try w.writeAll("(io)"),
     .adverb_val => try w.writeAll("(adverb_val)"),
     .transit => |t| {
       try w.writeAll("(transit ");

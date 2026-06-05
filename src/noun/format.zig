@@ -377,15 +377,3 @@ pub const TerseFormatter = struct {
     }
   }
 };
-
-test "format int" {
-  
-}
-
-test "format float" {
-  
-}
-
-test "format list" {
-  
-}

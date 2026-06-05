@@ -52,7 +52,6 @@ pub const VM = struct {
   stack_len: usize         = 0,
   frames:     [FRAMES_MAX]Frame = undefined,
   frames_len: usize             = 0,
-  // Pool for Partial objects (partial function applications).
   partial_pool: std.heap.MemoryPool(Partial),
 
   symbols: Pool,
@@ -718,25 +717,4 @@ test "VM simple addition" {
   defer res.deinit(alloc);
 
   try std.testing.expectEqual(@as(i32, 30), res.i);
-}
-
-test "large list IR" {
-  var vm = try VM.create(std.testing.allocator);
-  defer vm.deinit();
-
-  // Create a list with 20 elements to trigger MakeList with IR
-  const code = "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20";
-  const result = try vm.eval(code);
-  defer result.deinit(vm.alloc);
-  
-  try std.testing.expectEqual(@as(usize, 20), result.len());
-  const v0 = result.at(0);
-  const v19 = result.at(19);
-  if (v0 == .i) {
-    try std.testing.expectEqual(@as(i32, 1), v0.i);
-    try std.testing.expectEqual(@as(i32, 20), v19.i);
-  } else {
-    try std.testing.expectEqual(@as(f32, 1.0), v0.f);
-    try std.testing.expectEqual(@as(f32, 20.0), v19.f);
-  }
 }

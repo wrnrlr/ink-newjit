@@ -357,7 +357,7 @@ pub const Transpiler = struct {
                 else => .unknown,
             },
             .transit => |t| blk: {
-                if (t.v.* == .verb_op and std.mem.eql(u8, t.v.verb_op, ",")) {
+                if (t.v.* == .op and std.mem.eql(u8, t.v.op, ",")) {
                     const ta = try self.inferType(t.a, scope);
                     const tb = try self.inferType(t.b, scope);
                     break :blk WgslType.fromSize(ta.size() + tb.size());
@@ -380,10 +380,10 @@ pub const Transpiler = struct {
                 break :blk try self.inferType(p.a, scope);
             },
             .apposit => |ap| blk: {
-                // .`symbol — parser may produce apposit{f=verb_op("."), a=symbol} instead of prefix
+                // .`symbol — parser may produce apposit{f=op("."), a=symbol} instead of prefix
                 const f_is_dot = switch (ap.f.*) {
                     .literal => |lit| lit == .@"var" and std.mem.eql(u8, lit.@"var", "."),
-                    .verb_op => |op| std.mem.eql(u8, op, "."),
+                    .op => |op| std.mem.eql(u8, op, "."),
                     .verb_io => |io| std.mem.eql(u8, io, "."),
                     else => false,
                 };
@@ -740,7 +740,7 @@ pub const Transpiler = struct {
             .group => |g| try self.emitExpr(g.stmt, scope, w, tc, aa),
 
             .transit => |t| blk: {
-                const verb = if (t.v.* == .verb_op) t.v.verb_op
+                const verb = if (t.v.* == .op) t.v.op
                 else if (t.v.* == .verb_io) t.v.verb_io
                 else break :blk error.UnsupportedVerb;
 
@@ -769,8 +769,8 @@ pub const Transpiler = struct {
             },
 
             .intrans => |i| blk: {
-                if (i.v.* == .verb_op or i.v.* == .verb_io) {
-                    const verb = if (i.v.* == .verb_op) i.v.verb_op else i.v.verb_io;
+                if (i.v.* == .op or i.v.* == .verb_io) {
+                    const verb = if (i.v.* == .op) i.v.op else i.v.verb_io;
                     const ea = try self.emitExpr(i.a, scope, w, tc, aa);
                     if (std.mem.eql(u8, verb, "-")) {
                         break :blk try std.fmt.allocPrint(aa, "(-{s})", .{ea});
@@ -810,10 +810,10 @@ pub const Transpiler = struct {
             },
 
             .apposit => |ap| blk: {
-                // .`symbol — parser may produce apposit{f=verb_op("."), a=symbol} instead of prefix
+                // .`symbol — parser may produce apposit{f=op("."), a=symbol} instead of prefix
                 const f_is_dot = switch (ap.f.*) {
                     .literal => |lit| lit == .@"var" and std.mem.eql(u8, lit.@"var", "."),
-                    .verb_op => |op| std.mem.eql(u8, op, "."),
+                    .op => |op| std.mem.eql(u8, op, "."),
                     .verb_io => |io| std.mem.eql(u8, io, "."),
                     else => false,
                 };

@@ -72,7 +72,7 @@ fn nodeToV(vm: *VM, node: *Node) anyerror!V {
       try list.append(alloc, try sym(vm, type_name));
       return transfer(alloc, &list);
     },
-    .verb_op    => return sym(vm, "op"),
+    .op         => return sym(vm, "op"),
     .io    => return sym(vm, "verb_io"),
     .adverb_val => return sym(vm, "adverb_val"),
     .monad      => return sym(vm, "monad"),

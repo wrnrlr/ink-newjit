@@ -151,6 +151,9 @@ test "logical" {
   try t.check("2 in 1 2 3", "1b");
   try t.check("9 in 1 2 3", "0b");
   try t.check("2 9 1 in 1 2 3", "101b");
+  try t.check("\"aeiou\" has \"azbz\"", "1000b");
+  try t.check("1.0 0n 3.0 has 0n", "1b");
+  try t.check("1.0 0n 3.0 has 2.0", "0b");
 }
 test "named math operators" {
   var t = try Tester.init(); defer t.deinit();
@@ -181,6 +184,8 @@ test "ordering" {
   try t.check(">3 1 2", "0 2 1");
   try t.check("<\"cba\"", "2 1 0");
   try t.check("<42", ",0"); // TODO should be !class
+  try t.check(">\"abc\"", "2 1 0");
+  try t.check("<1.1 0n 0.5", "1 2 0");
 }
 
 test "amend" {
@@ -636,6 +641,7 @@ test "!I odometer" {
   try t.check("!2 3", "(0 0 0 1 1 1;0 1 2 0 1 2)");
   try t.check("!2 2", "(0 0 1 1;0 1 0 1)");
   try t.check("!,3", ",0 1 2");
+  try t.check("!2 2 2", "(0 0 0 0 1 1 1 1;0 0 1 1 0 0 1 1;0 1 0 1 0 1 0 1)");
 }
 
 test "!m keys" {
@@ -741,14 +747,21 @@ test "n^N fill empty numeric value with n" {
   try t.check("3^1.2 0n 4.5", "(1.2;3;4.5)");
 }
 
-test "I_C cut characters at every N" {
+test "I_X cut" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("2 4_\"abcdefg\"", "(\"cd\";\"efg\")");
+  try t.check("2 4 4_\"abcde\"", "(\"cd\";\"\";,\"e\")");
+  try t.check("0 3_10 20 30 40 50", "(10 20 30;40 50)");
+  try t.check("5 10_1 2 3", "(&0;&0)");
 }
 
-test "C_i delete character at n" {
+test "Y_i delete" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("\"abcde\"_2", "\"abde\"");
+  try t.check("1 2 3 4_0", "2 3 4");
+  try t.check("1 2 3 4_2", "1 2 4");
+  try t.check("1 2 3 4_3", "1 2 3");
+  try t.check("1 2 3_5", "!length");
 }
 
 test "weed out" {
@@ -792,6 +805,26 @@ test "X?Y find" {
   try t.check("\"abc\"?\"ca\"", "2 0");
   try t.check("(1;2.3;`c)?2.3", "1");
   // try t.check("(`a`b`c!1 2 3)?2", "`b"); // Not implemented in Finc or dispatch fallback logic
+  try t.check("3 1 4 1 5?3", "0");
+  try t.check("3 1 4 1 5?9", "0N");
+  try t.check("3 1 4?4 9 3", "2 0N 0");
+}
+
+test "i_Y drop" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("2_1 2 3 4 5", "3 4 5");
+  try t.check("-2_1 2 3 4 5", "1 2 3");
+  try t.check("0_1 2 3", "1 2 3");
+  try t.check("10_1 2 3", "&0");
+  try t.check("2_\"hello\"", "\"llo\"");
+}
+
+test "?X distinct" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("?3 1 4 1 3", "3 1 4");
+  try t.check("?\"banana\"", "\"ban\"");
+  try t.check("?7 7 7", ",7");
+  try t.check("?1.0 0n 1.0 0n", "1.0 0n");
 }
 
 test ".S get variable value by symbol" {
@@ -879,20 +912,6 @@ test "Dihedral group of degree 4" {
   try t.check("g:(:; |:; +:; |+:; +|+:; |+|:; +|+|:)", "");
   try t.check("M: 2 2#!4", "");
   try t.check("g@\\:M", "((0 1;2 3);(2 3;0 1);(0 2;1 3);(1 3;0 2);(1 0;3 2);(3 1;2 0);(3 2;1 0))");
-}
-
-test "csv parsing" {
-  var t = try Tester.init(); defer t.deinit();
-  // try t.check("`csv$\"name,age\nAlice,30\nBob,25\"", "[[]name:(\"Alice\";\"Bob\");age:30 25]");
-  // try t.check("`csv@\"name,age\nAlice,30\nBob,25\"", "[[]name:(\"Alice\";\"Bob\");age:30 25]");
-  // try t.check("`csv@\"name,age\nAlice,30\nBob,25\n\"", "[[]name:(\"Alice\";\"Bob\");age:30 25]");
-  // try t.check("`csv@\"name,age\r\nAlice,30\r\nBob,25\r\n\"", "[[]name:(\"Alice\";\"Bob\");age:30 25]");
-  // try t.check("`csv@\"1,2\n3,4\"", "[[]a:1 3;b:2 4]");
-  // try t.check("`csv@\"val\n1\n2\n3\"", "[[]val:1 2 3]");
-  // try t.check("@`csv@\"name,age\"", "[[]name:`L;age:`L]");
-  // try t.check("`csv@\"x,y\n1.5,2.5\n3.0,4.0\"", "[[]x:1.5 3.0;y:2.5 4.0]");
-  // try t.check("`csv@\"\"", "!domain");
-  // try t.check("`csv@\"n\n1\n2.5\n3\"", "[[]n:1.0 2.5 3.0]");
 }
 
 test "csv parsing quoted fields via file" {
@@ -987,99 +1006,12 @@ test "json array of same-schema objects becomes table" {
   // try t.check("`json$1:<`\"tmp_test_arr.json\"", "[[]a:1 3;b:2 4]");
 }
 
-// XML encoding tests
-
-// test "xml parsing column schema" {
-//   var t = try Tester.init(); defer t.deinit();
-//   const xml_content = "<a/>";
-//   const tmp = "tmp_test.xml";
-//   const zio = std.Io.Threaded.global_single_threaded.io();
-//   { const f = try std.Io.Dir.cwd().createFile(zio, tmp, .{}); defer f.close(zio);
-//     try f.writePositionalAll(zio, xml_content, 0); }
-//   defer std.Io.Dir.cwd().deleteFile(zio, tmp) catch {};
-//   // try t.check("@`xml$1:<`\"tmp_test.xml\"", "[[]id:`L;parent:`L;kind:`L;name:`L;value:`L]");
-// }
-
-// test "xml parsing self-closing element has one node" {
-//   var t = try Tester.init(); defer t.deinit();
-//   const xml_content = "<a/>";
-//   const tmp = "tmp_test_self.xml";
-//   const zio = std.Io.Threaded.global_single_threaded.io();
-//   { const f = try std.Io.Dir.cwd().createFile(zio, tmp, .{}); defer f.close(zio);
-//     try f.writePositionalAll(zio, xml_content, 0); }
-//   defer std.Io.Dir.cwd().deleteFile(zio, tmp) catch {};
-//   // try t.check("#`xml$1:<`\"tmp_test_self.xml\"", "1");
-// }
-
-// test "xml parsing nested elements" {
-//   var t = try Tester.init(); defer t.deinit();
-//   const xml_content = "<a><b/><c/></a>";
-//   const tmp = "tmp_test_nest.xml";
-//   const zio = std.Io.Threaded.global_single_threaded.io();
-//   { const f = try std.Io.Dir.cwd().createFile(zio, tmp, .{}); defer f.close(zio);
-//     try f.writePositionalAll(zio, xml_content, 0); }
-//   defer std.Io.Dir.cwd().deleteFile(zio, tmp) catch {};
-//   // try t.check("#`xml$1:<`\"tmp_test_nest.xml\"", "3");
-// }
-
-// test "xml parsing element with attribute" {
-//   var t = try Tester.init(); defer t.deinit();
-//   const xml_content = "<item id=\"1\"/>";
-//   const tmp = "tmp_test_attr.xml";
-//   const zio = std.Io.Threaded.global_single_threaded.io();
-//   { const f = try std.Io.Dir.cwd().createFile(zio, tmp, .{}); defer f.close(zio);
-//     try f.writePositionalAll(zio, xml_content, 0); }
-//   defer std.Io.Dir.cwd().deleteFile(zio, tmp) catch {};
-//   // 1 elem + 1 attr = 2 nodes
-//   // try t.check("#`xml$1:<`\"tmp_test_attr.xml\"", "2");
-// }
-
-// test "xml parsing element with text content" {
-//   var t = try Tester.init(); defer t.deinit();
-//   const xml_content = "<a>hello</a>";
-//   const tmp = "tmp_test_txt.xml";
-//   const zio = std.Io.Threaded.global_single_threaded.io();
-//   { const f = try std.Io.Dir.cwd().createFile(zio, tmp, .{}); defer f.close(zio);
-//     try f.writePositionalAll(zio, xml_content, 0); }
-//   defer std.Io.Dir.cwd().deleteFile(zio, tmp) catch {};
-//   // 1 elem + 1 text = 2 nodes
-//   // try t.check("#`xml$1:<`\"tmp_test_txt.xml\"", "2");
-// }
-
-// test "xml empty string returns domain error" {
-//   var t = try Tester.init(); defer t.deinit();
-//   const xml_content = "";
-//   const tmp = "tmp_test_empty.xml";
-//   const zio = std.Io.Threaded.global_single_threaded.io();
-//   { const f = try std.Io.Dir.cwd().createFile(zio, tmp, .{}); defer f.close(zio);
-//     try f.writePositionalAll(zio, xml_content, 0); }
-//   defer std.Io.Dir.cwd().deleteFile(zio, tmp) catch {};
-//   // try t.check("`xml$1:<`\"tmp_test_empty.xml\"", "!domain");
-// }
-
 test "grade ascending list" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("<(1 2 3; 4 5 6)", "0 1");
   try t.check("<(4 5 6; 1 2 3)", "1 0");
   try t.check("<(\"b\";\"a\";\"c\")", "1 0 2");
 }
-
-// test "print verb writes to out" {
-//   var t = try Tester.init(); defer t.deinit();
-//   (try t.eval("` 0: \"Hello\"")).deinit(t.vm.alloc);
-//   const o1 = try t.printout();
-//   defer testing.allocator.free(o1);
-//   try testing.expectEqualStrings("Hello\n", o1);
-//   (try t.eval("` 0: \"foo\"\n` 0: \"bar\"")).deinit(t.vm.alloc);
-//   const o2 = try t.printout();
-//   defer testing.allocator.free(o2);
-//   try testing.expectEqualStrings("foo\nbar\n", o2);
-//   // no-space form: `0:"world" parses as symbol-0 bind, routed to WriteLines
-//   (try t.eval("`0:\"world\"")).deinit(t.vm.alloc);
-//   const o3 = try t.printout();
-//   defer testing.allocator.free(o3);
-//   try testing.expectEqualStrings("world\n", o3);
-// }
 
 test "insert dict into table" {
   var t = try Tester.init(); defer t.deinit();
