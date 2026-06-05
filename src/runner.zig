@@ -72,15 +72,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
   const exe_name = args_iter.next() orelse "";
 
   var disasm_mode = false;
-  var gpu_flag    = false;
   var script_path: ?[]const u8 = null;
   var extra_args: std.ArrayList([]const u8) = .empty;
   defer extra_args.deinit(allocator);
   while (args_iter.next()) |arg| {
     if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--disasm")) {
       disasm_mode = true;
-    } else if (std.mem.eql(u8, arg, "--gpu")) {
-      gpu_flag = true;
     } else if (script_path == null) {
       script_path = arg;
     } else {
@@ -91,7 +88,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
   const io = std.Io.Threaded.global_single_threaded.io();
   const stdin_is_tty = (std.Io.File.stdin().isTty(io) catch false);
 
-  // Create VM once; GPU backend (if requested) is attached before any eval.
   const vm = try VM.create(allocator);
   defer vm.deinit();
 
@@ -106,10 +102,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
     try d.print(&stdout_writer.interface);
     return;
-  }
-
-  if (gpu_flag) {
-    std.debug.print("warning: --gpu flag ignored (GPU support is disabled in this build)\n", .{});
   }
 
   // Build argv = [exe_name, script_path?, ...extra_args]
