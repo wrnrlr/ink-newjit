@@ -38,7 +38,16 @@ pub const Op1 = enum(u8) {
 
 /// Dyadic primitives. Apply2 bytecode + dyad dispatch table.
 pub const Op2 = enum(u8) {
-  @"%", @"!", @"&", @"+", @"*", @"|", @"<", @">", @"=", @"~",
+  @"%",
+  @"!",
+  @"&",
+  @"+",
+  @"*", 
+  @"|",
+  @"<",
+  @">",
+  @"=",
+  @"~",
   @",", @"^", @"#", @"_", @"$", @"?", @"@", @"-", @".",
   in, has,
   mod, div,
