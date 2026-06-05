@@ -34,6 +34,13 @@ fn Amend3Vec(comptime k: K) type {
   };
 }
 
+// True when f is the builtin assignment verb `:` (dyadic right). Amend with `:`
+// is plain element assignment, so it can skip the per-element verb dispatch.
+inline fn isAssign(f: V) bool {
+  return f.tag() == .func and f.func.isBuiltinFn()
+    and opmod.isOp2Idx(f.func.idx) and f.func.getOp2() == .@":";
+}
+
 fn Amend4Vec(comptime k: K) type {
   const rt = k.atom();
   const T = K.backing(k);
@@ -41,6 +48,11 @@ fn Amend4Vec(comptime k: K) type {
     fn single(vm: *VM, a: N(T), idx: i32, f: V, b: V) !void {
       const s = a.slice();
       const i: usize = @intCast(idx);
+      if (isAssign(f)) {
+        if (b.tag() != rt) return error.TypeError;
+        s[i] = V.unwrap(b, rt);
+        return;
+      }
       var fc = Call{ .vm = vm };
       const res = fc.apply(f, &[_]V{ V.wrap(rt, s[i]), b }, false);
       if (res.tag() != rt) { res.deinit(vm.alloc); return error.TypeError; }
@@ -48,9 +60,20 @@ fn Amend4Vec(comptime k: K) type {
     }
     fn multiple(vm: *VM, a: N(T), ix: N(i32), f: V, b: V) !void {
       const s = a.slice();
-      const b_is_vec = b.isVec() and b.len() == ix.slice().len;
+      const ixs = ix.slice();
+      const b_is_vec = b.isVec() and b.len() == ixs.len;
+      // Fast path: `@[Xvec;I;:;vals]` is a typed scatter — no per-element verb
+      // dispatch, no V boxing. Values are scalars of `rt` (or atoms thereof).
+      if (isAssign(f)) {
+        for (ixs, 0..) |raw_i, n| {
+          const bv = if (b_is_vec) b.at(n) else b;
+          if (bv.tag() != rt) return error.TypeError;
+          s[@intCast(raw_i)] = V.unwrap(bv, rt);
+        }
+        return;
+      }
       var fc = Call{ .vm = vm };
-      for (ix.slice(), 0..) |raw_i, n| {
+      for (ixs, 0..) |raw_i, n| {
         const i: usize = @intCast(raw_i);
         const bv = if (b_is_vec) b.at(n) else b.ref();
         defer bv.deinit(vm.alloc);
@@ -89,6 +112,11 @@ const AmendList4 = struct {
   fn single(vm: *VM, a: N(V), idx: i32, f: V, b: V) !void {
     const s = a.slice();
     const i: usize = @intCast(idx);
+    if (isAssign(f)) {
+      s[i].deinit(vm.alloc);
+      s[i] = b.ref();
+      return;
+    }
     var fc = Call{ .vm = vm };
     const new_val = fc.apply(f, &[_]V{ s[i], b }, false);
     if (new_val.tag() == .err) return error.Domain;
@@ -97,9 +125,19 @@ const AmendList4 = struct {
   }
   fn multiple(vm: *VM, a: N(V), ix: N(i32), f: V, b: V) !void {
     const s = a.slice();
-    const b_is_vec = b.isVec() and b.len() == ix.slice().len;
+    const ixs = ix.slice();
+    const b_is_vec = b.isVec() and b.len() == ixs.len;
+    if (isAssign(f)) {
+      for (ixs, 0..) |raw_i, n| {
+        const i: usize = @intCast(raw_i);
+        const bv = if (b_is_vec) b.at(n) else b.ref(); // owned, transferred to s[i]
+        s[i].deinit(vm.alloc);
+        s[i] = bv;
+      }
+      return;
+    }
     var fc = Call{ .vm = vm };
-    for (ix.slice(), 0..) |raw_i, n| {
+    for (ixs, 0..) |raw_i, n| {
       const i: usize = @intCast(raw_i);
       const bv = if (b_is_vec) b.at(n) else b.ref();
       defer bv.deinit(vm.alloc);

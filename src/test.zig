@@ -192,6 +192,9 @@ test "amend" {
   try t.check("@[1 2 3 4; 1 2; {x*2}]", "1 4 6 4");
   try t.check("@[1; 0; :; 5 ]", "!type");
   try t.check("d:[a:10;b:20]; @[d; `a; +; 5]", "[a:15;b:20]");
+  // `:`-assign fast path: typed scatter (float) and list assign
+  try t.check("@[0.0 0.0 0.0; 0 2; :; 1.5 2.5]", "1.5 0.0 2.5");
+  try t.check("@[(1;\"ab\";3); 1; :; 9]", "(1;9;3)");
 }
 test "splice" {
   var t = try Tester.init(); defer t.deinit();
