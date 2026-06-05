@@ -161,6 +161,11 @@ fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, o
         const verb: Op2 = @enumFromInt(code[ip]); ip += 1;
         try out.print("Apply2      {s}\n", .{verb.toString()});
       },
+      .ReduceZip => {
+        const red: Op1 = @enumFromInt(code[ip]); ip += 1;
+        const bin: Op2 = @enumFromInt(code[ip]); ip += 1;
+        try out.print("ReduceZip   {s} {s}\n", .{ red.toString(), bin.toString() });
+      },
       .Call     => { const n = code[ip]; ip += 1; try out.print("Call        {d}\n", .{n}); },
       .TailCall => { const n = code[ip]; ip += 1; try out.print("TailCall    {d}\n", .{n}); },
       .Apply    => { const n = code[ip]; ip += 1; try out.print("Apply       {d}\n", .{n}); },

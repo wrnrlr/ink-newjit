@@ -15,6 +15,17 @@ inline fn isCall1(inst: *const ir.IRInst) bool {
   return (inst.op == .Call or inst.op == .TailCall) and inst.arg1 == 1 and inst.inputs.len == 2;
 }
 
+fn isFusableReducer(op: Op1) bool {
+  return switch (op) { .@"+/", .@"*/", .@"&/", .@"|/" => true, else => false };
+}
+
+fn isFusableBin(op: Op2) bool {
+  return switch (op) {
+    .@"+", .@"-", .@"*", .@"&", .@"|", .@"<", .@">", .@"=" => true,
+    else => false,
+  };
+}
+
 // True when inst is a Const holding a builtin dyad func reference to `op`.
 fn isBuiltinDyad(inst: *const ir.IRInst, op: Op2) bool {
   if (inst.op != .Const) return false;
@@ -107,6 +118,42 @@ pub const Optimizer = struct {
     var changed = false;
     for (insts) |*inst| {
       if (inst.is_dead) continue;
+
+      // Idiom: reduce-of-zip `red/ (x bin y)` → ReduceZip (avoids the temp).
+      //   %prod = Apply2(bin, a, b)
+      //   %r    = Apply1(redFused, %prod)   ; redFused ∈ {+/,*/,&/,|/}
+      // Rewrite %r to ReduceZip[a, b] carrying both ops; mark %prod dead.
+      // Only fires when %prod has a single user so a separate use of x bin y
+      // is never eliminated. The kernel falls back to the unfused path for
+      // operands it can't specialise, so this is always semantics-preserving.
+      if (inst.op == .Apply1 and inst.inputs.len == 1) {
+        const red: Op1 = @enumFromInt(inst.arg1);
+        if (isFusableReducer(red)) fz: {
+          const prod_id = inst.inputs[0];
+          if (prod_id == ir.NO_VALUE or use_count[prod_id] != 1) break :fz;
+          const prod = scope_ir.get(prod_id);
+          if (prod.op != .Apply2 or prod.inputs.len != 2) break :fz;
+          const bin: Op2 = @enumFromInt(prod.arg1);
+          if (!isFusableBin(bin)) break :fz;
+          const a = prod.inputs[0];
+          const b = prod.inputs[1];
+          if (a == ir.NO_VALUE or b == ir.NO_VALUE) break :fz;
+
+          const old_inputs = inst.inputs;
+          const new_inputs = try scope_ir.alloc.alloc(ir.ValueId, 2);
+          new_inputs[0] = a;
+          new_inputs[1] = b;
+          inst.inputs = new_inputs;
+          inst.op = .ReduceZip;
+          inst.arg1 = @intFromEnum(red); // Op1 reduce
+          inst.arg2 = prod.arg1;          // Op2 bin
+          scope_ir.alloc.free(old_inputs);
+          scope_ir.instructions.items[prod_id].is_dead = true;
+          changed = true;
+          continue;
+        }
+      }
+
       if (!isCall1(inst)) continue;
       const f_id = inst.inputs[0];
       const arg_id = inst.inputs[1];

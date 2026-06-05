@@ -784,7 +784,7 @@ pub const Compiler = struct {
         return 0;
       },
       .Jump, .JumpFalse, .JumpTrue => return 3,
-      .MakePartial => return 3,
+      .MakePartial, .ReduceZip => return 3,
       else => return 1,
     }
   }
@@ -833,7 +833,7 @@ pub const Compiler = struct {
         const jump_size: i32 = @as(i32, @intCast(target_offset)) - @as(i32, @intCast(current_offset + 3));
         try chunk.write16(@as(u16, @bitCast(@as(i16, @intCast(jump_size)))));
       },
-      .MakePartial => {
+      .MakePartial, .ReduceZip => {
         try chunk.write(@as(u8, @intCast(inst.arg1)));
         try chunk.write(@as(u8, @intCast(inst.arg2)));
       },

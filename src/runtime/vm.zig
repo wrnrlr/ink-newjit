@@ -28,6 +28,7 @@ const enlist = @import("../primitive/verb/enlist.zig").enlist;
 const dict = @import("../primitive/verb/pair.zig").dict;
 const promote = @import("../primitive/promote.zig").promote;
 const dispatch = @import("../primitive/dispatch.zig");
+const fuse = @import("../primitive/derived/fuse.zig");
 const MockWriter = @import("../util.zig").MockWriter;
 const SlabAlloc = @import("../noun/slab.zig").SlabAlloc;
 
@@ -317,6 +318,7 @@ pub const VM = struct {
         },
         .Apply1 => try VM.doApply1(vm),
         .Apply2 => try VM.doApply2(vm),
+        .ReduceZip => try VM.doReduceZip(vm),
         .Apply3 => try VM.doApply3(vm),
         .Apply4 => try VM.doApply4(vm),
         .Return => try vm.doReturn(),
@@ -490,6 +492,17 @@ pub const VM = struct {
     const a = vm.pop();
     defer a.deinit(vm.alloc);
     try vm.push(dispatch.dispatch2(vm, op, a, b));
+  }
+
+  // Fused reduce-of-zip: 2 op bytes (Op1 reduce, Op2 bin), pops 2 args.
+  fn doReduceZip(vm: *VM) !void {
+    const red: Op1 = @enumFromInt(vm.readByte());
+    const bin: Op2 = @enumFromInt(vm.readByte());
+    const b = vm.pop();
+    defer b.deinit(vm.alloc);
+    const a = vm.pop();
+    defer a.deinit(vm.alloc);
+    try vm.push(fuse.reduceZip(vm, red, bin, a, b));
   }
 
   fn doApply3(vm: *VM) !void {

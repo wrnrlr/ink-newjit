@@ -556,6 +556,19 @@ test "eachprior monadic" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("-':12 13 11 17 14", "12 1 -2 6 -3");
 }
+test "reduce-of-zip fusion" {
+  var t = try Tester.init(); defer t.deinit();
+  // Fused results must match the unfused `red/ (x bin y)` semantics.
+  try t.check("x:1 2 3 4; y:5 6 7 8; +/x*y", "70");   // dot product
+  try t.check("x:1 2 3; y:10 20 30; +/x+y", "66");
+  try t.check("x:3 1 4; y:1 5 9; &/x|y", "3");
+  try t.check("x:1 5 3; y:2 2 9; |/x<y", "1b");        // any
+  try t.check("x:1 5 3; y:2 2 9; +/x<y", "2");         // count
+  try t.check("x:1 1 1; y:2 2 2; &/x<y", "1b");        // all
+  try t.check("x:1.5 2.0; y:2.0 3.0; +/x*y", "9.0");   // float dot
+  try t.check("x:1 2 3; y:1.0 2.0 3.0; +/x*y", "14.0"); // mixed -> fallback
+  try t.check("x:1 2 3; +/x*2", "12");                  // scalar -> fallback
+}
 test "eachprior seeded" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("10-':12 13 11 17 14", "2 1 -2 6 -3");
