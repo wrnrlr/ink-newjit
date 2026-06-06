@@ -13,6 +13,8 @@
 # Ink language Overview
 Ink (sometimes called terse) is an array programming language based on k.
 
+## Tips
+- No `>=`/`<=` — use `~(a<b)`
 
 ## Nouns
 
