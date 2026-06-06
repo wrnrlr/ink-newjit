@@ -32,7 +32,6 @@ pub const Pick = struct {
   _S_i: util.DyadFn = pickAtomFn,
   _C_i: util.DyadFn = pickAtomFn,
   _L_i: util.DyadFn = pickAtomFn,
-  _m_i: util.DyadFn = pickAtomFn,
 
   _B_I: util.DyadFn = pickVecTyped(.B),
   _I_I: util.DyadFn = pickVecTyped(.I),
@@ -40,7 +39,6 @@ pub const Pick = struct {
   _S_I: util.DyadFn = pickVecTyped(.S),
   _C_I: util.DyadFn = pickVecTyped(.C),
   _L_I: util.DyadFn = pickVecFn,
-  _m_I: util.DyadFn = pickVecFn,
 
   // x@(y0;y1;...) → (x@y0; x@y1; ...) — index x at each element of list y
   _B_L: util.DyadFn = pickListFn,
@@ -51,14 +49,6 @@ pub const Pick = struct {
 
   _S_s: util.DyadFn = pickSymAtomFn,
   _S_S: util.DyadFn = pickSymVecFn,
-
-  _m_s: util.DyadFn = pickDictSymFn,
-  _m_S: util.DyadFn = pickDictSymVecFn,
-
-  _M_i: util.DyadFn = pickTableRowFn,
-  _M_I: util.DyadFn = pickTableRowVecFn,
-  _M_s: util.DyadFn = pickTableColFn,
-  _M_S: util.DyadFn = pickTableColVecFn,
 };
 
 
@@ -144,8 +134,8 @@ fn pickListFn(vm: *VM, x: V, y: V) V {
 
 fn pickBoolFn(_: *VM, x: V, y: V) V  { return x.at(if (y.b) 1 else 0); }
 fn pickMaskFn(vm: *VM, x: V, y: V) V { return pickMask(vm.alloc, x, y.B.slice()); }
-fn pickAtomFn(_: *VM, x: V, y: V) V  { return pickAtom(x, y.i); }
-fn pickVecFn(vm: *VM, x: V, y: V) V  { return pickVec(vm.alloc, x, y.I.slice()); }
+pub fn pickAtomFn(_: *VM, x: V, y: V) V  { return pickAtom(x, y.i); }
+pub fn pickVecFn(vm: *VM, x: V, y: V) V  { return pickVec(vm.alloc, x, y.I.slice()); }
 
 fn pickVecTyped(comptime xk: K) util.DyadFn {
   comptime std.debug.assert(xk.isVec());
@@ -191,12 +181,12 @@ fn pickMaskTyped(comptime xk: K) util.DyadFn {
 }
 fn pickSymAtomFn(_: *VM, x: V, y: V) V  { return pickSymAtom(x, y.s); }
 fn pickSymVecFn(vm: *VM, x: V, y: V) V  { return pickSymVec(vm.alloc, x, y.S.slice()); }
-fn pickDictSymFn(_: *VM, x: V, y: V) V  { return pickDictSym(x.m, y.s); }
-fn pickDictSymVecFn(vm: *VM, x: V, y: V) V { return pickDictSymVec(vm.alloc, x.m, y.S.slice()); }
-fn pickTableRowFn(vm: *VM, x: V, y: V) V  { return pickTableRow(vm.alloc, x.M, y.i); }
-fn pickTableRowVecFn(vm: *VM, x: V, y: V) V { return pickTableRowVec(vm.alloc, x, y.I.slice()); }
-fn pickTableColFn(_: *VM, x: V, y: V) V  { return pickTableCol(x.M, y.s); }
-fn pickTableColVecFn(vm: *VM, x: V, y: V) V { return pickTableColVec(vm.alloc, x, y.S.slice()); }
+pub fn pickDictSymFn(_: *VM, x: V, y: V) V  { return pickDictSym(x.m, y.s); }
+pub fn pickDictSymVecFn(vm: *VM, x: V, y: V) V { return pickDictSymVec(vm.alloc, x.m, y.S.slice()); }
+pub fn pickTableRowFn(vm: *VM, x: V, y: V) V  { return pickTableRow(vm.alloc, x.M, y.i); }
+pub fn pickTableRowVecFn(vm: *VM, x: V, y: V) V { return pickTableRowVec(vm.alloc, x, y.I.slice()); }
+pub fn pickTableColFn(_: *VM, x: V, y: V) V  { return pickTableCol(x.M, y.s); }
+pub fn pickTableColVecFn(vm: *VM, x: V, y: V) V { return pickTableColVec(vm.alloc, x, y.S.slice()); }
 
 
 fn pickAtom(x: V, idx: i32) V {

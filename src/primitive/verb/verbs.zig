@@ -1,5 +1,4 @@
 const std = @import("std");
-const Alloc = std.mem.Allocator;
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const Op1 = @import("../../noun/operator.zig").Op1;
@@ -27,14 +26,19 @@ const at = h.arithmetic_types;
 pub fn _B(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Upcast1, h.Bool1,   F, &at); }
 pub fn _N(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Upcast1, h.Upcast1, F, &at); }
 pub fn _F(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Float1,  h.Float1,  F, &at); }
+pub fn _Yf(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Float1, h.Int1,   F, &at); }
 pub fn _X1(comptime op: Op1, comptime Impl: type) type { return h._X(Op1, op, Impl); }
 
 // Dyad helpers (op: Op2)
-pub fn _B_B(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Bool2,   h.Bool2,   f, &at); }
+pub fn _B_B(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Bool2, h.Bool2, f, &.{.b, .B}); }
 pub fn _N_N(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Upcast2, h.Upcast2, f, &at); }
 pub fn _I_I(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Int2, h.Int2, f, &h.integer_types); }
 pub fn _F_F(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Float2,  h.Float2,  f, &at); }
-pub fn _X2(comptime op: Op2, comptime Impl: type) type { return h._X(Op2, op, Impl); }
+pub fn _X2(comptime op: Op2, comptime f: type) type { return h._X(Op2, op, f); }
+
+pub fn _Cmp(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Upcast2, h.Bool2, f, &at); }
+
+
 
 const Monads = struct {
   // Monadic Primitives
@@ -58,7 +62,7 @@ const Monads = struct {
   pub const @"^x" = @import("nulls.zig").Nulls;
   pub const @"#x" = @import("tally.zig").Tally;
   pub const @"_c" = @import("lowercase.zig").Lowercase;
-  pub const @"_n" = @import("floor.zig").Floor;
+  pub const @"_n" = h.makeMonad(.@"_", h.Float1, h.Int1, @import("floor.zig").FloorOp, &.{.f, .F});
   // pub const @"9:x"   = @import("graphics.zig").Draw;
   pub const @"sqrt"  = _F(.sqrt, calc.SqrtOp);
   pub const @"sqr"   = _N(.sqr,  calc.SqrOp);
@@ -70,6 +74,7 @@ const Monads = struct {
   pub const @"$x"    = @import("format.zig").Format;
   pub const @"parse" = @import("parse.zig").Parse;
   pub const @"@x"    = @import("type.zig").Type;
+  pub const @":x"    = @import("right.zig").Identity;
 
   pub const @"=u"  = @import("unitary.zig").Unitary;
   pub const @"?X"  = @import("distinct.zig").Distinct;
@@ -82,48 +87,45 @@ const Monads = struct {
 
   // Fused derived verbs — direct monadic reductions over typed arrays.
   // The optimizer rewrites `+/x` (Call+Derive) into `Apply1 +/` to hit these.
-  pub const @"sum_x"     = @import("../derived/sum.zig").Sum;
-  pub const @"product_x" = @import("../derived/product.zig").Product;
-  pub const @"min_x"     = @import("../derived/min.zig").Min;
-  pub const @"max_x"     = @import("../derived/max.zig").Max;
+  pub const @"sum x"     = @import("../derived/sum.zig").Sum;
+  pub const @"product x" = @import("../derived/product.zig").Product;
+  pub const @"min x"     = @import("../derived/min.zig").Min;
+  pub const @"max x"     = @import("../derived/max.zig").Max;
 };
 
 const Dyads = struct {
   // Dyadic Primitives
+  // pub const @"i+i" = _i_i(.@"+", fn f(x: anytype, y: anytype) i32 { return x +% y; });
   pub const @"N+N" = _N_N(.@"+", calc.AddOp);
   pub const @"N-N" = _N_N(.@"-", calc.SubOp);
   pub const @"N*N" = _N_N(.@"*", calc.MulOp);
   pub const @"N%N" = _F_F(.@"%", calc.DivOp);
   pub const @"N&N" = _N_N(.@"&", calc.MinOp);
   pub const @"N|N" = _N_N(.@"|", calc.MaxOp);
-  // Bool-preserving overrides for & and | on bool operands.
-  // These override the _N_N entries for b/B pairs, keeping the result type bool
-  // so the in-place mutation optimisation in dyadKernel can fire.
-  pub const @"B&B" = h.makeDyad(.@"&", h.Bool2, h.Bool2, calc.AndOp, &.{.b, .B});
-  pub const @"B|B" = h.makeDyad(.@"|", h.Bool2, h.Bool2, calc.OrOp,  &.{.b, .B});
+  pub const @"B&B" = _B_B(.@"&", calc.AndOp);
+  pub const @"B|B" = _B_B(.@"|", calc.OrOp);
   pub const @"x!y" = pair.Pair;
-  pub const @"X=X" = logic.Equal;
-  pub const @"X<X" = logic.Less;
-  pub const @"X>X" = logic.More;
+  pub const @"X=X" = _Cmp(.@"=", logic.EqualOp);
+  pub const @"X<X" = _Cmp(.@"<", logic.LessOp);
+  pub const @"X>X" = _Cmp(.@">", logic.MoreOp);
   pub const @"X~X" = @import("match.zig").Match;
-  pub const @"I mod I"  = _I_I(.mod, calc.ModOp);
-  pub const @"I div I"  = _I_I(.div, calc.DiviOp);
-  
+  pub const @"I⌊I"  = _I_I(.mod, calc.ModOp);
+  pub const @"I÷I"  = _I_I(.div, calc.DiviOp);
   pub const @"x,y"  = concat.Concat;
   pub const @"i_X"  = @import("drop.zig").Drop;
   pub const @"I_X"  = _X2(.@"_", @import("cut.zig").Cut);
   pub const @"B_X"  = @import("weedout.zig").WeedOut;
   pub const @"X_i"  = @import("delete.zig").Delete;
-
+  // pub const @"i_m"  = @import("drop_keys.zig").DropKeys;
+  // pub const @"I_m"  = @import("drop_keys.zig").DropKeys;
   pub const @"x_m"  = @import("drop_keys.zig").DropKeys;
   pub const @"m,m"  = @import("merge.zig").DictMerge;
-  pub const @"x#m"  = @import("select.zig").TakeKeys;
+  pub const @"x#m"  = @import("select.zig").SelectKeys;
   pub const @"M,m"  = @import("insert.zig").Insert;
-  // pub const @"M,m2" = @import("insert.zig").Upsert;
+  // pub const @"M,m" = @import("insert.zig").Upsert;
   // pub const @"m|m"  = @import("join.zig").UnionJoin;
-  // pub const @"m,m2" = @import("join.zig").LeftJoin;
+  // pub const @"m,m" = @import("join.zig").LeftJoin;
   // pub const @"m^m"  = dict.OuterJoin;
-
   pub const @"i#X"  = @import("take.zig").Take;
   pub const @"I#X"  = @import("reshape.zig").Reshape;
   pub const @"x^X"  = @import("fill.zig").Fill;
@@ -132,19 +134,22 @@ const Dyads = struct {
   pub const @"s$x"  = @import("cast.zig").Cast;
   pub const @"X?x"  = @import("find.zig").Find;
   pub const @"i?X"  = @import("random.zig").Random;
-  pub const @"f@y"  = @import("apply.zig").Apply;
+  pub const @"f@y"  = @import("apply1.zig").Apply;
+  pub const @"m@X"  = @import("select.zig").SelectDict;
+  pub const @"M@X"  = @import("select.zig").SelectTable;
+  pub const @"x@y"  = @import("apply.zig").Apply;
   pub const @"X@X"  = @import("pick.zig").Pick;
   pub const @"s?x"  = @import("marshal.zig").Marshal;
   pub const @"s@x"  = @import("marshal.zig").Unmarshal;
   // pub const @"x.y" = @import("apply.zig").ApplyN; // TODO: pick.pick reference broken
-  pub const @"has"  = member.Has;
-  pub const @"in"   = member.In;
-  pub const @"x0:x" = io.WriteLines;
-  pub const @"x1:x" = io.WriteBytes;
-  pub const @"x2:x" = io.WriteData;
-
-  pub const @"9:x"    = @import("graphics.zig").Draw;
-  pub const @"x9:x"  = @import("graphics.zig").DrawDyad;
+  pub const @"x has y"  = member.Has;
+  pub const @"x in y"   = member.In;
+  pub const @"x 0: x" = io.WriteLines;
+  pub const @"x 1: x" = io.WriteBytes;
+  pub const @"x 2: x" = io.WriteData;
+  pub const @"x: y"    = @import("right.zig").Right;
+  pub const @"9: x"    = @import("graphics.zig").Draw;
+  pub const @"x 9: x"  = @import("graphics.zig").DrawDyad;
   pub const @"x exec" = @import("exec.zig").ExecDyad;
 };
 

@@ -11,6 +11,7 @@ pub const OpCode = enum(u8) {
 	AssignGlobal, AssignLocal, ListAssignGlobal, ListAssignLocal,
 	Jump, JumpFalse, JumpTrue,
 	Apply1, Apply2,
+	ReduceZip,               // fused reduce-of-zip: 2 op bytes (Op1 reduce, Op2 bin); pops 2 args
 	Apply3,                  // 1-byte Op3 (amend3/drill3); pops 3 args from stack
 	Apply4,                  // 1-byte Op4 (amend4/drill4); pops 4 args from stack
 	Return,                  // return
@@ -20,8 +21,6 @@ pub const OpCode = enum(u8) {
 	MakeList,                // make a list from count items on stack
 	MakePartial,             // pops func + n args, pushes partial
 	Derive,                  // derive verb from variadic (adverb) and top value
-	MakeDict,                // make a dict from keys and values on stack
-	MakeTable,               // make a table from items on stack
 	Command,                 // meta command (\h \l \d \t \v \f \cd)
 
 	pub const COUNT = @typeInfo(OpCode).@"enum".fields.len;
@@ -141,7 +140,7 @@ pub const Chunk = struct {
     const op: OpCode = @enumFromInt(code[ip]);
     return switch (op) {
       .Nop, .Gap, .Drop, .Return, .Command => 1,
-      .Int, .Jump, .JumpFalse, .JumpTrue, .MakePartial => 3,
+      .Int, .Jump, .JumpFalse, .JumpTrue, .MakePartial, .ReduceZip => 3,
       .ListAssignGlobal, .ListAssignLocal => 2 + code[ip + 1],
       else => 2,
     };

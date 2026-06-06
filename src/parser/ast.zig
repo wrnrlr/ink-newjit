@@ -52,7 +52,7 @@ const NodeType = enum {
   transit, affix, apposit, phrase, @"defer", pending,
   intrans, prefix, compose, noun, phrase_verb, apply,
   group, list, lambda, dict, table, utable, literal, term,
-  verb_op, io, blank, cond,
+  op, io, blank, cond,
   command, monad, adverb_val,
 };
 
@@ -84,7 +84,7 @@ pub const Node = union(NodeType) {
   utable: UTable,
   literal: Literal,
   term: Term,
-  verb_op: Op,
+  op: Op,
   io: Io,
   blank: void,
   cond: Cond,
@@ -113,7 +113,7 @@ pub const Node = union(NodeType) {
         try transit.b.format(writer);
         try writer.writeAll(")");
       },
-      .verb_op => |op| {
+      .op => |op| {
         try writer.writeAll(op);
       },
       .apposit => |apposit| {
@@ -308,7 +308,7 @@ test "Adverb" {
   const apposit = &stmt.apposit;
   try std.testing.expect(apposit.f.* == .term);
   const term = &apposit.f.term;
-  try std.testing.expect(std.mem.eql(u8, term.f.verb_op, "+"));
+  try std.testing.expect(std.mem.eql(u8, term.f.op, "+"));
   try std.testing.expect(std.mem.eql(u8, term.a, "/"));
   try std.testing.expect(apposit.a.* == .literal);
   try std.testing.expect(apposit.a.literal == .I);

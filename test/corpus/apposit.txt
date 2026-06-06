@@ -3,7 +3,6 @@ enlist ,i
 ==================
 ,57
 ---
-
 (terse
   (apposit
     (op)
@@ -15,7 +14,6 @@ enlist , i
 ==================
 , 57
 ---
-
 (terse
   (apposit
     (op)
@@ -27,7 +25,6 @@ type @i
 ==================
 @57
 ---
-
 (terse
   (apposit
     (op)
@@ -39,7 +36,6 @@ type @ i
 ==================
 @ 57
 ---
-
 (terse
   (apposit
     (op)
@@ -51,7 +47,6 @@ shape @i
 ==================
 #57
 ---
-
 (terse
   (apposit
     (op)
@@ -63,7 +58,6 @@ type @ i
 ==================
 # 57
 ---
-
 (terse
   (apposit
     (op)
@@ -75,7 +69,6 @@ shape @I
 ==================
 #1 2
 ---
-
 (terse
   (apposit
     (op)
@@ -87,7 +80,6 @@ shape @ I
 ==================
 # 1 2
 ---
-
 (terse
   (apposit
     (op)

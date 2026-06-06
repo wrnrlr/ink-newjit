@@ -7,8 +7,11 @@ const Alloc = std.mem.Allocator;
 const util = @import("../../util.zig");
 const pair = @import("pair.zig");
 const promote = @import("../promote.zig").promote;
+const pick = @import("pick.zig");
 
-pub const TakeKeys = struct {
+// ── TakeKeys: x#m → sub-dict with only x's keys ──────────────────────────────
+
+pub const SelectKeys = struct {
   pub const op = .@"#";
   _s_m: util.DyadFn = takeKeys,
   _S_m: util.DyadFn = takeKeys,
@@ -81,3 +84,23 @@ pub fn takeKeysTable(vm: *VM, x: V, y: V) V {
   const dict = Dict.init(vm.alloc, .{ .S = res_keys }, promote(vm.alloc, res_vals)) catch return V{ .err = .memory };
   return V{ .M = dict };
 }
+
+// ── SelectDict: m@x → value(s) for key(s) x ─────────────────────────────────
+
+pub const SelectDict = struct {
+  pub const op = .@"@";
+  _m_s: util.DyadFn = pick.pickDictSymFn,
+  _m_S: util.DyadFn = pick.pickDictSymVecFn,
+  _m_i: util.DyadFn = pick.pickAtomFn,
+  _m_I: util.DyadFn = pick.pickVecFn,
+};
+
+// ── SelectTable: M@x → row(s) by integer index or column(s) by symbol ────────
+
+pub const SelectTable = struct {
+  pub const op = .@"@";
+  _M_i: util.DyadFn = pick.pickTableRowFn,
+  _M_I: util.DyadFn = pick.pickTableRowVecFn,
+  _M_s: util.DyadFn = pick.pickTableColFn,
+  _M_S: util.DyadFn = pick.pickTableColVecFn,
+};

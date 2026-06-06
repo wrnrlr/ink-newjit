@@ -19,22 +19,15 @@ const Op2 = opmod.Op2;
 const Op3 = opmod.Op3;
 const Op4 = opmod.Op4;
 const Adverb = opmod.Adverb;
-const Dict = @import("../noun/dict.zig").Dict;
 const Partial = @import("../noun/partial.zig").Partial;
 const Pool = @import("../noun/symbol.zig").Pool;
 const ExtRegistry = @import("../noun/plugin.zig").ExtRegistry;
 const Parser = @import("../parser/ast.zig").Parser;
-const enlist = @import("../primitive/verb/enlist.zig").enlist;
-const dict = @import("../primitive/verb/pair.zig").dict;
-const amend = @import("../primitive/amend.zig");
 const promote = @import("../primitive/promote.zig").promote;
 const dispatch = @import("../primitive/dispatch.zig");
+const fuse = @import("../primitive/derived/fuse.zig");
 const MockWriter = @import("../util.zig").MockWriter;
 const SlabAlloc = @import("../noun/slab.zig").SlabAlloc;
-// Force-link the CPS helpers so their exported symbols survive ReleaseFast gc-sections.
-// comptime {
-//   _ = @import("jit/cps_helpers.zig").force_keep;
-// }
 
 const STACK_MAX = 2048;
 const FRAMES_MAX = 64;
@@ -59,7 +52,6 @@ pub const VM = struct {
   stack_len: usize         = 0,
   frames:     [FRAMES_MAX]Frame = undefined,
   frames_len: usize             = 0,
-  // Pool for Partial objects (partial function applications).
   partial_pool: std.heap.MemoryPool(Partial),
 
   symbols: Pool,
@@ -99,6 +91,7 @@ pub const VM = struct {
       .prng          = std.Random.DefaultPrng.init(0),
     };
     vm.alloc = vm.slab.allocator();
+    try vm.symbols.prefill();
     vm.compiler.* = try Compiler.init(alloc, chunk, &vm.globals_names, &vm.symbols, &vm.registry, &vm.fn_tables);
     @memset(&vm.globals, .blank);
     std.Io.Threaded.global_single_threaded.allocator = alloc;
@@ -175,10 +168,41 @@ pub const VM = struct {
     return vm.pop();
   }
 
+  // Compile `txt` once, appending its bytecode to the top-level chunk, and
+  // return the ip where that bytecode begins. Paired with runFrom so callers
+  // (e.g. the `\t:n` timing command) can execute it repeatedly without paying
+  // the parse+compile+optimize cost on every iteration. Assumes the compiled
+  // text is the final code in the chunk (true for the trailing `\t` statement).
+  pub fn compileOnce(vm: *VM, txt: []const u8) !usize {
+    const text_id = try vm.registry.addText(txt);
+    const node = try vm.parser.?.parse(txt);
+    defer vm.parser.?.free(node);
+    vm.compiler.scope.reset();
+    vm.compiler.text_id = text_id;
+    const start_ip = vm.chunk.code.items.len;
+    try vm.compiler.compile(node, false);
+    return start_ip;
+  }
+
+  // Execute bytecode previously compiled at `start_ip` to completion on the
+  // persistent top-level frame, returning the result value.
+  pub fn runFrom(vm: *VM, start_ip: usize) !V {
+    vm.resetStack();
+    vm.current_chunk = vm.chunk;
+    vm.currentFrame().ip = start_ip;
+    try vm.run();
+    return vm.pop();
+  }
+
   fn executeCall(vm: *VM, func: V, incoming: []const V, mode: call.CallMode) !void {
     var fc = call.Call{ .vm = vm };
-    const res = try fc.apply(func, incoming, mode == .bracket);
-    try vm.push(res);
+    try vm.push(fc.apply(func, incoming, mode == .bracket));
+  }
+
+  fn cleanStack(vm: *VM, res_slot:usize) V {
+    for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
+    vm.stack_len = res_slot;
+    return V{ .err = .memory };
   }
 
   // Direct lambda call without wrapper→apply overhead. Used by hot adverb loops.
@@ -186,16 +210,8 @@ pub const VM = struct {
     const prev_frames = vm.frames_len;
     const res_slot = vm.stack_len;
     vm.push(.blank) catch return V{ .err = .memory };
-    for (args) |arg| vm.push(arg.ref()) catch {
-      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
-      vm.stack_len = res_slot;
-      return V{ .err = .memory };
-    };
-    vm.callLambda(ref, args.len, res_slot) catch {
-      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
-      vm.stack_len = res_slot;
-      return V{ .err = .memory };
-    };
+    for (args) |arg| vm.push(arg.ref()) catch return vm.cleanStack(res_slot);
+    vm.callLambda(ref, args.len, res_slot) catch return vm.cleanStack(res_slot);
     vm.runUntil(prev_frames) catch {};
     return vm.pop();
   }
@@ -209,26 +225,14 @@ pub const VM = struct {
     const prev_frames = vm.frames_len;
     const res_slot = vm.stack_len;
     vm.push(.blank) catch return V{ .err = .memory };
-    for (args) |arg| vm.push(arg) catch {
-      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
-      vm.stack_len = res_slot;
-      return V{ .err = .memory };
-    };
-    vm.callLambda(ref, args.len, res_slot) catch {
-      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
-      vm.stack_len = res_slot;
-      return V{ .err = .memory };
-    };
+    for (args) |arg| vm.push(arg) catch return vm.cleanStack(res_slot);
+    vm.callLambda(ref, args.len, res_slot) catch return vm.cleanStack(res_slot);
     vm.runUntil(prev_frames) catch {};
     return vm.pop();
   }
 
   fn run(vm: *VM) !void {
     try vm.runUntil(0);
-  }
-
-  pub fn runOp(vm: *VM, opCode: OpCode) !void {
-    try op_table[@intFromEnum(opCode)](vm);
   }
 
   pub fn runUntil(vm: *VM, min_frames: usize) !void {
@@ -308,22 +312,11 @@ pub const VM = struct {
           defer v.deinit(vm.alloc);
           if (v.isTrue()) frame.ip += offset;
         },
-        .Apply1 => {
-          const op: Op1 = @enumFromInt(code[frame.ip]);
-          frame.ip += 1;
-          const a = vm.pop();
-          defer a.deinit(vm.alloc);
-          try vm.push(dispatch.dispatch1(vm, op, a));
-        },
-        .Apply2 => {
-          const op: Op2 = @enumFromInt(code[frame.ip]);
-          frame.ip += 1;
-          const b_val = vm.pop();
-          defer b_val.deinit(vm.alloc);
-          const a_val = vm.pop();
-          defer a_val.deinit(vm.alloc);
-          try vm.push(dispatch.dispatch2(vm, op, a_val, b_val));
-        },
+        .Apply1 => try VM.doApply1(vm),
+        .Apply2 => try VM.doApply2(vm),
+        .ReduceZip => try VM.doReduceZip(vm),
+        .Apply3 => try VM.doApply3(vm),
+        .Apply4 => try VM.doApply4(vm),
         .Return => try vm.doReturn(),
         .Call => try vm.doCallWithMode(.sync),
         .TailCall => try vm.doTailCall(),
@@ -331,65 +324,15 @@ pub const VM = struct {
         .MakeList => try vm.doMakeList(),
         .MakePartial => try vm.doMakePartial(),
         .Derive => try vm.doDerive(),
-        .Apply3 => try vm.doApply3(),
-        .Apply4 => try vm.doApply4(),
-        .MakeDict => try vm.doMakeDict(),
-        .MakeTable => try vm.doMakeTable(),
         .Command => try vm.doCommand(),
       }
     }
   }
   
-  fn doConst(vm: *VM) !void {
-    const idx = vm.readByte();
-    const v = vm.current_chunk.constants.items[idx];
-    try vm.push(v.ref());
-  }
-  
-  fn doGlobal(vm: *VM) !void {
-    const idx = vm.readByte();
-    try vm.push(vm.globals[idx].ref());
-  }
-  
-  fn doInt(vm: *VM) !void {
-    const raw = vm.read16();
-    const v: i32 = @as(i16, @bitCast(raw));
-    try vm.push(.{ .i = v });
-  }
-
-  fn doLocal(vm: *VM) !void {
-    const idx = vm.readByte();
-    const v = vm.stack[vm.currentFrame().base + idx];
-    try vm.push(v.ref());
-  }
-
-  // Last use of a local: steal the value from the slot (clear it, push without
-  // incrementing RC).  The slot becomes .blank so Return's cleanup is a no-op.
-  fn doLocalLast(vm: *VM) !void {
-    const idx = vm.readByte();
-    const slot = vm.currentFrame().base + idx;
-    const v = vm.stack[slot];
-    vm.stack[slot] = .blank;
-    try vm.push(v);
-  }
-  
-  fn doAssignGlobal(vm: *VM) !void {
-    const index = vm.readByte();
-    const val = vm.pop();
-    vm.globals[index].deinit(vm.alloc);
-    vm.globals[index] = val;
-    try vm.push(.blank);
-  }
-  
-  fn doAssignLocal(vm: *VM) !void {
-    const index = vm.readByte();
-    const val = vm.pop();
-    const stack_idx = vm.currentFrame().base + index;
-    vm.stack[stack_idx].deinit(vm.alloc);
-    vm.stack[stack_idx] = val;
-    try vm.push(.blank);
-  }
-  
+  // NOTE: the simple opcodes (Const/Global/Int/Local/LocalLast/Assign*/Jump*)
+  // are handled inline in the runUntil switch above; ListAssign and the
+  // structural opcodes below keep dedicated helpers because the switch calls
+  // them directly.
   fn doListAssignGlobal(vm: *VM) !void {
     const n = vm.readByte();
     const val = vm.pop();
@@ -428,18 +371,6 @@ pub const VM = struct {
     }
   }
   
-  fn doJump(vm: *VM) !void {
-    const offset = vm.read16();
-    vm.currentFrame().ip += offset;
-  }
-  
-  fn doJumpWhen(vm: *VM, comptime cond: bool) !void {
-    const offset = vm.read16();
-    const v = vm.pop();
-    defer v.deinit(vm.alloc);
-    if (v.isTrue()==cond) vm.currentFrame().ip += offset;
-  }
-
   fn doReturn(vm: *VM) !void {
     const result = vm.pop();
     const frame = vm.popFrame();
@@ -469,7 +400,7 @@ pub const VM = struct {
 
     if (func_val == .func) {
       const ref = func_val.func;
-      const kind = ref.getKind();
+      const kind = ref.kind;
       // Tail-call lambda: reuse current frame instead of pushing a new one.
       if (kind == .callable and opmod.isLambdaIdx(ref.idx)) {
         const lambda_idx = opmod.lambdaIdxOf(ref.idx);
@@ -530,14 +461,6 @@ pub const VM = struct {
     }
   }
 
-  fn doCall(vm: *VM) !void {
-    try vm.doCallWithMode(.sync);
-  }
-
-  fn doApply(vm: *VM) !void {
-    try vm.doCallWithMode(.bracket);
-  }
-
   fn doCallWithMode(vm: *VM, mode: call.CallMode) !void {
     const argc = vm.readByte();
     var buf: [8]V = .{.blank} ** 8;
@@ -565,15 +488,23 @@ pub const VM = struct {
     try vm.push(dispatch.dispatch2(vm, op, a, b));
   }
 
+  // Fused reduce-of-zip: 2 op bytes (Op1 reduce, Op2 bin), pops 2 args.
+  fn doReduceZip(vm: *VM) !void {
+    const red: Op1 = @enumFromInt(vm.readByte());
+    const bin: Op2 = @enumFromInt(vm.readByte());
+    const b = vm.pop();
+    defer b.deinit(vm.alloc);
+    const a = vm.pop();
+    defer a.deinit(vm.alloc);
+    try vm.push(fuse.reduceZip(vm, red, bin, a, b));
+  }
+
   fn doApply3(vm: *VM) !void {
     const op: Op3 = @enumFromInt(vm.readByte());
     const start = vm.stack_len - 3;
     const args = vm.stack[start..vm.stack_len];
-    if (try maybePartialApplyN(vm, Fn.triad(op), args, 3)) return;
-    const res = switch (op) {
-      .amend3 => try amend.amend(vm, args),
-      .drill3 => try amend.dmend(vm, args),
-    };
+    const res = if (hasBlank(args)) call.makePartialFromArgs(vm, Fn.triad(op), args)
+      else dispatch.dispatch3(vm, op, args[0], args[1], args[2]);
     for (args) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     try vm.push(res);
@@ -583,39 +514,11 @@ pub const VM = struct {
     const op: Op4 = @enumFromInt(vm.readByte());
     const start = vm.stack_len - 4;
     const args = vm.stack[start..vm.stack_len];
-    if (try maybePartialApplyN(vm, Fn.tetrad(op), args, 4)) return;
-    const res = switch (op) {
-      .amend4 => try amend.amend(vm, args),
-      .drill4 => try amend.dmend(vm, args),
-    };
+    const res = if (hasBlank(args)) call.makePartialFromArgs(vm, Fn.tetrad(op), args)
+      else dispatch.dispatch4(vm, op, args[0], args[1], args[2], args[3]);
     for (args) |*v| v.deinit(vm.alloc);
     vm.stack_len = start;
     try vm.push(res);
-  }
-
-  // If `args` contains any blank slot, construct a Partial of `ref` filling
-  // the non-blank positions, push it onto the stack, and return true (caller
-  // skips its dispatch). Returns false when there are no blanks.
-  fn maybePartialApplyN(vm: *VM, ref: Fn, args: []V, arity: u8) !bool {
-    var has_blank = false;
-    for (args) |a| if (a == .blank) { has_blank = true; break; };
-    if (!has_blank) return false;
-
-    var pa: [8]V = .{.blank} ** 8;
-    var fill: u8 = 0;
-    for (args, 0..) |a, i| {
-      if (a != .blank) { pa[i] = a.ref(); fill |= @as(u8, 1) << @intCast(i); }
-    }
-    const p = try vm.partial_pool.create(vm.alloc);
-    p.* = .{
-      .pool = &vm.partial_pool, .rc = 1, .fill = fill,
-      .arity = arity, ._pad = 0, .ref = ref, .args = pa,
-    };
-    const start = vm.stack_len - args.len;
-    for (args) |*v| v.deinit(vm.alloc);
-    vm.stack_len = start;
-    try vm.push(.{ .partial = p });
-    return true;
   }
   
   fn doMakePartial(vm: *VM) !void {
@@ -677,7 +580,7 @@ pub const VM = struct {
     const derived: Fn = if (base_v == .func) blk: {
       const ref = base_v.func;
       base_v.deinit(vm.alloc);
-      break :blk switch (ref.getKind()) {
+      break :blk switch (ref.kind) {
         // Any callable (builtin verb/adverb or lambda) uses its global idx.
         .callable => Fn.makeDerived(ref.idx, ref.arity, adv),
         // Trains as base aren't directly representable as a single global idx;
@@ -706,42 +609,6 @@ pub const VM = struct {
     try vm.push(promote(vm.alloc, list_val.L));
   }
 
-  fn doMakeDict(vm: *VM) !void {
-    const n = vm.readByte();
-    const start = vm.stack_len - 2 * n;
-    const keys = if (n == 1) vm.stack[start].ref()
-                 else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start .. start + n])).L);
-    const keys_live = n > 1;
-    errdefer { if (keys_live) keys.deinit(vm.alloc); }
-    const vals = if (n == 1) vm.stack[start + 1].ref()
-                 else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
-    const vals_live = n > 1;
-    errdefer { if (vals_live) vals.deinit(vm.alloc); }
-    const res = if (n == 1) V{ .m = try Dict.init(vm.alloc, keys, vals) }
-                else dict(vm, keys, vals);
-    errdefer res.deinit(vm.alloc);
-    if (keys_live) {
-      keys.deinit(vm.alloc);
-      vals.deinit(vm.alloc);
-    }
-    for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
-    vm.stack_len = start;
-    try vm.push(res);
-  }
-
-  fn doMakeTable(vm: *VM) !void {
-    const n = vm.readByte();
-    const start = vm.stack_len - 2 * n;
-    const keys = if (n == 1) enlist(vm.alloc, vm.stack[start])
-                 else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start .. start + n])).L);
-    const vals = if (n == 1) enlist(vm.alloc, vm.stack[start + 1])
-                 else promote(vm.alloc, (try V.Values(vm.alloc, vm.stack[start + n .. start + 2 * n])).L);
-    const res = V{ .M = try Dict.init(vm.alloc, keys, vals) };
-    for (vm.stack[start..vm.stack_len]) |*v| v.deinit(vm.alloc);
-    vm.stack_len = start;
-    try vm.push(res);
-  }
-  
   fn doCommand(vm: *VM) anyerror!void {
     var cmd_v = vm.pop();
     defer cmd_v.deinit(vm.alloc);
@@ -823,48 +690,10 @@ pub const VM = struct {
   fn peek(vm: *VM, distance: usize) V { return vm.stack[vm.stack_len - 1 - distance]; }
 };
 
-fn opNop(_: *VM) !void {}
-fn opGap(vm: *VM) !void { try vm.push(.blank); }
-fn opDrop(vm: *VM) !void { vm.pop().deinit(vm.alloc); }
-fn opDup(vm: *VM) !void { try vm.push(vm.peek(0).ref()); }
-fn opJumpFalse(vm: *VM) !void { try vm.doJumpWhen(false); }
-fn opJumpTrue(vm: *VM) !void  { try vm.doJumpWhen(true); }
-
-const OpHandler = *const fn(*VM) anyerror!void;
-const op_table: [OpCode.COUNT]OpHandler = build: {
-  var t: [OpCode.COUNT]OpHandler = undefined;
-  t[@intFromEnum(OpCode.Nop)]              = &opNop;
-  t[@intFromEnum(OpCode.Gap)]              = &opGap;
-  t[@intFromEnum(OpCode.Drop)]             = &opDrop;
-  t[@intFromEnum(OpCode.Dup)]              = &opDup;
-  t[@intFromEnum(OpCode.Const)]            = &VM.doConst;
-  t[@intFromEnum(OpCode.Int)]              = &VM.doInt;
-  t[@intFromEnum(OpCode.Global)]           = &VM.doGlobal;
-  t[@intFromEnum(OpCode.Local)]            = &VM.doLocal;
-  t[@intFromEnum(OpCode.LocalLast)]        = &VM.doLocalLast;
-  t[@intFromEnum(OpCode.AssignGlobal)]     = &VM.doAssignGlobal;
-  t[@intFromEnum(OpCode.AssignLocal)]      = &VM.doAssignLocal;
-  t[@intFromEnum(OpCode.ListAssignGlobal)] = &VM.doListAssignGlobal;
-  t[@intFromEnum(OpCode.ListAssignLocal)]  = &VM.doListAssignLocal;
-  t[@intFromEnum(OpCode.Jump)]             = &VM.doJump;
-  t[@intFromEnum(OpCode.JumpFalse)]        = &opJumpFalse;
-  t[@intFromEnum(OpCode.JumpTrue)]         = &opJumpTrue;
-  t[@intFromEnum(OpCode.Apply1)]           = &VM.doApply1;
-  t[@intFromEnum(OpCode.Apply2)]           = &VM.doApply2;
-  t[@intFromEnum(OpCode.Return)]           = &VM.doReturn;
-  t[@intFromEnum(OpCode.Call)]             = &VM.doCall;
-  t[@intFromEnum(OpCode.TailCall)]         = &VM.doTailCall;
-  t[@intFromEnum(OpCode.Apply)]            = &VM.doApply;
-  t[@intFromEnum(OpCode.MakeList)]         = &VM.doMakeList;
-  t[@intFromEnum(OpCode.MakePartial)]      = &VM.doMakePartial;
-  t[@intFromEnum(OpCode.Derive)]           = &VM.doDerive;
-  t[@intFromEnum(OpCode.Apply3)]           = &VM.doApply3;
-  t[@intFromEnum(OpCode.Apply4)]           = &VM.doApply4;
-  t[@intFromEnum(OpCode.MakeDict)]         = &VM.doMakeDict;
-  t[@intFromEnum(OpCode.MakeTable)]        = &VM.doMakeTable;
-  t[@intFromEnum(OpCode.Command)]          = &VM.doCommand;
-  break :build t;
-};
+fn hasBlank(vals:[]V) bool {
+   for (vals) |a| if (a == .blank) return true;
+   return false;
+}
 
 test "VM simple addition" {
   const alloc = std.testing.allocator;
@@ -888,25 +717,4 @@ test "VM simple addition" {
   defer res.deinit(alloc);
 
   try std.testing.expectEqual(@as(i32, 30), res.i);
-}
-
-test "large list IR" {
-  var vm = try VM.create(std.testing.allocator);
-  defer vm.deinit();
-
-  // Create a list with 20 elements to trigger MakeList with IR
-  const code = "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20";
-  const result = try vm.eval(code);
-  defer result.deinit(vm.alloc);
-  
-  try std.testing.expectEqual(@as(usize, 20), result.len());
-  const v0 = result.at(0);
-  const v19 = result.at(19);
-  if (v0 == .i) {
-    try std.testing.expectEqual(@as(i32, 1), v0.i);
-    try std.testing.expectEqual(@as(i32, 20), v19.i);
-  } else {
-    try std.testing.expectEqual(@as(f32, 1.0), v0.f);
-    try std.testing.expectEqual(@as(f32, 20.0), v19.f);
-  }
 }

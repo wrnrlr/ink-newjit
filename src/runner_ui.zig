@@ -137,10 +137,7 @@ const App = struct {
       var fc = call_mod.Call{ .vm = self.vm };
       var loop_args = [_]V{ V{ .i = 1 }, props.ref(), events_v.ref() };
       defer for (&loop_args) |*a| a.deinit(alloc);
-      const result = fc.apply(self.loop_fn, &loop_args, false) catch |err| {
-        std.debug.print("fc.apply error: {s}\n", .{@errorName(err)});
-        return err;
-      };
+      const result = fc.apply(self.loop_fn, &loop_args, false);
       defer result.deinit(alloc);
 
       const swapchain_view = self.gctx.swapchain.getCurrentTextureView();

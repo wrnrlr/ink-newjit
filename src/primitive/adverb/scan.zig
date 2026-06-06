@@ -11,10 +11,10 @@ const N = @import("../../noun/array.zig").N;
 const promote = @import("../promote.zig").promote;
 
 inline fn fnIsBuiltinDyad(f: opmod.Fn) bool {
-  return f.getKind() == .callable and opmod.isOp2Idx(f.idx);
+  return f.kind == .callable and opmod.isOp2Idx(f.idx);
 }
 inline fn fnIsLambda(f: opmod.Fn) bool {
-  return f.getKind() == .callable and opmod.isLambdaIdx(f.idx);
+  return f.kind == .callable and opmod.isLambdaIdx(f.idx);
 }
 
 // CPU fast path: builtin prefix-scan on a typed CPU array.

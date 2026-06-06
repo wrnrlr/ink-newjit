@@ -5,6 +5,9 @@ const util = @import("../../util.zig");
 const V = @import("../../noun/value.zig").V;
 
 fn writeFile(vm: *VM, id: u32, content: []const u8) !void {
+  // Guard invalid ids (e.g. `2:` applied to a bogus handle) rather than
+  // indexing the registry out of bounds.
+  if (id >= vm.registry.texts.items.len) return error.BadFileId;
   if (vm.registry.getPath(id)) |path| {
     const io = std.Io.Threaded.global_single_threaded.io();
     const file = try std.Io.Dir.cwd().createFile(io, path, .{});

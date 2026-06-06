@@ -63,9 +63,12 @@ pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
   } else if (std.mem.eql(u8, verb, "t")) {
     if (args.len == 0) return .blank;
     const count = if (n == 0) 1 else n;
+    // Compile the expression once, then time only its repeated execution —
+    // re-parsing/compiling each iteration would dominate the measurement.
+    const start_ip = try vm.compileOnce(args);
     const start = std.Io.Clock.awake.now(io);
     for (0..@as(usize, count)) |_| {
-      var r = try vm.eval(args);
+      var r = try vm.runFrom(start_ip);
       r.deinit(vm.alloc);
     }
     const end = std.Io.Clock.awake.now(io);

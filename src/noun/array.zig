@@ -8,7 +8,6 @@ pub const ArrayFlags = struct {
   pub const immutable: u8 = 1 << 0; // do not mutate in place even at rc=1
   pub const ascending: u8 = 1 << 1; // elements are sorted ascending
   pub const distinct:  u8 = 1 << 2; // no duplicate elements
-  pub const boolean:   u8 = 1 << 3; // all values are 0 or 1
 };
 
 pub fn N(comptime T: type) type {
@@ -26,7 +25,6 @@ pub fn N(comptime T: type) type {
       const header: *align(@alignOf(Rc)) Rc = @ptrCast(buf.ptr);
       const cap_n: u32 = @intCast((total - data_offset) / @sizeOf(T));
       header.* = .{ .rc = 1, .len = @intCast(n), .cap = cap_n };
-      if (comptime T == bool) header.flags = ArrayFlags.boolean;
       return .{ .ptr = header };
     }
 
@@ -42,7 +40,6 @@ pub fn N(comptime T: type) type {
       const header: *align(@alignOf(Rc)) Rc = @ptrCast(buf.ptr);
       const cap_n: u32 = @intCast((rounded - data_offset) / @sizeOf(T));
       header.* = .{ .rc = 1, .len = @intCast(n), .cap = cap_n };
-      if (comptime T == bool) header.flags = ArrayFlags.boolean;
       return .{ .ptr = header };
     }
 

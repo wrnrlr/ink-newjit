@@ -70,6 +70,7 @@ pub const K = enum(u8) {
     return (@intFromEnum(k) & ~@as(u8, VEC_BIT)) == 4;
   }
   pub fn isMap(k: K) bool { return k == .m or k == .M; }
+  pub fn isPlural(k: K) bool { return k.isVec() and k.isMap() and k == .L; } 
 
   // b → B, i → I, etc.  Caller must ensure k is a scalar type.
   pub inline fn container(comptime k: K) K {

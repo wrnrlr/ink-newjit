@@ -104,7 +104,3 @@ fn castFloats(vm: *VM, x: V, y: V) V {
     return y;
   } else return .{ .err = .domain };
 }
-
-// fn castDict(vm: *VM, x: V, y: V) V {
-  
-// }

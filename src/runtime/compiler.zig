@@ -93,12 +93,12 @@ pub const Compiler = struct {
       .cond => |c| try self.compileCond(c, is_tail),
       .right => |r| try self.compileNode(r.clause, is_tail),
       .list => |l| try self.compileList(l),
-      .dict => |d| try self.compileDict(d, .MakeDict),
-      .table => |t| try self.compileDict(t, .MakeTable),
+      .dict => |d| try self.compileDict(d, false),
+      .table => |t| try self.compileDict(t, true),
       .utable => |u| try self.compileUTable(u),
       .pending => |p| try self.compileBind(.{ .v = p.v, .f = p.f, .a = p.a }),
-      .verb_op => |op| blk: {
-        // verb_op used as a value: prefer Op2 (dyadic) form so polymorphic
+      .op => |op| blk: {
+        // op used as a value: prefer Op2 (dyadic) form so polymorphic
         // calls can fall back to Op1 via op2ToOp1 when invoked with 1 arg.
         // For Op1-only verbs (e.g. "sqrt", "first"), build a monadic Fn.
         const v: V = if (Op2.fromString(op)) |o|
@@ -152,15 +152,45 @@ pub const Compiler = struct {
     return try self.emitOpWithArg(.MakeList, n, inputs.items);
   }
   
-  fn compileDict(self: *Compiler, d: ast.Dict, op: OpCode) anyerror!ir.ValueId {
+  // Dict/table literals lower to the dict verb `!` (and `+` flip for tables)
+  // rather than dedicated opcodes:
+  //   [a:1;b:2]   →  `a`b ! (1;2)
+  //   [[]a:1 2]   →  + (`a ! 1 2)
+  // n==1 keeps the key/value scalar (matching `s!v`); n>1 builds the key and
+  // value lists with MakeList so they promote exactly as the old opcode did.
+  fn compileDict(self: *Compiler, d: ast.Dict, is_table: bool) anyerror!ir.ValueId {
     const items = d.items orelse return ir.NO_VALUE;
-    var inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, items.len * 2);
-    defer inputs.deinit(self.alloc);
-    for (items) |item|
-      try inputs.append(self.alloc, try self.emitConst(.{ .s = try self.symbols.intern(item.k) }));
-    for (items) |item|
-      try inputs.append(self.alloc, try self.compileNode(item.v, false));
-    return try self.emitOpWithArg(op, @intCast(items.len), inputs.items);
+    const n = items.len;
+    if (n == 0) return ir.NO_VALUE;
+
+    var dict_id: ir.ValueId = undefined;
+    if (n == 1) {
+      const key_id = try self.emitConst(.{ .s = try self.symbols.intern(items[0].k) });
+      const val_id = try self.compileNode(items[0].v, false);
+      var pair = [_]ir.ValueId{ key_id, val_id };
+      dict_id = try self.emitOpWithArg(.Apply2, @intFromEnum(Op2.@"!"), &pair);
+    } else {
+      var kinputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, n);
+      defer kinputs.deinit(self.alloc);
+      for (items) |item|
+        try kinputs.append(self.alloc, try self.emitConst(.{ .s = try self.symbols.intern(item.k) }));
+      const keys_id = try self.emitOpWithArg(.MakeList, @intCast(n), kinputs.items);
+
+      var vinputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, n);
+      defer vinputs.deinit(self.alloc);
+      for (items) |item|
+        try vinputs.append(self.alloc, try self.compileNode(item.v, false));
+      const vals_id = try self.emitOpWithArg(.MakeList, @intCast(n), vinputs.items);
+
+      var pair = [_]ir.ValueId{ keys_id, vals_id };
+      dict_id = try self.emitOpWithArg(.Apply2, @intFromEnum(Op2.@"!"), &pair);
+    }
+
+    if (is_table) {
+      var finputs = [_]ir.ValueId{dict_id};
+      return try self.emitOpWithArg(.Apply1, @intFromEnum(Op1.@"+"), &finputs);
+    }
+    return dict_id;
   }
 
   fn compileUTable(self: *Compiler, u: ast.UTable) anyerror!ir.ValueId {
@@ -174,16 +204,18 @@ pub const Compiler = struct {
 
     // @[x;i;f] (3) / @[x;i;f;v] (4) → Apply3/Apply4 with Op3/Op4 byte (no function on stack).
     // Same for .[x;p;f] / .[x;p;f;v] → drill3 / drill4.
-    if (ap.f.* == .verb_op and (seq.len == 3 or seq.len == 4)) {
-      const op_str = ap.f.verb_op;
+    if (ap.f.* == .op and (seq.len == 3 or seq.len == 4)) {
+      const op_str = ap.f.op;
       const is_amend = std.mem.eql(u8, op_str, "@");
       const is_drill = std.mem.eql(u8, op_str, ".");
-      if (is_amend or is_drill) {
+      // ?[x;y;z] (3 args only) → splice. 4-arg `?` keeps the generic path.
+      const is_splice = seq.len == 3 and std.mem.eql(u8, op_str, "?");
+      if (is_amend or is_drill or is_splice) {
         var inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, seq.len);
         defer inputs.deinit(self.alloc);
         for (seq) |x| try inputs.append(self.alloc, try self.compileNode(x, false));
         if (seq.len == 3) {
-          const op3: Op3 = if (is_amend) .amend3 else .drill3;
+          const op3: Op3 = if (is_amend) .amend3 else if (is_drill) .drill3 else .splice3;
           return try self.emitOpWithArg(.Apply3, @intFromEnum(op3), inputs.items);
         } else {
           const op4: Op4 = if (is_amend) .amend4 else .drill4;
@@ -310,6 +342,10 @@ pub const Compiler = struct {
         }
         return try self.emitOpWithArg(.AssignGlobal, gop.value_ptr.*, &.{rhs_id});
       }
+    } else if (b.v.* == .literal and b.v.literal != .@"var") {
+      // Non-variable noun on LHS of ':' — dyadic right verb: x:y = y.
+      // b.v is a non-assignable expression; just return the already-compiled rhs.
+      return rhs_id;
     } else if (b.v.* == .list) {
       const list = b.v.list;
       const seq = list.seq orelse return ir.NO_VALUE;
@@ -363,8 +399,8 @@ pub const Compiler = struct {
       const lambda = ast.Lambda{ .a = null, .b = body_arr[0..], .start = 0, .end = 0 };
       return try self.compileLambda(lambda);
     }
-    if (t.v.* == .verb_op or t.v.* == .io) {
-      const op = if (t.v.* == .verb_op) t.v.verb_op else t.v.io;
+    if (t.v.* == .op or t.v.* == .io) {
+      const op = if (t.v.* == .op) t.v.op else t.v.io;
       if (Op2.fromString(op)) |o| {
         var inputs: [2]ir.ValueId = undefined;
         inputs[0] = try self.compileNode(t.a, false);
@@ -394,8 +430,8 @@ pub const Compiler = struct {
 
   fn compileIntrans(self: *Compiler, i: ast.Intrans, is_tail: bool) anyerror!ir.ValueId {
     if (i.z) |z| {
-      if (i.v.* == .verb_op or i.v.* == .io) {
-        const op = if (i.v.* == .verb_op) i.v.verb_op else i.v.io;
+      if (i.v.* == .op or i.v.* == .io) {
+        const op = if (i.v.* == .op) i.v.op else i.v.io;
         if (Op2.fromString(op)) |_| {
           var inputs: [2]ir.ValueId = undefined;
           inputs[0] = try self.compileNode(i.a, false);
@@ -409,8 +445,8 @@ pub const Compiler = struct {
       inputs[2] = try self.compileNode(z, false);
       return try self.emitOpWithArg(if (is_tail) .TailCall else .Call, 2, &inputs);
     } else {
-      if (i.v.* == .verb_op or i.v.* == .io) {
-        const op = if (i.v.* == .verb_op) i.v.verb_op else i.v.io;
+      if (i.v.* == .op or i.v.* == .io) {
+        const op = if (i.v.* == .op) i.v.op else i.v.io;
         if (Op2.fromString(op)) |o| {
           // Partial dyadic symbolic or IO op: a v -> v(a, )
           const v = V{ .func = Fn.dyad(o) };
@@ -492,7 +528,7 @@ pub const Compiler = struct {
   // Returns true if the node statically produces a function (verb-like expression).
   fn isVerbLike(node: *ast.Node) bool {
     return switch (node.*) {
-      .verb_op, .monad, .adverb_val => true,
+      .op, .monad, .adverb_val => true,
       .term => true,
       .group => |g| isVerbLike(g.stmt),
       .apposit => |ap| isVerbLike(ap.f) and isVerbLike(ap.a),
@@ -513,11 +549,11 @@ pub const Compiler = struct {
     return try self.compileLambda(lambda);
   }
 
-  // Collects single-char op bytes from a verb_op node or nested apposit of verb_ops.
+  // Collects single-char op bytes from a op node or nested apposit of ops.
   // Returns true if the entire subtree consists of single-char verb ops, false otherwise.
   fn collectVerbOps(node: *ast.Node, buf: []u8, pos: *usize) bool {
     switch (node.*) {
-      .verb_op => |op| {
+      .op => |op| {
         if (op.len == 1 and pos.* < buf.len) {
           buf[pos.*] = op[0];
           pos.* += 1;
@@ -771,14 +807,14 @@ pub const Compiler = struct {
       .Global => return 2,
       .Local, .AssignLocal, .AssignGlobal,
       .Call, .TailCall, .Apply1, .Apply2, .Apply3, .Apply4, .Apply,
-      .MakeList, .MakeDict, .MakeTable, .Derive,
+      .MakeList, .Derive,
       .ListAssignLocal, .ListAssignGlobal => return 2,
       .Drop => {
         if (inst.inputs.len > 0 and inst.inputs[0] != ir.NO_VALUE and !self.scope.ir.get(inst.inputs[0]).is_dead) return 1;
         return 0;
       },
       .Jump, .JumpFalse, .JumpTrue => return 3,
-      .MakePartial => return 3,
+      .MakePartial, .ReduceZip => return 3,
       else => return 1,
     }
   }
@@ -816,7 +852,7 @@ pub const Compiler = struct {
     try chunk.writeOp(effective_op);
     switch (effective_op) {
       .Local, .LocalLast, .Global, .AssignLocal, .AssignGlobal, .Call, .TailCall, .Apply1, .Apply2, .Apply3, .Apply4, .Apply,
-      .MakeList, .MakeDict, .MakeTable, .Derive, .ListAssignLocal, .ListAssignGlobal => {
+      .MakeList, .Derive, .ListAssignLocal, .ListAssignGlobal => {
         try chunk.write(@as(u8, @intCast(inst.arg1)));
       },
       .Drop => {},
@@ -827,7 +863,7 @@ pub const Compiler = struct {
         const jump_size: i32 = @as(i32, @intCast(target_offset)) - @as(i32, @intCast(current_offset + 3));
         try chunk.write16(@as(u16, @bitCast(@as(i16, @intCast(jump_size)))));
       },
-      .MakePartial => {
+      .MakePartial, .ReduceZip => {
         try chunk.write(@as(u8, @intCast(inst.arg1)));
         try chunk.write(@as(u8, @intCast(inst.arg2)));
       },

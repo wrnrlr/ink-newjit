@@ -161,13 +161,16 @@ fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, o
         const verb: Op2 = @enumFromInt(code[ip]); ip += 1;
         try out.print("Apply2      {s}\n", .{verb.toString()});
       },
+      .ReduceZip => {
+        const red: Op1 = @enumFromInt(code[ip]); ip += 1;
+        const bin: Op2 = @enumFromInt(code[ip]); ip += 1;
+        try out.print("ReduceZip   {s} {s}\n", .{ red.toString(), bin.toString() });
+      },
       .Call     => { const n = code[ip]; ip += 1; try out.print("Call        {d}\n", .{n}); },
       .TailCall => { const n = code[ip]; ip += 1; try out.print("TailCall    {d}\n", .{n}); },
       .Apply    => { const n = code[ip]; ip += 1; try out.print("Apply       {d}\n", .{n}); },
 
       .MakeList  => { const n = code[ip]; ip += 1; try out.print("MakeList    {d}\n", .{n}); },
-      .MakeDict  => { const n = code[ip]; ip += 1; try out.print("MakeDict    {d}\n", .{n}); },
-      .MakeTable => { const n = code[ip]; ip += 1; try out.print("MakeTable   {d}\n", .{n}); },
       .Apply3 => {
         const op3: Op3 = @enumFromInt(code[ip]); ip += 1;
         try out.print("Apply3      {s}\n", .{op3.toString()});
@@ -231,7 +234,7 @@ fn fmtValue(v: V, symbols: *const Pool, out: *std.Io.Writer) anyerror!void {
       try out.print("\"", .{});
     },
 
-    .func => |f| switch (f.getKind()) {
+    .func => |f| switch (f.kind) {
       .callable => {
         const idx = f.idx;
         if (opmod.isLambdaIdx(idx)) {

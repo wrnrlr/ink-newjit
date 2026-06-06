@@ -10,8 +10,6 @@ const V = @import("noun/value.zig").V;
 const K = @import("noun/class.zig").K;
 const N = @import("noun/array.zig").N;
 
-// ── REPL / stdin eval ─────────────────────────────────────────────────────────
-
 fn runRepl(allocator: std.mem.Allocator, vm: *VM) !void {
   var repl = Repl.init(allocator, vm);
   var buf = try std.ArrayList(u8).initCapacity(allocator, 64);
@@ -60,8 +58,6 @@ fn evalStdin(allocator: std.mem.Allocator, vm: *VM) !void {
   _ = try repl.evalStream(std.mem.trim(u8, content, " \t\r\n"), &stdout_writer.interface);
 }
 
-// ── main ─────────────────────────────────────────────────────────────────────
-
 pub fn main(init: std.process.Init.Minimal) !void {
   var gpa = std.heap.DebugAllocator(.{}){};
   defer { if (builtin.mode == .Debug) _ = gpa.deinit(); }
@@ -72,15 +68,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
   const exe_name = args_iter.next() orelse "";
 
   var disasm_mode = false;
-  var gpu_flag    = false;
   var script_path: ?[]const u8 = null;
   var extra_args: std.ArrayList([]const u8) = .empty;
   defer extra_args.deinit(allocator);
   while (args_iter.next()) |arg| {
     if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--disasm")) {
       disasm_mode = true;
-    } else if (std.mem.eql(u8, arg, "--gpu")) {
-      gpu_flag = true;
     } else if (script_path == null) {
       script_path = arg;
     } else {
@@ -91,7 +84,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
   const io = std.Io.Threaded.global_single_threaded.io();
   const stdin_is_tty = (std.Io.File.stdin().isTty(io) catch false);
 
-  // Create VM once; GPU backend (if requested) is attached before any eval.
   const vm = try VM.create(allocator);
   defer vm.deinit();
 
@@ -108,32 +100,28 @@ pub fn main(init: std.process.Init.Minimal) !void {
     return;
   }
 
-  if (gpu_flag) {
-    std.debug.print("warning: --gpu flag ignored (GPU support is disabled in this build)\n", .{});
-  }
-
   // Build argv = [exe_name, script_path?, ...extra_args]
   {
     var parts: usize = 1; // exe always included
     if (script_path != null) parts += 1;
     parts += extra_args.items.len;
-    const argv_n = try N(V).init(allocator, parts);
-    errdefer (V{ .L = argv_n }).deinit(allocator);
+    const argv_n = try N(V).init(vm.alloc, parts);
+    errdefer (V{ .L = argv_n }).deinit(vm.alloc);
     @memset(argv_n.slice(), .blank);
     var i: usize = 0;
-    argv_n.slice()[i] = try V.Chars(allocator, exe_name); i += 1;
-    if (script_path) |sp| { argv_n.slice()[i] = try V.Chars(allocator, sp); i += 1; }
-    for (extra_args.items) |arg| { argv_n.slice()[i] = try V.Chars(allocator, arg); i += 1; }
+    argv_n.slice()[i] = try V.Chars(vm.alloc, exe_name); i += 1;
+    if (script_path) |sp| { argv_n.slice()[i] = try V.Chars(vm.alloc, sp); i += 1; }
+    for (extra_args.items) |arg| { argv_n.slice()[i] = try V.Chars(vm.alloc, arg); i += 1; }
     vm.argv = V{ .L = argv_n };
   }
   // Register 'x' global with extra_args only (user-provided script arguments)
   if (extra_args.items.len > 0) {
     const n = extra_args.items.len;
-    const x_n = try N(V).init(allocator, n);
-    errdefer (V{ .L = x_n }).deinit(allocator);
+    const x_n = try N(V).init(vm.alloc, n);
+    errdefer (V{ .L = x_n }).deinit(vm.alloc);
     @memset(x_n.slice(), .blank);
     for (extra_args.items, x_n.slice()) |arg, *slot| {
-      slot.* = try V.Chars(allocator, arg);
+      slot.* = try V.Chars(vm.alloc, arg);
     }
     const key = try vm.alloc.dupe(u8, "x");
     errdefer vm.alloc.free(key);

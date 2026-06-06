@@ -17,10 +17,6 @@ pub const Find = struct {
   _S_S: util.DyadFn = findS_S,
   _S_L: util.DyadFn = findS_L,
   
-  // _B_b: util.DyadFn = findB_b,
-  // _B_B: util.DyadFn = findB_B,
-  // _B_L: util.DyadFn = findB_L,
-  
   _C_c: util.DyadFn = findC_c,
   _C_C: util.DyadFn = findC_C,
   _C_L: util.DyadFn = findC_L,
@@ -41,60 +37,6 @@ pub const Find = struct {
   
   // TODO support find for Dict & Table, maybe this should be part of the fallback logic.
 };
-
-fn find_vec_atom() util.DyadFn {
-  return struct {
-    fn f(_: *VM, _: V, _: V) V {
-    }
-  }.f;
-}
-
-fn find_vec_vec() util.DyadFn {
-  return struct {
-    fn f(_: *VM, _: V, _: V) V {
-    }
-  }.f;
-}
-
-fn find_list() util.DyadFn {
-  return struct {
-    fn f(_: *VM, _: V, _: V) V {
-    }
-  }.f;
-}
-
-// Bool helpers — build a 2-entry lookup from data, then index by bool
-fn boolLookup(data: []const bool) [2]i32 {
-  var idx_f: i32 = V.@"0N";
-  var idx_t: i32 = V.@"0N";
-  for (data, 0..) |v, i| {
-    if ( v and idx_t == V.@"0N") idx_t = @intCast(i);
-    if (!v and idx_f == V.@"0N") idx_f = @intCast(i);
-    if (idx_f != V.@"0N" and idx_t != V.@"0N") break;
-  }
-  return .{ idx_f, idx_t };
-}
-
-fn findB_b(vm: *VM, x: V, y: V) V {
-  _ = vm;
-  const lut = boolLookup(x.B.slice());
-  return .{ .i = lut[@intFromBool(y.b)] };
-}
-
-fn findB_B(vm: *VM, x: V, y: V) V {
-  const lut = boolLookup(x.B.slice());
-  const res = N(i32).init(vm.alloc, y.B.ptr.len) catch return V{ .err = .memory };
-  for (y.B.slice(), res.slice()) |v, *r| r.* = lut[@intFromBool(v)];
-  return .{ .I = res };
-}
-
-fn findB_L(vm: *VM, x: V, y: V) V {
-  const lut = boolLookup(x.B.slice());
-  const res = N(i32).init(vm.alloc, y.L.ptr.len) catch return V{ .err = .memory };
-  for (y.L.slice(), res.slice()) |yv, *r|
-    r.* = switch (yv) { .b => |v| lut[@intFromBool(v)], else => V.@"0N" };
-  return .{ .I = res };
-}
 
 // Char helpers — build 256-entry table of first-occurrence indices
 fn charTable(data: []const u8) [256]i32 {
@@ -290,79 +232,3 @@ fn findFallback(vm: *VM, x: V, y: V) V {
   return .{ .I = res };
 }
 
-test "find integers atom" {
-  const vm = try VM.create(std.testing.allocator);
-  defer vm.deinit();
-  var x = try V.Ints(vm.alloc, &.{ 3, 1, 4, 1, 5 });
-  defer x.deinit(vm.alloc);
-  try std.testing.expectEqual(@as(i32, 0), findI_i(vm, x, .{ .i = 3 }).i);
-  try std.testing.expectEqual(@as(i32, 1), findI_i(vm, x, .{ .i = 1 }).i); // first of two 1s
-  try std.testing.expectEqual(V.@"0N",     findI_i(vm, x, .{ .i = 9 }).i);
-}
-
-test "find integers vector" {
-  const vm = try VM.create(std.testing.allocator);
-  defer vm.deinit();
-  var x = try V.Ints(vm.alloc, &.{ 3, 1, 4 });
-  defer x.deinit(vm.alloc);
-  var y = try V.Ints(vm.alloc, &.{ 4, 9, 3 });
-  defer y.deinit(vm.alloc);
-  var res = findI_I(vm, x, y);
-  defer res.deinit(vm.alloc);
-  try std.testing.expectEqualSlices(i32, &.{ 2, V.@"0N", 0 }, res.I.slice());
-}
-
-test "find integers large (hash path)" {
-  const vm = try VM.create(std.testing.allocator);
-  defer vm.deinit();
-  var buf: [so.FIND_THRESHOLD + 1]i32 = undefined;
-  for (&buf, 0..) |*v, i| v.* = @intCast(i * 2); // even numbers 0,2,4,...
-  var x = try V.Ints(vm.alloc, &buf);
-  defer x.deinit(vm.alloc);
-  try std.testing.expectEqual(@as(i32, 0), findI_i(vm, x, .{ .i = 0 }).i);
-  try std.testing.expectEqual(@as(i32, 1), findI_i(vm, x, .{ .i = 2 }).i);
-  try std.testing.expectEqual(V.@"0N",     findI_i(vm, x, .{ .i = 1 }).i);
-}
-
-test "find chars atom" {
-  const vm = try VM.create(std.testing.allocator);
-  defer vm.deinit();
-  var x = try V.Chars(vm.alloc, "abcba");
-  defer x.deinit(vm.alloc);
-  try std.testing.expectEqual(@as(i32, 1), findC_c(vm, x, .{ .c = 'b' }).i); // first b
-  try std.testing.expectEqual(V.@"0N",     findC_c(vm, x, .{ .c = 'z' }).i);
-}
-
-test "find chars vector" {
-  const vm = try VM.create(std.testing.allocator);
-  defer vm.deinit();
-  var x = try V.Chars(vm.alloc, "abc");
-  defer x.deinit(vm.alloc);
-  var y = try V.Chars(vm.alloc, "bza");
-  defer y.deinit(vm.alloc);
-  var res = findC_C(vm, x, y);
-  defer res.deinit(vm.alloc);
-  try std.testing.expectEqualSlices(i32, &.{ 1, V.@"0N", 0 }, res.I.slice());
-}
-
-test "find booleans" {
-  const vm = try VM.create(std.testing.allocator);
-  defer vm.deinit();
-  const bv = try N(bool).init(vm.alloc, 3);
-  bv.slice()[0] = true; bv.slice()[1] = false; bv.slice()[2] = true;
-  var x = V{ .B = bv };
-  defer x.deinit(vm.alloc);
-  try std.testing.expectEqual(@as(i32, 0), findB_b(vm, x, .{ .b = true }).i);
-  try std.testing.expectEqual(@as(i32, 1), findB_b(vm, x, .{ .b = false }).i);
-}
-
-test "find floats with NaN" {
-  const vm = try VM.create(std.testing.allocator);
-  defer vm.deinit();
-  const nan = std.math.nan(f32);
-  var x = try V.Floats(vm.alloc, &.{ 1.0, nan, 3.0 });
-  defer x.deinit(vm.alloc);
-  try std.testing.expectEqual(@as(i32, 0), findF_f(vm, x, .{ .f = 1.0 }).i);
-  try std.testing.expectEqual(@as(i32, 1), findF_f(vm, x, .{ .f = nan }).i);
-  try std.testing.expectEqual(V.@"0N",     findF_f(vm, x, .{ .f = 9.9 }).i);
-}

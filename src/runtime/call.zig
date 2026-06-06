@@ -21,11 +21,11 @@ pub const CallMode = enum { sync, bracket };
 pub const Call = struct {
   vm: *VM,
 
-  pub fn apply(self: *Call, func: V, args: []const V, is_bracket: bool) anyerror!V {
+  pub fn apply(self: *Call, func: V, args: []const V, is_bracket: bool) V {
     return switch (func) {
-      .func => |ref| try self.applyFn(ref, args, is_bracket),
-      .partial => |p| try self.applyPartial(p, args, is_bracket),
-      .s => |sym_idx| return try syms.apply(self.vm, sym_idx, args),
+      .func    => |ref| self.applyFn(ref, args, is_bracket),
+      .partial => |p|   self.applyPartial(p, args, is_bracket),
+      .s       => |sym| syms.apply(self.vm, sym, args) catch V{ .err = .memory },
       .L, .I, .F, .S, .C, .B, .m, .M => {
         if (args.len == 1) return dispatch.dispatch2(self.vm, .@"@", func, args[0]);
         return V{ .err = .rank };
@@ -34,7 +34,7 @@ pub const Call = struct {
     };
   }
 
-  fn applyFn(self: *Call, ref: Fn, args: []const V, is_bracket: bool) anyerror!V {
+  fn applyFn(self: *Call, ref: Fn, args: []const V, is_bracket: bool) V {
     var filled: usize = args.len;
     var has_gaps = false;
     if (is_bracket) {
@@ -42,10 +42,9 @@ pub const Call = struct {
       for (args) |a| if (a != .blank) { filled += 1; };
       has_gaps = filled < args.len;
     }
-
-    switch (ref.getKind()) {
-      .callable => return self.applyCallable(ref, args, is_bracket, filled, has_gaps),
-      .derived => return self.applyDerivedFn(ref, args),
+    switch (ref.kind) {
+      .callable    => return self.applyCallable(ref, args, is_bracket, filled, has_gaps),
+      .derived     => return self.applyDerivedFn(ref, args),
       .derived_data => {
         const entry = self.vm.fn_tables.derivedAt(@intCast(ref.idx));
         return derived_mod.derived(self.vm, entry.base, ref.getAdverb(), args, wrapper);
@@ -53,46 +52,32 @@ pub const Call = struct {
       .train => {
         var buf: [7]u8 = undefined;
         const ops = ref.trainOps(&buf);
-        if (args.len == 1) return try self.applyTrain(ops, args[0]);
+        if (args.len == 1) return self.applyTrain(ops, args[0]);
         return V{ .err = .rank };
       },
     }
   }
 
-  // Unified dispatch for any callable (builtin verb / adverb / lambda).
-  // Range-checks `ref.idx` to pick the right execution path.
-  fn applyCallable(self: *Call, ref: Fn, args: []const V, is_bracket: bool, filled: usize, has_gaps: bool) anyerror!V {
+  fn applyCallable(self: *Call, ref: Fn, args: []const V, is_bracket: bool, filled: usize, has_gaps: bool) V {
     const vm = self.vm;
     const idx = ref.idx;
 
-    // User-defined lambda: idx ≥ BUILTIN_COUNT
     if (opmod.isLambdaIdx(idx)) {
       const arity = ref.arity;
       if (has_gaps or (filled < arity and (is_bracket or filled > 0)))
         return makePartialFromArgs(vm, ref, args);
-      const prev_frames = vm.frames_len;
-      const res_slot = vm.stack_len;
-      try vm.push(.blank);
-      for (args) |arg| try vm.push(arg.ref());
-      try vm.callLambda(ref, args.len, res_slot);
-      try vm.runUntil(prev_frames);
-      return vm.pop();
+      return vm.callLambdaAndRun(ref, args);
     }
 
-    // Builtin verb or adverb: dispatch by idx range.
     const builtin_arity = ref.arity;
-
-    // Partial-application check: bracket form with missing/blank args.
     if (has_gaps or (is_bracket and filled < builtin_arity))
       return makePartialFromArgs(vm, ref, args);
 
-    // Op1 (monadic verb)
     if (opmod.isOp1Idx(idx)) {
       if (args.len == 1) return dispatch.dispatch1(vm, opmod.op1OfIdx(idx), args[0]);
       return V{ .err = .rank };
     }
 
-    // Op2 (dyadic verb) — polymorphic: 1-arg call falls back to Op1 equivalent.
     if (opmod.isOp2Idx(idx)) {
       const op2 = opmod.op2OfIdx(idx);
       if (args.len == 2) return dispatch.dispatch2(vm, op2, args[0], args[1]);
@@ -104,13 +89,10 @@ pub const Call = struct {
       return V{ .err = .rank };
     }
 
-    // Standalone adverb (e.g. `\[base; arg]` or `\[seed; base; arg]`).
     if (opmod.isAdverbIdx(idx)) {
       if (args.len < builtin_arity) return makePartialFromArgs(vm, ref, args);
       const adv = opmod.adverbOfIdx(idx);
-      // 2 args = monogram form: derived(base, [arg]).
       if (args.len == 2) return derived_mod.derived(vm, args[0], adv, args[1..2], wrapper);
-      // 3 args = digram form: derived(base, [extra, arg]).
       if (args.len == 3) {
         const data_args = [_]V{ args[0], args[2] };
         return derived_mod.derived(vm, args[1], adv, &data_args, wrapper);
@@ -118,41 +100,35 @@ pub const Call = struct {
       return V{ .err = .rank };
     }
 
-    // Op3 (triadic builtin: amend3 / drill3)
     if (opmod.isOp3Idx(idx)) {
       if (args.len != 3) return V{ .err = .rank };
       var buf = [_]V{ args[0].ref(), args[1].ref(), args[2].ref() };
       defer for (&buf) |*v| v.deinit(vm.alloc);
       return switch (opmod.op3OfIdx(idx)) {
-        .amend3 => try amend_mod.amend(vm, &buf),
-        .drill3 => try amend_mod.dmend(vm, &buf),
+        .amend3 => amend_mod.amend(vm, &buf),
+        .drill3 => amend_mod.dmend(vm, &buf),
+        .splice3 => @import("../primitive/verb/splice.zig").splice(vm, buf[0], buf[1], buf[2]),
       };
     }
 
-    // Op4 (tetradic builtin: amend4 / drill4)
     if (opmod.isOp4Idx(idx)) {
       if (args.len != 4) return V{ .err = .rank };
-      const op4 = opmod.op4OfIdx(idx);
       var buf = [_]V{ args[0].ref(), args[1].ref(), args[2].ref(), args[3].ref() };
       defer for (&buf) |*v| v.deinit(vm.alloc);
-      return switch (op4) {
-        .amend4 => try amend_mod.amend(vm, &buf),
-        .drill4 => try amend_mod.dmend(vm, &buf),
+      return switch (opmod.op4OfIdx(idx)) {
+        .amend4 => amend_mod.amend(vm, &buf),
+        .drill4 => amend_mod.dmend(vm, &buf),
       };
     }
 
     return V{ .err = .rank };
   }
 
-  // Apply a .derived Fn (base callable + adverb).
-  fn applyDerivedFn(self: *Call, ref: Fn, args: []const V) anyerror!V {
-    const base_idx = ref.idx;
-    const adv = ref.getAdverb();
-    const base = reconstructBaseV(base_idx, ref.arity);
-    return derived_mod.derived(self.vm, base, adv, args, wrapper);
+  fn applyDerivedFn(self: *Call, ref: Fn, args: []const V) V {
+    return derived_mod.derived(self.vm, reconstructBaseV(ref.idx, ref.arity), ref.getAdverb(), args, wrapper);
   }
 
-  fn applyPartial(self: *Call, p: *Partial, args: []const V, is_bracket: bool) anyerror!V {
+  fn applyPartial(self: *Call, p: *Partial, args: []const V, is_bracket: bool) V {
     const arity = p.arity;
     var merged: [8]V = .{.blank} ** 8;
     var fill: u8 = p.fill;
@@ -168,13 +144,12 @@ pub const Call = struct {
         inc += 1;
       }
     }
-    const filled: u8 = @popCount(fill);
-    if (filled < arity or (is_bracket and arity == 2 and filled == 1 and p.isFull()))
+    if (@popCount(fill) < arity)
       return makePartialFromMerged(self.vm, p.ref, arity, &merged, fill);
-    return try self.applyFn(p.ref, merged[0..arity], is_bracket);
+    return self.applyFn(p.ref, merged[0..arity], is_bracket);
   }
 
-  fn applyTrain(self: *Call, ops: []const u8, arg: V) anyerror!V {
+  fn applyTrain(self: *Call, ops: []const u8, arg: V) V {
     var res = arg.ref();
     var i: usize = ops.len;
     while (i > 0) {
@@ -192,7 +167,7 @@ pub const Call = struct {
 
   pub fn wrapper(vm: *VM, f: V, a: []const V) V {
     var fc = Call{ .vm = vm };
-    return fc.apply(f, a, false) catch V{ .err = .memory };
+    return fc.apply(f, a, false);
   }
 };
 
@@ -207,7 +182,7 @@ fn reconstructBaseV(global_idx: u32, base_arity: u8) V {
   }
   // Builtin: construct a Fn.callable directly with the global idx.
   return .{ .func = .{
-    .kind = @intFromEnum(FnKind.callable),
+    .kind = FnKind.callable,
     .arity = @intCast(opmod.arityOfBuiltin(global_idx)),
     .idx = @intCast(global_idx),
     .extra = 0,
@@ -219,7 +194,13 @@ pub fn applyDerivedBuiltin(vm: *VM, ref: Fn, args: []const V) V {
   return derived_mod.derived(vm, base, ref.getAdverb(), args, Call.wrapper);
 }
 
-fn makePartialFromArgs(vm: *VM, ref: Fn, args: []const V) !V {
+fn allocPartial(vm: *VM, ref: Fn, arity: u8, pa: [8]V, fill: u8) V {
+  const p = vm.partial_pool.create(vm.alloc) catch return V{ .err = .memory };
+  p.* = .{ .pool = &vm.partial_pool, .rc = 1, .fill = fill, .arity = arity, ._pad = 0, .ref = ref, .args = pa };
+  return .{ .partial = p };
+}
+
+pub fn makePartialFromArgs(vm: *VM, ref: Fn, args: []const V) V {
   const arity = ref.getRealArity();
   var pa: [8]V = .{.blank} ** 8;
   var fill: u8 = 0;
@@ -227,21 +208,17 @@ fn makePartialFromArgs(vm: *VM, ref: Fn, args: []const V) !V {
     if (i >= arity) break;
     if (a != .blank) { pa[i] = a.ref(); fill |= @as(u8, 1) << @intCast(i); }
   }
-  const p = try vm.partial_pool.create(vm.alloc);
-  p.* = .{ .pool = &vm.partial_pool, .rc = 1, .fill = fill, .arity = arity, ._pad = 0, .ref = ref, .args = pa };
-  return .{ .partial = p };
+  return allocPartial(vm, ref, arity, pa, fill);
 }
 
-fn makePartialFromMerged(vm: *VM, ref: Fn, arity: u8, merged: *const [8]V, fill: u8) !V {
-  var args: [8]V = .{.blank} ** 8;
+fn makePartialFromMerged(vm: *VM, ref: Fn, arity: u8, merged: *const [8]V, fill: u8) V {
+  var pa: [8]V = .{.blank} ** 8;
   var new_fill: u8 = 0;
   for (0..arity) |i| {
     if (fill & (@as(u8, 1) << @intCast(i)) != 0) {
-      args[i] = merged[i].ref();
+      pa[i] = merged[i].ref();
       new_fill |= @as(u8, 1) << @intCast(i);
     }
   }
-  const p = try vm.partial_pool.create(vm.alloc);
-  p.* = .{ .pool = &vm.partial_pool, .rc = 1, .fill = new_fill, .arity = arity, ._pad = 0, .ref = ref, .args = args };
-  return .{ .partial = p };
+  return allocPartial(vm, ref, arity, pa, new_fill);
 }

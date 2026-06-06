@@ -48,6 +48,7 @@ pub const Registry = struct {
   }
 
   pub fn getPath(self: Registry, id: u32) ?[]const u8 {
+    if (id >= self.paths.items.len) return null;
     return self.paths.items[id];
   }
 

@@ -196,7 +196,7 @@ pub const Parser = struct {
       self.advance();
       if (self.isStmtEnd() or self.is(.comment)) {
         const m = try self.arena.allocator().create(Node);
-        m.* = .{ .verb_op = colon_tok.slice(self.src) };
+        m.* = .{ .op = colon_tok.slice(self.src) };
         return m;
       }
       const clause = try self.parseStmt();
@@ -388,7 +388,7 @@ pub const Parser = struct {
     // Check for monad: op ':' (e.g. *: as first-class value)
     if (self.is(.@":")) {
       self.advance();
-      const op_str = if (verb_node.* == .verb_op) verb_node.verb_op else "";
+      const op_str = if (verb_node.* == .op) verb_node.op else "";
       const mv = try self.arena.allocator().create(Node);
       mv.* = .{ .monad = .{ .f = op_str } };
       self.arena.allocator().destroy(verb_node);
@@ -463,7 +463,7 @@ pub const Parser = struct {
   fn makeVerbNode(self: *Parser, tok: Token) ParseError!*Node {
     const m = try self.arena.allocator().create(Node);
     m.* = switch (tok.tt) {
-      .op, .keyword => .{ .verb_op = tok.slice(self.src) },
+      .op, .keyword => .{ .op = tok.slice(self.src) },
       .io => .{ .io = tok.slice(self.src) },
       else => .blank,
     };
@@ -974,7 +974,7 @@ test "parse transit" {
   defer p.deinit();
   const s = n.terse.stmts[0].node;
   try std.testing.expect(s.* == .transit);
-  try std.testing.expectEqualStrings("+", s.transit.v.verb_op);
+  try std.testing.expectEqualStrings("+", s.transit.v.op);
 }
 
 test "parse apposit (f a)" {
@@ -993,7 +993,7 @@ test "parse adverb term" {
   const s = n.terse.stmts[0].node;
   try std.testing.expect(s.* == .apposit);
   try std.testing.expect(s.apposit.f.* == .term);
-  try std.testing.expectEqualStrings("+", s.apposit.f.term.f.verb_op);
+  try std.testing.expectEqualStrings("+", s.apposit.f.term.f.op);
   try std.testing.expectEqualStrings("/", s.apposit.f.term.a);
 }
 

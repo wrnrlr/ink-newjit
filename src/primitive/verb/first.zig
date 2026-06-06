@@ -5,9 +5,10 @@ const VM = @import("../../runtime/vm.zig").VM;
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
+const Op1 = @import("../../noun/operator.zig").Op1;
+const h = @import("helper.zig");
 
-pub const First = struct {
-  pub const op = .@"*";
+const FirstImpl = struct {
   _b: util.MonadFn = identity,
   _i: util.MonadFn = identity,
   _f: util.MonadFn = identity,
@@ -23,22 +24,8 @@ pub const First = struct {
   _M: util.MonadFn = firstFn,
 };
 
-pub const First_Name = struct {
-  pub const op = .first;
-  _b: util.MonadFn = identity,
-  _i: util.MonadFn = identity,
-  _f: util.MonadFn = identity,
-  _s: util.MonadFn = identity,
-  _c: util.MonadFn = identity,
-  _B: util.MonadFn = firstVec(.B),
-  _I: util.MonadFn = firstVec(.I),
-  _F: util.MonadFn = firstVec(.F),
-  _S: util.MonadFn = firstVec(.S),
-  _C: util.MonadFn = firstVec(.C),
-  _L: util.MonadFn = firstFn,
-  _m: util.MonadFn = firstFn,
-  _M: util.MonadFn = firstFn,
-};
+pub const First      = h._X(Op1, .@"*",  FirstImpl);
+pub const First_Name = h._X(Op1, .first, FirstImpl);
 
 pub const Last_Name = struct {
   pub const op = .last;
@@ -56,7 +43,6 @@ pub const Last_Name = struct {
   _m: util.MonadFn = lastFn,
   _M: util.MonadFn = lastFn,
 };
-
 
 pub fn first(alloc: Alloc, x: V) V {
   if (x.len() == 0) return .blank;

@@ -20,10 +20,6 @@ pub const Flip = struct {
   _L: util.MonadFn = flipList,
 };
 
-pub const FlipOp = struct {
-  pub fn f(x: anytype, y: @TypeOf(x)) @TypeOf(x) { return x / y; }
-};
-
 // 1D vector → enlist, e.g. +1 2 3 → ,1 2 3
 fn flipVector(vm: *VM, x: V) V {
   return enlist(vm.alloc, x);

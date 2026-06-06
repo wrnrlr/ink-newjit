@@ -25,7 +25,7 @@ pub fn fusedReducerOf(op: Op2) ?Op1 {
 pub fn fold(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
   // No init + builtin dyad with a fused reducer + typed array → dispatch
   // straight to the monad table entry. Avoids the per-element fold loop.
-  if (init == null and base.tag() == .func and base.func.getKind() == .callable
+  if (init == null and base.tag() == .func and base.func.kind == .callable
       and opmod.isOp2Idx(base.func.idx))
   {
     if (fusedReducerOf(base.func.getOp2())) |op1| {
