@@ -126,12 +126,13 @@ pub fn Upcast1(comptime T: type) type { return if (T == f32) f32 else i32; }
 pub fn Float1(comptime _: type) type { return f32; }
 pub fn Int1(comptime _: type) type { return i32; }
 pub fn Bool1(comptime _: type) type { return bool; }
+pub fn Char1(comptime _: type) type { return u8; }
 
 // ── Result-kind helpers ───────────────────────────────────────────────────────
 
 pub fn resultKind1(comptime xk: K, comptime RT: fn (type) type) K {
   const R = RT(xk.backing());
-  const scalar: K = if (R == f32) .f else if (R == bool) .b else .i;
+  const scalar: K = if (R == f32) .f else if (R == bool) .b else if (R == u8) .c else .i;
   return if (xk.isVec()) scalar.container() else scalar;
 }
 

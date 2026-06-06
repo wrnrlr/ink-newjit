@@ -107,6 +107,48 @@ pub fn max(comptime T: type, s: []const T) T {
   return acc;
 }
 
+// ── Comptime generators for fused derived verb structs ────────────────────────
+
+const util      = @import("../../util.zig");
+const VM        = @import("../../runtime/vm.zig").VM;
+const V         = @import("../../noun/value.zig").V;
+const Op1       = @import("../../noun/operator.zig").Op1;
+const Op2       = @import("../../noun/operator.zig").Op2;
+const dispatch  = @import("../dispatch.zig");
+
+// typedFold: I or F monadic reducer using the SIMD helpers above.
+pub fn typedFold(comptime T: type, comptime op2: Op2) util.MonadFn {
+  return &struct { fn f(_: *VM, x: V) V {
+    const s = if (T == i32) x.I.slice() else x.F.slice();
+    if (s.len == 0) return .blank;
+    const r = switch (op2) {
+      .@"+" => sum(T, s),
+      .@"*" => product(T, s),
+      .@"&" => min(T, s),
+      .@"|" => max(T, s),
+      else => unreachable,
+    };
+    return if (T == i32) V{ .i = r } else V{ .f = r };
+  }}.f;
+}
+
+// listFold: generic L reducer via dispatch.
+pub fn listFold(comptime op2: Op2) util.MonadFn {
+  return &struct { fn f(vm: *VM, x: V) V {
+    const n = x.len();
+    if (n == 0) return .blank;
+    var accum = x.at(0);
+    for (1..n) |i| {
+      const item = x.at(i);
+      defer item.deinit(vm.alloc);
+      const next = dispatch.dispatch2(vm, op2, accum, item);
+      accum.deinit(vm.alloc);
+      accum = next;
+    }
+    return accum;
+  }}.f;
+}
+
 test "simd reductions match scalar" {
   const ints = [_]i32{ 5, -3, 7, 1, 9, -2, 4, 8, 0, 6, 11, -5, 3, 2, 10, -1, 12 };
   var ssum: i32 = ints[0];

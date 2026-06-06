@@ -1,49 +1,19 @@
-// Fused &/ reducer (min on numeric, all-AND on bool).
-const std = @import("std");
 const util = @import("../../util.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const V = @import("../../noun/value.zig").V;
-const dispatch = @import("../dispatch.zig");
-const reduce = @import("reduce.zig");
-
-pub const Min = struct {
-  pub const op = .@"&/";
-  _B: util.MonadFn = minB,
-  _I: util.MonadFn = minI,
-  _F: util.MonadFn = minF,
-  _L: util.MonadFn = minL,
-};
+const r = @import("reduce.zig");
 
 fn minB(_: *VM, x: V) V {
   const s = x.B.slice();
   if (s.len == 0) return .blank;
-  var acc = s[0];
-  for (s[1..]) |v| acc = acc and v;
-  return .{ .b = acc };
+  for (s) |v| if (!v) return .{ .b = false };
+  return .{ .b = true };
 }
 
-fn minI(_: *VM, x: V) V {
-  const s = x.I.slice();
-  if (s.len == 0) return .blank;
-  return .{ .i = reduce.min(i32, s) };
-}
-
-fn minF(_: *VM, x: V) V {
-  const s = x.F.slice();
-  if (s.len == 0) return .blank;
-  return .{ .f = reduce.min(f32, s) };
-}
-
-fn minL(vm: *VM, x: V) V {
-  const n = x.len();
-  if (n == 0) return .blank;
-  var accum = x.at(0);
-  for (1..n) |i| {
-    const item = x.at(i);
-    defer item.deinit(vm.alloc);
-    const next = dispatch.dispatch2(vm, .@"&", accum, item);
-    accum.deinit(vm.alloc);
-    accum = next;
-  }
-  return accum;
-}
+pub const Min = struct {
+  pub const op = .@"&/";
+  _B: util.MonadFn = minB,
+  _I: util.MonadFn = r.typedFold(i32, .@"&"),
+  _F: util.MonadFn = r.typedFold(f32, .@"&"),
+  _L: util.MonadFn = r.listFold(.@"&"),
+};
