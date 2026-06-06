@@ -32,7 +32,7 @@ const std = @import("std");
 const Alloc = std.mem.Allocator;
 const tatfi = @import("tatfi");
 
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+var gpa = std.heap.DebugAllocator(.{}){};
 
 // ── Font table ────────────────────────────────────────────────────────────────
 
@@ -50,7 +50,7 @@ var n_fonts: usize = 0;
 
 /// Load a font file.  `path` is a null-terminated UTF-8 path.
 /// Returns a non-negative handle on success, -1 on failure.
-pub export fn font_load(path: [*:0]const u8) callconv(.C) i32 {
+pub export fn font_load(path: [*:0]const u8) i32 {
   if (n_fonts >= MAX_FONTS) return -1;
   const alloc = gpa.allocator();
 
@@ -90,7 +90,7 @@ pub export fn font_load(path: [*:0]const u8) callconv(.C) i32 {
 ///   out[1] = descent (negative, pixels below baseline)
 ///   out[2] = line_gap
 /// Returns 0 on success, -1 on bad handle.
-pub export fn font_metrics(handle: i32, size: f32, out: *[3]f32) callconv(.C) i32 {
+pub export fn font_metrics(handle: i32, size: f32, out: *[3]f32) i32 {
   if (handle < 0 or handle >= @as(i32, @intCast(n_fonts))) return -1;
   const entry = fonts[@intCast(handle)] orelse return -1;
   const upm: f32 = @floatFromInt(entry.face.units_per_em());
@@ -111,7 +111,7 @@ pub export fn font_shape(
   text_len: usize,
   out: [*]u16,
   out_cap: usize,
-) callconv(.C) i32 {
+) i32 {
   if (handle < 0 or handle >= @as(i32, @intCast(n_fonts))) return -1;
   const entry = fonts[@intCast(handle)] orelse return -1;
 
@@ -152,24 +152,23 @@ const OutlineCollector = struct {
 
   fn flushCurrent(self: *OutlineCollector) void {
     if (self.current.items.len > 0) {
-      self.contours.append(self.current) catch {};
-      self.current = std.ArrayList([2]f32).init(self.alloc);
+      self.contours.append(self.alloc, self.current) catch {};
+      self.current = .{ .items = &.{}, .capacity = 0 };
     }
   }
 
   fn moveTo(ptr: *anyopaque, x: f32, y: f32) void {
     const self: *OutlineCollector = @ptrCast(@alignCast(ptr));
     self.flushCurrent();
-    self.current.append(.{ x * self.scale, -y * self.scale }) catch {};
+    self.current.append(self.alloc, .{ x * self.scale, -y * self.scale }) catch {};
   }
   fn lineTo(ptr: *anyopaque, x: f32, y: f32) void {
     const self: *OutlineCollector = @ptrCast(@alignCast(ptr));
-    self.current.append(.{ x * self.scale, -y * self.scale }) catch {};
+    self.current.append(self.alloc, .{ x * self.scale, -y * self.scale }) catch {};
   }
   fn quadTo(ptr: *anyopaque, x1: f32, y1: f32, x: f32, y: f32) void {
     const self: *OutlineCollector = @ptrCast(@alignCast(ptr));
     const p0 = self.lastPt();
-    // Elevate quad to cubic then subdivide
     const cx1 = (p0[0] + 2 * x1 * self.scale) / 3;
     const cy1 = (p0[1] + 2 * (-y1 * self.scale)) / 3;
     const cx2 = (2 * x1 * self.scale + x * self.scale) / 3;
@@ -198,7 +197,7 @@ const OutlineCollector = struct {
     level: u32,
   ) void {
     if (level > 5) {
-      self.current.append(.{ x4, y4 }) catch {};
+      self.current.append(self.alloc, .{ x4, y4 }) catch {};
       return;
     }
     const tol: f32 = 0.25;
@@ -207,7 +206,7 @@ const OutlineCollector = struct {
     const d2 = @abs((x2 - x4) * dy - (y2 - y4) * dx);
     const d3 = @abs((x3 - x4) * dy - (y3 - y4) * dx);
     if ((d2 + d3) * (d2 + d3) < tol * (dx * dx + dy * dy)) {
-      self.current.append(.{ x4, y4 }) catch {};
+      self.current.append(self.alloc, .{ x4, y4 }) catch {};
       return;
     }
     const x12   = (x1 + x2) * 0.5;  const y12   = (y1 + y2) * 0.5;
@@ -250,22 +249,26 @@ pub export fn font_glyph_outline(
   out_counts: ?[*]u32,  // point count per contour
   out_n_contours: *u32,
   pts_cap: usize,       // capacity of out_pts in number of [x,y] pairs
-) callconv(.C) i32 {
+) i32 {
   if (handle < 0 or handle >= @as(i32, @intCast(n_fonts))) return -1;
   const entry = fonts[@intCast(handle)] orelse return -1;
   const alloc = gpa.allocator();
 
   const upm: f32 = @floatFromInt(entry.face.units_per_em());
+  var contours_init = std.ArrayList(std.ArrayList([2]f32)).initCapacity(alloc, 4) catch return -1;
+  const current_init  = std.ArrayList([2]f32).initCapacity(alloc, 32) catch {
+    contours_init.deinit(alloc); return -1;
+  };
   var collector = OutlineCollector{
     .alloc    = alloc,
-    .contours = std.ArrayList(std.ArrayList([2]f32)).init(alloc),
-    .current  = std.ArrayList([2]f32).init(alloc),
+    .contours = contours_init,
+    .current  = current_init,
     .scale    = size / upm,
   };
   defer {
-    for (collector.contours.items) |*c| c.deinit();
-    collector.contours.deinit();
-    collector.current.deinit();
+    for (collector.contours.items) |*c| c.deinit(alloc);
+    collector.contours.deinit(alloc);
+    collector.current.deinit(alloc);
   }
 
   _ = entry.face.outline_glyph(alloc, .{glyph_id}, collector.builder());
@@ -295,7 +298,7 @@ pub export fn font_glyph_outline(
 
 // ── Extension entry point ─────────────────────────────────────────────────────
 
-pub export fn terse_init(reg: *anyopaque) callconv(.C) void {
+pub export fn terse_init(reg: *anyopaque) void {
   _ = reg;
   // TODO: register `font` namespace verbs via VM extension API
 }

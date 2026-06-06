@@ -5,6 +5,11 @@ pub fn build(b: *std.Build) !void {
   const optimize = b.standardOptimizeOption(.{});
   const paranoid   = b.option(bool, "paranoid", "Enable extra runtime validation") orelse false;
 
+  const tatfi_dep = b.dependency("tatfi", .{});
+  const gpu_tri_mod = b.createModule(.{ .root_source_file = b.path("lib/gpu/triangulate.zig") });
+  const font_ext_mod = b.createModule(.{ .root_source_file = b.path("lib/font/font_ext.zig") });
+  font_ext_mod.addImport("tatfi", tatfi_dep.module("tatfi"));
+
   // --- Tests ---
   const test_mod = b.createModule(.{
     .root_source_file = b.path("src/test.zig"),
@@ -15,6 +20,8 @@ pub fn build(b: *std.Build) !void {
   test_options.addOption(bool, "paranoid",   paranoid);
   test_mod.addOptions("build_options", test_options);
   test_mod.addIncludePath(b.path("src"));
+  test_mod.addImport("gpu_tri",  gpu_tri_mod);
+  test_mod.addImport("font_ext", font_ext_mod);
   const test_exe = b.addTest(.{ .root_module = test_mod });
   const test_run = b.addRunArtifact(test_exe);
   const test_step = b.step("test", "Run unit tests");
@@ -43,6 +50,8 @@ pub fn build(b: *std.Build) !void {
   const runner_exe = b.addExecutable(.{ .name = "ink", .root_module = runner_mod });
   runner_mod.addOptions("build_options", runner_options);
   runner_mod.addIncludePath(b.path("src"));
+  runner_mod.addImport("gpu_tri",   gpu_tri_mod);
+  runner_mod.addImport("font_ext",  font_ext_mod);
 
   b.installArtifact(runner_exe);
   const runner_run_cmd = b.addRunArtifact(runner_exe);

@@ -192,13 +192,24 @@ pub const ReadData = struct {
 // WriteData  2: (dyad)
 // ---------------------------------------------------------------------------
 
-fn writeDataBySymbol(vm: *VM, x: V, y: V) V {
-  const id = vm.mapFile(vm.getSymbol(x.s)) catch return V{ .err = .io };
+fn writeDataOrFfi(vm: *VM, lib_path: []const u8, y: V) V {
+  // Intercept: "lib.so" 2: (`sym; arity)  →  load FFI function
+  if (y.tag() == .L) {
+    const sl = y.L.slice();
+    if (sl.len == 2 and sl[0].tag() == .s and sl[1].tag() == .i) {
+      const sym_name = vm.getSymbol(sl[0].s);
+      const arity: u8 = @intCast(@max(0, @min(8, sl[1].i)));
+      return @import("../../ffi.zig").ffiLoad(vm, lib_path, sym_name, arity);
+    }
+  }
+  const id = vm.mapFile(lib_path) catch return V{ .err = .io };
   return writeDataFallback(vm, V{ .i = @intCast(id) }, y);
 }
+fn writeDataBySymbol(vm: *VM, x: V, y: V) V {
+  return writeDataOrFfi(vm, vm.getSymbol(x.s), y);
+}
 fn writeDataByChars(vm: *VM, x: V, y: V) V {
-  const id = vm.mapFile(x.C.slice()) catch return V{ .err = .io };
-  return writeDataFallback(vm, V{ .i = @intCast(id) }, y);
+  return writeDataOrFfi(vm, x.C.slice(), y);
 }
 
 pub const WriteData = struct {

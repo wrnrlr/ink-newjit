@@ -83,6 +83,8 @@ const Monads = struct {
   pub const @".m"  = @import("values.zig").Values;
   pub const @".s"  = @import("get.zig").GetSymbol;
   pub const exec   = @import("exec.zig").Exec;
+  pub const gpu    = @import("gpu_verb.zig").Gpu;
+  pub const font   = @import("font_verb.zig").Font;
 
   // Fused derived verbs — direct monadic reductions over typed arrays.
   // The optimizer rewrites `+/x` (Call+Derive) into `Apply1 +/` to hit these.
@@ -150,6 +152,8 @@ const Dyads = struct {
   pub const @"9: x"    = @import("graphics.zig").Draw;
   pub const @"x 9: x"  = @import("graphics.zig").DrawDyad;
   pub const @"x exec" = @import("exec.zig").ExecDyad;
+  pub const @"gpu x"  = @import("gpu_verb.zig").Gpu;
+  pub const @"font x" = @import("font_verb.zig").Font;
 };
 
 fn typeError1(_: *VM, _:V) V { return .{ .err = .@"type" }; }

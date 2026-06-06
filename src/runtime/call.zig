@@ -26,11 +26,20 @@ pub const Call = struct {
       .func    => |ref| self.applyFn(ref, args, is_bracket),
       .partial => |p|   self.applyPartial(p, args, is_bracket),
       .s       => |sym| syms.apply(self.vm, sym, args) catch V{ .err = .memory },
+      .x       => |obj| self.applyExt(obj, args),
       .L, .I, .F, .S, .C, .B, .m, .M => {
         if (args.len == 1) return dispatch.dispatch2(self.vm, .@"@", func, args[0]);
         return V{ .err = .rank };
       },
       else => V{ .err = .@"type" },
+    };
+  }
+
+  fn applyExt(_: *Call, obj: *@import("../noun/plugin.zig").ExtObj, args: []const V) V {
+    return switch (args.len) {
+      1 => if (obj.vtable.call1_fn) |f| f(obj.data, args[0]) else V{ .err = .@"type" },
+      2 => if (obj.vtable.call2_fn) |f| f(obj.data, args[0], args[1]) else V{ .err = .@"type" },
+      else => V{ .err = .rank },
     };
   }
 

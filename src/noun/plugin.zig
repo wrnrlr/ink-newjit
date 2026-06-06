@@ -1,18 +1,20 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
+const V = @import("value.zig").V;
 
 // Per-type vtable for extension objects.  Extensions fill this in and pass it
 // to ExtRegistry.register(); the VM then uses it for RC, format, and dispatch.
 pub const ExtVTable = struct {
   name:       []const u8,
-  // Optional: called on every additional reference (shared ownership).
-  // If null, `data` is treated as uniquely owned by the ExtObj wrapper.
   ref_fn:     ?*const fn (data: *anyopaque) void       = null,
-  // Required: free `data`.  Called when rc reaches 0.
   deinit_fn:  *const fn (data: *anyopaque) void,
-  // Optional: write a human-readable form into `buf` (max 256 bytes).
-  // Return the number of bytes written.
   format_fn:  ?*const fn (data: *anyopaque, buf: *[256]u8) usize = null,
+  // Optional: make the ExtObj callable from K.
+  // call1_fn(data, x)    — monad: f x
+  // call2_fn(data, x, y) — dyad:  x f y
+  // Returning V{.err = .nyi} falls back to a type error.
+  call1_fn:   ?*const fn (data: *anyopaque, x: V) V  = null,
+  call2_fn:   ?*const fn (data: *anyopaque, x: V, y: V) V = null,
 };
 
 // Heap-allocated wrapper owned by V.x.  The VM manages this struct's lifetime
