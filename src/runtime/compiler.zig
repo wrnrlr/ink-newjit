@@ -17,19 +17,19 @@ const Alloc = std.mem.Allocator;
 const Chunk = @import("tape.zig").Chunk;
 const OpCode = @import("tape.zig").OpCode;
 const Pool = @import("../noun/symbol.zig").Pool;
-const Registry = @import("registry.zig").Registry;
+const Fs = @import("registry.zig").Fs;
 
 pub const Compiler = struct {
   alloc: Alloc,
   chunk: *Chunk,
   globals: *std.StringHashMap(u8),
   symbols: *Pool,
-  registry: *Registry,
+  registry: *Fs,
   fn_tables: *fntable.FnTables,
   scope: *Scope,
   text_id: u32 = 0,
 
-  pub fn init(alloc: Alloc, chunk: *Chunk, globals: *std.StringHashMap(u8), symbols: *Pool, registry: *Registry, fn_tables: *fntable.FnTables) !Compiler {
+  pub fn init(alloc: Alloc, chunk: *Chunk, globals: *std.StringHashMap(u8), symbols: *Pool, registry: *Fs, fn_tables: *fntable.FnTables) !Compiler {
     const scope = try alloc.create(Scope);
     scope.* = try Scope.init(alloc, chunk, null);
     return .{

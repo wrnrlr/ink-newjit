@@ -34,6 +34,7 @@ pub const Op1 = enum(u8) {
   pub fn fromString(s: []const u8) ?Op1 { return std.meta.stringToEnum(Op1, s); }
   pub fn toString(self: Op1) []const u8 { return @tagName(self); }
   pub inline fn code(op: Op1) usize { return @intFromEnum(op); }
+  pub inline fn load(a: u8) usize { return @enumFromInt(a); }
 };
 
 /// Dyadic primitives. Apply2 bytecode + dyad dispatch table.

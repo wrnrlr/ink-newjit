@@ -4,7 +4,7 @@ const Alloc = std.mem.Allocator;
 const Chunk = @import("tape.zig").Chunk;
 const OpCode = @import("tape.zig").OpCode;
 const Compiler = @import("compiler.zig").Compiler;
-const Registry = @import("registry.zig").Registry;
+const Fs = @import("registry.zig").Fs;
 const command = @import("command.zig");
 const FnTables = @import("fntable.zig").FnTables;
 const assert = std.debug.assert;
@@ -28,6 +28,7 @@ const dispatch = @import("../primitive/dispatch.zig");
 const fuse = @import("../primitive/derived/fuse.zig");
 const MockWriter = @import("../util.zig").MockWriter;
 const SlabAlloc = @import("../noun/slab.zig").SlabAlloc;
+const Partials = std.heap.MemoryPool(Partial);
 
 const STACK_MAX = 2048;
 const FRAMES_MAX = 64;
@@ -52,13 +53,13 @@ pub const VM = struct {
   stack_len: usize         = 0,
   frames:     [FRAMES_MAX]Frame = undefined,
   frames_len: usize             = 0,
-  partial_pool: std.heap.MemoryPool(Partial),
+  partials: Partials,
 
   symbols: Pool,
   globals: [256]V = undefined,
-  globals_names: std.StringHashMap(u8),
+  names: std.StringHashMap(u8),
   current_chunk: *Chunk,
-  registry: Registry,
+  fs: Fs,
   fn_tables: FnTables,
   ext: ExtRegistry,
   out: ?*std.Io.Writer = null,
@@ -82,17 +83,17 @@ pub const VM = struct {
       .compiler     = try alloc.create(Compiler),
       .chunk        = chunk,
       .current_chunk = chunk,
-      .partial_pool  = std.heap.MemoryPool(Partial).empty,
+      .partials  = .empty,
       .symbols       = symbols,
-      .globals_names = std.StringHashMap(u8).init(alloc),
-      .registry      = try Registry.init(alloc),
+      .names = std.StringHashMap(u8).init(alloc),
+      .fs      = try Fs.init(alloc),
       .fn_tables     = FnTables.init(alloc),
       .ext           = ExtRegistry.init(alloc),
       .prng          = std.Random.DefaultPrng.init(0),
     };
     vm.alloc = vm.slab.allocator();
     try vm.symbols.prefill();
-    vm.compiler.* = try Compiler.init(alloc, chunk, &vm.globals_names, &vm.symbols, &vm.registry, &vm.fn_tables);
+    vm.compiler.* = try Compiler.init(alloc, chunk, &vm.names, &vm.symbols, &vm.fs, &vm.fn_tables);
     @memset(&vm.globals, .blank);
     std.Io.Threaded.global_single_threaded.allocator = alloc;
     vm.pushFrame(.{ .base = 0, .result_slot = 0, .lambda_idx = NO_LAMBDA });
@@ -102,34 +103,24 @@ pub const VM = struct {
   pub fn deinit(vm: *VM) void {
     vm.argv.deinit(vm.alloc);
     for (vm.stack[0..vm.stack_len]) |*v| v.deinit(vm.alloc);
-
     vm.compiler.deinit();
     vm.alloc.destroy(vm.compiler);
-
     vm.symbols.deinit();
-
     for (&vm.globals) |*v| v.deinit(vm.alloc);
-
-    var kit = vm.globals_names.keyIterator();
+    var kit = vm.names.keyIterator();
     while (kit.next()) |k| vm.alloc.free(k.*);
-    vm.globals_names.deinit();
-
+    vm.names.deinit();
     vm.fn_tables.deinit();
-    vm.partial_pool.deinit(vm.alloc);
+    vm.partials.deinit(vm.alloc);
     vm.ext.deinit();
     vm.chunk.deinit();
     vm.alloc.destroy(vm.chunk);
-    vm.registry.deinit();
-
-    if (vm.parser) |p| {
-      p.deinit();
-      vm.alloc.destroy(p);
-    }
-
+    vm.fs.deinit();
+    if (vm.parser) |p| { p.deinit(); vm.alloc.destroy(p); }
     vm.slab.deinit();
     vm.alloc.destroy(vm);
   }
-
+  
   pub fn print(vm: *VM, comptime fmt: []const u8, args: anytype) void {
     if (vm.out) |out| {
       out.print(fmt, args) catch {};
@@ -144,14 +135,14 @@ pub const VM = struct {
   pub fn symbolCount(vm: *const VM) usize { return vm.symbols.count(); }
 
   pub fn eval(vm: *VM, txt: []const u8) !V {
-    const text_id = try vm.registry.addText(txt);
-    return vm.interpret(txt, text_id);
+    const tid = try vm.fs.addText(txt);
+    return vm.interpret(txt, tid);
   }
 
   pub fn load(vm: *VM, path: []const u8) !V {
     const io = std.Io.Threaded.global_single_threaded.io();
     const text = try std.Io.Dir.cwd().readFileAlloc(io, path, vm.alloc, std.Io.Limit.limited(10 * 1024 * 1024));
-    const text_id = try vm.registry.addFile(path, text);
+    const text_id = try vm.fs.addFile(path, text);
     return vm.interpret(text, text_id);
   }
 
@@ -159,22 +150,15 @@ pub const VM = struct {
     vm.resetStack();
     const node = try vm.parser.?.parse(txt);
     defer vm.parser.?.free(node);
-
     vm.compiler.scope.reset();
     vm.compiler.text_id = text_id;
     try vm.compiler.compile(node, false);
     try vm.run();
-
     return vm.pop();
   }
 
-  // Compile `txt` once, appending its bytecode to the top-level chunk, and
-  // return the ip where that bytecode begins. Paired with runFrom so callers
-  // (e.g. the `\t:n` timing command) can execute it repeatedly without paying
-  // the parse+compile+optimize cost on every iteration. Assumes the compiled
-  // text is the final code in the chunk (true for the trailing `\t` statement).
   pub fn compileOnce(vm: *VM, txt: []const u8) !usize {
-    const text_id = try vm.registry.addText(txt);
+    const text_id = try vm.fs.addText(txt);
     const node = try vm.parser.?.parse(txt);
     defer vm.parser.?.free(node);
     vm.compiler.scope.reset();
@@ -312,11 +296,11 @@ pub const VM = struct {
           defer v.deinit(vm.alloc);
           if (v.isTrue()) frame.ip += offset;
         },
-        .Apply1 => try VM.doApply1(vm),
-        .Apply2 => try VM.doApply2(vm),
-        .ReduceZip => try VM.doReduceZip(vm),
-        .Apply3 => try VM.doApply3(vm),
-        .Apply4 => try VM.doApply4(vm),
+        .Apply1    => try vm.doApply(1, call1),
+        .Apply2    => try vm.doApply(2, call2),
+        .ReduceZip => try vm.doApply(2, reduceZip),
+        .Apply3    => try vm.doApply(3, call3),
+        .Apply4    => try vm.doApply(4, call4),
         .Return => try vm.doReturn(),
         .Call => try vm.doCallWithMode(.sync),
         .TailCall => try vm.doTailCall(),
@@ -472,53 +456,41 @@ pub const VM = struct {
     func_val.deinit(vm.alloc);
   }
   
-  fn doApply1(vm: *VM) !void {
-    const op: Op1 = @enumFromInt(vm.readByte());
-    const a = vm.pop();
-    defer a.deinit(vm.alloc);
-    try vm.push(dispatch.dispatch1(vm, op, a));
-  }
+  pub inline fn size(vm: *VM) usize { return vm.stack_len; }
+  pub inline fn cut(vm: *VM, c: usize) []V { const s = vm.size(); return vm.stack[s-c..s]; }
+  pub inline fn slice(vm: *VM, n: usize, m: usize) []V { return vm.stack[n..m]; }
 
-  fn doApply2(vm: *VM) !void {
-    const op: Op2 = @enumFromInt(vm.readByte());
-    const b = vm.pop();
-    defer b.deinit(vm.alloc);
-    const a = vm.pop();
-    defer a.deinit(vm.alloc);
-    try vm.push(dispatch.dispatch2(vm, op, a, b));
+  pub fn call1(vm: *VM, op: u8, a: []V) V {
+    return dispatch.dispatch1(vm, @enumFromInt(op), a[0]);
   }
-
-  // Fused reduce-of-zip: 2 op bytes (Op1 reduce, Op2 bin), pops 2 args.
-  fn doReduceZip(vm: *VM) !void {
-    const red: Op1 = @enumFromInt(vm.readByte());
+  pub fn call2(vm: *VM, op: u8, a: []V) V {
+    return dispatch.dispatch2(vm, @enumFromInt(op), a[0], a[1]);
+  }
+  pub fn call3(vm: *VM, op: u8, a: []V) V {
+    const o: Op3 = @enumFromInt(op);
+    return if (hasBlank(a)) call.makePartialFromArgs(vm, Fn.triad(o), a)
+           else dispatch.dispatch3(vm, o, a[0], a[1], a[2]);
+  }
+  pub fn call4(vm: *VM, op: u8, a: []V) V {
+    const o: Op4 = @enumFromInt(op);
+    return if (hasBlank(a)) call.makePartialFromArgs(vm, Fn.tetrad(o), a)
+           else dispatch.dispatch4(vm, o, a[0], a[1], a[2], a[3]);
+  }
+  // Fused reduce-of-zip: reads a second op byte (bin) after the primary (red).
+  fn reduceZip(vm: *VM, op: u8, a: []V) V {
     const bin: Op2 = @enumFromInt(vm.readByte());
-    const b = vm.pop();
-    defer b.deinit(vm.alloc);
-    const a = vm.pop();
-    defer a.deinit(vm.alloc);
-    try vm.push(fuse.reduceZip(vm, red, bin, a, b));
+    return fuse.reduceZip(vm, @enumFromInt(op), bin, a[0], a[1]);
   }
 
-  fn doApply3(vm: *VM) !void {
-    const op: Op3 = @enumFromInt(vm.readByte());
-    const start = vm.stack_len - 3;
-    const args = vm.stack[start..vm.stack_len];
-    const res = if (hasBlank(args)) call.makePartialFromArgs(vm, Fn.triad(op), args)
-      else dispatch.dispatch3(vm, op, args[0], args[1], args[2]);
-    for (args) |*v| v.deinit(vm.alloc);
-    vm.stack_len = start;
-    try vm.push(res);
-  }
-
-  fn doApply4(vm: *VM) !void {
-    const op: Op4 = @enumFromInt(vm.readByte());
-    const start = vm.stack_len - 4;
-    const args = vm.stack[start..vm.stack_len];
-    const res = if (hasBlank(args)) call.makePartialFromArgs(vm, Fn.tetrad(op), args)
-      else dispatch.dispatch4(vm, op, args[0], args[1], args[2], args[3]);
-    for (args) |*v| v.deinit(vm.alloc);
-    vm.stack_len = start;
-    try vm.push(res);
+  // Generic apply: reads opcode, takes top N args, calls F, cleans up, pushes result.
+  fn doApply(vm: *VM, comptime arity: usize, comptime F: anytype) !void {
+    const op = vm.readByte();
+    const s  = vm.size();
+    const a  = vm.cut(arity);
+    const r  = F(vm, op, a);
+    for (a) |*v| v.deinit(vm.alloc);
+    vm.stack_len = s - arity;
+    try vm.push(r);
   }
   
   fn doMakePartial(vm: *VM) !void {
@@ -566,8 +538,8 @@ pub const VM = struct {
       }
     }
 
-    const p = try vm.partial_pool.create(vm.alloc);
-    p.* = .{ .pool = &vm.partial_pool, .rc = 1, .fill = fill, .arity = arity, ._pad = 0, .ref = base_ref, .args = merged };
+    const p = try vm.partials.create(vm.alloc);
+    p.* = .{ .pool = &vm.partials, .rc = 1, .fill = fill, .arity = arity, ._pad = 0, .ref = base_ref, .args = merged };
 
     for (vm.stack[args_start - 1 .. vm.stack_len]) |*v| v.deinit(vm.alloc);
     vm.stack_len = args_start - 1;
@@ -640,10 +612,10 @@ pub const VM = struct {
   }
   
   pub fn mapFile(vm: *VM, path: []const u8) !u32 {
-    if (vm.registry.findFile(path)) |id| return id;
+    if (vm.fs.findFile(path)) |id| return id;
     const io = std.Io.Threaded.global_single_threaded.io();
     const text = try std.Io.Dir.cwd().readFileAlloc(io, path, vm.alloc, std.Io.Limit.limited(10 * 1024 * 1024));
-    return try vm.registry.addFile(path, text);
+    return try vm.fs.addFile(path, text);
   }
 
   pub inline fn pushFrame(vm: *VM, frame: Frame) void {
@@ -658,6 +630,9 @@ pub const VM = struct {
 
   pub inline fn currentFrame(vm: *VM) *Frame { return &vm.frames[vm.frames_len - 1]; }
 
+  // pub fn read(vm: *VM, comptime Op:type) u8 {
+    
+  // }
   pub fn readByte(vm: *VM) u8 {
     const frame = vm.currentFrame();
     const byte = vm.current_chunk.code.items[frame.ip];

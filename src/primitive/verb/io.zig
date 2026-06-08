@@ -7,14 +7,14 @@ const V = @import("../../noun/value.zig").V;
 fn writeFile(vm: *VM, id: u32, content: []const u8) !void {
   // Guard invalid ids (e.g. `2:` applied to a bogus handle) rather than
   // indexing the registry out of bounds.
-  if (id >= vm.registry.texts.items.len) return error.BadFileId;
-  if (vm.registry.getPath(id)) |path| {
+  if (id >= vm.fs.texts.items.len) return error.BadFileId;
+  if (vm.fs.getPath(id)) |path| {
     const io = std.Io.Threaded.global_single_threaded.io();
     const file = try std.Io.Dir.cwd().createFile(io, path, .{});
     defer file.close(io);
     try file.writePositionalAll(io, content, 0);
   }
-  try vm.registry.updateFile(id, content);
+  try vm.fs.updateFile(id, content);
 }
 
 // ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ fn readLinesByChars(vm: *VM, x: V) V {
   return readLinesById(vm, V{ .i = @intCast(id) });
 }
 fn readLinesById(vm: *VM, x: V) V {
-  const text = vm.registry.getFileText(@as(u32, @intCast(x.i)));
+  const text = vm.fs.getFileText(@as(u32, @intCast(x.i)));
   var list = std.ArrayList(V).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
   defer list.deinit(vm.alloc);
   var iter = std.mem.splitScalar(u8, text, '\n');
@@ -131,7 +131,7 @@ fn readBytesByChars(vm: *VM, x: V) V {
   return readBytesById(vm, V{ .i = @intCast(id) });
 }
 fn readBytesById(vm: *VM, x: V) V {
-  return V.Chars(vm.alloc, vm.registry.getFileText(@as(u32, @intCast(x.i)))) catch return V{ .err = .memory };
+  return V.Chars(vm.alloc, vm.fs.getFileText(@as(u32, @intCast(x.i)))) catch return V{ .err = .memory };
 }
 
 pub const ReadBytes = struct {
@@ -178,7 +178,7 @@ fn readDataByChars(vm: *VM, x: V) V {
   return readDataById(vm, V{ .i = @intCast(id) });
 }
 fn readDataById(vm: *VM, x: V) V {
-  return vm.eval(vm.registry.getFileText(@as(u32, @intCast(x.i)))) catch return V{ .err = .io };
+  return vm.eval(vm.fs.getFileText(@as(u32, @intCast(x.i)))) catch return V{ .err = .io };
 }
 
 pub const ReadData = struct {

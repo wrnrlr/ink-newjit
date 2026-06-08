@@ -193,7 +193,7 @@ pub const TerseFormatter = struct {
         const idx = ref.idx;
         if (opmod.isLambdaIdx(idx)) {
           const entry = self.vm.fn_tables.lambdaAt(opmod.lambdaIdxOf(idx));
-          try w.writeAll(self.vm.registry.getSource(entry.range));
+          try w.writeAll(self.vm.fs.getSource(entry.range));
         } else if (opmod.isOp1Idx(idx)) {
           try w.writeAll(opmod.op1OfIdx(idx).toString());
           try w.writeAll(":");

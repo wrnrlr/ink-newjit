@@ -204,8 +204,8 @@ pub fn applyDerivedBuiltin(vm: *VM, ref: Fn, args: []const V) V {
 }
 
 fn allocPartial(vm: *VM, ref: Fn, arity: u8, pa: [8]V, fill: u8) V {
-  const p = vm.partial_pool.create(vm.alloc) catch return V{ .err = .memory };
-  p.* = .{ .pool = &vm.partial_pool, .rc = 1, .fill = fill, .arity = arity, ._pad = 0, .ref = ref, .args = pa };
+  const p = vm.partials.create(vm.alloc) catch return V{ .err = .memory };
+  p.* = .{ .pool = &vm.partials, .rc = 1, .fill = fill, .arity = arity, ._pad = 0, .ref = ref, .args = pa };
   return .{ .partial = p };
 }
 

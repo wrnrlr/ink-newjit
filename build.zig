@@ -130,4 +130,19 @@ pub fn build(b: *std.Build) !void {
   b.installArtifact(font_lib);
   const font_step = b.step("font", "Build the font extension shared library");
   font_step.dependOn(&b.addInstallArtifact(font_lib, .{}).step);
+
+  // --- MD5 extension shared library ---
+  const md5_ext_mod = b.createModule(.{
+    .root_source_file = b.path("lib/md5/src/main.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+  });
+
+  const md5_lib = b.addLibrary(.{
+    .name     = "md5",
+    .root_module = md5_ext_mod,
+    .linkage  = .dynamic,
+  });
+  b.installArtifact(md5_lib);
+  const md5_step = b.step("md5", "Build the MD5 extension shared library");
+  md5_step.dependOn(&b.addInstallArtifact(md5_lib, .{}).step);
 }

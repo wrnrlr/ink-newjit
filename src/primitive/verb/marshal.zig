@@ -76,7 +76,7 @@ fn unmarshal_s_s(vm: *VM, x: V, y: V) V {
 }
 
 fn unmarshal_s_i(vm: *VM, x: V, y: V) V {
-  return unmarshalDispatch(vm, vm.getSymbol(x.s), vm.registry.getFileText(@intCast(y.i)));
+  return unmarshalDispatch(vm, vm.getSymbol(x.s), vm.fs.getFileText(@intCast(y.i)));
 }
 
 fn unmarshalDispatch(vm: *VM, s: []const u8, data: []const u8) V {

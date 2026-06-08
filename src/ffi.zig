@@ -282,7 +282,8 @@ fn ffiCall1(data: *anyopaque, x: V) V {
   setCurrentVm(d.vm);
   defer clearCurrentVm();
   const f: FfiFn1 = @ptrCast(@alignCast(d.fn_ptr));
-  const bx = box(x.ref()) catch return .{ .err = .memory };
+  // No x.ref(): args are borrowed; the .blank defer skips rc decrement so ref() would leak.
+  const bx = box(x) catch return .{ .err = .memory };
   defer { bx.v = .blank; c_alloc.destroy(bx); }
   const result = f(bx) orelse return .{ .err = .domain };
   return reallocV(unbox(result, c_alloc), vm.alloc);
@@ -295,9 +296,9 @@ fn ffiCall2(data: *anyopaque, x: V, y: V) V {
   setCurrentVm(d.vm);
   defer clearCurrentVm();
   const f: FfiFn2 = @ptrCast(@alignCast(d.fn_ptr));
-  const bx = box(x.ref()) catch return .{ .err = .memory };
+  const bx = box(x) catch return .{ .err = .memory };
   defer { bx.v = .blank; c_alloc.destroy(bx); }
-  const by = box(y.ref()) catch return .{ .err = .memory };
+  const by = box(y) catch return .{ .err = .memory };
   defer { by.v = .blank; c_alloc.destroy(by); }
   const result = f(bx, by) orelse return .{ .err = .domain };
   return reallocV(unbox(result, c_alloc), vm.alloc);

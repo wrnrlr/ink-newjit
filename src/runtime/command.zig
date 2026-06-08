@@ -26,7 +26,7 @@ pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
     _ = try vm.load(args);
     return .blank;
   } else if (std.mem.eql(u8, verb, "v")) {
-    var it_v = vm.globals_names.iterator();
+    var it_v = vm.names.iterator();
     while (it_v.next()) |entry| {
       const name = entry.key_ptr.*;
       const idx = entry.value_ptr.*;
@@ -44,7 +44,7 @@ pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
     }
     return .blank;
   } else if (std.mem.eql(u8, verb, "f")) {
-    var it_f = vm.globals_names.iterator();
+    var it_f = vm.names.iterator();
     while (it_f.next()) |entry| {
       const name = entry.key_ptr.*;
       const idx = entry.value_ptr.*;
