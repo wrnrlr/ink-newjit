@@ -5,7 +5,7 @@ const Op1 = @import("../../noun/operator.zig").Op1;
 const Op2 = @import("../../noun/operator.zig").Op2;
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
-
+const toLower = std.ascii.toLower;
 const selection = @import("first.zig");
 const logic = @import("logic.zig");
 const pair = @import("pair.zig");
@@ -28,6 +28,8 @@ pub fn _N(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Up
 pub fn _F(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Float1,  h.Float1,  F, &at); }
 pub fn _Yf(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Float1, h.Int1,   F, &at); }
 pub fn _X1(comptime op: Op1, comptime Impl: type) type { return h._X(Op1, op, Impl); }
+// pub fn _X(comptime op: Op1, comptime F: type, comptime tip:[]K) type { return h.makeMonad(op, h.Char1, h.Char1, F, tip); }
+// pub fn _F(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Float1, h.Int1, F, &.{.f, .F}); }
 
 // Dyad helpers (op: Op2)
 pub fn _B_B(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Bool2, h.Bool2, f, &.{.b, .B}); }
@@ -38,7 +40,7 @@ pub fn _X2(comptime op: Op2, comptime f: type) type { return h._X(Op2, op, f); }
 
 pub fn _Cmp(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Upcast2, h.Bool2, f, &at); }
 
-
+// const Lowercase = struct { fn f(x: anytype) u8 { return toLower(@intCast(x)); } };
 
 const Monads = struct {
   // Monadic Primitives
@@ -83,8 +85,6 @@ const Monads = struct {
   pub const @".m"  = @import("values.zig").Values;
   pub const @".s"  = @import("get.zig").GetSymbol;
   pub const exec   = @import("exec.zig").Exec;
-  pub const gpu    = @import("gpu_verb.zig").Gpu;
-  pub const font   = @import("font_verb.zig").Font;
 
   // Fused derived verbs — direct monadic reductions over typed arrays.
   // The optimizer rewrites `+/x` (Call+Derive) into `Apply1 +/` to hit these.
@@ -152,8 +152,6 @@ const Dyads = struct {
   pub const @"9: x"    = @import("graphics.zig").Draw;
   pub const @"x 9: x"  = @import("graphics.zig").DrawDyad;
   pub const @"x exec" = @import("exec.zig").ExecDyad;
-  pub const @"gpu x"  = @import("gpu_verb.zig").Gpu;
-  pub const @"font x" = @import("font_verb.zig").Font;
 };
 
 fn typeError1(_: *VM, _:V) V { return .{ .err = .@"type" }; }

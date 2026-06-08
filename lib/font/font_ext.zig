@@ -296,9 +296,3 @@ pub export fn font_glyph_outline(
   return @intCast(written);
 }
 
-// ── Extension entry point ─────────────────────────────────────────────────────
-
-pub export fn terse_init(reg: *anyopaque) void {
-  _ = reg;
-  // TODO: register `font` namespace verbs via VM extension API
-}

@@ -1,0 +1,308 @@
+/// GPU extension for ink — loaded via `"./zig-out/lib/libgpu.dylib" 2: (`gpu_run; 2)`.
+///
+/// K API (after loading via lib/gpu/gpu.k):
+///   gpu_run[loop_fn; config]   blocking event loop; calls loop_fn(props) each frame
+///   gpu_fill[verts_F; frag_F]  draw triangles (call inside frame callback)
+///   gpu_tess[pts_F]            tessellate polygon → flat F vertex array
+///
+/// props dict passed to loop_fn each frame:
+///   {width: f; height: f; mx: f; my: f; time: f}
+///
+/// Host K API imported via dynamic linker (exported by the ink binary):
+///   k_call, k_make_dict, ki, kf, kn, kfp, ku, KF
+
+const std = @import("std");
+const zglfw = @import("zglfw");
+const zgpu  = @import("zgpu");
+const wgpu  = zgpu.wgpu;
+const render = @import("render");
+const tri    = @import("triangulate");
+const Renderer = render.Renderer;
+
+// ── Host K API — resolved at init time via dlsym ─────────────────────────────
+
+const K = *anyopaque;
+
+// macOS RTLD_DEFAULT = (void*)-2; finds symbols in any already-loaded image.
+const RTLD_DEFAULT = @as(?*anyopaque, @ptrFromInt(@as(usize, @bitCast(@as(isize, -2)))));
+extern fn dlsym(handle: ?*anyopaque, symbol: [*:0]const u8) ?*anyopaque;
+
+const KApi = struct {
+    k_call:      *const fn (K, K) callconv(.c) ?K,
+    k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?K) callconv(.c) ?K,
+    kf:          *const fn (f32) callconv(.c) ?K,
+    ki:          *const fn (i32) callconv(.c) ?K,
+    kn:          *const fn (?K) callconv(.c) i32,
+    kfp:         *const fn (?K) callconv(.c) ?[*]f32,
+    KF:          *const fn (i32) callconv(.c) ?K,
+    ku:          *const fn (?K) callconv(.c) void,
+};
+var g_api: ?KApi = null;
+
+fn lookupFn(comptime T: type, name: [*:0]const u8) ?T {
+    const ptr = dlsym(RTLD_DEFAULT, name) orelse return null;
+    return @ptrCast(@alignCast(ptr));
+}
+
+// Thin wrappers so the rest of the file can call ki/kf/etc. without changing.
+fn ki(v: i32) ?K         { return g_api.?.ki(v); }
+fn kf(v: f32) ?K         { return g_api.?.kf(v); }
+fn kn(x: ?K) i32         { return g_api.?.kn(x); }
+fn kfp(x: ?K) ?[*]f32   { return g_api.?.kfp(x); }
+fn KF(n: i32) ?K         { return g_api.?.KF(n); }
+fn ku(x: ?K) void        { g_api.?.ku(x); }
+fn k_call(f: K, a: K) ?K { return g_api.?.k_call(f, a); }
+fn k_make_dict(n: i32, keys: [*]const [*:0]const u8, vals: [*]const ?K) ?K {
+    return g_api.?.k_make_dict(n, keys, vals);
+}
+
+// ── Frame-local renderer (set while the frame callback executes) ───────────────
+
+var g_renderer: ?*Renderer = null;
+
+// ── gpu_fill ──────────────────────────────────────────────────────────────────
+//
+// verts_F: flat f32 array, stride 4 [x, y, u, v] — must be multiple of 4
+// frag_F:  44 floats matching FragUniforms layout in fill.wgsl
+
+export fn gpuFill(verts_k: ?K, frag_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const vf = kfp(verts_k) orelse return ki(0);
+  const vn = kn(verts_k);
+  const ff = kfp(frag_k) orelse return ki(0);
+  if (kn(frag_k) != 44) return ki(0);
+
+  var fu: render.FragUniforms = undefined;
+  for (0..11) |i| fu.frag[i] = .{ ff[i*4], ff[i*4+1], ff[i*4+2], ff[i*4+3] };
+
+  const n_verts: usize = @intCast(@divTrunc(vn, 4));
+  const verts_slice = @as([*]const render.Vertex, @ptrCast(@alignCast(vf)))[0..n_verts];
+  r.draw(verts_slice, fu) catch {};
+  return ki(0);
+}
+
+// ── gpu_tess ──────────────────────────────────────────────────────────────────
+//
+// pts_F: flat f32 [x0,y0,x1,y1,...] polygon
+// Returns flat f32 [x,y,u,v,...] triangle vertices (u=0.5, v=1.0)
+
+export fn gpuTess(pts_k: ?K) callconv(.c) ?K {
+  const pf = kfp(pts_k) orelse return ki(0);
+  const pn = kn(pts_k);
+  if (pn < 6) return ki(0);
+
+  const n: usize = @as(usize, @intCast(pn)) / 2;
+  var da = std.heap.DebugAllocator(.{}).init;
+  defer _ = da.deinit();
+  const alloc = da.allocator();
+
+  const contour = alloc.alloc(tri.Pt, n) catch return ki(0);
+  defer alloc.free(contour);
+  for (0..n) |i| contour[i] = .{ .x = pf[i * 2], .y = pf[i * 2 + 1] };
+
+  var out = std.ArrayList(tri.Pt).initCapacity(alloc, 64) catch return ki(0);
+  defer out.deinit(alloc);
+
+  const contours = [1]tri.Contour{.{ .pts = contour }};
+  tri.triangulate(alloc, &contours, &out) catch return ki(0);
+
+  const n_out = out.items.len;
+  const result_k = KF(@intCast(n_out * 4)) orelse return ki(0);
+  const rf = kfp(result_k) orelse { ku(result_k); return ki(0); };
+  for (out.items, 0..) |p, i| {
+    rf[i * 4 + 0] = p.x;
+    rf[i * 4 + 1] = p.y;
+    rf[i * 4 + 2] = 0.5;
+    rf[i * 4 + 3] = 1.0;
+  }
+  return result_k;
+}
+
+// ── Window helpers ────────────────────────────────────────────────────────────
+
+fn getFramebufferSize(window: *const anyopaque) [2]u32 {
+  var w: i32 = 0;
+  var h: i32 = 0;
+  zglfw.getFramebufferSize(@constCast(@ptrCast(@alignCast(window))), &w, &h);
+  return .{ @intCast(w), @intCast(h) };
+}
+
+fn getTime() f64 { return zglfw.getTime(); }
+
+extern fn glfwGetCocoaWindow(window: *anyopaque) ?*anyopaque;
+fn getCocoaWindow(window: *const anyopaque) callconv(.c) ?*anyopaque {
+  return glfwGetCocoaWindow(@constCast(window));
+}
+
+fn createPipeline(device: wgpu.Device, bgl: wgpu.BindGroupLayout) !wgpu.RenderPipeline {
+  const fill_wgsl = @embedFile("fill.wgsl");
+  var buf: [fill_wgsl.len + 1]u8 = undefined;
+  @memcpy(buf[0..fill_wgsl.len], fill_wgsl);
+  buf[fill_wgsl.len] = 0;
+  const shader_module = zgpu.createWgslShaderModule(device, buf[0..fill_wgsl.len :0], "fill");
+  defer shader_module.release();
+
+  const pipeline_layout = device.createPipelineLayout(.{
+    .bind_group_layout_count = 1,
+    .bind_group_layouts = &[_]wgpu.BindGroupLayout{bgl},
+  });
+  defer pipeline_layout.release();
+
+  const vtx_attrs = [_]wgpu.VertexAttribute{
+    .{ .format = .float32x2, .offset = 0, .shader_location = 0 },
+    .{ .format = .float32x2, .offset = 8, .shader_location = 1 },
+  };
+  const vtx_bufs = [_]wgpu.VertexBufferLayout{.{
+    .array_stride    = 16,
+    .attribute_count = vtx_attrs.len,
+    .attributes      = &vtx_attrs,
+  }};
+  const color_targets = [_]wgpu.ColorTargetState{.{
+    .format     = zgpu.GraphicsContext.swapchain_format,
+    .write_mask = wgpu.ColorWriteMask.all,
+    .blend      = &wgpu.BlendState{
+      .color = .{ .operation = .add, .src_factor = .src_alpha, .dst_factor = .one_minus_src_alpha },
+      .alpha = .{ .operation = .add, .src_factor = .one,       .dst_factor = .one_minus_src_alpha },
+    },
+  }};
+  return device.createRenderPipeline(.{
+    .layout   = pipeline_layout,
+    .vertex   = .{
+      .module = shader_module, .entry_point = "vs_main",
+      .buffer_count = vtx_bufs.len, .buffers = &vtx_bufs,
+    },
+    .primitive = .{ .topology = .triangle_list },
+    .fragment  = &wgpu.FragmentState{
+      .module = shader_module, .entry_point = "fs_main",
+      .target_count = color_targets.len, .targets = &color_targets,
+    },
+  });
+}
+
+// ── gpu_run ───────────────────────────────────────────────────────────────────
+//
+// loop_fn: K lambda called each frame with a props dict
+// config:  optional float list [width; height] (default 800×600)
+// Returns 0 on clean exit, -1 on error.
+
+export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
+  const loop_fn = loop_k orelse return ki(0);
+
+  var win_w: i32 = 800;
+  var win_h: i32 = 600;
+  if (config_k) |cfg| {
+    if (kfp(cfg)) |cf| {
+      if (kn(cfg) >= 2) { win_w = @intFromFloat(cf[0]); win_h = @intFromFloat(cf[1]); }
+    }
+  }
+
+  var da = std.heap.DebugAllocator(.{}).init;
+  defer _ = da.deinit();
+  const alloc = da.allocator();
+
+  zglfw.init() catch return ki(-1);
+  defer zglfw.terminate();
+  zglfw.windowHint(zglfw.ClientAPI, zglfw.NoAPI);
+
+  const window = zglfw.createWindow(win_w, win_h, "ink", null, null) catch return ki(-1);
+  defer zglfw.destroyWindow(window);
+
+  const gctx = zgpu.GraphicsContext.create(alloc, .{
+    .window              = window,
+    .fn_getTime          = getTime,
+    .fn_getFramebufferSize = getFramebufferSize,
+    .fn_getCocoaWindow   = getCocoaWindow,
+  }, .{}) catch return ki(-1);
+  defer gctx.destroy(alloc);
+
+  const bgl_entries = [_]wgpu.BindGroupLayoutEntry{
+    zgpu.bufferEntry(0, .{ .vertex = true, .fragment = true }, .uniform, false, 0),
+    zgpu.bufferEntry(1, .{ .fragment = true }, .uniform, false, 0),
+    .{ .binding = 2, .visibility = .{ .fragment = true }, .texture = .{ .sample_type = .float } },
+    zgpu.samplerEntry(3, .{ .fragment = true }, .filtering),
+    .{ .binding = 4, .visibility = .{ .fragment = true }, .texture = .{ .sample_type = .float } },
+    zgpu.samplerEntry(5, .{ .fragment = true }, .filtering),
+  };
+  const bgl = gctx.device.createBindGroupLayout(.{
+    .label = "gpu_ext bgl", .entry_count = bgl_entries.len, .entries = &bgl_entries,
+  });
+  defer bgl.release();
+
+  const pipeline = createPipeline(gctx.device, bgl) catch return ki(-1);
+  defer pipeline.release();
+
+  const renderer = Renderer.init(alloc, gctx.device, gctx.queue, pipeline, bgl, 2_000_000) catch return ki(-1);
+  defer renderer.deinit();
+
+  const start_time = zglfw.getTime();
+
+  while (!zglfw.windowShouldClose(window)) {
+    zglfw.pollEvents();
+
+    const fb = getFramebufferSize(window);
+    if (fb[0] == 0 or fb[1] == 0) { zgpu.wgpuDeviceTick(); continue; }
+
+    const fw: f32 = @floatFromInt(fb[0]);
+    const fh: f32 = @floatFromInt(fb[1]);
+
+    const swapchain_view = gctx.swapchain.getCurrentTextureView();
+    defer swapchain_view.release();
+    const encoder = gctx.device.createCommandEncoder(.{ .label = "frame" });
+    defer encoder.release();
+
+    const pass = encoder.beginRenderPass(.{
+      .color_attachment_count = 1,
+      .color_attachments = &[_]wgpu.RenderPassColorAttachment{.{
+        .view        = swapchain_view,
+        .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 1 },
+        .load_op     = .clear,
+        .store_op    = .store,
+      }},
+    });
+
+    g_renderer = renderer;
+    defer g_renderer = null;
+
+    var mx: f64 = 0;
+    var my: f64 = 0;
+    zglfw.getCursorPos(window, &mx, &my);
+    const t: f32 = @floatCast(zglfw.getTime() - start_time);
+
+    // Build props dict and call loop_fn
+    const keys = [5][*:0]const u8{ "width", "height", "mx", "my", "time" };
+    const v_w = kf(fw); const v_h = kf(fh);
+    const v_mx = kf(@floatCast(mx)); const v_my = kf(@floatCast(my));
+    const v_t = kf(t);
+    const vals = [5]?K{ v_w, v_h, v_mx, v_my, v_t };
+
+    if (k_make_dict(5, &keys, &vals)) |pk| {
+      const result = k_call(loop_fn, pk);
+      ku(result);
+      ku(pk);
+    }
+    ku(v_w); ku(v_h); ku(v_mx); ku(v_my); ku(v_t);
+
+    renderer.flush(pass, fw, fh) catch {};
+
+    const cmd = encoder.finish(.{});
+    defer cmd.release();
+    gctx.queue.submit(&[_]wgpu.CommandBuffer{cmd});
+    gctx.swapchain.present();
+  }
+
+  return ki(0);
+}
+
+export fn terse_init(reg: *anyopaque) callconv(.c) void {
+    _ = reg;
+    g_api = .{
+        .k_call      = lookupFn(*const fn (K, K) callconv(.c) ?K, "k_call")           orelse return,
+        .k_make_dict = lookupFn(*const fn (i32, [*]const [*:0]const u8, [*]const ?K) callconv(.c) ?K, "k_make_dict") orelse return,
+        .kf          = lookupFn(*const fn (f32) callconv(.c) ?K, "kf")                 orelse return,
+        .ki          = lookupFn(*const fn (i32) callconv(.c) ?K, "ki")                 orelse return,
+        .kn          = lookupFn(*const fn (?K) callconv(.c) i32, "kn")                 orelse return,
+        .kfp         = lookupFn(*const fn (?K) callconv(.c) ?[*]f32, "kfp")            orelse return,
+        .KF          = lookupFn(*const fn (i32) callconv(.c) ?K, "KF")                 orelse return,
+        .ku          = lookupFn(*const fn (?K) callconv(.c) void, "ku")                 orelse return,
+    };
+}

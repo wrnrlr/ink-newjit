@@ -136,8 +136,8 @@ pub const Renderer = struct {
   // offset/count are recorded for the GPU draw command issued in flush().
   pub fn draw(self: *Renderer, verts: []const Vertex, frag: FragUniforms) !void {
     const offset = self.verts.items.len;
-    try self.verts.appendSlice(verts);
-    try self.draw_calls.append(.{
+    try self.verts.appendSlice(self.allocator, verts);
+    try self.draw_calls.append(self.allocator, .{
       .offset = offset,
       .count = verts.len,
       .frag = frag,

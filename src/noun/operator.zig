@@ -26,8 +26,6 @@ pub const Op1 = enum(u8) {
   // io verbs (monadic forms)
   @"0:", @"1:", @"2:", @"9:",
   exec,
-  // extension verbs
-  gpu, font,
   // fused monad-only derived verbs (sum, product, min, max)
   @"+/", @"*/", @"|/", @"&/",
 
@@ -56,7 +54,6 @@ pub const Op2 = enum(u8) {
   @"0:", @"1:", @"2:", @"9:",
   @":",
   exec,
-  gpu, font,
 
   pub const COUNT = @typeInfo(Op2).@"enum".fields.len;
 
