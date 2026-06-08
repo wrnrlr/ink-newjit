@@ -27,6 +27,67 @@ pub const KBox = struct {
   v:   V,
 };
 
+// ── KRegistry: function-pointer table passed to terse_init ────────────────────
+// Extensions receive this as their `reg` argument in terse_init and use it to
+// resolve host k_* symbols without relying on dlsym, which fails when the
+// linker dead-strips unreferenced export functions in release builds.
+// Field order MUST match KRegistry in include/k.h and all extension sources.
+pub const KRegistry = extern struct {
+    ki:          *const fn (i32)                         callconv(.c) ?*KBox,
+    kf:          *const fn (f32)                         callconv(.c) ?*KBox,
+    kc:          *const fn (u8)                          callconv(.c) ?*KBox,
+    kb:          *const fn (c_int)                       callconv(.c) ?*KBox,
+    ks:          *const fn ([*:0]const u8)               callconv(.c) ?*KBox,
+    kerr:        *const fn ()                            callconv(.c) ?*KBox,
+    KC:          *const fn (i32)                         callconv(.c) ?*KBox,
+    KI:          *const fn (i32)                         callconv(.c) ?*KBox,
+    KF:          *const fn (i32)                         callconv(.c) ?*KBox,
+    KL:          *const fn (i32)                         callconv(.c) ?*KBox,
+    kt:          *const fn (?*KBox)                      callconv(.c) i8,
+    kn:          *const fn (?*KBox)                      callconv(.c) i32,
+    ki_val:      *const fn (?*KBox)                      callconv(.c) i32,
+    kf_val:      *const fn (?*KBox)                      callconv(.c) f32,
+    kc_val:      *const fn (?*KBox)                      callconv(.c) u8,
+    kb_val:      *const fn (?*KBox)                      callconv(.c) c_int,
+    kip:         *const fn (?*KBox)                      callconv(.c) ?[*]i32,
+    kfp:         *const fn (?*KBox)                      callconv(.c) ?[*]f32,
+    kcp:         *const fn (?*KBox)                      callconv(.c) ?[*]u8,
+    klp:         *const fn (?*KBox)                      callconv(.c) ?[*]?*KBox,
+    ku:          *const fn (?*KBox)                      callconv(.c) void,
+    k_list_set:  *const fn (?*KBox, i32, ?*KBox)         callconv(.c) i32,
+    k_call:      *const fn (?*KBox, ?*KBox)              callconv(.c) ?*KBox,
+    k_call2:     *const fn (?*KBox, ?*KBox, ?*KBox)      callconv(.c) ?*KBox,
+    k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?*KBox) callconv(.c) ?*KBox,
+};
+
+export const k_registry: KRegistry = .{
+    .ki          = &ki,
+    .kf          = &kf,
+    .kc          = &kc,
+    .kb          = &kb,
+    .ks          = &ks,
+    .kerr        = &kerr,
+    .KC          = &KC,
+    .KI          = &KI,
+    .KF          = &KF,
+    .KL          = &KL,
+    .kt          = &kt,
+    .kn          = &kn,
+    .ki_val      = &ki_val,
+    .kf_val      = &kf_val,
+    .kc_val      = &kc_val,
+    .kb_val      = &kb_val,
+    .kip         = &kip,
+    .kfp         = &kfp,
+    .kcp         = &kcp,
+    .klp         = &klp,
+    .ku          = &ku,
+    .k_list_set  = &k_list_set,
+    .k_call      = &k_call,
+    .k_call2     = &k_call2,
+    .k_make_dict = &k_make_dict,
+};
+
 const c_alloc = std.heap.c_allocator;
 
 // ── Thread-local VM pointer (set around every C call) ─────────────────────────
@@ -329,11 +390,11 @@ pub fn ffiLoad(vm: *anyopaque, lib_path: []const u8, sym_name: []const u8, arity
     return .{ .err = .domain };
   };
 
-  // Allow the extension to resolve host k_* symbols before first use.
+  // Pass the full k_* function-pointer table to the extension's terse_init so
+  // it can resolve host symbols without relying on dlsym(RTLD_DEFAULT, ...).
   const TerseInit = *const fn (*anyopaque) callconv(.c) void;
   if (lib.lookup(TerseInit, "terse_init")) |init_fn| {
-    var dummy: u8 = 0;
-    init_fn(@ptrCast(&dummy));
+    init_fn(@constCast(@ptrCast(&k_registry)));
   }
 
   const data = c_alloc.create(FfiData) catch { lib.close(); return .{ .err = .memory }; };

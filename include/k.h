@@ -10,6 +10,18 @@
  *   - Arguments are BORROWED — do not call ku() on them.
  *   - Return values are OWNED by the caller — ink will call ku() on them.
  *   - Return NULL to signal an error.
+ *
+ * Initialization:
+ *   Export a `terse_init(const KRegistry* reg)` function. ink calls it once
+ *   when the library is loaded and passes a pointer to all host k_* functions.
+ *   Use the registry rather than dlsym — the latter fails in release builds
+ *   where the linker dead-strips unreferenced export symbols.
+ *
+ *   void terse_init(const KRegistry* reg) {
+ *       g_ki = reg->ki;
+ *       g_ku = reg->ku;
+ *       // ...
+ *   }
  */
 
 #ifndef INK_K_H
@@ -24,6 +36,36 @@ extern "C" {
 
 /* Opaque K value handle. */
 typedef void* K;
+
+/* ── KRegistry: function-pointer table passed to terse_init ────────────────── */
+/* Field order is ABI-stable — extensions must match it exactly.               */
+typedef struct {
+    K    (*ki)(int32_t n);
+    K    (*kf)(float f);
+    K    (*kc)(uint8_t c);
+    K    (*kb)(int b);
+    K    (*ks)(const char* name);
+    K    (*kerr)(void);
+    K    (*KC)(int32_t n);
+    K    (*KI)(int32_t n);
+    K    (*KF)(int32_t n);
+    K    (*KL)(int32_t n);
+    int8_t   (*kt)(K x);
+    int32_t  (*kn)(K x);
+    int32_t  (*ki_val)(K x);
+    float    (*kf_val)(K x);
+    uint8_t  (*kc_val)(K x);
+    int      (*kb_val)(K x);
+    int32_t* (*kip)(K x);
+    float*   (*kfp)(K x);
+    uint8_t* (*kcp)(K x);
+    void**   (*klp)(K x);
+    void     (*ku)(K x);
+    int      (*k_list_set)(K list, int index, K val);
+    K        (*k_call)(K func, K arg);
+    K        (*k_call2)(K func, K x, K y);
+    K        (*k_make_dict)(int n, const char** keys, K* vals);
+} KRegistry;
 
 /* ── Type tags (returned by kt()) ──────────────────────────────────────────── */
 #define KT_BLANK   0

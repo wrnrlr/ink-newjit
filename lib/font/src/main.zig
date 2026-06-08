@@ -6,16 +6,42 @@
 ///   font_shape (h; "text")          → I glyph ID list
 ///   font_outline (h; glyph_id; sz)  → L of F contours [x0,y0,x1,y1,...]
 ///
-/// Host K API imported via dynamic linker:
-///   ki, kf, kn, kfp, kcp, kip, KF, KI, KL, ku
+/// Host K API imported via the KRegistry passed to terse_init:
+///   ki, kf, kn, kfp, kcp, kip, KF, KI, KL, ku, k_list_set
 
 const std = @import("std");
 const font = @import("font_ext");
 
 const K = *anyopaque;
 
-const RTLD_DEFAULT = @as(?*anyopaque, @ptrFromInt(@as(usize, @bitCast(@as(isize, -2)))));
-extern fn dlsym(handle: ?*anyopaque, symbol: [*:0]const u8) ?*anyopaque;
+// Mirror of KRegistry in ffi.zig / include/k.h — field order must match exactly.
+const KRegistry = extern struct {
+    ki:          *const fn (i32)                         callconv(.c) ?K,
+    kf:          *const fn (f32)                         callconv(.c) ?K,
+    kc:          *const fn (u8)                          callconv(.c) ?K,
+    kb:          *const fn (c_int)                       callconv(.c) ?K,
+    ks:          *const fn ([*:0]const u8)               callconv(.c) ?K,
+    kerr:        *const fn ()                            callconv(.c) ?K,
+    KC:          *const fn (i32)                         callconv(.c) ?K,
+    KI:          *const fn (i32)                         callconv(.c) ?K,
+    KF:          *const fn (i32)                         callconv(.c) ?K,
+    KL:          *const fn (i32)                         callconv(.c) ?K,
+    kt:          *const fn (?K)                          callconv(.c) i8,
+    kn:          *const fn (?K)                          callconv(.c) i32,
+    ki_val:      *const fn (?K)                          callconv(.c) i32,
+    kf_val:      *const fn (?K)                          callconv(.c) f32,
+    kc_val:      *const fn (?K)                          callconv(.c) u8,
+    kb_val:      *const fn (?K)                          callconv(.c) c_int,
+    kip:         *const fn (?K)                          callconv(.c) ?[*]i32,
+    kfp:         *const fn (?K)                          callconv(.c) ?[*]f32,
+    kcp:         *const fn (?K)                          callconv(.c) ?[*]u8,
+    klp:         *const fn (?K)                          callconv(.c) ?[*]?K,
+    ku:          *const fn (?K)                          callconv(.c) void,
+    k_list_set:  *const fn (?K, i32, ?K)                callconv(.c) i32,
+    k_call:      *const fn (?K, ?K)                     callconv(.c) ?K,
+    k_call2:     *const fn (?K, ?K, ?K)                 callconv(.c) ?K,
+    k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?K) callconv(.c) ?K,
+};
 
 const KApi = struct {
     ki:          *const fn (i32) callconv(.c) ?K,
@@ -31,11 +57,6 @@ const KApi = struct {
     k_list_set:  *const fn (?K, i32, ?K) callconv(.c) i32,
 };
 var g_api: ?KApi = null;
-
-fn lookupFn(comptime T: type, name: [*:0]const u8) ?T {
-    const ptr = dlsym(RTLD_DEFAULT, name) orelse return null;
-    return @ptrCast(@alignCast(ptr));
-}
 
 fn ki(v: i32) ?K                              { return g_api.?.ki(v); }
 fn kf(v: f32) ?K                              { return g_api.?.kf(v); }
@@ -156,18 +177,18 @@ export fn fontOutline(args_k: ?K) callconv(.c) ?K {
 }
 
 export fn terse_init(reg: *anyopaque) callconv(.c) void {
-    _ = reg;
+    const r: *const KRegistry = @ptrCast(@alignCast(reg));
     g_api = .{
-        .ki         = lookupFn(*const fn (i32) callconv(.c) ?K, "ki")         orelse return,
-        .kf         = lookupFn(*const fn (f32) callconv(.c) ?K, "kf")         orelse return,
-        .kn         = lookupFn(*const fn (?K) callconv(.c) i32, "kn")         orelse return,
-        .kfp        = lookupFn(*const fn (?K) callconv(.c) ?[*]f32, "kfp")    orelse return,
-        .kcp        = lookupFn(*const fn (?K) callconv(.c) ?[*]u8, "kcp")     orelse return,
-        .kip        = lookupFn(*const fn (?K) callconv(.c) ?[*]i32, "kip")    orelse return,
-        .KF         = lookupFn(*const fn (i32) callconv(.c) ?K, "KF")         orelse return,
-        .KI         = lookupFn(*const fn (i32) callconv(.c) ?K, "KI")         orelse return,
-        .KL         = lookupFn(*const fn (i32) callconv(.c) ?K, "KL")         orelse return,
-        .ku         = lookupFn(*const fn (?K) callconv(.c) void, "ku")         orelse return,
-        .k_list_set = lookupFn(*const fn (?K, i32, ?K) callconv(.c) i32, "k_list_set") orelse return,
+        .ki         = r.ki,
+        .kf         = r.kf,
+        .kn         = r.kn,
+        .kfp        = r.kfp,
+        .kcp        = r.kcp,
+        .kip        = r.kip,
+        .KF         = r.KF,
+        .KI         = r.KI,
+        .KL         = r.KL,
+        .ku         = r.ku,
+        .k_list_set = r.k_list_set,
     };
 }

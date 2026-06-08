@@ -600,14 +600,11 @@ pub const VM = struct {
     if (vm.frames_len >= FRAMES_MAX) return VMError.StackOverflow;
     const idx = opmod.lambdaIdxOf(ref.idx);
     const entry = vm.fn_tables.lambdaAt(idx);
-
     const total_slots = @as(usize, entry.arity) + @as(usize, entry.locals);
     const locals_to_push = if (total_slots > argc) total_slots - argc else 0;
     for (0..locals_to_push) |_| try vm.push(.blank);
-
     const base = vm.stack_len - argc - locals_to_push;
     vm.pushFrame(.{ .lambda_idx = idx, .base = base, .result_slot = slot });
-
     vm.current_chunk = entry.chunk;
   }
   
@@ -630,9 +627,6 @@ pub const VM = struct {
 
   pub inline fn currentFrame(vm: *VM) *Frame { return &vm.frames[vm.frames_len - 1]; }
 
-  // pub fn read(vm: *VM, comptime Op:type) u8 {
-    
-  // }
   pub fn readByte(vm: *VM) u8 {
     const frame = vm.currentFrame();
     const byte = vm.current_chunk.code.items[frame.ip];

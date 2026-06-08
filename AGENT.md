@@ -88,20 +88,8 @@ The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` 
   - `spec.md` Ink language specification (WIP)
   - `changelog.md` Changelog, document changes here
   - `future.md` Planning of future features
-- `src`
-  - `encoding`
-  - `gpu` Work in progressm, GPU is currently disabled
-    - `gpu.zig`
-    - `gpu_wgpu.zig` Implements `WgpuBackend`, the WGPU backend for gpu interface
-  - `graphics`
-    - `shaders/fill.wgsl` Fragment shader 
-    - `color.zig` Oklch color space
-    - `data.zig` Unicode data (very big, 14K lines of data tables)
-    - `render.zig` `Renderer` 
-    - `shape.zig` Text shaping for glyphs
-    - `ink.zig` Vector graphics API and named colors
-    - `triangulate.zig` Triangulate bezier curve using earcutting
-    - `window.zig` Window screen
+- `src` core language components
+  - `graphics` old graphics code
   - `noun` Basic buildings blocks of the language
     - `class.zig` Class enum `K`
     - `value.zig` Value struct `V`, array struct `N`
@@ -136,6 +124,8 @@ The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` 
 - `build.zig`
 - `build.zig.zon`
 - `Makefile`
+
+
 
 # Optimalizations
 - JIT: as built is useful for user-defined reduce (`f:{x+y}; f/!N`),

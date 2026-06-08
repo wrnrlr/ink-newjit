@@ -9,8 +9,34 @@ const std = @import("std");
 
 const K = *anyopaque;
 
-const RTLD_DEFAULT = @as(?*anyopaque, @ptrFromInt(@as(usize, @bitCast(@as(isize, -2)))));
-extern fn dlsym(handle: ?*anyopaque, symbol: [*:0]const u8) ?*anyopaque;
+// Mirror of KRegistry in ffi.zig / include/k.h — field order must match exactly.
+const KRegistry = extern struct {
+    ki:          *const fn (i32)                         callconv(.c) ?K,
+    kf:          *const fn (f32)                         callconv(.c) ?K,
+    kc:          *const fn (u8)                          callconv(.c) ?K,
+    kb:          *const fn (c_int)                       callconv(.c) ?K,
+    ks:          *const fn ([*:0]const u8)               callconv(.c) ?K,
+    kerr:        *const fn ()                            callconv(.c) ?K,
+    KC:          *const fn (i32)                         callconv(.c) ?K,
+    KI:          *const fn (i32)                         callconv(.c) ?K,
+    KF:          *const fn (i32)                         callconv(.c) ?K,
+    KL:          *const fn (i32)                         callconv(.c) ?K,
+    kt:          *const fn (?K)                          callconv(.c) i8,
+    kn:          *const fn (?K)                          callconv(.c) i32,
+    ki_val:      *const fn (?K)                          callconv(.c) i32,
+    kf_val:      *const fn (?K)                          callconv(.c) f32,
+    kc_val:      *const fn (?K)                          callconv(.c) u8,
+    kb_val:      *const fn (?K)                          callconv(.c) c_int,
+    kip:         *const fn (?K)                          callconv(.c) ?[*]i32,
+    kfp:         *const fn (?K)                          callconv(.c) ?[*]f32,
+    kcp:         *const fn (?K)                          callconv(.c) ?[*]u8,
+    klp:         *const fn (?K)                          callconv(.c) ?[*]?K,
+    ku:          *const fn (?K)                          callconv(.c) void,
+    k_list_set:  *const fn (?K, i32, ?K)                callconv(.c) i32,
+    k_call:      *const fn (?K, ?K)                     callconv(.c) ?K,
+    k_call2:     *const fn (?K, ?K, ?K)                 callconv(.c) ?K,
+    k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?K) callconv(.c) ?K,
+};
 
 const KApi = struct {
     kcp: *const fn (?K) callconv(.c) ?[*]u8,
@@ -19,11 +45,6 @@ const KApi = struct {
     ku:  *const fn (?K) callconv(.c) void,
 };
 var g_api: ?KApi = null;
-
-fn lookupFn(comptime T: type, name: [*:0]const u8) ?T {
-    const ptr = dlsym(RTLD_DEFAULT, name) orelse return null;
-    return @ptrCast(@alignCast(ptr));
-}
 
 fn kcp(x: ?K) ?[*]u8 { return g_api.?.kcp(x); }
 fn kn(x: ?K) i32     { return g_api.?.kn(x); }
@@ -51,11 +72,11 @@ export fn md5Hash(x: ?K) callconv(.c) ?K {
 }
 
 export fn terse_init(reg: *anyopaque) callconv(.c) void {
-    _ = reg;
+    const r: *const KRegistry = @ptrCast(@alignCast(reg));
     g_api = .{
-        .kcp = lookupFn(*const fn (?K) callconv(.c) ?[*]u8, "kcp") orelse return,
-        .kn  = lookupFn(*const fn (?K) callconv(.c) i32,    "kn")  orelse return,
-        .KC  = lookupFn(*const fn (i32) callconv(.c) ?K,    "KC")  orelse return,
-        .ku  = lookupFn(*const fn (?K) callconv(.c) void,   "ku")  orelse return,
+        .kcp = r.kcp,
+        .kn  = r.kn,
+        .KC  = r.KC,
+        .ku  = r.ku,
     };
 }

@@ -2,48 +2,39 @@ const std = @import("std");
 const util = @import("../util.zig");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
-const Value = @import("../noun/value.zig").V;
+const Blocks = std.ArrayListUnmanaged(BasicBlock);
+const V = @import("../noun/value.zig").V;
 
 pub const OpCode = enum(u8) {
-  Nop, Gap, Drop, Dup,
-	Const, Int,                // Int: inline i16 value (avoids constant pool for small integers)
-	Global, Local, LocalLast,  // LocalLast: last use — steals slot without ref increment
-	AssignGlobal, AssignLocal, ListAssignGlobal, ListAssignLocal,
+  Nop, Gap, Drop, Dup, Const, Int,
+	Global, Local, LocalLast,
+	AssignGlobal, AssignLocal,
+	ListAssignGlobal, ListAssignLocal,
 	Jump, JumpFalse, JumpTrue,
-	Apply1, Apply2,
-	ReduceZip,               // fused reduce-of-zip: 2 op bytes (Op1 reduce, Op2 bin); pops 2 args
-	Apply3,                  // 1-byte Op3 (amend3/drill3); pops 3 args from stack
-	Apply4,                  // 1-byte Op4 (amend4/drill4); pops 4 args from stack
-	Return,                  // return
-	Call,                    // call a lambda
-	TailCall,                // tail call a lambda
-	Apply,                   // apply with brackets
-	MakeList,                // make a list from count items on stack
-	MakePartial,             // pops func + n args, pushes partial
-	Derive,                  // derive verb from variadic (adverb) and top value
-	Command,                 // meta command (\h \l \d \t \v \f \cd)
+	Apply1, Apply2, Apply3, Apply4, ReduceZip,        
+	Return, Call, TailCall, Apply,
+	MakeList, MakePartial,
+	Derive, Command,
 
 	pub const COUNT = @typeInfo(OpCode).@"enum".fields.len;
 };
 
 pub const BasicBlock = struct {
-  start:  u32,
-  end:    u32,     // exclusive — first byte of the next BB (or code.len)
-  succ:   [2]u32,
-  n_succ: u8,
+  start:u32, end:u32, succ:[2]u32, n_succ:u8,
+  // end: exclusive — first byte of the next BB (or code.len)
 };
 
 pub const Chunk = struct {
   alloc: Allocator,
   code: ArrayList(u8),
-  constants: ArrayList(Value),
-  blocks: std.ArrayListUnmanaged(BasicBlock) = .empty,
+  constants: ArrayList(V),
+  blocks: Blocks = .empty,
 
   pub fn init(alloc: Allocator) !Chunk {
     return .{
       .alloc = alloc,
       .code = try ArrayList(u8).initCapacity(alloc, 0),
-      .constants = try ArrayList(Value).initCapacity(alloc, 0),
+      .constants = try ArrayList(V).initCapacity(alloc, 0),
     };
   }
 
@@ -146,8 +137,8 @@ pub const Chunk = struct {
     };
   }
 
-  pub fn write(self: *Chunk, byte: u8) !void {
-    try self.code.append(self.alloc, byte);
+  pub fn write(self: *Chunk, b: u8) !void {
+    try self.code.append(self.alloc, b);
   }
 
   pub fn writeOp(self: *Chunk, op: OpCode) !void {
@@ -163,9 +154,9 @@ pub const Chunk = struct {
     self.code.items[idx] = byte;
   }
 
-  pub fn addConstant(self: *Chunk, value: Value) !u8 {
+  pub fn addConstant(self: *Chunk, v: V) !u8 {
     const index = @as(u8, @intCast(self.constants.items.len));
-    try self.constants.append(self.alloc, value);
+    try self.constants.append(self.alloc, v);
     return index;
   }
 };
