@@ -1,20 +1,20 @@
 const std = @import("std");
+const eql = std.mem.eql;
 const V = @import("../noun/value.zig").V;
 const N = @import("../noun/array.zig").N;
 const Dict = @import("../noun/dict.zig").Dict;
 const VM = @import("vm.zig").VM;
 const exec_mod = @import("../primitive/verb/exec.zig");
 
-pub fn apply(vm: *VM, sym_idx: u32, args: []const V) anyerror!V {
+pub fn apply(vm: *VM, sym_idx: u32, args: []const V) !V {
   const name = vm.getSymbol(sym_idx);
-
-  if (std.mem.eql(u8, name, "t")) {
+  if (eql(u8, name, "t")) {
     var ts: std.posix.timespec = undefined;
     _ = std.c.clock_gettime(std.posix.CLOCK.MONOTONIC, &ts);
     const us: i64 = ts.sec * 1_000_000 + @divTrunc(ts.nsec, 1000);
     return .{ .i = @truncate(us) };
   }
-  if (std.mem.eql(u8, name, "argv")) {
+  if (eql(u8, name, "argv")) {
     const has_arg = args.len == 1 and args[0] != .blank;
     if (!has_arg) return vm.argv.ref();
     if (vm.argv == .blank) return V{ .err = .domain };
@@ -25,13 +25,13 @@ pub fn apply(vm: *VM, sym_idx: u32, args: []const V) anyerror!V {
     if (idx < 0 or @as(usize, @intCast(idx)) >= items.len) return V{ .err = .domain };
     return items[@as(usize, @intCast(idx))].ref();
   }
-  if (std.mem.eql(u8, name, "env")) return getEnv(vm);
-  if (std.mem.eql(u8, name, "prng")) {
+  if (eql(u8, name, "env")) return getEnv(vm);
+  if (eql(u8, name, "prng")) {
     const has_arg = args.len == 1 and args[0] != .blank;
     if (!has_arg) return getPrngState(vm);
     return setPrngState(vm, args[0]);
   }
-  if (std.mem.eql(u8, name, "x")) {
+  if (eql(u8, name, "x")) {
     if (args.len == 1 and args[0] != .blank) return forkExec(vm, args[0], null);
     if (args.len == 2 and args[0] != .blank) return forkExec(vm, args[0], args[1]);
     return V{ .err = .rank };
@@ -60,7 +60,7 @@ fn setPrngState(vm: *VM, v: V) V {
   return .blank;
 }
 
-fn getEnv(vm: *VM) anyerror!V {
+fn getEnv(vm: *VM) !V {
   var n: usize = 0;
   while (std.c.environ[n]) |_| n += 1;
 
@@ -88,6 +88,6 @@ fn getEnv(vm: *VM) anyerror!V {
   return .{ .m = try Dict.init(vm.alloc, keys_v, V{ .L = vals_n }) };
 }
 
-fn forkExec(vm: *VM, cmd: V, stdin_v: ?V) anyerror!V {
+fn forkExec(vm: *VM, cmd: V, stdin_v: ?V) !V {
   return exec_mod.execFromV(vm, cmd, stdin_v);
 }
