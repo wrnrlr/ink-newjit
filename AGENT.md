@@ -88,6 +88,12 @@ The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` 
   - `spec.md` Ink language specification (WIP)
   - `changelog.md` Changelog, document changes here
   - `future.md` Planning of future features
+- `lib` language extensions
+  - `csv`
+  - `font`
+  - `json`
+  - `gpu`
+  - `md5`
 - `src` core language components
   - `graphics` old graphics code
   - `noun` Basic buildings blocks of the language
@@ -112,11 +118,18 @@ The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` 
     - `derived.zig` Derive value from an adverb phrase
     - `promote.zig` Promote between scalars, vectors and lists.
   - `runtime`
-    - `jit` Old jit implementation based on copy and patch, to be replaced with TPDE
+    - `call.zig`
+    - `command.zig`
+    - `compiler.zig`
+    - `disarm.zig`
+    - `fntable.zig`
+    - `ir.zig`
+    - `tape.zig` OpCode enum, BasicBlock struct and Chunk struct
     - `vm.zig`
+  - `ffi.zig`
   - `runner.zig`
   - `runner_ui.zig`
-  - `test.zig`
+  - `test.zig` All 178 unit tests passed
 - `test`
   - `corpus` Parser tests in TxtTest format
   - `data`
@@ -124,8 +137,6 @@ The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` 
 - `build.zig`
 - `build.zig.zon`
 - `Makefile`
-
-
 
 # Optimalizations
 - JIT: as built is useful for user-defined reduce (`f:{x+y}; f/!N`),
