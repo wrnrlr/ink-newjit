@@ -152,6 +152,40 @@ const Dyads = struct {
   pub const @"9: x"    = @import("graphics.zig").Draw;
   pub const @"x 9: x"  = @import("graphics.zig").DrawDyad;
   pub const @"x exec" = @import("exec.zig").ExecDyad;
+
+  // // Special Forms
+  // const @"@[x;y;f]" = struct{};
+  // const @"@[x;y;F;z]" = struct{};
+  // const @".[x;y;f]" = struct{};
+  // const @".[x;y;F;z]" = struct{};
+  // // const @".[f;y;f]" = struct{}; // try
+  // const @"?[x;y;z]" = struct{}; // splice
+  
+  // // Adverbs
+  // const @"i f'" = struct {};
+  // const @"f'" = struct {};
+  // const @"x F'" = struct {};
+  // const @"X'" = struct {};
+  // const @"F/" = struct {};
+  // const @"F\\" = struct {};
+  // const @"x F/" = struct {};
+  // const @"x F\\" = struct {};
+  // const @"i f/" = struct {};
+  // const @"i f\\" = struct {};
+  // const @"f f/" = struct {};
+  // const @"f f\\" = struct {};
+  // const @"f/" = struct {};
+  // const @"f\\" = struct {};
+  // const @"C/" = struct {};
+  // const @"C\\" = struct {};
+  // const @"I/" = struct {};
+  // const @"I\\" = struct {};
+  // const @"i'" = struct {};
+  // const @"i f':" = struct {};
+  // const @"F'" = struct {};
+  // const @"x F':" = struct {};
+  // const @"x F/:" = struct {};
+  // const @"x F\\:" = struct {};
 };
 
 fn typeError1(_: *VM, _:V) V { return .{ .err = .@"type" }; }
