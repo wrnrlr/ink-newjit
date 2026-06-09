@@ -53,9 +53,7 @@ fn setPrngState(vm: *VM, v: V) V {
   if (v.tag() != .I or v.I.ptr.len != 8) return V{ .err = .length };
   const src = v.I.slice();
   for (0..4) |i| {
-    const lo: u32 = @bitCast(src[i * 2]);
-    const hi: u32 = @bitCast(src[i * 2 + 1]);
-    vm.prng.s[i] = @as(u64, lo) | (@as(u64, hi) << 32);
+    vm.prng.s[i] = @as(u64, @as(u32, @bitCast(src[i*2]))) | (@as(u64, @as(u32, @bitCast(src[i*2+1]))) << 32);
   }
   return .blank;
 }

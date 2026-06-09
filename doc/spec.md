@@ -7,42 +7,22 @@ Nouns can be combined into an expression using verbs and adverbs.
 Expressions are evaluated from right-to-left. There are no special priority rules for operators.
 
 
-## Types
-
-The types are organized in different classes:
-- Atoms: 
-- Scalars: singular numeric types
-- Vectors: 
-- Mappings: the associative types Dict & Table
-
-### Integer `` 0 1 -2 0N ``
-Signed hole numbers, writen as arabic numerals, `-2 0 1`, null value `0N`.
-
-### Float `` 0.1 2. -3. 0n 0w -0w ``
-Floating point number, null value `0n`, plus/minus infinity `-0w 0w`
-
-### Symbol `` `Abc ``
-Common nouns. Blank symbols are written with single backquote `` ` ``.
-
-### Char `` "H" ``
-Character encoded in `u8`. Whitespace is interpreted as empty `" "`.
-
-### Integers `` `I ``
-Vector of integers.
-
-### Floats `` `F ``
-Vector of floats.
-
-### Symbols `` `S ``
-Array of symbols.
-Array of 3 Symbols `` `a`b`c ``.
-Array of 3 empty symbols `` ``` ``.
-
-### Chars `` `C ``
-String of characters encoding text in `[]u8`. Empty quoted string is interpreted as empty char `""`.
-
-### List `` `L ``
-Empty list is written as `` ,() ``.
+## Types `` ` `i`f`s`c`m`I`F`S`C`M`L ``
+- Integer - numbers like `` -2 0 1 0N ``, type symbol `` `i ``.
+- Float - floating point numbers `` 0.1 2. -3. 0n 0w -0w ``, type symbol `` `f ``.
+- Symbol `` `s `` - Common nouns for names for tables or colors Ex. `` `id`Red100 ``
+- Char `` `c `` - Single u8 character, Whitespace is interpreted as empty `" "`. Ex. `` "H" ``
+- Integers `` `I `` - Vector of integers.
+- Floats `` `F `` - Vector of floats.
+- Symbols `` `S `` - Array of symbols.
+- Chars `` `C `` - String of characters encoding text in `[]u8`.
+- List `` `L `` - Empty list is written as `` ,() ``.
+- List `` `L `` - Empty list is written as `` ,() ``.
+- Table `` `M `` Ex. `` [[]a:1 2] ``
+The types are organized in different classes.
+- Atoms: Integer, Float, Symbol, Char;
+- Vectors: Integers, Floats, Symbols, Chars;
+- Mappings: Dict & Table
 
 ### Dict
 Dict can be written with bracke t syntax `` [a:1:b:2] ``.
@@ -265,16 +245,13 @@ Open file and return handle
 #### Close `>s`
 file handle
 
-### Special Symbol 
+### Special Forms 
 Some special symbols can be called with apply `s@` or call `s "Abc"` .
-- Parse ink as AST: `` `p@"1+2" `` --> `` (`terse;(`transit;(`literal;`int);`op;(`literal;`int))) ``
+- Amend3 `` @[x;y;f]   amend  @["ABC";1;_:] -> "AbC"   @[2 3;1;{-x}] -> 2 -3 ``
+- Amend4 `` @[x;y;F;z] amend  @["abc";1;:;"x"] -> "axc"   @[2 3;0;+;4] -> 6 3 ``
+- Drill3
+- Drill4
 
-### Amend 
-
-```
-@[x;y;f]   amend  @["ABC";1;_:] -> "AbC"   @[2 3;1;{-x}] -> 2 -3
-@[x;y;F;z] amend  @["abc";1;:;"x"] -> "axc"   @[2 3;0;+;4] -> 6 3
-```
 
 ### Drill
 
@@ -284,131 +261,45 @@ Some special symbols can be called with apply `s@` or call `s "Abc"` .
 ```
 
 ## Adverbs
-An adverb is written using any of these plyph(s) `` ' / \ ': /: \: ``.
-Adverbs are polysemic, there precise meaning depends on the type of the operand(s).
-
-- `'`: Each, Zip
+- Each `f'` - Apply f to each item (unary map). Ex, Length of each element in a list:  `` #'("abc";3 4 5 6) `` -> `` 3 4 ``
+- Zip `x F'` - Apply rhs array elementwise on rhs dyad. Ex. Reshape each element in a character string:  `` 2 3#'"ab" `` -> `` ("aa";"bbb") ``
+- Binsearch `X'` (NYI) - for each x, return its index in sorted X (or -1). `` 1 3 5 7 9'8 9 0 `` -> `` 3 4 -1 ``
+- `F/` - Reduce list with F (left fold). Ex. `+/1 2 3` -> `6`
+- Scan `F\` - Running fold (prefix results). Ex. `+\1 2 3 -> 1 3 6`
+- Seeded Fold `x F/ /` - Reduce list with F starting with x. Ex. `` f:{x+y}; 10 f/1 2 3 ``, `` 10+/1 2 3 `` -> `` 16 ``
+- Seeded Scan `x F\ \` - Running fold over F starting with x. `10+\1 2 3 -> 11 13 16`
+- N-Do `i f/` - apply f repeatedly i times (iterate). Multiply 5 times the double function starting with 1 `` 5(2*)/1 `` -> `` 32 ``
+- N-Dos `i f\` - list all intermediate results of i iterations. `` 5(2*)\1 -> 1 2 4 8 16 32 ``
+- While `f f/` - apply f until condition fails (loop). `(1<){:[2!x;1+3*x;-2!x]}/3 -> 1`
+- Whiles `f f\` - list all states while condition holds. `(1<){:[2!x;1+3*x;-2!x]}\3 -> 3 10 5 16 8 4 2 1`
+- Converge `f/` - Iterate f until result stops changing. `` {1+1.0%x}/1 `` -> `` 1.618033988749895 ``
+- Converges `f\` - list successive results until convergence. `(-2!)\100 -> 100 50 25 12 6 3 1 0`
+- Join `C/` - join list with separator C. "ra"/("ab";"cadab";"") -> "abracadabra"
+- Split `C\` - split data by separator C "ra"\"abracadabra" -> ("ab";"cadab";"")
+- Decode `I/` - interpret digits in mixed base I → number 24 60 60/1 2 3 -> 3723   2/1 1 0 1 -> 13
+- Encode `I\` - express number in mixed base I 24 60 60\3723 -> 1 2 3   2\13 -> 1 1 0 1
+- Window `i'` - sliding windows of size i. `3':"abcdef" -> ("abc";"bcd";"cde";"def")`
+- Stencil `i f'` - Apply f to each sliding window. `` 3{x,"."}'"abcde" `` -> `` ("abc.";"bcd.";"cde.") ``
+- Eachprior `F'` - apply F between each item and its predecessor. `` -':12 13 11 17 14 -> 12 1 -2 6 -3 ``
+- EachpriorSeeded `x F'` - like eachprior but starting with seed x. ` ': 10-':12 13 11 17 14 -> 2 1 -2 6 -3 `
+- Eachright `x F/` - apply F with fixed right arg to each left item. ` 1 2*/:3 4 -> (3 6;4 8) `
+- Eachleft `x F\` - apply F with fixed left arg to each right item. ` 1 2*\:3 4 -> (3 4;6 8) `
+An adverb is written using any of these glyph(s) `` ' / \ ': /: \: ``.
+Adverbs have a different meaning based on the type of the operands (Polysemic):
+- `'` adverb can be Each, Zip
 - `/`: Fold, Decode, Join
 - `\`: Scan, Encode, Split
 - `':`
 - `/:`
 - `\:` EachLeft
-
 An adverb with only character or integer operands, the string utilities `C/` Join & `C\` Split, or the `I/` Decode & `I\` Encode, behave like verbs.
-
-A digram is an adverb is written with 2 values on the left hand side:
-Zip `x F'`
-N-Do `i f/`
-N-Dos `i f\`
-
-### Each `f'`
-Apply f to each item (unary map)
-Ex, Length of each element in a list:  `` #'("abc";3 4 5 6) `` -> `` 3 4 ``
-
-### Zip `x F'`
-Apply rhs array elementwise on rhs dyad.
-aka each2
-Ex. Reshape each element in a character string:  `` 2 3#'"ab" `` -> `` ("aa";"bbb") ``
-
-### binsearch `X'` (NYI)
-for each x, return its index in sorted X (or -1)
-1 3 5 7 9'8 9 0 -> 3 4 -1
-
-### Fold `F/`
-Reduce list with F (left fold)
-Ex. `+/1 2 3` -> `6`
-
-### Scan `F\`
-Running fold (prefix results)
-`+\1 2 3 -> 1 3 6`
-
-### Seeded Fold `x F/ /`
-Reduce list with F starting with x.
-`` f:{x+y}; 10 f/1 2 3 ``, `` 10+/1 2 3 `` -> `` 16 ``
-
-### Seeded Scan `x F\ \`
-Running fold over F starting with x.
-`10+\1 2 3 -> 11 13 16`
-
-### N-Do `i f/`
-apply f repeatedly i times (iterate)
-Multiply 5 times the double function starting with 1 `` 5(2*)/1 `` -> `` 32 ``
-
-### N-Dos `i f\`
-list all intermediate results of i iterations
-5(2*)\1 -> 1 2 4 8 16 32
-
-### While `f f/`
-apply f until condition fails (loop)
-`(1<){:[2!x;1+3*x;-2!x]}/3 -> 1`
-
-### Whiles `f f\`
-list all states while condition holds
-`(1<){:[2!x;1+3*x;-2!x]}\3 -> 3 10 5 16 8 4 2 1`
-
-### Converge `f/`
-Iterate f until result stops changing
-`` {1+1.0%x}/1 `` -> `` 1.618033988749895 ``
-
-### Converges `f\`
-list successive results until convergence
-`(-2!)\100 -> 100 50 25 12 6 3 1 0`
-
-### Join `C/`
-join list with separator C
-"ra"/("ab";"cadab";"") -> "abracadabra"
-
-### Split `C\`
-split data by separator C
-"ra"\"abracadabra" -> ("ab";"cadab";"")
-
-### Decode `I/`
-interpret digits in mixed base I → number
-24 60 60/1 2 3 -> 3723   2/1 1 0 1 -> 13
-
-### Encode `I\`
-express number in mixed base I
-24 60 60\3723 -> 1 2 3   2\13 -> 1 1 0 1
-
-### Window `i'`
-sliding windows of size i
-`3':"abcdef" -> ("abc";"bcd";"cde";"def")`
-
-### Stencil `i f'`
-Apply f to each sliding window
-`` 3{x,"."}'"abcde" `` -> `` ("abc.";"bcd.";"cde.") ``
-
-### Eachprior `F'`
-apply F between each item and its predecessor
--':12 13 11 17 14 -> 12 1 -2 6 -3
-
-### EachpriorSeeded `x F'`
-like eachprior but starting with seed x
-` ': 10-':12 13 11 17 14 -> 2 1 -2 6 -3 `
-
-### Eachright `x F/`
-apply F with fixed right arg to each left item
-` 1 2*/:3 4 -> (3 6;4 8) `
-
-### Eachleft `x F\`
-apply F with fixed left arg to each right item
-` 1 2*\:3 4 -> (3 4;6 8) `
-
+A digram is an adverb is written with 2 values on the left hand side: Zip `x F'`, N-Do `i f/`, N-Dos `i f\`.
 ## Special Symbols
-
-### Arguments `` `argv[] ``
-list of cmd line args (also in global variable x)
-
-### Enviroment Variables `` `env[] ``
-dict of env variables
-
-### Random Number `` `prng[] ``
-
-### Exit `` `exit@i ``
-
+- Arguments `` `argv[] `` - list of cmd line args (also in global variable x)
+- Enviroment Variables `` `env[] `` - dict of env variables
+- Random Number `` `prng[] ``
+- Exit `` `exit@i ``
 ## Commands
-
 A command always start at the beginning of a line with `\`.
-
 ### Time Command `\t:n expr`
 The time elapsed milliseconds after n runs. The n is optional.
