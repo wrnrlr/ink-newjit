@@ -1,62 +1,41 @@
 # Language Reference
-
 ## Grammar
-
 Nouns can be combined into an expression using verbs and adverbs.
-
 Expressions are evaluated from right-to-left. There are no special priority rules for operators.
-
-
 ## Types `` ` `i`f`s`c`m`I`F`S`C`M`L ``
 - Integer - numbers like `` -2 0 1 0N ``, type symbol `` `i ``.
 - Float - floating point numbers `` 0.1 2. -3. 0n 0w -0w ``, type symbol `` `f ``.
-- Symbol `` `s `` - Common nouns for names for tables or colors Ex. `` `id`Red100 ``
-- Char `` `c `` - Single u8 character, Whitespace is interpreted as empty `" "`. Ex. `` "H" ``
-- Integers `` `I `` - Vector of integers.
-- Floats `` `F `` - Vector of floats.
-- Symbols `` `S `` - Array of symbols.
-- Chars `` `C `` - String of characters encoding text in `[]u8`.
-- List `` `L `` - Empty list is written as `` ,() ``.
-- List `` `L `` - Empty list is written as `` ,() ``.
-- Table `` `M `` Ex. `` [[]a:1 2] ``
+- Symbol - Common nouns for names for tables or colors Ex. `` `id`Red100 ``, type symbol `` `s ``.
+- Char - Single u8 character, Whitespace is interpreted as empty `" "`. Ex. `` "H" ``, type symbol `` `c ``.
+- Integers - Vector of integers, type symbol `` `I ``.
+- Floats - Vector of floats, type symbol `` `F ``.
+- Symbols - Array of symbols, type symbol `` `S ``.
+- Chars - String of characters encoding text in `[]u8`, type symbol `` `C ``.
+- List - Empty list is written as `` ,() ``, type symbol `` `L ``.
+- Table Ex. `` [[]a:1 2] ``
 The types are organized in different classes.
 - Atoms: Integer, Float, Symbol, Char;
 - Vectors: Integers, Floats, Symbols, Chars;
 - Mappings: Dict & Table
-
 ### Dict
 Dict can be written with bracke t syntax `` [a:1:b:2] ``.
 The dict operator `!` can pair 2 equal length array `` `a`b!1 2 ``.
 A dict has the type symbol `` `m ``.
-
 ### Table `` `M ``
 Dict can be written with bracket syntax `` [[]a:1 2;b:"ab"] ``.
 A table can be created from a dict with thee following phrase `` +`a`b!(1 2;"ab") ``.
 Constructing a table from mismatching length results in a length error.
 A dict has the type symbol `` `M ``.
-
 ### Lambda
 A lambdas is user defined function. They have their own local scope.
 A lambda is written between curly backeds: `` { a+b*c } ``.
 A lambda can have up to 8 arguments, arguments are either implicit in the lambda body or specified in the square bracked header `[]`.
 A lambda can have up to 8 arguments.
 A lambda's type symbol is `` `o ``.
-
-### Partial `` `p ``
-A partial is a variadic (operator or lambda) with only a certain arguments applied.
-
-### Composition/Train `` `q ``
-A compition is a sequence of variadics..
-
+### Partial `` `p `` - A partial is a variadic (operator or lambda) with only a certain arguments applied.
+### Composition/Train `` `q `` - A compition is a sequence of variadics..
 ### Error `` `! ``
-
-### Blank `` ` ``
-
-Blanks can be used to  empty assignment and defining partials:
-```k
-a: / Blank assignment
-p: +[;3]
-```
+### Blank `` ` `` - Blanks can be used to  empty assignment and defining partials:
 ## Nouns
 ## Verbs
 ### Assigment
