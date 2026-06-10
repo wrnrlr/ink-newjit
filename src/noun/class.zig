@@ -4,24 +4,11 @@ const N = @import("value.zig").N;
 const Alloc = std.mem.Allocator;
 
 pub const K = enum(u8) {
-  blank   = 0,
-  err     = 1,
-  b       = 2,
-  i       = 3,
-  f       = 4,
-  s       = 5,
-  c       = 6,
-  func    = 7,
-  partial = 8,
-  L       = 9,
-  m       = 10,
-  M       = 11,
-  x       = 12,            // extension type (user-defined via ExtVTable)
-  B       = 2  | VEC_BIT,  // = 18
-  I       = 3  | VEC_BIT,  // = 19
-  F       = 4  | VEC_BIT,  // = 20
-  S       = 5  | VEC_BIT,  // = 21
-  C       = 6  | VEC_BIT,  // = 22
+  blank   = 0, err     = 1,
+  b = 2, i       = 3, f       = 4, s       = 5, c       = 6,
+  func    = 7, partial = 8,
+  L       = 9, m       = 10, M       = 11, x       = 12,
+  B = 2  | VEC_BIT, I = 3  | VEC_BIT, F = 4  | VEC_BIT, S = 5  | VEC_BIT, C = 6  | VEC_BIT,
 
   pub const VEC_BIT: u8       = 16;   // bit 4
   pub const NON_VEC_COUNT: u8 = 13;   // blank(0)..x(12)

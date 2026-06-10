@@ -8,7 +8,6 @@ const K = @import("class.zig").K;
 const N = @import("array.zig").N;
 const Dict = @import("dict.zig").Dict;
 const util = @import("../util.zig");
-const activeTag = std.meta.activeTag;
 const ExtObj = @import("plugin.zig").ExtObj;
 const ExtVTable = @import("plugin.zig").ExtVTable;
 
@@ -17,16 +16,14 @@ pub const Err = enum { domain, length, rank, nyi, memory, @"type", io };
 pub const V = union(K) {
   blank, err: Err,
   b: bool, i: i32, f: f32, s: u32, c: u8,
-  func: opmod.Fn,
-  partial: *Partial,
-  L: N(V), m: Dict, M: Dict,
-  x: *ExtObj,
+  func: opmod.Fn, partial: *Partial,
+  L: N(V), m: Dict, M: Dict, x: *ExtObj,
   B: N(bool), I: N(i32), F: N(f32), S: N(u32), C: N(u8),
 
   pub const @"0N" = std.math.minInt(i32);
   pub inline fn wrap(comptime k: K, v: holder(k)) V { return @unionInit(V, @tagName(k), v); }
   pub inline fn unwrap(v: V, comptime k: K) holder(k) { return @field(v, @tagName(k)); }
-  pub inline fn tag(v: V) K { return activeTag(v); }
+  pub inline fn tag(v: V) K { return std.meta.activeTag(v); }
   pub inline fn code(v: V) usize { return v.tag().code(); }
   pub fn isAtom(v: V) bool { return v.tag().isAtom(); }
   pub fn isVec(v: V) bool { return v.tag().isVec(); }
@@ -106,8 +103,8 @@ pub const V = union(K) {
   }
 
   pub fn eq(x: V, y: V) bool {
-    const t = activeTag(x);
-    if (t != activeTag(y)) return false;
+    const t = std.meta.activeTag(x);
+    if (t != std.meta.activeTag(y)) return false;
     return switch (x) {
       .blank => true, .err => x.err == y.err,
       .b => x.b == y.b, .i => x.i == y.i, .f => x.f == y.f,
