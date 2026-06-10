@@ -1,7 +1,4 @@
 const std = @import("std");
-const assert = std.debug.assert;
-const N = @import("value.zig").N;
-const Alloc = std.mem.Allocator;
 
 pub const K = enum(u8) {
   blank = 0, err = 1,
@@ -34,8 +31,7 @@ pub const K = enum(u8) {
     };
   }
 
-  pub fn isScalar(k: K) bool { const v = @intFromEnum(k); return v >= 2 and v <= 6; }
-  pub fn isAtom(k: K)   bool { return k.isScalar(); }
+  pub fn isAtom(k: K) bool { const v = @intFromEnum(k); return v >= 2 and v <= 6; }
   pub fn isVec(k: K)    bool { return @intFromEnum(k) & VEC_BIT != 0; }
   pub fn isNumeric(k: K) bool {
     const e = @intFromEnum(k) & ~@as(u8, VEC_BIT);
@@ -43,7 +39,6 @@ pub const K = enum(u8) {
   }
   pub fn isFloat(k: K) bool { return (@intFromEnum(k) & ~@as(u8, VEC_BIT)) == 4; }
   pub fn isMap(k: K) bool { return k == .m or k == .M; }
-  pub fn isPlural(k: K) bool { return k.isVec() and k.isMap() and k == .L; } 
   pub inline fn container(comptime k: K) K { return @enumFromInt(@intFromEnum(k) | VEC_BIT); }
   pub inline fn atom(comptime k: K) K { return @enumFromInt(@intFromEnum(k) & ~@as(u8, VEC_BIT)); }
 

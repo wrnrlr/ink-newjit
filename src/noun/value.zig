@@ -1,13 +1,11 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
 const ArrayFlags = @import("array.zig").ArrayFlags;
-const Rc = @import("rc.zig").Rc;
 const Fn = @import("operator.zig").Fn;
 const Partial = @import("partial.zig").Partial;
 const K = @import("class.zig").K;
 const N = @import("array.zig").N;
 const Dict = @import("dict.zig").Dict;
-const util = @import("../util.zig");
 const ExtObj = @import("plugin.zig").ExtObj;
 
 pub const Err = enum { domain, length, rank, nyi, memory, @"type", io };
@@ -23,7 +21,6 @@ pub const V = union(K) {
   pub inline fn wrap(comptime k: K, v: holder(k)) V { return @unionInit(V, @tagName(k), v); }
   pub inline fn unwrap(v: V, comptime k: K) holder(k) { return @field(v, @tagName(k)); }
   pub inline fn tag(v: V) K { return std.meta.activeTag(v); }
-  pub inline fn code(v: V) usize { return v.tag().code(); }
   pub fn isAtom(v: V) bool { return v.tag().isAtom(); }
   pub fn isVec(v: V) bool { return v.tag().isVec(); }
   pub fn isDict(v: V) bool { return switch (v.tag()) { .m, .M => true, else => false }; }
