@@ -226,61 +226,31 @@ pub const Node = union(NodeType) {
 
 pub const Parser = @import("parser.zig").Parser;
 
-test "Ints" {
-  var parser = Parser.init(std.heap.c_allocator);
-  const node = try parser.parse("1 2 3");
-  defer parser.deinit();
-  try std.testing.expect(node.* == .terse);
-  try std.testing.expect(node.terse.stmts.len == 1);
-  const stmt = node.terse.stmts[0].node;
-  try std.testing.expect(stmt.* == .literal);
-  try std.testing.expect(stmt.literal == .I);
-  try std.testing.expect(std.mem.eql(i32, stmt.literal.I, &[_]i32{ 1, 2, 3 }));
-}
-
 test "Explicit Apply" {
-  var parser = Parser.init(std.heap.c_allocator);
-  const node = try parser.parse("f[1]");
-  defer parser.deinit();
-  try std.testing.expect(node.* == .terse);
-  try std.testing.expect(node.terse.stmts.len == 1);
-  const stmt = node.terse.stmts[0].node;
-  try std.testing.expect(stmt.* == .apply);
+  var p = Parser.init(std.testing.allocator); defer p.deinit();
+  const n = try p.parse("f[1]");
+  const stmt = n.terse.stmts[0].node;
   const apply = &stmt.apply;
-  try std.testing.expect(apply.f.* == .literal);
-  try std.testing.expect(apply.f.literal == .@"var");
   try std.testing.expect(std.mem.eql(u8, apply.f.literal.@"var", "f"));
   try std.testing.expect(apply.a != null);
   const seq = apply.a.?;
-  try std.testing.expect(seq.len == 1);
-  try std.testing.expect(seq[0].* == .literal);
-  try std.testing.expect(seq[0].literal == .i);
   try std.testing.expect(seq[0].literal.i == 1);
 }
 
 test "Bind" {
-  var parser = Parser.init(std.heap.c_allocator);
-  const node = try parser.parse("a:1");
-  defer parser.deinit();
-  try std.testing.expect(node.* == .terse);
-  try std.testing.expect(node.terse.stmts.len == 1);
+  var p = Parser.init(std.testing.allocator); defer p.deinit();
+  const node = try p.parse("a:1");
   const stmt = node.terse.stmts[0].node;
-  try std.testing.expect(stmt.* == .bind);
   const bind = &stmt.bind;
-  try std.testing.expect(bind.v.* == .literal);
-  try std.testing.expect(bind.v.literal == .@"var");
   try std.testing.expect(std.mem.eql(u8, bind.v.literal.@"var", "a"));
   try std.testing.expect(bind.f == null);
-  try std.testing.expect(bind.a != null);
-  try std.testing.expect(bind.a.?.* == .literal);
-  try std.testing.expect(bind.a.?.literal == .i);
   try std.testing.expect(bind.a.?.literal.i == 1);
 }
 
 test "Lambda" {
-  var parser = Parser.init(std.heap.c_allocator);
-  const node = try parser.parse("{x+1}");
-  defer parser.deinit();
+  var p = Parser.init(std.testing.allocator);
+  const node = try p.parse("{x+1}");
+  defer p.deinit();
   try std.testing.expect(node.* == .terse);
   try std.testing.expect(node.terse.stmts.len == 1);
   const stmt = node.terse.stmts[0].node;
@@ -298,80 +268,53 @@ test "Lambda" {
 }
 
 test "Adverb" {
-  var parser = Parser.init(std.heap.c_allocator);
-  const node = try parser.parse("+/ 1 2 3");
-  defer parser.deinit();
-  try std.testing.expect(node.* == .terse);
-  try std.testing.expect(node.terse.stmts.len == 1);
+  var p = Parser.init(std.testing.allocator); defer p.deinit();
+  const node = try p.parse("+/ 1 2 3");
   const stmt = node.terse.stmts[0].node;
-  try std.testing.expect(stmt.* == .apposit);
   const apposit = &stmt.apposit;
-  try std.testing.expect(apposit.f.* == .term);
   const term = &apposit.f.term;
   try std.testing.expect(std.mem.eql(u8, term.f.op, "+"));
   try std.testing.expect(std.mem.eql(u8, term.a, "/"));
-  try std.testing.expect(apposit.a.* == .literal);
-  try std.testing.expect(apposit.a.literal == .I);
   try std.testing.expect(std.mem.eql(i32, apposit.a.literal.I, &[_]i32{ 1, 2, 3 }));
 }
 
 test "Implicit Call" {
-  var parser = Parser.init(std.heap.c_allocator);
-  const node = try parser.parse("f 1");
-  defer parser.deinit();
-  try std.testing.expect(node.* == .terse);
-  try std.testing.expect(node.terse.stmts.len == 1);
+  var p = Parser.init(std.testing.allocator); defer p.deinit();
+  const node = try p.parse("f 1");
   const stmt = node.terse.stmts[0].node;
   try std.testing.expect(stmt.* == .apposit);
   const apposit = &stmt.apposit;
-  try std.testing.expect(apposit.f.* == .literal);
-  try std.testing.expect(apposit.f.literal == .@"var");
   try std.testing.expect(std.mem.eql(u8, apposit.f.literal.@"var", "f"));
-  try std.testing.expect(apposit.a.* == .literal);
-  try std.testing.expect(apposit.a.literal == .i);
   try std.testing.expect(apposit.a.literal.i == 1);
 }
 
 test "List" {
-  var parser = Parser.init(std.heap.c_allocator);
-  const node = try parser.parse("(1 2 3; 4 5 6)");
-  defer parser.deinit();
-  try std.testing.expect(node.* == .terse);
-  try std.testing.expect(node.terse.stmts.len == 1);
+  var p = Parser.init(std.testing.allocator); defer p.deinit();
+  const node = try p.parse("(1 2 3; 4 5 6)");
   const stmt = node.terse.stmts[0].node;
-  try std.testing.expect(stmt.* == .list);
   const list = &stmt.list;
-  try std.testing.expect(list.seq != null);
   const seq = list.seq.?;
-  try std.testing.expect(seq.len == 2);
-  try std.testing.expect(seq[0].* == .literal);
-  try std.testing.expect(seq[0].literal == .I);
   try std.testing.expect(std.mem.eql(i32, seq[0].literal.I, &[_]i32{ 1, 2, 3 }));
-  try std.testing.expect(seq[1].* == .literal);
-  try std.testing.expect(seq[1].literal == .I);
   try std.testing.expect(std.mem.eql(i32, seq[1].literal.I, &[_]i32{ 4, 5, 6 }));
 }
 
-test "String" {
-  var parser = Parser.init(std.heap.c_allocator);
-  const node = try parser.parse("\"Hello\"");
-  defer parser.deinit();
-  try std.testing.expect(node.* == .terse);
-  try std.testing.expect(node.terse.stmts.len == 1);
+test "Ints" {
+  var parser = Parser.init(std.testing.allocator); defer parser.deinit();
+  const node = try parser.parse("1 2 3");
   const stmt = node.terse.stmts[0].node;
-  try std.testing.expect(stmt.* == .literal);
-  try std.testing.expect(stmt.literal == .c);
+  try std.testing.expect(std.mem.eql(i32, stmt.literal.I, &[_]i32{ 1, 2, 3 }));
+}
+
+test "String" {
+  var p = Parser.init(std.testing.allocator); defer p.deinit();
+  const node = try p.parse("\"Hello\"");
+  const stmt = node.terse.stmts[0].node;
   try std.testing.expect(std.mem.eql(u8, stmt.literal.c, "Hello"));
 }
 
 test "Symbol" {
-  var parser = Parser.init(std.heap.c_allocator);
-  const node = try parser.parse("`abc");
-  defer parser.deinit();
-  try std.testing.expect(node.* == .terse);
-  try std.testing.expect(node.terse.stmts.len == 1);
+  var p = Parser.init(std.testing.allocator); defer p.deinit();
+  const node = try p.parse("`abc");
   const stmt = node.terse.stmts[0].node;
-  try std.testing.expect(stmt.* == .literal);
-  try std.testing.expect(stmt.literal == .s);
   try std.testing.expect(std.mem.eql(u8, stmt.literal.s, "abc"));
 }

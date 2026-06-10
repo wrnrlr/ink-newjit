@@ -1,5 +1,4 @@
-// Hand-written recursive-descent parser for the terse/ink language.
-// Evaluation order in K is right-to-left, so the parser is right-recursive.
+// Recursive-descent parser, evaluation order in K is right-to-left, so the parser is right-recursive.
 
 const std = @import("std");
 const Alloc = std.mem.Allocator;
