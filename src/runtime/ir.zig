@@ -37,62 +37,37 @@ pub const IR = struct {
   instructions: std.ArrayList(IRInst),
   alloc: std.mem.Allocator,
 
-  pub fn init(alloc: std.mem.Allocator) !IR {
-    return .{
-      .instructions = try std.ArrayList(IRInst).initCapacity(alloc, 0),
-      .alloc = alloc,
-    };
+  pub fn init(alloc: std.mem.Allocator) IR {
+    return .{ .instructions = .empty, .alloc = alloc };
   }
 
   pub fn deinit(self: *IR) void {
-    for (self.instructions.items) |inst| {
-      inst.deinit(self.alloc);
-    }
+    for (self.instructions.items) |inst| inst.deinit(self.alloc);
     self.instructions.deinit(self.alloc);
   }
 
-  pub fn emit(self: *IR, op: OpCode, inputs: []const ValueId) !ValueId {
-    const id = @as(u32, @intCast(self.instructions.items.len));
-    const inputs_copy = try self.alloc.dupe(ValueId, inputs);
-    var inst = IRInst{ 
-      .op = op, 
-      .inputs = inputs_copy,
-      .is_pure = false,
-    };
+  pub fn emitWithArg(self: *IR, op: OpCode, arg: u32, inputs: []const ValueId) !ValueId {
+    const id: u32 = @intCast(self.instructions.items.len);
+    var inst: IRInst = .{ .op = op, .arg1 = arg, .inputs = try self.alloc.dupe(ValueId, inputs) };
     inst.is_pure = !inst.isEffectful();
     try self.instructions.append(self.alloc, inst);
     return id;
   }
 
-  pub fn emitWithArg(self: *IR, op: OpCode, arg: u32, inputs: []const ValueId) !ValueId {
-    const id = @as(u32, @intCast(self.instructions.items.len));
-    const inputs_copy = try self.alloc.dupe(ValueId, inputs);
-    var inst = IRInst{ 
-      .op = op, 
-      .arg1 = arg, 
-      .inputs = inputs_copy,
-      .is_pure = false,
-    };
-    inst.is_pure = !inst.isEffectful();
-    try self.instructions.append(self.alloc, inst);
-    return id;
+  pub fn emit(self: *IR, op: OpCode, inputs: []const ValueId) !ValueId {
+    return self.emitWithArg(op, 0, inputs);
   }
 
   pub fn emitConstant(self: *IR, val: V) !ValueId {
-    const id = @as(u32, @intCast(self.instructions.items.len));
     const stored = val.ref();
     // Mark array constants immutable so cow() always copies them.
     switch (stored) {
       inline .B, .I, .F, .S, .C, .L => |n| n.setFlag(ArrayFlags.immutable),
-      inline .m, .M => |d| { d.ptr.flags |= ArrayFlags.immutable; },
+      inline .m, .M => |d| d.ptr.flags |= ArrayFlags.immutable,
       else => {},
     }
-    try self.instructions.append(self.alloc, .{
-      .op = .Const,
-      .val = stored,
-      .inputs = &.{},
-      .is_pure = true,
-    });
+    const id: u32 = @intCast(self.instructions.items.len);
+    try self.instructions.append(self.alloc, .{ .op = .Const, .val = stored, .is_pure = true });
     return id;
   }
 
@@ -105,9 +80,7 @@ pub const IR = struct {
   }
 
   pub fn reset(self: *IR) void {
-    for (self.instructions.items) |inst| {
-      inst.deinit(self.alloc);
-    }
+    for (self.instructions.items) |inst| inst.deinit(self.alloc);
     self.instructions.clearRetainingCapacity();
   }
 };
