@@ -6,12 +6,7 @@ const N = @import("../../noun/array.zig").N;
 const Dict = @import("../../noun/dict.zig").Dict;
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
-const csv    = @import("../../encoding/csv.zig");
-const json   = @import("../../encoding/json.zig");
-const xml    = @import("../../encoding/xml.zig");
 const binary = @import("../../encoding/binary.zig");
-const font   = @import("../../encoding/font.zig");
-const shp    = @import("../../encoding/shapefile.zig");
 
 /// Marshal/Serialize: value -> bytes
 pub const Marshal = struct {
@@ -81,9 +76,6 @@ fn unmarshal_s_i(vm: *VM, x: V, y: V) V {
 
 fn unmarshalDispatch(vm: *VM, s: []const u8, data: []const u8) V {
   const eql = std.mem.eql;
-  if (eql(u8, s, "bin"))  return binary.deserialize(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
-  if (eql(u8, s, "font")) return font.parse(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
-  if (eql(u8, s, "csv"))  return csv.parse(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
-  if (eql(u8, s, "json")) return json.parse(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
+  if (eql(u8, s, "bin")) return binary.deserialize(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
   return .{ .err = .domain };
 }
