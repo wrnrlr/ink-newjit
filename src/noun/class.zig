@@ -4,10 +4,10 @@ const N = @import("value.zig").N;
 const Alloc = std.mem.Allocator;
 
 pub const K = enum(u8) {
-  blank   = 0, err     = 1,
-  b = 2, i       = 3, f       = 4, s       = 5, c       = 6,
-  o       = 7, p       = 8,
-  L       = 9, m       = 10, M       = 11, x       = 12,
+  blank = 0, err = 1,
+  b = 2, i = 3, f = 4, s = 5, c = 6,
+  o = 7, p = 8,
+  L = 9, m = 10, M = 11, x = 12,
   B = 2  | VEC_BIT, I = 3  | VEC_BIT, F = 4  | VEC_BIT, S = 5  | VEC_BIT, C = 6  | VEC_BIT,
 
   pub const VEC_BIT: u8       = 16;   // bit 4
@@ -45,10 +45,7 @@ pub const K = enum(u8) {
   pub fn isMap(k: K) bool { return k == .m or k == .M; }
   pub fn isPlural(k: K) bool { return k.isVec() and k.isMap() and k == .L; } 
   pub inline fn container(comptime k: K) K { return @enumFromInt(@intFromEnum(k) | VEC_BIT); }
-  pub inline fn atom(comptime k: K) K {
-    std.debug.assert(k.isVec());
-    return @enumFromInt(@intFromEnum(k) & ~@as(u8, VEC_BIT));
-  }
+  pub inline fn atom(comptime k: K) K { return @enumFromInt(@intFromEnum(k) & ~@as(u8, VEC_BIT)); }
 
   pub fn backing(comptime k: K) type {
     return switch (k) {
@@ -63,12 +60,19 @@ pub const K = enum(u8) {
   }
   pub fn isNullFn(comptime k: K) fn(K.backing(k)) bool {
     return switch (k) {
-      .b, .B => struct { fn f(_: bool) bool { return false; } }.f,
-      .i, .I => struct { fn f(v: i32) bool { return v == std.math.minInt(i32); } }.f,
-      .f, .F => struct { fn f(v: f32) bool { return std.math.isNan(v); } }.f,
-      .s, .S => struct { fn f(v: u32) bool { return v == 0; } }.f,
-      .c, .C => struct { fn f(v: u8) bool { return v == ' '; } }.f,
+      .b, .B => Nulls.b,
+      .i, .I => Nulls.i,
+      .f, .F => Nulls.f,
+      .s, .S => Nulls.s,
+      .c, .C => Nulls.c,
       else => struct { fn f(_: usize) bool { return false; } }.f,
     };
   }
+  pub const Nulls = struct {
+    fn b(_: bool) bool { return false; }
+    fn i(v: i32) bool { return v == std.math.minInt(i32); }
+    fn f(v: f32) bool { return std.math.isNan(v); }
+    fn s(v: u32) bool { return v == 0; }
+    fn c(v: u8) bool { return v == ' '; }
+  };
 };

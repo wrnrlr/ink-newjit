@@ -2,7 +2,7 @@ const std = @import("std");
 const Alloc = std.mem.Allocator;
 const ArrayFlags = @import("array.zig").ArrayFlags;
 const Rc = @import("rc.zig").Rc;
-const opmod = @import("operator.zig");
+const Fn = @import("operator.zig").Fn;
 const Partial = @import("partial.zig").Partial;
 const K = @import("class.zig").K;
 const N = @import("array.zig").N;
@@ -15,7 +15,7 @@ pub const Err = enum { domain, length, rank, nyi, memory, @"type", io };
 pub const V = union(K) {
   blank, err: Err,
   b: bool, i: i32, f: f32, s: u32, c: u8,
-  o: opmod.Fn, p: *Partial,
+  o: Fn, p: *Partial,
   L: N(V), m: Dict, M: Dict, x: *ExtObj,
   B: N(bool), I: N(i32), F: N(f32), S: N(u32), C: N(u8),
 
