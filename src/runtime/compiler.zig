@@ -31,7 +31,7 @@ pub const Compiler = struct {
 
   pub fn init(alloc: Alloc, chunk: *Chunk, globals: *std.StringHashMap(u8), symbols: *Pool, registry: *Fs, fn_tables: *fntable.FnTables) !Compiler {
     const scope = try alloc.create(Scope);
-    scope.* = try Scope.init(alloc, chunk, null);
+    scope.* = Scope.init(alloc, chunk, null);
     return .{
       .alloc = alloc,
       .chunk = chunk,
@@ -144,14 +144,13 @@ pub const Compiler = struct {
   }
 
   fn compileList(self: *Compiler, l: ast.List) anyerror!ir.ValueId {
-    var inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, 0);
+    const seq = l.seq orelse return try self.emitOpWithArg(.MakeList, 0, &.{});
+    var inputs: std.ArrayList(ir.ValueId) = .empty;
     defer inputs.deinit(self.alloc);
-    if (l.seq) |seq|
-      for (seq) |x| try inputs.append(self.alloc, try self.compileNode(x, false));
-    const n = if (l.seq) |seq| @as(u8, @intCast(seq.len)) else 0;
-    return try self.emitOpWithArg(.MakeList, n, inputs.items);
+    for (seq) |x| try inputs.append(self.alloc, try self.compileNode(x, false));
+    return try self.emitOpWithArg(.MakeList, @intCast(seq.len), inputs.items);
   }
-  
+
   // Dict/table literals lower to the dict verb `!` (and `+` flip for tables)
   // rather than dedicated opcodes:
   //   [a:1;b:2]   →  `a`b ! (1;2)
@@ -170,13 +169,13 @@ pub const Compiler = struct {
       var pair = [_]ir.ValueId{ key_id, val_id };
       dict_id = try self.emitOpWithArg(.Apply2, @intFromEnum(Op2.@"!"), &pair);
     } else {
-      var kinputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, n);
+      var kinputs: std.ArrayList(ir.ValueId) = .empty;
       defer kinputs.deinit(self.alloc);
       for (items) |item|
         try kinputs.append(self.alloc, try self.emitConst(.{ .s = try self.symbols.intern(item.k) }));
       const keys_id = try self.emitOpWithArg(.MakeList, @intCast(n), kinputs.items);
 
-      var vinputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, n);
+      var vinputs: std.ArrayList(ir.ValueId) = .empty;
       defer vinputs.deinit(self.alloc);
       for (items) |item|
         try vinputs.append(self.alloc, try self.compileNode(item.v, false));
@@ -211,7 +210,7 @@ pub const Compiler = struct {
       // ?[x;y;z] (3 args only) → splice. 4-arg `?` keeps the generic path.
       const is_splice = seq.len == 3 and std.mem.eql(u8, op_str, "?");
       if (is_amend or is_drill or is_splice) {
-        var inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, seq.len);
+        var inputs: std.ArrayList(ir.ValueId) = .empty;
         defer inputs.deinit(self.alloc);
         for (seq) |x| try inputs.append(self.alloc, try self.compileNode(x, false));
         if (seq.len == 3) {
@@ -224,7 +223,7 @@ pub const Compiler = struct {
       }
     }
 
-    var inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, seq.len + 1);
+    var inputs: std.ArrayList(ir.ValueId) = .empty;
     defer inputs.deinit(self.alloc);
     try inputs.append(self.alloc, try self.compileNode(ap.f, false));
     for (seq) |x| try inputs.append(self.alloc, try self.compileNode(x, false));
@@ -289,13 +288,7 @@ pub const Compiler = struct {
       try self.addPatch(name);
       return id;
     } else {
-      if (self.globals.get(name)) |index| {
-        return try self.emitOpWithArg(.Global, index, &.{});
-      } else {
-        const index = @as(u8, @intCast(self.globals.count()));
-        try self.globals.put(try self.alloc.dupe(u8, name), index);
-        return try self.emitOpWithArg(.Global, index, &.{});
-      }
+      return try self.emitOpWithArg(.Global, try self.getOrAddGlobal(name), &.{});
     }
   }
 
@@ -335,12 +328,7 @@ pub const Compiler = struct {
         try self.addPatch(name);
         return id;
       } else {
-        const gop = try self.globals.getOrPut(name);
-        if (!gop.found_existing) {
-          gop.key_ptr.* = try self.alloc.dupe(u8, name);
-          gop.value_ptr.* = @intCast(self.globals.count() - 1);
-        }
-        return try self.emitOpWithArg(.AssignGlobal, gop.value_ptr.*, &.{rhs_id});
+        return try self.emitOpWithArg(.AssignGlobal, try self.getOrAddGlobal(name), &.{rhs_id});
       }
     } else if (b.v.* == .literal and b.v.literal != .@"var") {
       // Non-variable noun on LHS of ':' — dyadic right verb: x:y = y.
@@ -371,12 +359,7 @@ pub const Compiler = struct {
         for (seq) |item| {
           if (item.* == .literal and item.literal == .@"var") {
             const name = item.literal.@"var";
-            const gop = try self.globals.getOrPut(name);
-            if (!gop.found_existing) {
-              gop.key_ptr.* = try self.alloc.dupe(u8, name);
-              gop.value_ptr.* = @intCast(self.globals.count() - 1);
-            }
-            const nop_id = try self.emitOpWithArg(.Nop, gop.value_ptr.*, &.{});
+            const nop_id = try self.emitOpWithArg(.Nop, try self.getOrAddGlobal(name), &.{});
             const inst = self.scope.ir.get(nop_id);
             inst.arg3 = 1;
             self.scope.ir.markEffectful(nop_id);
@@ -567,13 +550,12 @@ pub const Compiler = struct {
   }
 
   fn adverbFromString(a: []const u8) Adverb {
-    if (std.mem.eql(u8, a, "'")) return .@"'"
-    else if (std.mem.eql(u8, a, "/")) return .@"/"
-    else if (std.mem.eql(u8, a, "\\")) return .@"\\"
-    else if (std.mem.eql(u8, a, "':")) return .@"':"
-    else if (std.mem.eql(u8, a, "/:")) return .@"/:"
-    else if (std.mem.eql(u8, a, "\\:")) return .@"\\:"
-    else unreachable;
+    return switch (a[0]) {
+      '\'' => if (a.len == 1) .@"'" else .@"':",
+      '/'  => if (a.len == 1) .@"/" else .@"/:",
+      '\\' => if (a.len == 1) .@"\\" else .@"\\:",
+      else => unreachable,
+    };
   }
 
   fn compileTerm(self: *Compiler, t: ast.Term) anyerror!ir.ValueId {
@@ -594,11 +576,10 @@ pub const Compiler = struct {
     }
     const v = V{ .o = Fn.makeTrain(name) };
     const f_id = try self.emitConst(v);
-    var call_inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, inputs.len + 1);
-    defer call_inputs.deinit(self.alloc);
-    try call_inputs.append(self.alloc, f_id);
-    for (inputs) |input| try call_inputs.append(self.alloc, input);
-    return try self.emitOpWithArg(.Apply, arity_val, call_inputs.items);
+    var buf: [3]ir.ValueId = undefined;
+    buf[0] = f_id;
+    @memcpy(buf[1..][0..inputs.len], inputs);
+    return try self.emitOpWithArg(.Apply, arity_val, buf[0 .. inputs.len + 1]);
   }
 
   fn compileLambda(self: *Compiler, l: ast.Lambda) anyerror!ir.ValueId {
@@ -608,11 +589,10 @@ pub const Compiler = struct {
     errdefer if (chunk_owned) { chunk_ptr.deinit(); self.alloc.destroy(chunk_ptr); };
 
     const scope_ptr = try self.alloc.create(Scope);
-    scope_ptr.* = try Scope.init(self.alloc, chunk_ptr, self.scope);
+    scope_ptr.* = Scope.init(self.alloc, chunk_ptr, self.scope);
     scope_ptr.is_lambda = true;
     scope_ptr.named_args = l.a;
-    var scope_owned = true;
-    errdefer if (scope_owned) { scope_ptr.deinit(); self.alloc.destroy(scope_ptr); };
+    defer { scope_ptr.deinit(); self.alloc.destroy(scope_ptr); }
 
     const arity_res = blk: {
       const old_scope = self.scope;
@@ -676,13 +656,7 @@ pub const Compiler = struct {
 
         if (!found_local) {
           inst.op = .Global;
-          if (self.globals.get(patch.name)) |idx| {
-            inst.arg1 = idx;
-          } else {
-            const idx = @as(u8, @intCast(self.globals.count()));
-            try self.globals.put(try self.alloc.dupe(u8, patch.name), idx);
-            inst.arg1 = idx;
-          }
+          inst.arg1 = try self.getOrAddGlobal(patch.name);
         }
       }
 
@@ -697,9 +671,6 @@ pub const Compiler = struct {
     };
 
     const locals_count = @as(u8, @intCast(scope_ptr.locals.count()));
-    scope_ptr.deinit();
-    self.alloc.destroy(scope_ptr);
-    scope_owned = false;
 
     const range_id = try self.registry.addRange(self.text_id, l.start, l.end);
     const lambda_idx = try self.fn_tables.addLambda(.{
@@ -718,7 +689,7 @@ pub const Compiler = struct {
     const end_jumps = try self.alloc.alloc(usize, jump_count);
     defer self.alloc.free(end_jumps);
 
-    var res_ids = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, jump_count + 1);
+    var res_ids: std.ArrayList(ir.ValueId) = .empty;
     defer res_ids.deinit(self.alloc);
 
     var i: usize = 0;
@@ -736,7 +707,7 @@ pub const Compiler = struct {
 
     res = if (i < stmts.len) try self.compileNode(stmts[i], is_tail)
           else try self.emitOp(.Gap, &.{});
-    
+
     try res_ids.append(self.alloc, res);
 
     for (end_jumps[0..j]) |jump| try self.patchJump(jump);
@@ -763,6 +734,15 @@ pub const Compiler = struct {
 
   fn emitConst(self: *Compiler, val: V) !ir.ValueId {
     return try self.scope.ir.emitConstant(val);
+  }
+
+  fn getOrAddGlobal(self: *Compiler, name: []const u8) !u8 {
+    const gop = try self.globals.getOrPut(name);
+    if (!gop.found_existing) {
+      gop.key_ptr.* = try self.alloc.dupe(u8, name);
+      gop.value_ptr.* = @intCast(self.globals.count() - 1);
+    }
+    return gop.value_ptr.*;
   }
 
   fn addPatch(self: *Compiler, name: []const u8) !void {
@@ -892,14 +872,14 @@ const Scope = struct {
   uses_y: bool = false,
   uses_z: bool = false,
 
-  pub fn init(alloc: Alloc, chunk: *Chunk, parent: ?*Scope) !Scope {
+  pub fn init(alloc: Alloc, chunk: *Chunk, parent: ?*Scope) Scope {
     return .{
       .alloc = alloc,
       .parent = parent,
       .chunk = chunk,
-      .ir = try ir.IR.init(alloc),
+      .ir = ir.IR.init(alloc),
       .locals = std.StringHashMap(u8).init(alloc),
-      .patches = try std.ArrayList(PatchInfo).initCapacity(alloc, 0),
+      .patches = .empty,
     };
   }
 

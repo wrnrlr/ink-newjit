@@ -221,36 +221,29 @@ pub const Optimizer = struct {
     for (scope_ir.instructions.items) |*inst| {
       if (inst.is_dead) continue;
 
-      if (inst.op == .Apply1 and inst.inputs.len > 0) {
-        if (inst.inputs[0] == ir.NO_VALUE) continue;
+      if (inst.op == .Apply1 and inst.inputs.len > 0 and inst.inputs[0] != ir.NO_VALUE) {
         const input = scope_ir.get(inst.inputs[0]);
         if (input.op == .Const) {
-          const op = @as(Op1, @enumFromInt(inst.arg1));
-          if (try self.foldMonad(op, input.val.?)) |res| {
+          const op: Op1 = @enumFromInt(inst.arg1);
+          if (foldMonad(op, input.val.?)) |res| {
             if (inst.val) |v| v.deinit(self.alloc);
             self.alloc.free(inst.inputs);
-            inst.op = .Const;
-            inst.val = res;
-            inst.inputs = &.{};
-            inst.is_pure = true;
+            inst.* = .{ .op = .Const, .val = res, .is_pure = true };
             changed = true;
           }
         }
       }
 
-      if (inst.op == .Apply2 and inst.inputs.len > 1) {
-        if (inst.inputs[0] == ir.NO_VALUE or inst.inputs[1] == ir.NO_VALUE) continue;
+      if (inst.op == .Apply2 and inst.inputs.len > 1 and
+          inst.inputs[0] != ir.NO_VALUE and inst.inputs[1] != ir.NO_VALUE) {
         const left = scope_ir.get(inst.inputs[0]);
         const right = scope_ir.get(inst.inputs[1]);
         if (left.op == .Const and right.op == .Const) {
-          const op = @as(Op2, @enumFromInt(inst.arg1));
-          if (try self.foldDyad(op, left.val.?, right.val.?)) |res| {
+          const op: Op2 = @enumFromInt(inst.arg1);
+          if (foldDyad(op, left.val.?, right.val.?)) |res| {
             if (inst.val) |v| v.deinit(self.alloc);
             self.alloc.free(inst.inputs);
-            inst.op = .Const;
-            inst.val = res;
-            inst.inputs = &.{};
-            inst.is_pure = true;
+            inst.* = .{ .op = .Const, .val = res, .is_pure = true };
             changed = true;
           }
         }
@@ -259,98 +252,23 @@ pub const Optimizer = struct {
     return changed;
   }
 
-  fn foldMonad(self: *Optimizer, op: Op1, x: V) !?V {
-    _ = self;
-    return switch (x) {
-      .i => |xv| switch (op) {
-        .@"+" => x.ref(),
-        .@"-" => V{ .i = 0 -% xv },
-        .@"~" => V{ .b = xv == 0 },
-        else => null,
-      },
-      .f => |xv| switch (op) {
-        .@"-" => V{ .f = -xv },
-        .@"~" => V{ .b = xv == 0.0 },
-        else => null,
-      },
-      .b => |xv| switch (op) {
-        .@"~" => V{ .b = !xv },
-        else => null,
-      },
-      else => null,
-    };
-  }
-
-  fn foldDyad(self: *Optimizer, op: Op2, x: V, y: V) !?V {
-    _ = self;
-    if (x == .i and y == .i) {
-      const xv = x.i; const yv = y.i;
-      return switch (op) {
-        .@"+" => V{ .i = xv +% yv },
-        .@"-" => V{ .i = xv -% yv },
-        .@"*" => V{ .i = xv *% yv },
-        .@"&" => V{ .i = @min(xv, yv) },
-        .@"|" => V{ .i = @max(xv, yv) },
-        .@"<" => V{ .b = xv < yv },
-        .@">" => V{ .b = xv > yv },
-        .@"=" => V{ .b = xv == yv },
-        .@"~" => V{ .b = xv == yv },
-        else => null,
-      };
-    }
-    if (x == .f and y == .f) {
-      const xv = x.f; const yv = y.f;
-      return switch (op) {
-        .@"+" => V{ .f = xv + yv },
-        .@"-" => V{ .f = xv - yv },
-        .@"*" => V{ .f = xv * yv },
-        .@"%" => V{ .f = xv / yv },
-        .@"&" => V{ .f = @min(xv, yv) },
-        .@"|" => V{ .f = @max(xv, yv) },
-        .@"<" => V{ .b = xv < yv },
-        .@">" => V{ .b = xv > yv },
-        .@"=" => V{ .b = xv == yv },
-        .@"~" => V{ .b = xv == yv },
-        else => null,
-      };
-    }
-    if (x == .b and y == .b) {
-      const xv = x.b; const yv = y.b;
-      return switch (op) {
-        .@"=" => V{ .b = xv == yv },
-        .@"~" => V{ .b = xv == yv },
-        else => null,
-      };
-    }
-    return null;
-  }
-
   fn dce(self: *Optimizer, scope_ir: *ir.IR, root_id: ir.ValueId) !bool {
     var changed = false;
     const insts = scope_ir.instructions.items;
     const used = try self.alloc.alloc(bool, insts.len);
     defer self.alloc.free(used);
     @memset(used, false);
-    
     if (root_id != ir.NO_VALUE) used[root_id] = true;
 
     var i = insts.len;
     while (i > 0) {
       i -= 1;
-      const idx = i;
-      const inst = insts[idx];
-      
+      const inst = insts[i];
       if (inst.is_dead) continue;
-
-      if (!inst.is_pure or used[idx]) {
-        var k: usize = 0;
-        while (k < inst.inputs.len) : (k += 1) {
-          if (inst.inputs[k] != ir.NO_VALUE) {
-            used[inst.inputs[k]] = true;
-          }
-        }
+      if (!inst.is_pure or used[i]) {
+        for (inst.inputs) |id| { if (id != ir.NO_VALUE) used[id] = true; }
       } else {
-        scope_ir.instructions.items[idx].is_dead = true;
+        scope_ir.instructions.items[i].is_dead = true;
         changed = true;
       }
     }
@@ -527,6 +445,70 @@ pub const Optimizer = struct {
     }
   }
 };
+
+fn foldMonad(op: Op1, x: V) ?V {
+  return switch (x) {
+    .i => |xv| switch (op) {
+      .@"+" => x.ref(),
+      .@"-" => V{ .i = 0 -% xv },
+      .@"~" => V{ .b = xv == 0 },
+      else => null,
+    },
+    .f => |xv| switch (op) {
+      .@"-" => V{ .f = -xv },
+      .@"~" => V{ .b = xv == 0.0 },
+      else => null,
+    },
+    .b => |xv| switch (op) {
+      .@"~" => V{ .b = !xv },
+      else => null,
+    },
+    else => null,
+  };
+}
+
+fn foldDyad(op: Op2, x: V, y: V) ?V {
+  if (x == .i and y == .i) {
+    const xv = x.i; const yv = y.i;
+    return switch (op) {
+      .@"+" => V{ .i = xv +% yv },
+      .@"-" => V{ .i = xv -% yv },
+      .@"*" => V{ .i = xv *% yv },
+      .@"&" => V{ .i = @min(xv, yv) },
+      .@"|" => V{ .i = @max(xv, yv) },
+      .@"<" => V{ .b = xv < yv },
+      .@">" => V{ .b = xv > yv },
+      .@"=" => V{ .b = xv == yv },
+      .@"~" => V{ .b = xv == yv },
+      else => null,
+    };
+  }
+  if (x == .f and y == .f) {
+    const xv = x.f; const yv = y.f;
+    return switch (op) {
+      .@"+" => V{ .f = xv + yv },
+      .@"-" => V{ .f = xv - yv },
+      .@"*" => V{ .f = xv * yv },
+      .@"%" => V{ .f = xv / yv },
+      .@"&" => V{ .f = @min(xv, yv) },
+      .@"|" => V{ .f = @max(xv, yv) },
+      .@"<" => V{ .b = xv < yv },
+      .@">" => V{ .b = xv > yv },
+      .@"=" => V{ .b = xv == yv },
+      .@"~" => V{ .b = xv == yv },
+      else => null,
+    };
+  }
+  if (x == .b and y == .b) {
+    const xv = x.b; const yv = y.b;
+    return switch (op) {
+      .@"=" => V{ .b = xv == yv },
+      .@"~" => V{ .b = xv == yv },
+      else => null,
+    };
+  }
+  return null;
+}
 
 // Returns the builtin op byte if the chunk's bytecode is a single-op body:
 //   arity=1: (Local|LocalLast 0), Apply1 op, Return

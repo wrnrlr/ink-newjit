@@ -18,9 +18,9 @@ pub const Type = struct {
   _L:     util.MonadFn = ktype("L"),
   _m:     util.MonadFn = ktype("m"),
   _M:     util.MonadFn = ktype("M"),
-  _func:  util.MonadFn = ktype("func"),
-  _partial: util.MonadFn = ktype("p"),
-  _err:     util.MonadFn = ktype("!"),
+  _o:   util.MonadFn = ktype("func"),
+  _p:   util.MonadFn = ktype("p"),
+  _err: util.MonadFn = ktype("!"),
 };
 
 fn ktype(comptime s: []const u8) util.MonadFn {
