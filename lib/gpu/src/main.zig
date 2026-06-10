@@ -203,6 +203,7 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   zglfw.init() catch return ki(-1);
   defer zglfw.terminate();
   zglfw.windowHint(zglfw.ClientAPI, zglfw.NoAPI);
+  zglfw.windowHint(zglfw.CocoaRetinaFramebuffer, 1);
 
   const window = zglfw.createWindow(win_w, win_h, "ink", null, null) catch return ki(-1);
   defer zglfw.destroyWindow(window);
@@ -283,11 +284,13 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
     ku(v_w); ku(v_h); ku(v_mx); ku(v_my); ku(v_t);
 
     renderer.flush(pass, fw, fh) catch {};
+    pass.release();
 
     const cmd = encoder.finish(.{});
     defer cmd.release();
     gctx.queue.submit(&[_]wgpu.CommandBuffer{cmd});
-    gctx.swapchain.present();
+    _ = gctx.present();
+    gctx.device.tick();
   }
 
   return ki(0);

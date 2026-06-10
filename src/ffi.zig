@@ -340,8 +340,9 @@ fn ffiCall1(data: *anyopaque, x: V) V {
   const d: *FfiData = @ptrCast(@alignCast(data));
   const VM = @import("runtime/vm.zig").VM;
   const vm: *VM = @ptrCast(@alignCast(d.vm));
+  const prev_vm = current_vm;
   setCurrentVm(d.vm);
-  defer clearCurrentVm();
+  defer current_vm = prev_vm;
   const f: FfiFn1 = @ptrCast(@alignCast(d.fn_ptr));
   // No x.ref(): args are borrowed; the .blank defer skips rc decrement so ref() would leak.
   const bx = box(x) catch return .{ .err = .memory };
@@ -354,8 +355,9 @@ fn ffiCall2(data: *anyopaque, x: V, y: V) V {
   const d: *FfiData = @ptrCast(@alignCast(data));
   const VM = @import("runtime/vm.zig").VM;
   const vm: *VM = @ptrCast(@alignCast(d.vm));
+  const prev_vm = current_vm;
   setCurrentVm(d.vm);
-  defer clearCurrentVm();
+  defer current_vm = prev_vm;
   const f: FfiFn2 = @ptrCast(@alignCast(d.fn_ptr));
   const bx = box(x) catch return .{ .err = .memory };
   defer { bx.v = .blank; c_alloc.destroy(bx); }
