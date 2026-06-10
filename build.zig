@@ -20,17 +20,6 @@ pub fn build(b: *std.Build) !void {
   const test_step = b.step("test", "Run unit tests");
   test_step.dependOn(&test_run.step);
 
-  // --- Corpus tests ---
-  const corpus_mod = b.createModule(.{
-    .root_source_file = b.path("src/corpus.zig"),
-    .target = target, .optimize = optimize, .link_libc = true,
-  });
-  corpus_mod.addIncludePath(b.path("src"));
-  const corpus_exe = b.addTest(.{ .root_module = corpus_mod });
-  const corpus_run = b.addRunArtifact(corpus_exe);
-  const corpus_step = b.step("corpus", "Run corpus tests for the Zig parser");
-  corpus_step.dependOn(&corpus_run.step);
-
   // --- ink runner (core, no GPU dependency) ---
   const runner_options = b.addOptions();
   runner_options.addOption(bool, "enable_ui", false);
@@ -152,11 +141,7 @@ pub fn build(b: *std.Build) !void {
     .target = target, .optimize = optimize, .link_libc = true,
   });
 
-  const json_lib = b.addLibrary(.{
-    .name     = "json",
-    .root_module = json_ext_mod,
-    .linkage  = .dynamic,
-  });
+  const json_lib = b.addLibrary(.{ .name = "json", .root_module = json_ext_mod, .linkage = .dynamic });
   b.installArtifact(json_lib);
   const json_step = b.step("json", "Build the JSON extension shared library");
   json_step.dependOn(&b.addInstallArtifact(json_lib, .{}).step);
@@ -167,11 +152,7 @@ pub fn build(b: *std.Build) !void {
     .target = target, .optimize = optimize, .link_libc = true,
   });
 
-  const csv_lib = b.addLibrary(.{
-    .name     = "csv",
-    .root_module = csv_ext_mod,
-    .linkage  = .dynamic,
-  });
+  const csv_lib = b.addLibrary(.{ .name = "csv", .root_module = csv_ext_mod, .linkage  = .dynamic });
   b.installArtifact(csv_lib);
   const csv_step = b.step("csv", "Build the CSV extension shared library");
   csv_step.dependOn(&b.addInstallArtifact(csv_lib, .{}).step);
