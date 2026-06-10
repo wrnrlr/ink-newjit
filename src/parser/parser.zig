@@ -23,12 +23,7 @@ const parseFloat = std.fmt.parseFloat;
 const eql = std.mem.eql;
 const trim = std.mem.trim;
 
-pub const ParseError = error{
-  OutOfMemory,
-  Overflow,
-  InvalidCharacter,
-  UnexpectedToken,
-};
+pub const ParseError = error{ OutOfMemory, Overflow, InvalidCharacter, UnexpectedToken };
 
 pub const Parser = struct {
   arena: std.heap.ArenaAllocator,
