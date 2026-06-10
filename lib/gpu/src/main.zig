@@ -127,6 +127,13 @@ fn getFramebufferSize(window: *const anyopaque) [2]u32 {
   return .{ @intCast(w), @intCast(h) };
 }
 
+fn getWindowSize(window: *const anyopaque) [2]u32 {
+  var w: i32 = 0;
+  var h: i32 = 0;
+  zglfw.getWindowSize(@constCast(@ptrCast(@alignCast(window))), &w, &h);
+  return .{ @intCast(w), @intCast(h) };
+}
+
 fn getTime() f64 { return zglfw.getTime(); }
 
 extern fn glfwGetCocoaWindow(window: *anyopaque) ?*anyopaque;
@@ -246,6 +253,10 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
     const fw: f32 = @floatFromInt(fb[0]);
     const fh: f32 = @floatFromInt(fb[1]);
 
+    const ws = getWindowSize(window);
+    const dpr_x: f64 = if (ws[0] > 0) @as(f64, @floatFromInt(fb[0])) / @as(f64, @floatFromInt(ws[0])) else 1.0;
+    const dpr_y: f64 = if (ws[1] > 0) @as(f64, @floatFromInt(fb[1])) / @as(f64, @floatFromInt(ws[1])) else 1.0;
+
     const swapchain_view = gctx.swapchain.getCurrentTextureView();
     defer swapchain_view.release();
     const encoder = gctx.device.createCommandEncoder(.{ .label = "frame" });
@@ -272,7 +283,7 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
     // Build props dict and call loop_fn
     const keys = [5][*:0]const u8{ "width", "height", "mx", "my", "time" };
     const v_w = kf(fw); const v_h = kf(fh);
-    const v_mx = kf(@floatCast(mx)); const v_my = kf(@floatCast(my));
+    const v_mx = kf(@floatCast(mx * dpr_x)); const v_my = kf(@floatCast(my * dpr_y));
     const v_t = kf(t);
     const vals = [5]?K{ v_w, v_h, v_mx, v_my, v_t };
 
