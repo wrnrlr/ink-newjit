@@ -5,7 +5,6 @@ const std = @import("std");
 const Alloc = std.mem.Allocator;
 const ast = @import("ast.zig");
 const lex = @import("lexer.zig");
-
 const Node = ast.Node;
 const Literal = ast.Literal;
 const Seq = ast.Seq;
@@ -13,11 +12,9 @@ const Args = ast.Args;
 const Items = ast.Items;
 const Item = ast.Item;
 const Arg = ast.Arg;
-
 const TT = lex.TT;
 const Token = lex.Token;
 const Lexer = lex.Lexer;
-
 const parseInt = std.fmt.parseInt;
 const parseFloat = std.fmt.parseFloat;
 const eql = std.mem.eql;
@@ -38,27 +35,15 @@ pub const Parser = struct {
   }
 
   pub fn deinit(self: *Parser) void { self.arena.deinit(); }
-
-  fn advance(self: *Parser) void {
-    self.tok = self.lex.next();
-  }
-
+  fn advance(self: *Parser) void { self.tok = self.lex.next(); }
   // Advance past comment and sep tokens.
-  fn skipComments(self: *Parser) void {
-    while (self.tok.tt == .comment) self.advance();
-  }
-
-  fn is(self: *Parser, tt: TT) bool {
-    return self.tok.tt == tt;
-  }
+  fn skipComments(self: *Parser) void { while (self.tok.tt == .comment) self.advance(); }
+  fn is(self: *Parser, tt: TT) bool { return self.tok.tt == tt; }
+  fn tokSlice(self: *Parser) []const u8 { return self.tok.slice(self.src); }
 
   fn eat(self: *Parser, tt: TT) bool {
     if (self.tok.tt == tt) { self.advance(); return true; }
     return false;
-  }
-
-  fn tokSlice(self: *Parser) []const u8 {
-    return self.tok.slice(self.src);
   }
 
   // True if the current token can begin a noun.
@@ -91,8 +76,6 @@ pub const Parser = struct {
     };
   }
 
-  // ---- Top-level ----
-
   pub fn parse(self: *Parser, src: []const u8) ParseError!*Node {
     _ = self.arena.reset(.retain_capacity);
     self.src = src;
@@ -103,14 +86,9 @@ pub const Parser = struct {
 
   fn parseTerse(self: *Parser) ParseError!*Node {
     var stmts = try std.ArrayList(ast.Stmt).initCapacity(self.arena.allocator(), 0);
-    // Skip leading comments/seps
     while (self.tok.tt == .sep or self.tok.tt == .comment) self.advance();
-
     while (self.tok.tt != .eof) {
       if (self.tok.tt == .sep) {
-        // Explicit semicolon produces a blank if this is not a newline separator
-        // between statements. We mimic tree-sitter: only `;` (not `\n`) at top
-        // level produces a blank statement.
         const sep_slice = self.tok.slice(self.src);
         const is_semicolon = sep_slice.len > 0 and sep_slice[0] == ';';
         self.advance();
@@ -122,17 +100,12 @@ pub const Parser = struct {
         }
         continue;
       }
-
       const stmt_start = self.tok.start;
       const node = try self.parseStmt();
-      // tok.start now points just past the statement (at sep, comment, eof, etc.)
       const raw_end = self.tok.start;
       const source = trim(u8, self.src[stmt_start..raw_end], " \t\n");
       try stmts.append(self.arena.allocator(), .{ .node = node, .source = source });
-
       self.skipComments();
-      // After a statement, consume a sep if present.
-      // An inline `;` produces a blank ";" stmt (suppression marker).
       if (self.tok.tt == .sep) {
         const sep_slice = self.tok.slice(self.src);
         const is_semicolon = sep_slice.len > 0 and sep_slice[0] == ';';
@@ -147,7 +120,6 @@ pub const Parser = struct {
         break;
       }
     }
-
     const m = try self.arena.allocator().create(Node);
     m.* = .{ .terse = .{ .stmts = try stmts.toOwnedSlice(self.arena.allocator()) } };
     return m;
@@ -210,16 +182,11 @@ pub const Parser = struct {
       m.* = .blank;
       return m;
     }
-
-    // Parse a noun
     const noun = try self.parseNoun();
-
-    // What follows?
     self.skipComments();
     return self.parseAfterNoun(noun);
   }
 
-  // After parsing a noun, decide what the overall expression is.
   fn parseAfterNoun(self: *Parser, noun: *Node) ParseError!*Node {
     self.skipComments();
 
@@ -230,9 +197,7 @@ pub const Parser = struct {
     }
 
     // Check for bind: noun (op)? ':' (clause)?
-    if (self.is(.@":")) {
-      return self.parseBind(noun, null);
-    }
+    if (self.is(.@":")) { return self.parseBind(noun, null); }
 
     // op followed by colon → compound bind: noun op ':' (clause)?
     if (self.is(.op) or self.is(.keyword)) {
@@ -465,8 +430,6 @@ pub const Parser = struct {
     return m;
   }
 
-  // ---- Noun parsing ----
-
   fn parseNoun(self: *Parser) ParseError!*Node {
     const tok = self.tok;
     switch (tok.tt) {
@@ -495,8 +458,6 @@ pub const Parser = struct {
     }
   }
 
-  // ---- Literal and vector stranding ----
-
   fn parseLiteralOrVector(self: *Parser) ParseError!*Node {
     const tok = self.tok;
     self.advance();
@@ -504,10 +465,6 @@ pub const Parser = struct {
     // Stranding: collect consecutive same-type literals into vectors
     switch (tok.tt) {
       .int => {
-        // Collect ints, interleaving positive and negative (0 1 -2 0N forms a vector).
-        // A '-' is a vector element only when BOTH:
-        //   • there is whitespace before it (gap from preceding element, so 10-3 is subtraction)
-        //   • it is immediately adjacent to the following int (no space, so "- 3" is not negation)
         var ints = try std.ArrayList(i32).initCapacity(self.arena.allocator(), 0);
         try ints.append(self.arena.allocator(), try parseIntLit(tok.slice(self.src)));
         var last_end = tok.end;
@@ -642,8 +599,6 @@ pub const Parser = struct {
     }
   }
 
-  // ---- Group / List ----
-
   fn parseGroupOrList(self: *Parser) ParseError!*Node {
     std.debug.assert(self.is(.@"("));
     self.advance(); // consume '('
@@ -721,22 +676,18 @@ pub const Parser = struct {
     std.debug.assert(self.is(.@"{"));
     const start_byte = self.tok.start;
     self.advance(); // consume '{'
-
     var args: ?Args = null;
     // Optional args: [a;b;c]
     if (self.is(.@"[")) {
       self.advance();
       args = try self.parseArgList();
     }
-
     var seq: ?Seq = null;
     if (!self.is(.@"}")) {
       seq = try self.parseSeq(.@"}");
     }
-
     const end_byte = self.tok.end;
     _ = self.eat(.@"}");
-
     const m = try self.arena.allocator().create(Node);
     m.* = .{ .lambda = .{ .a = args, .b = seq, .start = start_byte, .end = end_byte } };
     return m;
@@ -823,13 +774,10 @@ pub const Parser = struct {
       self.skipComments();
       if (self.is(end_tt) or self.is(.eof)) break;
       if (self.is(.sep)) { self.advance(); continue; }
-
       // Parse key: one of int, string, symbol, var
       const key = try self.parseItemKey() orelse break;
-
       // Consume ':'
       if (!self.eat(.@":")) break;
-
       // Parse value (optional)
       var val: *Node = undefined;
       if (self.is(end_tt) or self.is(.sep) or self.is(.eof)) {
@@ -891,8 +839,6 @@ pub const Parser = struct {
     return m;
   }
 
-  // ---- Literal helpers ----
-
   fn parseIntLit(s: []const u8) ParseError!i32 {
     if (eql(u8, s, "0N") or eql(u8, s, "-0N")) return std.math.minInt(i32);
     return parseInt(i32, s, 0) catch return error.InvalidCharacter;
@@ -925,9 +871,6 @@ pub const Parser = struct {
 
   pub fn free(_: Parser, _: *Node) void {}
 };
-
-
-// ---- Tests ----
 
 const ta = std.testing.allocator;
 
