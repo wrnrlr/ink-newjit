@@ -57,83 +57,34 @@ Blanks can be used to  empty assignment and defining partials:
 a: / Blank assignment
 p: +[;3]
 ```
-
 ## Nouns
-
 ## Verbs
-
 ### Assigment
-
 #### Local Assign `` : ``
-
 #### Global Assign `` :: ``
-
 ### Monadic Operators `:+-*!#@&|<>=?,^~$.`
-
-#### Identity `:x`
-Return right hand side
-
-#### Flip `+x`
-Transpose (flip rows/columns).
-Row vector becomes column `` +(1 2 3;4 5 6) `` --> `` (1 4;2 5;3 6) ``
-Table to Dict-of-Lists (and vice versa) `` +[[]n:`b`c;i:2 3] `` --> `` [n:`b`c;i:2 3] ``
-`` +("abc";1;1 2 3 4) `` --> `` !length ``
-
-#### Negate `-x`
-Numeric negation.
-
-#### First `*x`
-Returns the first item of its argument.
-
-#### Iota `!i`
-Generates a list of consecutive integers starting at 0 up to i-1.
-
-#### Odometer `!I`
-For an integer list I, produces Cartesian product indices.
-
-#### Tally `#x`
-Returns the number of elements.
-
-#### Type `@x`
-Returns the symbol representing the type of x (e.g. \`i, \`F, \`v).
-
-#### Where `&I`
-Converts a list of counts into repeated indices.
-
-#### Reverse `|x`
-Returns x with its elements in reverse order.
-
-#### Ascend `<X`
-Returns the indices that would sort X in ascending order.
-
-#### Descend `>X`
-Returns the indices that would sort X in descending order.
-
-#### Group `=X`
-For each distinct value, give me the indices where it occurs.
-
-#### Unit `=i`
-Identity matrix.
-
-#### Distinct `?X`
-Returns the distinct elements of X in order.
-
-#### Uniform `?i`
-Returns i random floats in [0,1).
-
-#### Enlist `,x`
-Wraps x in a list (increases rank).
-
-#### Null `^x`
-Returns a boolean mask indicating null/missing elements.
-
-#### Not `~x`
-Logical negation (returns 1 for 0/nulls, 0 otherwise).
-
-#### String `$x`
-Returns the string representation of x.
-
-- `.x` Values/Get: Extracts dictionary values; Retrieves global symbol value.
+- Identity `:x` - Return right hand side
+- Flip `+x` - Transpose (flip rows/columns). Row vector becomes column `` +(1 2 3;4 5 6) `` --> `` (1 4;2 5;3 6) ``
+- Pivot `+d` - Table to Dict-of-Lists (and vice versa) `` +[[]n:`b`c;i:2 3] `` --> `` [n:`b`c;i:2 3] `` `` +("abc";1;1 2 3 4) `` --> `` !length ``
+- Negate `-x` - Numeric negation.
+- First `*x` - Returns the first item of its argument.
+- Iota `!i` - Generates a list of consecutive integers starting at 0 up to i-1.
+- Odometer `!I` - For an integer list I, produces Cartesian product indices.
+- Tally `#x` - Returns the number of elements.
+- Type `@x` - Returns the symbol representing the type of x (e.g. \`i, \`F, \`v).
+- Where `&I` - Converts a list of counts into repeated indices.
+- Reverse `|x` - Returns x with its elements in reverse order.
+- Ascend `<X` - Returns the indices that would sort X in ascending order.
+- Descend `>X` - Returns the indices that would sort X in descending order.
+- Group `=X` - For each distinct value, give me the indices where it occurs.
+- Unit `=i` - Identity matrix.
+- Distinct `?X` - Returns the distinct elements of X in order.
+- Uniform `?i` - Returns i random floats in [0,1).
+- Enlist `,x` - Wraps x in a list (increases rank).
+- Null `^x` - Returns a boolean mask indicating null/missing elements.
+- Not `~x` - Logical negation (returns 1 for 0/nulls, 0 otherwise).
+- String `$x` - Returns the string representation of x.
+- Value/Get `.x` - Extracts dictionary values; Retrieves global symbol value.
 - `sqrt n`
 - `sqr n`
 - `log n`
@@ -141,125 +92,50 @@ Returns the string representation of x.
 - `sin n`
 - `cos n`
 - `abs n`
-
 ### Dyadic Operators
-
-#### Right `x:y`
-Return right hand side
-
-#### Add `x+y`
-Addition.
-
-#### Sub `x-y`
-Subtraction.
-
-#### Mul `x*y`
-Multiplication.
-
-#### Div `x%y`
-Division (integer divFloor for integers, float division for floats).
-
-#### Modulo `x mod y`
-Modulo operator, return remainder of x divided by y as integer
-
-#### Integer division `x div y`
-Return floor of x divided by y as integer
-
-#### Key `x!y`
-Dictionary creation.
-
-#### Equal `x=y`
-Elementwise equality comparison.
-
-#### Match `x~y`
-Identity check (same type and value).
-
-#### Drop `i_Y`
-Drops i items from the start (positive i) or end (negative i).
-
-#### Drop `X_d`
-eys: Removes keys X from dictionary d.
-
-#### Cut `I_Y`
-Slices Y at indices I.
-
-#### WeedOut `f_Y`
-Removes elements where boolean vector f is 1.
-
-#### Delete `X_i`
-Removes element at index i from list X.
-
-#### Join `x,y`
-Joins atoms/lists into a list; Merges dictionaries (right-side precedence).
-
-#### Take `x#y`
-Resizes/cycles list y to length |x|.
-
-#### TakeKeys `X#d`
-Filters dictionary d for keys in X.
-
-#### Reshape `I#y`
-Filters dictionary d for keys in X.
-
-#### Fill `x^y`
-Replaces nulls in y with x.
-
-#### Without `X^y`
-Removes occurrences of elements in X from list y.
-
-#### Pad `i$C`
-Pads string y to length |x|.
-
-#### Cast `x$y`
-Casts y to type represented by symbol x.
-String to int `` `I$"-12" `` --> `` -12 ``
-String to float `` `F$"-12.3" `` --> `` -12.3 `` 
-
-#### Parse `` `p@C ``
-Parse ink, return AST ast list.
-
-#### Find `x?y`
-Returns first index of y in x (null if not found).
-
-- `i?x` Roll/Deal): i random selections from x (positive: replacement, negative: unique).
-- `s@x` (Unmarchal/Deserialize): supports csv, bin
-- `s?x` (Marchal/Serialize): 
+- Right `x:y` Return right hand side
+- Add `x+y` Addition.
+- Sub `x-y` Subtraction.
+- Mul `x*y` Multiplication.
+- Div `x%y` Division (integer divFloor for integers, float division for floats).
+- Modulo `x mod y` Modulo operator, return remainder of x divided by y as integer
+- Integer division `x div y` Return floor of x divided by y as integer
+- Key `x!y` Dictionary creation.
+- Equal `x=y` Elementwise equality comparison.
+- Match `x~y` Identity check (same type and value).
+- Drop `i_Y` Drops i items from the start (positive i) or end (negative i).
+- Drop `X_d` eys: Removes keys X from dictionary d.
+- Cut `I_Y` Slices Y at indices I.
+- WeedOut `f_Y` Removes elements where boolean vector f is 1.
+- Delete `X_i` Removes element at index i from list X.
+- Join `x,y` Joins atoms/lists into a list; Merges dictionaries (right-side precedence).
+- Take `x#y` Resizes/cycles list y to length |x|.
+- TakeKeys `X#d` Filters dictionary d for keys in X.
+- Reshape `I#y` Filters dictionary d for keys in X.
+- Fill `x^y` Replaces nulls in y with x.
+- Without `X^y` Removes occurrences of elements in X from list y.
+- Pad `i$C` Pads string y to length |x|.
+- Cast `x$y` Casts y to type represented by symbol x. String to int `` `I$"-12" `` --> `` -12 `` String to float `` `F$"-12.3" `` --> `` -12.3 `` 
+- Parse `` `p@C `` Parse ink, return AST ast list.
+- Find `x?y` Returns first index of y in x (null if not found).
+- Roll/Deal `i?x` - i random selections from x (positive: replacement, negative: unique).
+- Unmarchal/Deserialize `s@x` - supports csv, bin
+- Marchal/Serialize `s?x`: 
 - `x@y` (At/Apply): Indices into x at y; Applies function x to y.
 - `x.y` (Dot/ApplyN): Deep indexing or multi-argument function application.
-
-#### Apply1 `x@y`
-
 ### IO Verbs
-
-#### Read Line `` 0:x ``
-
-#### Write Line `` x 0:y``
-
-#### Read Byte `` 1:x ``
-
-#### Write Byte `` x 1:y``
-
-#### Open `<s`
-Open file and return handle
-
-#### Close `>s`
-file handle
-
+- Read Line `` 0:x ``
+- Write Line `` x 0:y``
+- Read Byte `` 1:x ``
+- Write Byte `` x 1:y``
+- Open `<s` Open file and return handle
+- Close `>s` file handle
 ### Special Forms 
-Some special symbols can be called with apply `s@` or call `s "Abc"` .
 - Amend3 `` @[x;y;f]   amend  @["ABC";1;_:] -> "AbC"   @[2 3;1;{-x}] -> 2 -3 ``
 - Amend4 `` @[x;y;F;z] amend  @["abc";1;:;"x"] -> "axc"   @[2 3;0;+;4] -> 6 3 ``
-- Drill3
-- Drill4
-
-
-### Drill
-
-```
-.[x;y;f]   drill  .[("AB";"CD");1 0;_:] -> ("AB";"cD")
-.[x;y;F;z] drill  .[("ab";"cd");1 0;:;"x"] -> ("ab";"xd")
-```
-
+- Drill3 `` .[x;y;f]   drill  .[("AB";"CD");1 0;_:] -> ("AB";"cD") ``
+- Drill4 `` .[x;y;F;z] drill  .[("ab";"cd");1 0;:;"x"] -> ("ab";"xd") ``
+- Splice ``   ``
 ## Adverbs
 - Each `f'` - Apply f to each item (unary map). Ex, Length of each element in a list:  `` #'("abc";3 4 5 6) `` -> `` 3 4 ``
 - Zip `x F'` - Apply rhs array elementwise on rhs dyad. Ex. Reshape each element in a character string:  `` 2 3#'"ab" `` -> `` ("aa";"bbb") ``

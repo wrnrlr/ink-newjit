@@ -332,6 +332,35 @@ fn reallocV(v: V, dest: Alloc) V {
       n.deinit(c_alloc);
       return @unionInit(V, @tagName(tag), cloned);
     },
+    // Deep-realloc a list: move the N(V) shell and recursively each element.
+    .L => |n| {
+      const len = n.ptr.len;
+      const new_n = N(V).init(dest, len) catch return .{ .err = .memory };
+      for (new_n.slice()) |*s| s.* = .blank;  // safe baseline for errdefer path
+      for (n.slice(), 0..) |elem, i| {
+        const copy = elem;
+        n.slice()[i] = .blank;    // prevent n.deinit from double-freeing
+        new_n.slice()[i] = reallocV(copy, dest);
+      }
+      n.deinit(c_alloc);          // all slots blanked; frees only the Rc shell
+      return .{ .L = new_n };
+    },
+    // Deep-realloc a dict (both .m and .M share the same Dict payload).
+    inline .m, .M => |d, tag| {
+      const keys_v = d.av();
+      const vals_v = d.bv();
+      d.avPtr().* = .blank;       // prevent d.deinit from double-freeing
+      d.bvPtr().* = .blank;
+      d.deinit(c_alloc);          // frees only the Rc shell
+      const new_keys = reallocV(keys_v, dest);
+      const new_vals = reallocV(vals_v, dest);
+      const new_dict = Dict.init(dest, new_keys, new_vals) catch {
+        new_keys.deinit(dest);
+        new_vals.deinit(dest);
+        return .{ .err = .memory };
+      };
+      return @unionInit(V, @tagName(tag), new_dict);
+    },
     else => return v,
   }
 }

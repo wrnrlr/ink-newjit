@@ -145,4 +145,34 @@ pub fn build(b: *std.Build) !void {
   b.installArtifact(md5_lib);
   const md5_step = b.step("md5", "Build the MD5 extension shared library");
   md5_step.dependOn(&b.addInstallArtifact(md5_lib, .{}).step);
+
+  // --- JSON extension shared library ---
+  const json_ext_mod = b.createModule(.{
+    .root_source_file = b.path("lib/json/src/main.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+  });
+
+  const json_lib = b.addLibrary(.{
+    .name     = "json",
+    .root_module = json_ext_mod,
+    .linkage  = .dynamic,
+  });
+  b.installArtifact(json_lib);
+  const json_step = b.step("json", "Build the JSON extension shared library");
+  json_step.dependOn(&b.addInstallArtifact(json_lib, .{}).step);
+
+  // --- CSV extension shared library ---
+  const csv_ext_mod = b.createModule(.{
+    .root_source_file = b.path("lib/csv/src/main.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+  });
+
+  const csv_lib = b.addLibrary(.{
+    .name     = "csv",
+    .root_module = csv_ext_mod,
+    .linkage  = .dynamic,
+  });
+  b.installArtifact(csv_lib);
+  const csv_step = b.step("csv", "Build the CSV extension shared library");
+  csv_step.dependOn(&b.addInstallArtifact(csv_lib, .{}).step);
 }

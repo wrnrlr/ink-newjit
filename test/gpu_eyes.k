@@ -9,10 +9,8 @@ pi: 3.14159265359
 / Flat [x0;y0;x1;y1;...] polygon for an ellipse (n segments)
 ellipsePts: {[cx;cy;rx;ry;n]
   t: (2.*pi%(n+0.))*!n
-  xs: cx + rx * cos t
-  ys: cy + ry * sin t
-  pts: @[(2*n)#0.; 2*!n; :; xs]
-  @[pts; 1+2*!n; :; ys]}
+  pts: @[(2*n)#0.; 2*!n; :; cx + rx * cos t]
+  @[pts; 1+2*!n; :; cy + ry * sin t]}
 
 / Fill a solid-color ellipse
 fillEllipse: {[cx;cy;rx;ry;r;g;b]

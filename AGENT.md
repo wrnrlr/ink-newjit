@@ -168,14 +168,12 @@ echo "1+2" | ink
 
 ## QA
 Usefull QA commands
-
-### Unit tests `` time zig test src/test.zig ``
+- Unit tests `` time zig test src/test.zig ``
 ```
 All 178 tests passed.
 zig test src/test.zig  18.91s user 0.41s system 99% cpu 19.506 total
 ```
-
-### Walk solutions `` ./zig-out/bin/ink test/walk.k ``
+- Walk solutions `` ./zig-out/bin/ink test/walk.k ``
 ```
 456
 0
@@ -185,4 +183,8 @@ ink(3391,0x203d9a140) malloc: *** error for object 0x6000025cf65f: pointer being
 ink(3391,0x203d9a140) malloc: *** set a breakpoint in malloc_error_break to debug
 zsh: abort      ./zig-out/bin/ink test/walk.k
 ~/Code/ink
+```
+- Eyes Example `` ./zig-out/bin/ test/gpu_eyes.k ``
+```
+
 ```

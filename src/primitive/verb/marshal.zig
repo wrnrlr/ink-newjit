@@ -85,11 +85,5 @@ fn unmarshalDispatch(vm: *VM, s: []const u8, data: []const u8) V {
   if (eql(u8, s, "font")) return font.parse(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
   if (eql(u8, s, "csv"))  return csv.parse(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
   if (eql(u8, s, "json")) return json.parse(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
-  if (eql(u8, s, "xml"))  return xml.parse(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
-  if (eql(u8, s, "shp"))  return shp.parseShp(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
-  if (eql(u8, s, "shx"))  return shp.parseShx(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
-  if (eql(u8, s, "dbf"))  return shp.parseDbf(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
-  if (eql(u8, s, "prj"))  return shp.parsePrj(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
-  if (eql(u8, s, "cpg"))  return shp.parseCpg(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
   return .{ .err = .domain };
 }

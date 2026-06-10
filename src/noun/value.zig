@@ -1,6 +1,5 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const Chunk = @import("../runtime/tape.zig").Chunk;
 const ArrayFlags = @import("array.zig").ArrayFlags;
 const Rc = @import("rc.zig").Rc;
 const opmod = @import("operator.zig");
@@ -12,36 +11,29 @@ const util = @import("../util.zig");
 const activeTag = std.meta.activeTag;
 const ExtObj = @import("plugin.zig").ExtObj;
 const ExtVTable = @import("plugin.zig").ExtVTable;
-const ExtRegistry = @import("plugin.zig").ExtRegistry;
 
 pub const Err = enum { domain, length, rank, nyi, memory, @"type", io };
 
 pub const V = union(K) {
-  // Field order must match K enum declaration order exactly.
   blank, err: Err,
   b: bool, i: i32, f: f32, s: u32, c: u8,
-  func: opmod.Fn,          // inline 8-byte, no alloc, no RC
-  partial: *Partial, // heap, RC inside Partial
+  func: opmod.Fn,
+  partial: *Partial,
   L: N(V), m: Dict, M: Dict,
-  x: *ExtObj,        // heap, RC inside ExtObj
+  x: *ExtObj,
   B: N(bool), I: N(i32), F: N(f32), S: N(u32), C: N(u8),
 
   pub const @"0N" = std.math.minInt(i32);
-
   pub inline fn wrap(comptime k: K, v: holder(k)) V { return @unionInit(V, @tagName(k), v); }
   pub inline fn unwrap(v: V, comptime k: K) holder(k) { return @field(v, @tagName(k)); }
-
   pub inline fn tag(v: V) K { return activeTag(v); }
   pub inline fn code(v: V) usize { return v.tag().code(); }
-  
   pub fn isAtom(v: V) bool { return v.tag().isAtom(); }
   pub fn isVec(v: V) bool { return v.tag().isVec(); }
   pub fn isDict(v: V) bool { return switch (v.tag()) { .m, .M => true, else => false }; }
   pub fn isLambda(v: V) bool { return v == .func and v.func.isLambda(); }
   pub fn isPartial(v: V) bool { return v == .partial; }
-  
   pub fn asPartial(v: V) *Partial { return v.partial; }
-
   pub fn Ints(alloc: Alloc, x: []const i32) !V { return .{ .I = try N(i32).n1(alloc, x) }; }
   pub fn Floats(alloc: Alloc, x: []const f32) !V { return .{ .F = try N(f32).n1(alloc, x) }; }
   pub fn Symbols(alloc: Alloc, x: []const u32) !V { return .{ .S = try N(u32).n1(alloc, x) }; }

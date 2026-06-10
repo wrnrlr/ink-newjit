@@ -249,12 +249,12 @@ test "partial adverb" {
 test "partial amend" {
   var t = try Tester.init(); defer t.deinit();
   // 3-arg amend with the function slot blank, then completed.
-  // try t.check("@[\"ABC\";1;](_:)", "\"AbC\"");
-  // try t.check("@[1 2 3;1;](-:)", "1 -2 3");
+  try t.check("@[\"ABC\";1;](_:)", "\"AbC\"");
+  try t.check("@[1 2 3;1;](-:)", "1 -2 3");
   // 3-arg drill (path), function completed later.
-  // try t.check(".[(1 2 3;4 5 6);0 1;](-:)", "(1 -2 3;4 5 6)");
+  try t.check(".[(1 2 3;4 5 6);0 1;](-:)", "(1 -2 3;4 5 6)");
   // Partial amend saved, then completed.
-  // try t.check("c:(@[\"aBc\";1;]); c(_:)", "\"abc\"");
+  try t.check("c:(@[\"aBc\";1;]); c(_:)", "\"abc\"");
 }
 test "dyadic verb" {
   var t = try Tester.init(); defer t.deinit();
@@ -1016,51 +1016,6 @@ test "grade ascending list" {
   try t.check("<(1 2 3; 4 5 6)", "0 1");
   try t.check("<(4 5 6; 1 2 3)", "1 0");
   try t.check("<(\"b\";\"a\";\"c\")", "1 0 2");
-}
-
-test "insert dict into table" {
-  var t = try Tester.init(); defer t.deinit();
-  // try t.check("[[]c1:`a`b`a;c2:1 2 7],`c1`c2!(`a;12)", "[[]c1:`a`b`a`a;c2:1 2 7 12]");
-  // try t.check("[[]c1:`a`b`a;c2:1 2 7],[c1:`c;c2:12]", "[[]c1:`a`b`a`c;c2:1 2 7 12]");
-}
-
-test "upsert dict into utable" {
-  var t = try Tester.init(); defer t.deinit();
-  // update existing key
-  // try t.check("[[c1:`a`b`c]c2:1 2 7],[c1:`a;c2:12]", "[[c1:`a`b`c]c2:12 2 7]");
-  // try t.check("[[c1:`a`b`c]c2:1 2 7],[c1:`b;c2:12]", "[[c1:`a`b`c]c2:1 12 7]");
-  // insert new key
-  // try t.check("[[c1:`a`b`c]c2:1 2 7],`c1`c2!(`d;12)", "[[c1:`a`b`c`d]c2:1 2 7 12]");
-}
-
-test "union join two tables" {
-  // var t = try Tester.init(); defer t.deinit();
-  // basic union join
-  // try t.check("[[]s:`a`b;p:1 2;q:3 4],[[]s:`b`c;p:11 12;q:21 22]", "[[]s:`a`b`b`c;p:1 2 11 12;q:3 4 21 22]");
-  // single-row tables
-  // try t.check("[[]x:1;y:10],[[]x:2;y:20]", "[[]x:1 2;y:10 20]");
-  // different columns: return t1 unchanged
-  // try t.check("[[]x:1 2;y:3 4],[[]a:5 6;b:7 8]", "[[]x:1 2;y:3 4]");
-}
-
-test "left join table with utable" {
-  // var t = try Tester.init(); defer t.deinit();
-  // value column override + new column
-  // try t.check("[[]s:`a`b`c;p:1 2 3;q:7 8 9],[[s:`a`b`x`y`z]q:101 102 103 104 105;r:51 52 53 54 55]", "[[]s:`a`b`c;p:1 2 3;q:101 102 9;r:51 52 0]");
-  // all rows match
-  // try t.check("[[]s:`a`b;v:10 20],[[s:`a`b]v:100 200;w:1 2]", "[[]s:`a`b;v:100 200;w:1 2]");
-  // no rows match: all from t, extra col is 0
-  // try t.check("[[]s:`c`d;v:10 20],[[s:`a`b]v:100 200;w:1 2]", "[[]s:`c`d;v:10 20;w:0 0]");
-}
-
-test "outer join two utables" {
-  var t = try Tester.init(); defer t.deinit();
-  // from spec: overlapping keys update, new keys append
-  // try t.check("[[s:`a`b]p:1 2;q:3 4],[[s:`b`c]p:9 8;q:7 6]", "[[s:`a`b`c]p:1 9 8;q:3 7 6]");
-  // no overlap: all rows from both
-  // try t.check("[[s:`a]p:1;q:3],[[s:`b]p:9;q:7]", "[[s:`a`b]p:1 9;q:3 7]");
-  // full overlap: k2 overrides all of k1
-  // try t.check("[[s:`a`b]p:1 2;q:3 4],[[s:`a`b]p:9 8;q:7 6]", "[[s:`a`b]p:9 8;q:7 6]");
 }
 
 test "comment" {

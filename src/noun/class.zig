@@ -1,13 +1,8 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const N = @import("value.zig").N;
 const Alloc = std.mem.Allocator;
 
-// Scalars occupy codes 2–6. Vectors are scalar | VEC_BIT (code 2–6 → 18–22).
-// This makes container/atom single bitwise ops and type predicates range checks.
-//
-// Compact sequential dispatch codes (code() → 0–17, dense):
-//   blank=0 err=1 b=2 i=3 f=4 s=5 c=6 func=7 partial=8 L=9 m=10 M=11 x=12
-//   B=13 I=14 F=15 S=16 C=17
 pub const K = enum(u8) {
   blank   = 0,
   err     = 1,
@@ -32,19 +27,14 @@ pub const K = enum(u8) {
   pub const NON_VEC_COUNT: u8 = 13;   // blank(0)..x(12)
   pub const COUNT: usize      = @typeInfo(K).@"enum".fields.len; // 18
 
-  // Compact sequential index for dispatch-table keys (0–17, always dense).
-  // Non-vector tags map to themselves (0–12).
-  // Vector tags strip VEC_BIT and map into 13–17.
   pub inline fn code(k: K) usize {
     const v = @intFromEnum(k);
     if (v & VEC_BIT != 0) return @as(usize, v & ~@as(u8, VEC_BIT)) - 2 + NON_VEC_COUNT;
     return v;
   }
 
-  // Stable byte for binary serialisation (equals code()).
   pub inline fn serCode(k: K) u8 { return @intCast(k.code()); }
 
-  // Inverse of serCode: compact index → K.  Returns null for unknown codes.
   pub fn fromCode(c: u8) ?K {
     return switch (c) {
       0  => .blank,
@@ -60,23 +50,14 @@ pub const K = enum(u8) {
   pub fn isScalar(k: K) bool { const v = @intFromEnum(k); return v >= 2 and v <= 6; }
   pub fn isAtom(k: K)   bool { return k.isScalar(); }
   pub fn isVec(k: K)    bool { return @intFromEnum(k) & VEC_BIT != 0; }
-
-  // Strip VEC_BIT and test element range (b/B=2, i/I=3, f/F=4).
   pub fn isNumeric(k: K) bool {
     const e = @intFromEnum(k) & ~@as(u8, VEC_BIT);
     return e >= 2 and e <= 4;
   }
-  pub fn isFloat(k: K) bool {
-    return (@intFromEnum(k) & ~@as(u8, VEC_BIT)) == 4;
-  }
+  pub fn isFloat(k: K) bool { return (@intFromEnum(k) & ~@as(u8, VEC_BIT)) == 4; }
   pub fn isMap(k: K) bool { return k == .m or k == .M; }
   pub fn isPlural(k: K) bool { return k.isVec() and k.isMap() and k == .L; } 
-
-  // b → B, i → I, etc.  Caller must ensure k is a scalar type.
-  pub inline fn container(comptime k: K) K {
-    return @enumFromInt(@intFromEnum(k) | VEC_BIT);
-  }
-  // B → b, I → i, etc.  Caller must ensure k is a vector type.
+  pub inline fn container(comptime k: K) K { return @enumFromInt(@intFromEnum(k) | VEC_BIT); }
   pub inline fn atom(comptime k: K) K {
     std.debug.assert(k.isVec());
     return @enumFromInt(@intFromEnum(k) & ~@as(u8, VEC_BIT));
