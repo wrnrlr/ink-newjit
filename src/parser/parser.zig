@@ -25,18 +25,17 @@ pub const Parser = struct {
     const t = l.next();
     return .{ .arena = std.heap.ArenaAllocator.init(backing), .src = "", .lex = l, .tok = t };
   }
+  fn eat(self: *Parser, tt: TT) bool {
+    if (self.tok.tt == tt) { self.advance(); return true; }
+    return false;
+  }
   pub fn deinit(self: *Parser) void { self.arena.deinit(); }
   pub fn free(_: Parser, _: *Node) void {}
-
   fn al(self: *Parser) Alloc { return self.arena.allocator(); }
   fn advance(self: *Parser) void { self.tok = self.lex.next(); }
   fn skipComments(self: *Parser) void { while (self.tok.tt == .comment) self.advance(); }
   fn is(self: *Parser, tt: TT) bool { return self.tok.tt == tt; }
   fn slice(self: *Parser) []const u8 { return self.tok.slice(self.src); }
-  fn eat(self: *Parser, tt: TT) bool {
-    if (self.tok.tt == tt) { self.advance(); return true; }
-    return false;
-  }
   fn isNounStart(self: *Parser) bool {
     return switch (self.tok.tt) {
       .int, .float, .bit, .bits, .string, .symbol, .iden,
@@ -44,12 +43,8 @@ pub const Parser = struct {
       else => false,
     };
   }
-  fn isVerbStart(self: *Parser) bool {
-    return switch (self.tok.tt) { .op, .keyword, .io => true, else => false };
-  }
-  fn isEnd(self: *Parser) bool {
-    return switch (self.tok.tt) { .sep, .eof, .@"}", .@"]", .@")" => true, else => false };
-  }
+  fn isVerbStart(self: *Parser) bool { return switch (self.tok.tt) { .op, .keyword, .io => true, else => false }; }
+  fn isEnd(self: *Parser) bool { return switch (self.tok.tt) { .sep, .eof, .@"}", .@"]", .@")" => true, else => false }; }
   fn node(self: *Parser, val: Node) ParseError!*Node {
     const m = try self.al().create(Node);
     m.* = val;
@@ -494,31 +489,18 @@ pub const Parser = struct {
   }
 };
 
-const ta = std.testing.allocator;
-
-test "parse transit" {
-  var p = Parser.init(ta);
-  defer p.deinit();
-  const n = try p.parse("1+1");
-  const s = n.terse.stmts[0].node;
-  try std.testing.expect(s.* == .transit);
-  try std.testing.expectEqualStrings("+", s.transit.v.op);
-}
-
-test "parse dict" {
-  var p = Parser.init(ta);
-  defer p.deinit();
-  const n = try p.parse("[name:\"Bob\";age:42]");
-  const s = n.terse.stmts[0].node;
-  try std.testing.expect(s.* == .dict);
-  try std.testing.expect(s.dict.items.?.len == 2);
-}
-
-test "parse monad value" {
-  var p = Parser.init(ta);
-  defer p.deinit();
-  const n = try p.parse("*:1 2 3");
-  const s = n.terse.stmts[0].node;
-  try std.testing.expect(s.* == .apposit);
-  try std.testing.expect(s.apposit.f.* == .monad);
+test "parser" {
+  var p = Parser.init(std.testing.allocator); defer p.deinit();
+  const n1 = try p.parse("1+1");
+  const s1 = n1.terse.stmts[0].node;
+  try std.testing.expect(s1.* == .transit);
+  try std.testing.expectEqualStrings("+", s1.transit.v.op);
+  const n2 = try p.parse("[name:\"Bob\";age:42]");
+  const s2 = n2.terse.stmts[0].node;
+  try std.testing.expect(s2.* == .dict);
+  try std.testing.expect(s2.dict.items.?.len == 2);
+  const n3 = try p.parse("*:1 2 3");
+  const s3 = n3.terse.stmts[0].node;
+  try std.testing.expect(s3.* == .apposit);
+  try std.testing.expect(s3.apposit.f.* == .monad);
 }
