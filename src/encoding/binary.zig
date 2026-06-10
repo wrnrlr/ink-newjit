@@ -40,10 +40,7 @@ const Err = value.Err;
 
 const VERSION: u8 = 0x03;
 
-// ---------------------------------------------------------------------------
 // Serialization
-// ---------------------------------------------------------------------------
-
 pub fn serialize(alloc: Alloc, pool: *const Pool, v: V) !V {
   var buf: std.ArrayList(u8) = .empty;
   defer buf.deinit(alloc);
@@ -129,10 +126,7 @@ fn writeStr(buf: *std.ArrayList(u8), alloc: Alloc, s: []const u8) !void {
   try buf.appendSlice(alloc, s);
 }
 
-// ---------------------------------------------------------------------------
 // Deserialization
-// ---------------------------------------------------------------------------
-
 pub fn deserialize(alloc: Alloc, pool: *Pool, bytes: []const u8) !V {
   if (bytes.len < 1) return .{ .err = .domain };
   if (bytes[0] != VERSION) return .{ .err = .domain };
