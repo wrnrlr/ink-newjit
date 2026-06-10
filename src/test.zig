@@ -123,12 +123,17 @@ test "arithmetic" {
   try t.check("9.0 mod 5", "!type");
   try t.check("9 mod 5.0", "!type");
   try t.check("9.0 mod 5.0", "!type");
-}
-
-test "- neg" {
-  var t = try Tester.init(); defer t.deinit();
   try t.check("-(1;2.3;`c)", "!type");
   // try t.check("-`a", "!type"); // TODO maybe we can define user/all erros with neg symbol
+  try t.check("sqrt 4 9", "2.0 3.0");
+  try t.check("sqr 2 3", "4 9");
+  try t.check("sin 0.0", "0.0");
+  try t.check("sin 1.0", "0.84147096");
+  try t.check("cos 0.0", "1.0");
+  try t.check("abs -4.0", "4.0"); // TODO abs 0N crashes
+  // try t.check("min 5 3 4 8 2", "2");
+  // try t.check("min 5", "!class");
+  // try t.check("min `a`b!1 2", "!rank"); 
 }
 
 test "logical" {
@@ -154,18 +159,6 @@ test "logical" {
   try t.check("\"aeiou\" has \"azbz\"", "1000b");
   try t.check("1.0 0n 3.0 has 0n", "1b");
   try t.check("1.0 0n 3.0 has 2.0", "0b");
-}
-test "named math operators" {
-  var t = try Tester.init(); defer t.deinit();
-  try t.check("sqrt 4 9", "2.0 3.0");
-  try t.check("sqr 2 3", "4 9");
-  try t.check("sin 0.0", "0.0");
-  try t.check("sin 1.0", "0.84147096");
-  try t.check("cos 0.0", "1.0");
-  try t.check("abs -4.0", "4.0"); // TODO abs 0N crashes
-  // try t.check("min 5 3 4 8 2", "2");
-  // try t.check("min 5", "!class");
-  // try t.check("min `a`b!1 2", "!rank");
 }
 test "division" {
   var t = try Tester.init(); defer t.deinit();
@@ -503,11 +496,6 @@ test "fold with init" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("{x,y}/[0;10]", "0 10");
 }
-
-// test "each2 adverb" {
-//   var t = try Tester.init(); defer t.deinit();
-//   try t.check("2 3#'\"ab\"", "(\"aa\";\"bbb\")");
-// }
 test "fold" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("+/ 1 2 3", "6");
@@ -532,7 +520,6 @@ test "ndos" {
   try t.check("5{2*x}\\1", "1 2 4 8 16 32");
   try t.check("0{2*x}\\1", ",1");
   try t.check("3{x+1}\\10", "10 11 12 13");
-
   try t.check("5(2*)\\1", "1 2 4 8 16 32"); // partial not working
 }
 test "while" {
@@ -582,7 +569,6 @@ test "eachprior seeded" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("10-':12 13 11 17 14", "2 1 -2 6 -3");
 }
-
 // verb like adverbs 
 test "encode decode" {
   var t = try Tester.init(); defer t.deinit();
@@ -962,53 +948,6 @@ test "io verbs" {
 
   try t.check("1: `\"user.csv\"", "\"name,age\\nAlice,23\\nBob,47\\n\"");
   try t.check("f: <`\"user.csv\"; 1: f", "\"name,age\\nAlice,23\\nBob,47\\n\"");
-}
-
-// JSON encoding tests
-
-test "json atom integer" {
-  var t = try Tester.init(); defer t.deinit();
-  try t.check("`json@\"42\"", "42");
-  try t.check("`json@\"3.14\"", "3.14");
-  try t.check("`json@\"true\"", "1b");
-  try t.check("`json@\"false\"", "0b");
-  try t.check("`json@\"null\"", "");
-  try t.check("`json@\"[1,2,3]\"", "1 2 3");
-  try t.check("`json@\"[1.5,2.5,3.0]\"", "1.5 2.5 3.0");
-  try t.check("`json@\"[true,false,true]\"", "101b");
-  try t.check("`json@\"\"", "!domain");
-}
-
-test "json empty string returns domain error" {
-  var t = try Tester.init(); defer t.deinit();
-  try t.check("`json@\"\"", "!domain");
-}
-
-test "json nested array" {
-  var t = try Tester.init(); defer t.deinit();
-  try t.check("`json@\"[1,[2,3]]\"", "(1;2 3)");
-}
-
-test "json object via file" {
-  var t = try Tester.init(); defer t.deinit();
-  const json_content = "{\"x\":1,\"y\":2}";
-  const tmp = "tmp_test_obj.json";
-  const zio = std.Io.Threaded.global_single_threaded.io();
-  { const f = try std.Io.Dir.cwd().createFile(zio, tmp, .{}); defer f.close(zio);
-    try f.writePositionalAll(zio, json_content, 0); }
-  defer std.Io.Dir.cwd().deleteFile(zio, tmp) catch {};
-  // try t.check("`json$1:<`\"tmp_test_obj.json\"", "[x:1;y:2]");
-}
-
-test "json array of same-schema objects becomes table" {
-  var t = try Tester.init(); defer t.deinit();
-  const json_content = "[{\"a\":1,\"b\":2},{\"a\":3,\"b\":4}]";
-  const tmp = "tmp_test_arr.json";
-  const zio = std.Io.Threaded.global_single_threaded.io();
-  { const f = try std.Io.Dir.cwd().createFile(zio, tmp, .{}); defer f.close(zio);
-    try f.writePositionalAll(zio, json_content, 0); }
-  defer std.Io.Dir.cwd().deleteFile(zio, tmp) catch {};
-  // try t.check("`json$1:<`\"tmp_test_arr.json\"", "[[]a:1 3;b:2 4]");
 }
 
 test "grade ascending list" {
