@@ -156,7 +156,5 @@ pub fn main(init: std.process.Init.Minimal) !void {
   // Find 'loop' global — if absent, file was already evaluated; exit cleanly
   const loop_idx = vm.names.get("loop") orelse return;
   if (!vm.globals[loop_idx].isLambda()) return;
-  // UI runner removed in Phase-0 GPU strip; the loop lambda is parsed but not
-  // invoked. When the graphics stack is restored, dispatch back to runner_ui.
   _ = vm.globals[loop_idx];
 }
