@@ -6,7 +6,7 @@ const Alloc = std.mem.Allocator;
 pub const K = enum(u8) {
   blank   = 0, err     = 1,
   b = 2, i       = 3, f       = 4, s       = 5, c       = 6,
-  func    = 7, partial = 8,
+  o       = 7, p       = 8,
   L       = 9, m       = 10, M       = 11, x       = 12,
   B = 2  | VEC_BIT, I = 3  | VEC_BIT, F = 4  | VEC_BIT, S = 5  | VEC_BIT, C = 6  | VEC_BIT,
 
@@ -27,7 +27,7 @@ pub const K = enum(u8) {
       0  => .blank,
       1  => .err,
       2  => .b,   3  => .i,   4  => .f,   5  => .s,   6  => .c,
-      7  => .func, 8 => .partial, 9 => .L, 10 => .m, 11 => .M,
+      7  => .o,    8 => .p,       9 => .L, 10 => .m, 11 => .M,
       12 => .x,
       13 => .B,  14 => .I,  15 => .F,  16 => .S,  17 => .C,
       else => null,

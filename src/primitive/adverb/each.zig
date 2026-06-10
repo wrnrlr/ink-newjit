@@ -11,8 +11,8 @@ const promote = @import("../promote.zig").promote;
 pub fn each(vm: *VM, base: V, x: V, f: util.ApplyFn) V {
   const n = x.len();
   var res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
-  const is_lambda = base.tag() == .func and base.func.isLambda();
-  const lambda_ref = if (is_lambda) base.func else undefined;
+  const is_lambda = base.tag() == .o and base.o.isLambda();
+  const lambda_ref = if (is_lambda) base.o else undefined;
   for (0..n) |i| {
     const item = x.at(i);
     const args = [_]V{item};

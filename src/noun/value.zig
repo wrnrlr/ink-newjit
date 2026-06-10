@@ -9,14 +9,13 @@ const N = @import("array.zig").N;
 const Dict = @import("dict.zig").Dict;
 const util = @import("../util.zig");
 const ExtObj = @import("plugin.zig").ExtObj;
-const ExtVTable = @import("plugin.zig").ExtVTable;
 
 pub const Err = enum { domain, length, rank, nyi, memory, @"type", io };
 
 pub const V = union(K) {
   blank, err: Err,
   b: bool, i: i32, f: f32, s: u32, c: u8,
-  func: opmod.Fn, partial: *Partial,
+  o: opmod.Fn, p: *Partial,
   L: N(V), m: Dict, M: Dict, x: *ExtObj,
   B: N(bool), I: N(i32), F: N(f32), S: N(u32), C: N(u8),
 
@@ -28,9 +27,9 @@ pub const V = union(K) {
   pub fn isAtom(v: V) bool { return v.tag().isAtom(); }
   pub fn isVec(v: V) bool { return v.tag().isVec(); }
   pub fn isDict(v: V) bool { return switch (v.tag()) { .m, .M => true, else => false }; }
-  pub fn isLambda(v: V) bool { return v == .func and v.func.isLambda(); }
-  pub fn isPartial(v: V) bool { return v == .partial; }
-  pub fn asPartial(v: V) *Partial { return v.partial; }
+  pub fn isLambda(v: V) bool { return v == .o and v.o.isLambda(); }
+  pub fn isPartial(v: V) bool { return v == .p; }
+  pub fn asPartial(v: V) *Partial { return v.p; }
   pub fn Ints(alloc: Alloc, x: []const i32) !V { return .{ .I = try N(i32).n1(alloc, x) }; }
   pub fn Floats(alloc: Alloc, x: []const f32) !V { return .{ .F = try N(f32).n1(alloc, x) }; }
   pub fn Symbols(alloc: Alloc, x: []const u32) !V { return .{ .S = try N(u32).n1(alloc, x) }; }
@@ -56,7 +55,7 @@ pub const V = union(K) {
       inline .I => |n| { if (n.ptr.rc != std.math.maxInt(u32)) n.ptr.rc += 1; },
       inline .B, .F, .S, .C, .L => |n| n.ptr.rc += 1,
       inline .m, .M => |n| n.ptr.rc += 1,
-      .partial => |p| p.rc += 1,
+      .p => |p| p.rc += 1,
       .x => |obj| { _ = obj.ref(); },
       else => {},
     }
@@ -66,7 +65,7 @@ pub const V = union(K) {
   pub fn deinit(v: V, alloc: Alloc) void {
     switch (v) {
       inline .B, .I, .F, .S, .C, .L, .m, .M => |n| n.deinit(alloc),
-      .partial => |p| p.deinit(alloc),
+      .p => |p| p.deinit(alloc),
       .x => |obj| obj.deinit(alloc),
       else => {},
     }
@@ -109,8 +108,8 @@ pub const V = union(K) {
       .blank => true, .err => x.err == y.err,
       .b => x.b == y.b, .i => x.i == y.i, .f => x.f == y.f,
       .s => x.s == y.s, .c => x.c == y.c,
-      .func => @as(u64, @bitCast(x.func)) == @as(u64, @bitCast(y.func)),
-      .partial => x.partial == y.partial, // pointer equality
+      .o => @as(u64, @bitCast(x.o)) == @as(u64, @bitCast(y.o)),
+      .p => x.p == y.p, // pointer equality
       .x => x.x == y.x,                  // pointer equality
       inline else => |n| {
         const T = @TypeOf(n);
@@ -139,8 +138,8 @@ pub const V = union(K) {
 
   pub fn arity(v: V) u8 {
     return switch (v) {
-      .func => |r| r.getRealArity(),
-      .partial => |p| p.remaining(),
+      .o => |r| r.getRealArity(),
+      .p => |p| p.remaining(),
       .blank => 0,
       else => 1,
     };
@@ -163,7 +162,7 @@ pub const V = union(K) {
       .i => |a| a != 0 and a != @"0N", .f => |a| a != 0.0 and !std.math.isNan(a),
       inline .B, .I, .F, .S, .C, .L => |n| n.ptr.len > 0,
       inline .m, .M => |n| n.ptr.len > 0,
-      .func, .partial => true,
+      .o, .p => true,
       else => false,
     };
   }
@@ -172,7 +171,7 @@ pub const V = union(K) {
     return switch (v) {
       inline .B, .I, .F, .S, .C, .L => |n| n.ptr.rc,
       inline .m, .M => |n| n.ptr.rc,
-      .partial => |p| p.rc,
+      .p => |p| p.rc,
       .x => |obj| obj.rc,
       else => 1,
     };

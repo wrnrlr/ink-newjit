@@ -23,8 +23,8 @@ pub const Call = struct {
 
   pub fn apply(self: *Call, func: V, args: []const V, is_bracket: bool) V {
     return switch (func) {
-      .func    => |ref| self.applyFn(ref, args, is_bracket),
-      .partial => |p|   self.applyPartial(p, args, is_bracket),
+      .o    => |ref| self.applyFn(ref, args, is_bracket),
+      .p => |p|   self.applyPartial(p, args, is_bracket),
       .s       => |sym| syms.apply(self.vm, sym, args) catch V{ .err = .memory },
       .x       => |obj| self.applyExt(obj, args),
       .L, .I, .F, .S, .C, .B, .m, .M => {
@@ -187,10 +187,10 @@ fn reconstructBaseV(global_idx: u32, base_arity: u8) V {
     // Note: caller provides the cached arity since lambda table lookup
     // isn't available here without VM access.
     const lambda_idx = opmod.lambdaIdxOf(global_idx);
-    return .{ .func = Fn.lambda(lambda_idx, base_arity) };
+    return .{ .o = Fn.lambda(lambda_idx, base_arity) };
   }
   // Builtin: construct a Fn.callable directly with the global idx.
-  return .{ .func = .{
+  return .{ .o = .{
     .kind = FnKind.callable,
     .arity = @intCast(opmod.arityOfBuiltin(global_idx)),
     .idx = @intCast(global_idx),
@@ -206,7 +206,7 @@ pub fn applyDerivedBuiltin(vm: *VM, ref: Fn, args: []const V) V {
 fn allocPartial(vm: *VM, ref: Fn, arity: u8, pa: [8]V, fill: u8) V {
   const p = vm.partials.create(vm.alloc) catch return V{ .err = .memory };
   p.* = .{ .pool = &vm.partials, .rc = 1, .fill = fill, .arity = arity, ._pad = 0, .ref = ref, .args = pa };
-  return .{ .partial = p };
+  return .{ .p = p };
 }
 
 pub fn makePartialFromArgs(vm: *VM, ref: Fn, args: []const V) V {

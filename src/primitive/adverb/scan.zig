@@ -92,8 +92,8 @@ inline fn cpuScan(alloc: Alloc, op: Op2, x: V) ?V {
 // +\1 2 3 → 1 3 6  (n results, starting from x[0])
 pub fn scan(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
   // CPU fast path: no init, builtin op, typed array — returns typed result.
-  if (init == null and base.tag() == .func and fnIsBuiltinDyad(base.func)) {
-    if (cpuScan(vm.alloc, base.func.getOp2(), x)) |v| return v;
+  if (init == null and base.tag() == .o and fnIsBuiltinDyad(base.o)) {
+    if (cpuScan(vm.alloc, base.o.getOp2(), x)) |v| return v;
   }
 
   const n = x.len();
@@ -108,8 +108,8 @@ pub fn scan(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
   if (init == null) res.slice()[0] = accum.ref();
 
   var ri: usize = if (init != null) 0 else 1;
-  const is_lambda = base.tag() == .func and fnIsLambda(base.func);
-  const lambda_ref = if (is_lambda) base.func else undefined;
+  const is_lambda = base.tag() == .o and fnIsLambda(base.o);
+  const lambda_ref = if (is_lambda) base.o else undefined;
   for (start..n) |i| {
     const item = x.at(i);
     const args = [_]V{ accum, item };

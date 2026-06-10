@@ -25,10 +25,10 @@ pub fn fusedReducerOf(op: Op2) ?Op1 {
 pub fn fold(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
   // No init + builtin dyad with a fused reducer + typed array → dispatch
   // straight to the monad table entry. Avoids the per-element fold loop.
-  if (init == null and base.tag() == .func and base.func.kind == .callable
-      and opmod.isOp2Idx(base.func.idx))
+  if (init == null and base.tag() == .o and base.o.kind == .callable
+      and opmod.isOp2Idx(base.o.idx))
   {
-    if (fusedReducerOf(base.func.getOp2())) |op1| {
+    if (fusedReducerOf(base.o.getOp2())) |op1| {
       return dispatch.dispatch1(vm, op1, x);
     }
   }
@@ -42,8 +42,8 @@ pub fn fold(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
 
   const start: usize = if (init != null) 0 else 1;
 
-  if (base.tag() == .func and base.func.isLambda()) {
-    const ref = base.func;
+  if (base.tag() == .o and base.o.isLambda()) {
+    const ref = base.o;
     // Move semantics: transfer ownership of accum and item into the lambda's
     // locals. Inside the body, accum has rc==1 so in-place mutation kernels
     // (concat append, arith) can fire, turning what would be O(N²) loops into

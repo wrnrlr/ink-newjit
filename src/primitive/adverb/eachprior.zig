@@ -42,8 +42,8 @@ pub fn eachprior(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
 
   // Fast path: unseeded each-prior of a builtin arithmetic verb over a numeric
   // vector (e.g. `-':`). Falls through to the generic path otherwise.
-  if (init == null and n > 0 and base.tag() == .func and base.func.isOp2()) {
-    if (eachpriorTyped(vm, base.func.getOp2(), x)) |r| return r;
+  if (init == null and n > 0 and base.tag() == .o and base.o.isOp2()) {
+    if (eachpriorTyped(vm, base.o.getOp2(), x)) |r| return r;
   }
 
   var res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };

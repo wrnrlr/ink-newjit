@@ -145,8 +145,8 @@ pub const TerseFormatter = struct {
       },
       .m => |d| try self.formatDict(d, w),
       .M => |d| try self.formatTable(d, w),
-      .func => |ref| try self.formatFn(ref, w),
-      .partial => |p| {
+      .o => |ref| try self.formatFn(ref, w),
+      .p => |p| {
         // Compact display for operator projections: 1+ or +1
         const opmod = @import("./operator.zig");
         const is_builtin = p.ref.kind == .callable and opmod.isBuiltinIdx(p.ref.idx) and p.ref.arity == 2;

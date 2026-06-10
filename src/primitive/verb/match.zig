@@ -21,8 +21,8 @@ fn matchI      (_: *VM, x: V, y: V) V { return .{ .b = x.i == y.i }; }
 fn matchF      (_: *VM, x: V, y: V) V { return .{ .b = x.f == y.f }; }
 fn matchS      (_: *VM, x: V, y: V) V { return .{ .b = x.s == y.s }; }
 fn matchC      (_: *VM, x: V, y: V) V { return .{ .b = x.c == y.c }; }
-fn matchFunc   (_: *VM, x: V, y: V) V { return .{ .b = @as(u64, @bitCast(x.func)) == @as(u64, @bitCast(y.func)) }; }
-fn matchPartial(_: *VM, x: V, y: V) V { return .{ .b = x.partial == y.partial }; }
+fn matchFunc   (_: *VM, x: V, y: V) V { return .{ .b = @as(u64, @bitCast(x.o)) == @as(u64, @bitCast(y.o)) }; }
+fn matchPartial(_: *VM, x: V, y: V) V { return .{ .b = x.p == y.p }; }
 fn matchExtObj (_: *VM, x: V, y: V) V { return .{ .b = x.x == y.x }; }
 
 fn matchVec(comptime k: K) util.DyadFn {
@@ -63,8 +63,8 @@ fn getMatchHandler(comptime k: K) util.DyadFn {
     .f       => &matchF,
     .s       => &matchS,
     .c       => &matchC,
-    .func    => &matchFunc,
-    .partial => &matchPartial,
+    .o    => &matchFunc,
+    .p => &matchPartial,
     .x       => &matchExtObj,
     .L       => &matchL,
     .m       => matchDict(.m),

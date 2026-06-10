@@ -102,22 +102,22 @@ pub const Compiler = struct {
         // calls can fall back to Op1 via op2ToOp1 when invoked with 1 arg.
         // For Op1-only verbs (e.g. "sqrt", "first"), build a monadic Fn.
         const v: V = if (Op2.fromString(op)) |o|
-          .{ .func = Fn.dyad(o) }
+          .{ .o = Fn.dyad(o) }
         else if (Op1.fromString(op)) |o|
-          .{ .func = Fn.monad(o) }
+          .{ .o = Fn.monad(o) }
         else
-          .{ .func = Fn.makeTrain(op) };
+          .{ .o = Fn.makeTrain(op) };
         break :blk try self.emitConst(v);
       },
       .io => |io| blk: {
         const op = Op2.fromString(io) orelse return error.UnknownOp;
-        break :blk try self.emitConst(V{ .func = Fn.dyad(op) });
+        break :blk try self.emitConst(V{ .o = Fn.dyad(op) });
       },
       .monad => |mv| blk: {
         const op = Op1.fromString(mv.f) orelse return error.UnknownOp;
-        break :blk try self.emitConst(V{ .func = Fn.monad(op) });
+        break :blk try self.emitConst(V{ .o = Fn.monad(op) });
       },
-      .adverb_val => |a| try self.emitConst(V{ .func = Fn.adverb(adverbFromString(a)) }),
+      .adverb_val => |a| try self.emitConst(V{ .o = Fn.adverb(adverbFromString(a)) }),
       .command => |cmd| blk: {
         // Encode command as: verb\0count_str\0args
         var count_buf: [12]u8 = undefined;
@@ -449,7 +449,7 @@ pub const Compiler = struct {
         const op = if (i.v.* == .op) i.v.op else i.v.io;
         if (Op2.fromString(op)) |o| {
           // Partial dyadic symbolic or IO op: a v -> v(a, )
-          const v = V{ .func = Fn.dyad(o) };
+          const v = V{ .o = Fn.dyad(o) };
           var inputs: [2]ir.ValueId = undefined;
           inputs[0] = try self.emitConst(v);
           inputs[1] = try self.compileNode(i.a, false);
@@ -484,9 +484,9 @@ pub const Compiler = struct {
       if (Op1.fromString(p.v) != null or Op2.fromString(p.v) != null) {
         return try self.compilePrimitive(p.v, 1, &.{arg_id});
       } else if (std.ascii.isAlphabetic(p.v[0])) {
-        const v: V = if (Op2.fromString(p.v)) |o| .{ .func = Fn.dyad(o) }
-                     else if (Op1.fromString(p.v)) |o| .{ .func = Fn.monad(o) }
-                     else .{ .func = Fn.makeTrain(p.v) };
+        const v: V = if (Op2.fromString(p.v)) |o| .{ .o = Fn.dyad(o) }
+                     else if (Op1.fromString(p.v)) |o| .{ .o = Fn.monad(o) }
+                     else .{ .o = Fn.makeTrain(p.v) };
         var inputs: [2]ir.ValueId = undefined;
         inputs[0] = try self.emitConst(v);
         inputs[1] = arg_id;
@@ -512,7 +512,7 @@ pub const Compiler = struct {
     var ops_buf: [7]u8 = undefined;
     var ops_len: usize = 0;
     if (collectVerbOps(ap.f, &ops_buf, &ops_len) and collectVerbOps(ap.a, &ops_buf, &ops_len)) {
-      const v = V{ .func = Fn.makeTrain(ops_buf[0..ops_len]) };
+      const v = V{ .o = Fn.makeTrain(ops_buf[0..ops_len]) };
       return try self.emitConst(v);
     }
     // Tacit composition: f g where both are verb-like → lambda {f (g x)}
@@ -592,7 +592,7 @@ pub const Compiler = struct {
         return try self.emitOpWithArg(.Apply2, @intFromEnum(op), inputs);
       }
     }
-    const v = V{ .func = Fn.makeTrain(name) };
+    const v = V{ .o = Fn.makeTrain(name) };
     const f_id = try self.emitConst(v);
     var call_inputs = try std.ArrayList(ir.ValueId).initCapacity(self.alloc, inputs.len + 1);
     defer call_inputs.deinit(self.alloc);
@@ -709,7 +709,7 @@ pub const Compiler = struct {
       .range  = range_id,
     });
     chunk_owned = false;
-    return try self.emitConst(V{ .func = Fn.lambda(lambda_idx, arity_res) });
+    return try self.emitConst(V{ .o = Fn.lambda(lambda_idx, arity_res) });
   }
 
   fn compileCond(self: *Compiler, c: ast.Cond, is_tail: bool) anyerror!ir.ValueId {

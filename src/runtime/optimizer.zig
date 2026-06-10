@@ -30,10 +30,10 @@ fn isFusableBin(op: Op2) bool {
 fn isBuiltinDyad(inst: *const ir.IRInst, op: Op2) bool {
   if (inst.op != .Const) return false;
   const v = inst.val orelse return false;
-  if (v != .func) return false;
-  if (v.func.kind != .callable) return false;
-  if (!operator.isOp2Idx(v.func.idx)) return false;
-  return v.func.getOp2() == op;
+  if (v != .o) return false;
+  if (v.o.kind != .callable) return false;
+  if (!operator.isOp2Idx(v.o.idx)) return false;
+  return v.o.getOp2() == op;
 }
 
 // 256-bit set for local variable indices (max 256 locals per lambda).
@@ -172,10 +172,10 @@ pub const Optimizer = struct {
           const base = scope_ir.get(base_id);
           if (base.op == .Const) blk: {
             const v = base.val orelse break :blk;
-            if (v != .func) break :blk;
-            if (v.func.kind != .callable) break :blk;
-            if (!operator.isOp2Idx(v.func.idx)) break :blk;
-            const fused = fold_mod.fusedReducerOf(v.func.getOp2()) orelse break :blk;
+            if (v != .o) break :blk;
+            if (v.o.kind != .callable) break :blk;
+            if (!operator.isOp2Idx(v.o.idx)) break :blk;
+            const fused = fold_mod.fusedReducerOf(v.o.getOp2()) orelse break :blk;
 
             const old_inputs = inst.inputs;
             const new_inputs = try scope_ir.alloc.alloc(ir.ValueId, 1);
@@ -374,8 +374,8 @@ pub const Optimizer = struct {
       const func_inst = scope_ir.get(func_id);
       if (func_inst.op != .Const) continue;
       const fval = func_inst.val orelse continue;
-      if (fval != .func) continue;
-      const fn_ref = fval.func;
+      if (fval != .o) continue;
+      const fn_ref = fval.o;
       if (fn_ref.kind != .callable or !operator.isLambdaIdx(fn_ref.idx)) continue;
       const lambda_idx = operator.lambdaIdxOf(fn_ref.idx);
       if (lambda_idx >= fn_tables.lambdas.items.len) continue;

@@ -12,8 +12,8 @@ const N = @import("../../noun/array.zig").N;
 pub fn ndo(vm: *VM, base: V, n: i32, init: V, f: util.ApplyFn) V {
   if (n < 0) return .{ .err = .domain };
   var accum = init.ref();
-  if (base.tag() == .func and base.func.isLambda()) {
-    const ref = base.func;
+  if (base.tag() == .o and base.o.isLambda()) {
+    const ref = base.o;
     for (0..@intCast(n)) |_| {
       const args = [_]V{ accum };
       accum = vm.callLambdaAndRunMove(ref, &args);

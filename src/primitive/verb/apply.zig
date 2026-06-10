@@ -33,7 +33,7 @@ fn makeApply1() type {
   var attrs: []const h.Attr = &.{
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
-  const apply_x_types = [_]K{ .func, .partial, .s };
+  const apply_x_types = [_]K{ .o, .p, .s };
   for (apply_x_types) |xk| {
     for (all_k_types) |yk| {
       const handler: util.DyadFn = if (xk == .s) &applySymFn else &applyFnFn;

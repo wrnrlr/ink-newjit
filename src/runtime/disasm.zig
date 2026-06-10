@@ -204,7 +204,7 @@ fn fmtValue(v: V, symbols: *const Pool, out: *std.Io.Writer) anyerror!void {
     .f       => |f| try out.print("{d}", .{f}),
     .c       => |c| try out.print("\"{c}\"", .{c}),
     .s       => |s| try out.print("`{s}", .{symbols.get(s)}),
-    .partial => |p| try out.print("partial(arity={d})", .{p.arity}),
+    .p => |p| try out.print("partial(arity={d})", .{p.arity}),
     .m       => try out.print("dict", .{}),
     .M       => try out.print("table", .{}),
 
@@ -234,7 +234,7 @@ fn fmtValue(v: V, symbols: *const Pool, out: *std.Io.Writer) anyerror!void {
       try out.print("\"", .{});
     },
 
-    .func => |f| switch (f.kind) {
+    .o => |f| switch (f.kind) {
       .callable => {
         const idx = f.idx;
         if (opmod.isLambdaIdx(idx)) {

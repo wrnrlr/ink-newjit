@@ -37,8 +37,8 @@ fn Amend3Vec(comptime k: K) type {
 // True when f is the builtin assignment verb `:` (dyadic right). Amend with `:`
 // is plain element assignment, so it can skip the per-element verb dispatch.
 inline fn isAssign(f: V) bool {
-  return f.tag() == .func and f.func.isBuiltinFn()
-    and opmod.isOp2Idx(f.func.idx) and f.func.getOp2() == .@":";
+  return f.tag() == .o and f.o.isBuiltinFn()
+    and opmod.isOp2Idx(f.o.idx) and f.o.getOp2() == .@":";
 }
 
 fn Amend4Vec(comptime k: K) type {
@@ -273,7 +273,7 @@ fn drill(vm: *VM, target: *V, path: V, path_idx: usize, func: V, val: V) !void {
   if (path_idx == path_len) {
     if (func.tag() == .blank) return;
 
-    if (func.tag() == .func and func.func.isBuiltinFn() and opmod.isOp2Idx(func.func.idx) and func.func.getOp2() == .@":") {
+    if (func.tag() == .o and func.o.isBuiltinFn() and opmod.isOp2Idx(func.o.idx) and func.o.getOp2() == .@":") {
       target.deinit(vm.alloc);
       target.* = val.ref();
       return;
@@ -329,7 +329,7 @@ fn applyAt(vm: *VM, target: *V, key: V, func: V, val: V) !void {
   // val is owned by this function
   errdefer val.deinit(vm.alloc);
 
-  if (func.tag() == .func and func.func.isBuiltinFn() and opmod.isOp2Idx(func.func.idx) and func.func.getOp2() == .@":") {
+  if (func.tag() == .o and func.o.isBuiltinFn() and opmod.isOp2Idx(func.o.idx) and func.o.getOp2() == .@":") {
     try setAt(vm, target, key, val);
     return;
   }

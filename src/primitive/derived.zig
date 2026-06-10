@@ -10,7 +10,7 @@ const adverbs = @import("adverb/adverbs.zig");
 pub fn derived(vm: *VM, base: V, adv: Adverb, args: []const V, f: util.ApplyFn) V {
   // Stencil: f'[n;x] — integer n means window size, not each2 broadcast.
   if (adv == .@"'" and args.len == 2 and args[0].tag() == .i
-      and base.tag() == .func and base.func.getRealArity() == 1)
+      and base.tag() == .o and base.o.getRealArity() == 1)
     return adverbs.stencil(vm, args[0], base, args[1], f);
   // Multi-arg each: f'[x;y;...] → apply base element-wise across tuples.
   if (adv == .@"'" and args.len >= 2)
@@ -50,13 +50,13 @@ fn derived3(vm: *VM, adv: Adverb, x: V, y: V, z: V, f: util.ApplyFn) V {
     .@"'" => .{ .err = .nyi },
     .@"/" => blk: {
       if (y.tag() == .i and x.arity() == 1) break :blk adverbs.ndo(vm, x, y.i, z, f);
-      if ((y.tag() == .func or y.tag() == .partial) and x.arity() >= 1)
+      if ((y.tag() == .o or y.tag() == .p) and x.arity() >= 1)
         break :blk adverbs.whiledo(vm, y, x, z, f);
       break :blk adverbs.fold(vm, x, y, z, f);
     },
     .@"\\" => blk: {
       if (y.tag() == .i and x.arity() == 1) break :blk adverbs.ndos(vm, x, y.i, z, f);
-      if ((y.tag() == .func or y.tag() == .partial) and x.arity() >= 1)
+      if ((y.tag() == .o or y.tag() == .p) and x.arity() >= 1)
         break :blk adverbs.whilescan(vm, y, x, z, f);
       break :blk adverbs.scan(vm, x, y, z, f);
     },

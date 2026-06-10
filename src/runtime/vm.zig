@@ -382,8 +382,8 @@ pub const VM = struct {
     const func_val = vm.pop();
     defer func_val.deinit(vm.alloc);
 
-    if (func_val == .func) {
-      const ref = func_val.func;
+    if (func_val == .o) {
+      const ref = func_val.o;
       const kind = ref.kind;
       // Tail-call lambda: reuse current frame instead of pushing a new one.
       if (kind == .callable and opmod.isLambdaIdx(ref.idx)) {
@@ -504,13 +504,13 @@ pub const VM = struct {
     var base_ref: Fn = undefined;
     var existing: [8]V = .{.blank} ** 8;
     var existing_fill: u8 = 0;
-    if (func_val == .partial) {
+    if (func_val == .p) {
       const p = func_val.asPartial();
       base_ref = p.ref;
       existing = p.args;
       existing_fill = p.fill;
-    } else if (func_val == .func) {
-      base_ref = func_val.func;
+    } else if (func_val == .o) {
+      base_ref = func_val.o;
     } else {
       for (vm.stack[args_start - 1 .. vm.stack_len]) |*v| v.deinit(vm.alloc);
       vm.stack_len = args_start - 1;
@@ -543,14 +543,14 @@ pub const VM = struct {
 
     for (vm.stack[args_start - 1 .. vm.stack_len]) |*v| v.deinit(vm.alloc);
     vm.stack_len = args_start - 1;
-    try vm.push(.{ .partial = p });
+    try vm.push(.{ .p = p });
   }
 
   fn doDerive(vm: *VM) !void {
     const adv: Adverb = @enumFromInt(vm.readByte());
     const base_v = vm.pop();
-    const derived: Fn = if (base_v == .func) blk: {
-      const ref = base_v.func;
+    const derived: Fn = if (base_v == .o) blk: {
+      const ref = base_v.o;
       base_v.deinit(vm.alloc);
       break :blk switch (ref.kind) {
         // Any callable (builtin verb/adverb or lambda) uses its global idx.
@@ -558,7 +558,7 @@ pub const VM = struct {
         // Trains as base aren't directly representable as a single global idx;
         // stash the base V in the derived table.
         else => blk2: {
-          const idx = try vm.fn_tables.addDerived(.{ .base = V{ .func = ref }, .adverb = adv });
+          const idx = try vm.fn_tables.addDerived(.{ .base = V{ .o = ref }, .adverb = adv });
           break :blk2 Fn.makeDerivedTable(idx, adv);
         },
       };
@@ -567,7 +567,7 @@ pub const VM = struct {
       const idx = try vm.fn_tables.addDerived(.{ .base = base_v, .adverb = adv });
       break :blk Fn.makeDerivedTable(idx, adv);
     };
-    try vm.push(.{ .func = derived });
+    try vm.push(.{ .o = derived });
   }
   
   fn doMakeList(vm: *VM) !void {
