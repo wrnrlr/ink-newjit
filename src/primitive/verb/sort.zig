@@ -1,4 +1,5 @@
 const std = @import("std");
+const radix = @import("sort/radixsort.zig");
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
@@ -116,7 +117,10 @@ pub fn sortIndices(alloc: Alloc, v: V, desc: bool) V {
   for (0..length) |i| idx_buf[i] = i;
 
   switch (v) {
-    inline .I, .S, .C, .F, .B => |n| {
+    .I => |n| radix.sortI32(alloc, idx_buf, n.slice(), desc) catch return V{ .err = .memory },
+    .S => |n| radix.sortU32(alloc, idx_buf, n.slice(), desc) catch return V{ .err = .memory },
+    .C => |n| radix.sortU8(alloc, idx_buf, n.slice(), desc) catch return V{ .err = .memory },
+    inline .F, .B => |n| {
       const Ctx = Context(@TypeOf(n.slice()));
       std.sort.block(usize, idx_buf, Ctx{ .data = n.slice(), .desc = desc }, Ctx.cmp);
     },

@@ -1,6 +1,5 @@
 const std = @import("std");
 const util = @import("../../util.zig");
-const broadcast = @import("../broadcast.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const V = @import("../../noun/value.zig").V;
 const Dict = @import("../../noun/dict.zig").Dict;
@@ -8,8 +7,6 @@ const K = @import("../../noun/class.zig").K;
 const Op2 = @import("../../noun/operator.zig").Op2;
 const h = @import("helper.zig");
 
-// Key types: scalars + typed vecs + generic list.
-// Value types: all of the above plus dict (m) and table (M).
 const key_types = [_]K{ .b, .i, .f, .s, .c, .B, .I, .F, .S, .C, .L };
 const val_types = [_]K{ .b, .i, .f, .s, .c, .B, .I, .F, .S, .C, .L, .m, .M };
 
@@ -49,7 +46,7 @@ fn dictAtomKey(vm: *VM, x: V, y: V) V {
 }
 
 fn dictVecAtom(vm: *VM, x: V, y: V) V {
-  const vals = broadcast.broadcastAtom(vm, y, x.len()) catch return V{ .err = .memory };
+  const vals = broadcastAtom(vm, y, x.len()) catch return V{ .err = .memory };
   const a2 = x.ref();
   return .{ .m = Dict.init(vm.alloc, a2, vals) catch return V{ .err = .memory } };
 }
@@ -66,4 +63,17 @@ pub fn dict(vm: *VM, x: V, y: V) V {
   if (x.isAtom()) return dictAtomKey(vm, x, y);
   if (y.isAtom()) return dictVecAtom(vm, x, y);
   return dictVecVec(vm, x, y);
+}
+
+fn broadcastAtom(vm: *VM, x: V, n: usize) !V {
+  std.debug.assert(x.isAtom());
+  switch (x) {
+    inline .b, .i, .f, .s, .c => |val, kt| {
+      const T = comptime K.backing(kt);
+      const vec = try N(T).init(vm.alloc, n);
+      @memset(vec.slice(), val);
+      return @unionInit(V, @tagName(kt.container()), vec);
+    },
+    else => unreachable,
+  }
 }

@@ -10,9 +10,6 @@ const N = @import("../../noun/array.zig").N;
 const Dict = @import("../../noun/dict.zig").Dict;
 pub const Attr = std.builtin.Type.StructField.Attributes;
 
-// pub fn ID1 (_: *VN, a: V) V { return a; }
-// pub fn ID2 (_: *VM, a: V, b: V) V { return a; }
-
 pub const numeric_types    = [_]K{ .b, .i, .f, .B, .I, .F };
 pub const arithmetic_types = [_]K{ .b, .i, .f, .B, .I, .F }; //, .L, .m, .M };
 pub const integer_types    = [_]K{ .i, .I };
@@ -281,10 +278,8 @@ fn dyadKernel(
 }
 
 // ── Container kernel generators ───────────────────────────────────────────────
-
 // Generates a broadcasting kernel for (xk, yk) when at least one is L/m/M.
 // Returns null for pure scalar/vector pairs — those are handled by dyadKernel.
-//
 // Cases (checked in order, each returns on match):
 //   dict × dict  → key equality check, recurse on values, preserve x's dict type
 //   dict × other → recurse on dict values vs y (includes dict × list)
