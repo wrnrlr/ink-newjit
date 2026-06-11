@@ -9,16 +9,16 @@ const promote = @import("../promote.zig").promote;
 /// X_i: delete the element at index i from x.
 pub const Delete = struct {
   pub const op = .@"_";
-  _I_i: VM.DyadFn = deleteVec(.I),
-  _F_i: VM.DyadFn = deleteVec(.F),
-  _S_i: VM.DyadFn = deleteVec(.S),
-  _C_i: VM.DyadFn = deleteVec(.C),
-  _B_i: VM.DyadFn = deleteVec(.B),
+  _I_i: VM.Dyad = deleteVec(.I),
+  _F_i: VM.Dyad = deleteVec(.F),
+  _S_i: VM.Dyad = deleteVec(.S),
+  _C_i: VM.Dyad = deleteVec(.C),
+  _B_i: VM.Dyad = deleteVec(.B),
   // Delete Dict & Table?
-  _L_i: VM.DyadFn = deleteList,
+  _L_i: VM.Dyad = deleteList,
 };
 
-fn deleteVec(comptime xk: K) VM.DyadFn {
+fn deleteVec(comptime xk: K) VM.Dyad {
   return struct {
     fn f(vm: *VM, x: V, y: V) V {
       const n = @field(x, @tagName(xk));

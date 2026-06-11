@@ -24,7 +24,7 @@ fn matchFunc   (_: *VM, x: V, y: V) V { return .{ .b = @as(u64, @bitCast(x.o)) =
 fn matchPartial(_: *VM, x: V, y: V) V { return .{ .b = x.p == y.p }; }
 fn matchExtObj (_: *VM, x: V, y: V) V { return .{ .b = x.x == y.x }; }
 
-fn matchVec(comptime k: K) VM.DyadFn {
+fn matchVec(comptime k: K) VM.Dyad {
   return &struct {
     fn f(_: *VM, x: V, y: V) V {
       const vx = @field(x, @tagName(k));
@@ -43,7 +43,7 @@ fn matchL(_: *VM, x: V, y: V) V {
   return .{ .b = true };
 }
 
-fn matchDict(comptime k: K) VM.DyadFn {
+fn matchDict(comptime k: K) VM.Dyad {
   return &struct {
     fn f(_: *VM, x: V, y: V) V {
       const dx = @field(x, @tagName(k));
@@ -53,7 +53,7 @@ fn matchDict(comptime k: K) VM.DyadFn {
   }.f;
 }
 
-fn getMatchHandler(comptime k: K) VM.DyadFn {
+fn getMatchHandler(comptime k: K) VM.Dyad {
   return switch (k) {
     .blank   => &matchBlank,
     .err     => &matchErr,
@@ -86,9 +86,9 @@ fn makeMatch() type {
   };
   for (all_k_types) |xk| {
     for (all_k_types) |yk| {
-      const handler: VM.DyadFn = if (xk == yk) getMatchHandler(xk) else &matchFalse;
+      const handler: VM.Dyad = if (xk == yk) getMatchHandler(xk) else &matchFalse;
       names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-      field_types = field_types ++ .{VM.DyadFn};
+      field_types = field_types ++ .{VM.Dyad};
       const attr: h.Attr = .{ .default_value_ptr = @ptrCast(&handler) };
       attrs = attrs ++ .{attr};
     }

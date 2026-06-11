@@ -11,7 +11,7 @@ const Alloc = std.mem.Allocator;
 
 pub const DictMerge = struct {
   pub const op = .@",";
-  _m_m: VM.DyadFn = merge,
+  _m_m: VM.Dyad = merge,
 };
 
 fn merge(vm: *VM, x: V, y: V) V {

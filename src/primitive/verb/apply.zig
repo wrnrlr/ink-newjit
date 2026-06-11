@@ -33,9 +33,9 @@ fn makeApply1() type {
   const apply_x_types = [_]K{ .o, .p, .s };
   for (apply_x_types) |xk| {
     for (all_k_types) |yk| {
-      const handler: VM.DyadFn = if (xk == .s) &applySymFn else &applyFnFn;
+      const handler: VM.Dyad = if (xk == .s) &applySymFn else &applyFnFn;
       names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-      field_types = field_types ++ .{VM.DyadFn};
+      field_types = field_types ++ .{VM.Dyad};
       const attr: h.Attr = .{ .default_value_ptr = @ptrCast(&handler) };
       attrs = attrs ++ .{attr};
     }
@@ -58,52 +58,52 @@ fn applySymFn(vm: *VM, x: V, y: V) V {
 pub const ApplyN = struct {
   pub const op = .@".";
 
-  _B_b: VM.DyadFn = applyAtom,
-  _B_i: VM.DyadFn = applyAtom,
-  _I_b: VM.DyadFn = applyAtom,
-  _I_i: VM.DyadFn = applyAtom,
-  _F_b: VM.DyadFn = applyAtom,
-  _F_i: VM.DyadFn = applyAtom,
-  _S_b: VM.DyadFn = applyAtom,
-  _S_i: VM.DyadFn = applyAtom,
-  _C_b: VM.DyadFn = applyAtom,
-  _C_i: VM.DyadFn = applyAtom,
-  _L_b: VM.DyadFn = applyAtom,
-  _L_i: VM.DyadFn = applyAtom,
+  _B_b: VM.Dyad = applyAtom,
+  _B_i: VM.Dyad = applyAtom,
+  _I_b: VM.Dyad = applyAtom,
+  _I_i: VM.Dyad = applyAtom,
+  _F_b: VM.Dyad = applyAtom,
+  _F_i: VM.Dyad = applyAtom,
+  _S_b: VM.Dyad = applyAtom,
+  _S_i: VM.Dyad = applyAtom,
+  _C_b: VM.Dyad = applyAtom,
+  _C_i: VM.Dyad = applyAtom,
+  _L_b: VM.Dyad = applyAtom,
+  _L_i: VM.Dyad = applyAtom,
   
-  _m_b: VM.DyadFn = applyAtom,
-  _m_i: VM.DyadFn = applyAtom,
-  _m_s: VM.DyadFn = applyAtom,
+  _m_b: VM.Dyad = applyAtom,
+  _m_i: VM.Dyad = applyAtom,
+  _m_s: VM.Dyad = applyAtom,
 
-  _B_B: VM.DyadFn = dotPath,
-  _B_I: VM.DyadFn = dotPath,
-  _B_S: VM.DyadFn = dotPath,
-  _B_L: VM.DyadFn = dotPath,
+  _B_B: VM.Dyad = dotPath,
+  _B_I: VM.Dyad = dotPath,
+  _B_S: VM.Dyad = dotPath,
+  _B_L: VM.Dyad = dotPath,
   
-  _I_B: VM.DyadFn = dotPath,
-  _I_I: VM.DyadFn = dotPath,
-  _I_S: VM.DyadFn = dotPath,
-  _I_L: VM.DyadFn = dotPath,
+  _I_B: VM.Dyad = dotPath,
+  _I_I: VM.Dyad = dotPath,
+  _I_S: VM.Dyad = dotPath,
+  _I_L: VM.Dyad = dotPath,
   
-  _F_B: VM.DyadFn = dotPath,
-  _F_I: VM.DyadFn = dotPath,
-  _F_S: VM.DyadFn = dotPath,
-  _F_L: VM.DyadFn = dotPath,
+  _F_B: VM.Dyad = dotPath,
+  _F_I: VM.Dyad = dotPath,
+  _F_S: VM.Dyad = dotPath,
+  _F_L: VM.Dyad = dotPath,
   
-  _S_B: VM.DyadFn = dotPath,
-  _S_I: VM.DyadFn = dotPath,
-  _S_S: VM.DyadFn = dotPath,
-  _S_L: VM.DyadFn = dotPath,
+  _S_B: VM.Dyad = dotPath,
+  _S_I: VM.Dyad = dotPath,
+  _S_S: VM.Dyad = dotPath,
+  _S_L: VM.Dyad = dotPath,
   
-  _C_B: VM.DyadFn = dotPath,
-  _C_I: VM.DyadFn = dotPath,
-  _C_S: VM.DyadFn = dotPath,
-  _C_L: VM.DyadFn = dotPath,
+  _C_B: VM.Dyad = dotPath,
+  _C_I: VM.Dyad = dotPath,
+  _C_S: VM.Dyad = dotPath,
+  _C_L: VM.Dyad = dotPath,
   
-  _L_B: VM.DyadFn = dotPath,
-  _L_I: VM.DyadFn = dotPath,
-  _L_S: VM.DyadFn = dotPath,
-  _L_L: VM.DyadFn = dotPath,
+  _L_B: VM.Dyad = dotPath,
+  _L_I: VM.Dyad = dotPath,
+  _L_S: VM.Dyad = dotPath,
+  _L_L: VM.Dyad = dotPath,
 };
 
 fn applyAtom(vm: *VM, x: V, y: V) V {

@@ -11,13 +11,13 @@ const promote = @import("../promote.zig").promote;
 /// B_Y: keep elements of y where the bool mask is false (weed out truthy rows).
 pub const WeedOut = struct {
   pub const op = .@"_";
-  _B_I: VM.DyadFn = weedOutI,
-  _B_F: VM.DyadFn = weedOutF,
-  _B_S: VM.DyadFn = weedOutS,
-  _B_C: VM.DyadFn = weedOutC,
-  _B_B: VM.DyadFn = weedOutB,
-  _B_L: VM.DyadFn = weedOutL,
-  _B_M: VM.DyadFn = weedOutA,
+  _B_I: VM.Dyad = weedOutI,
+  _B_F: VM.Dyad = weedOutF,
+  _B_S: VM.Dyad = weedOutS,
+  _B_C: VM.Dyad = weedOutC,
+  _B_B: VM.Dyad = weedOutB,
+  _B_L: VM.Dyad = weedOutL,
+  _B_M: VM.Dyad = weedOutA,
 };
 
 fn weedOutI(vm: *VM, x: V, y: V) V { return filterTyped(.I, i32,  vm.alloc, x.B.slice(), y.I.slice()); }

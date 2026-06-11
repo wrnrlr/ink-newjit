@@ -6,7 +6,7 @@ const N = @import("../../noun/array.zig").N;
 
 pub const Pad = struct {
   pub const op = .@"$";
-  _i_C: VM.DyadFn = pad,
+  _i_C: VM.Dyad = pad,
 };
 
 fn pad(vm: *VM, x: V, y: V) V {

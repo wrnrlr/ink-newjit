@@ -78,10 +78,10 @@ pub fn makeDyad(
   };
   for (types) |xk| {
     for (types) |yk| {
-      const maybe: ?VM.DyadFn = dyadKernel(xk, yk, CastType, ResultType, Impl);
+      const maybe: ?VM.Dyad = dyadKernel(xk, yk, CastType, ResultType, Impl);
       if (maybe) |handler| {
         names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-        field_types = field_types ++ .{VM.DyadFn};
+        field_types = field_types ++ .{VM.Dyad};
         const attr: Attr = .{ .default_value_ptr = @ptrCast(&handler) };
         attrs = attrs ++ .{attr};
       }
@@ -97,7 +97,7 @@ pub fn makeDyad(
     for (all_k) |yk| {
       if (dyadContainerKernel(xk, yk, operator)) |handler| {
         names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-        field_types = field_types ++ .{VM.DyadFn};
+        field_types = field_types ++ .{VM.Dyad};
         const attr: Attr = .{ .default_value_ptr = @ptrCast(&handler) };
         attrs = attrs ++ .{attr};
       }
@@ -212,7 +212,7 @@ fn dyadKernel(
   comptime CastType: fn (type, type) type,
   comptime ResultType: fn (type, type) type,
   comptime Impl: type,
-) VM.DyadFn {
+) VM.Dyad {
   const XT = xk.backing();
   const YT = yk.backing();
   const C  = CastType(XT, YT);
@@ -288,7 +288,7 @@ pub fn dyadContainerKernel(
   comptime xk: K,
   comptime yk: K,
   comptime operator: Op2,
-) ?VM.DyadFn {
+) ?VM.Dyad {
   const op2 = operator;
   const xIsDict = comptime xk.isMap();
   const yIsDict = comptime yk.isMap();

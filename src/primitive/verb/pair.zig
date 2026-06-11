@@ -10,7 +10,7 @@ const h = @import("helper.zig");
 const key_types = [_]K{ .b, .i, .f, .s, .c, .B, .I, .F, .S, .C, .L };
 const val_types = [_]K{ .b, .i, .f, .s, .c, .B, .I, .F, .S, .C, .L, .m, .M };
 
-fn pairHandler(comptime xk: K, comptime yk: K) VM.DyadFn {
+fn pairHandler(comptime xk: K, comptime yk: K) VM.Dyad {
   if (xk.isAtom()) return &dictAtomKey;
   if (yk.isAtom()) return &dictVecAtom;
   return &dictVecVec;
@@ -26,9 +26,9 @@ fn makePair() type {
   };
   for (key_types) |xk| {
     for (val_types) |yk| {
-      const handler: VM.DyadFn = pairHandler(xk, yk);
+      const handler: VM.Dyad = pairHandler(xk, yk);
       names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-      field_types = field_types ++ .{VM.DyadFn};
+      field_types = field_types ++ .{VM.Dyad};
       const attr: h.Attr = .{ .default_value_ptr = @ptrCast(&handler) };
       attrs = attrs ++ .{attr};
     }

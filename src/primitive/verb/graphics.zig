@@ -51,16 +51,16 @@ pub const Draw = struct {
 // Dyad dispatch table entries: i 9: L/m  and  data 9: spec
 pub const DrawDyad = struct {
   pub const op = .@"9:";
-  _i_L: VM.DyadFn = drawDyad,
-  _i_m: VM.DyadFn = drawDyad,
-  _i_M: VM.DyadFn = drawDyad,
+  _i_L: VM.Dyad = drawDyad,
+  _i_m: VM.Dyad = drawDyad,
+  _i_M: VM.Dyad = drawDyad,
   // ` 9: cmds — blank symbol left = draw inline (same as monad on right)
-  _s_L: VM.DyadFn = drawDyad,
-  _s_m: VM.DyadFn = drawDyad,
-  _s_M: VM.DyadFn = drawDyad,
-  _s_s: VM.DyadFn = drawDyad,
-  _M_L: VM.DyadFn = drawPlot,
-  _M_m: VM.DyadFn = drawPlot,
-  _m_L: VM.DyadFn = drawPlot,
-  _m_m: VM.DyadFn = drawPlot,
+  _s_L: VM.Dyad = drawDyad,
+  _s_m: VM.Dyad = drawDyad,
+  _s_M: VM.Dyad = drawDyad,
+  _s_s: VM.Dyad = drawDyad,
+  _M_L: VM.Dyad = drawPlot,
+  _M_m: VM.Dyad = drawPlot,
+  _m_L: VM.Dyad = drawPlot,
+  _m_m: VM.Dyad = drawPlot,
 };

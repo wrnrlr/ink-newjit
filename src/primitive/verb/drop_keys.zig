@@ -11,14 +11,14 @@ const promote = @import("../promote.zig").promote;
 /// X_d: drop keys from a dict.
 pub const DropKeys = struct {
   pub const op = .@"_";
-  _s_m: VM.DyadFn = dropKeys,
-  _S_m: VM.DyadFn = dropKeys,
-  _i_m: VM.DyadFn = dropKeys,
-  _I_m: VM.DyadFn = dropKeys,
-  _f_m: VM.DyadFn = dropKeys,
-  _F_m: VM.DyadFn = dropKeys,
-  _c_m: VM.DyadFn = dropKeys,
-  _C_m: VM.DyadFn = dropKeys,
+  _s_m: VM.Dyad = dropKeys,
+  _S_m: VM.Dyad = dropKeys,
+  _i_m: VM.Dyad = dropKeys,
+  _I_m: VM.Dyad = dropKeys,
+  _f_m: VM.Dyad = dropKeys,
+  _F_m: VM.Dyad = dropKeys,
+  _c_m: VM.Dyad = dropKeys,
+  _C_m: VM.Dyad = dropKeys,
 };
 
 pub fn dropKeys(vm: *VM, x: V, y: V) V {

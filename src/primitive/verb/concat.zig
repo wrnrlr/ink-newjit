@@ -11,7 +11,7 @@ const h = @import("helper.zig");
 // ── Kernel generators ─────────────────────────────────────────────────────────
 
 // Handles any combination where at least one side is .L.
-fn listKernel(comptime xk: K, comptime yk: K) VM.DyadFn {
+fn listKernel(comptime xk: K, comptime yk: K) VM.Dyad {
   return &struct {
     fn f(vm: *VM, x: V, y: V) V {
       const xl: usize = x.len();
@@ -42,7 +42,7 @@ fn listKernel(comptime xk: K, comptime yk: K) VM.DyadFn {
 // we write y into x.dataPtr()[xl..xl+yl] and bump x.len, returning x.ref().
 // This makes `x = x, e` loops O(N) amortised — geometric growth comes from
 // initWithCap on the slow path, which gives the next allocation enough headroom.
-fn homoKernel(comptime xk: K, comptime yk: K) VM.DyadFn {
+fn homoKernel(comptime xk: K, comptime yk: K) VM.Dyad {
   const VK: K = @enumFromInt((@intFromEnum(xk) & ~@as(u8, K.VEC_BIT)) | K.VEC_BIT);
   const T = K.backing(VK);
   return &struct {
@@ -86,7 +86,7 @@ fn heteroConcat(vm: *VM, x: V, y: V) V {
   return V{ .L = res };
 }
 
-fn getConcatKernel(comptime xk: K, comptime yk: K) VM.DyadFn {
+fn getConcatKernel(comptime xk: K, comptime yk: K) VM.Dyad {
   if (xk == .L or yk == .L) return listKernel(xk, yk);
   if ((xk.isAtom() or xk.isVec()) and (yk.isAtom() or yk.isVec())) {
     if ((@intFromEnum(xk) & ~@as(u8, K.VEC_BIT)) == (@intFromEnum(yk) & ~@as(u8, K.VEC_BIT)))
@@ -119,9 +119,9 @@ fn makeConcat() type {
   };
   for (concat_types) |xk| {
     for (concat_types) |yk| {
-      const handler: VM.DyadFn = getConcatKernel(xk, yk);
+      const handler: VM.Dyad = getConcatKernel(xk, yk);
       names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-      field_types = field_types ++ .{VM.DyadFn};
+      field_types = field_types ++ .{VM.Dyad};
       const attr: h.Attr = .{ .default_value_ptr = @ptrCast(&handler) };
       attrs = attrs ++ .{attr};
     }

@@ -8,12 +8,12 @@ const promote = @import("../promote.zig").promote;
 
 pub const Random = struct {
   pub const op = .@"?";
-  _i_I: VM.DyadFn = randomVec(.I),
-  _i_F: VM.DyadFn = randomVec(.F),
-  _i_S: VM.DyadFn = randomVec(.S),
-  _i_C: VM.DyadFn = randomVec(.C),
-  _i_B: VM.DyadFn = randomVec(.B),
-  _i_L: VM.DyadFn = randomList,
+  _i_I: VM.Dyad = randomVec(.I),
+  _i_F: VM.Dyad = randomVec(.F),
+  _i_S: VM.Dyad = randomVec(.S),
+  _i_C: VM.Dyad = randomVec(.C),
+  _i_B: VM.Dyad = randomVec(.B),
+  _i_L: VM.Dyad = randomList,
 };
 
 // fastrange32: equivalent to ngn/k's ri(m) = (uint32_t)r()*m>>32.
@@ -23,7 +23,7 @@ inline fn randBelow(prng: *std.Random.DefaultPrng, n: usize) usize {
   return @intCast(@as(u64, @as(u32, @truncate(prng.next()))) * @as(u64, n) >> 32);
 }
 
-fn randomVec(comptime yk: K) VM.DyadFn {
+fn randomVec(comptime yk: K) VM.Dyad {
   comptime std.debug.assert(yk.isVec());
   return struct {
     const T = K.backing(yk);

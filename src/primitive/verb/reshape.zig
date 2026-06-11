@@ -10,23 +10,23 @@ const promote = @import("../promote.zig").promote;
 
 pub const Reshape = struct {
   pub const op = .@"#";
-  _I_b: VM.DyadFn = reshapeAtom(.b),
-  _I_i: VM.DyadFn = reshapeAtom(.i),
-  _I_f: VM.DyadFn = reshapeAtom(.f),
-  _I_s: VM.DyadFn = reshapeAtom(.s),
-  _I_c: VM.DyadFn = reshapeAtom(.c),
+  _I_b: VM.Dyad = reshapeAtom(.b),
+  _I_i: VM.Dyad = reshapeAtom(.i),
+  _I_f: VM.Dyad = reshapeAtom(.f),
+  _I_s: VM.Dyad = reshapeAtom(.s),
+  _I_c: VM.Dyad = reshapeAtom(.c),
 
-  _I_B: VM.DyadFn = reshapeVec(.B),
-  _I_I: VM.DyadFn = reshapeVec(.I),
-  _I_F: VM.DyadFn = reshapeVec(.F),
-  _I_S: VM.DyadFn = reshapeVec(.S),
-  _I_C: VM.DyadFn = reshapeVec(.C),
+  _I_B: VM.Dyad = reshapeVec(.B),
+  _I_I: VM.Dyad = reshapeVec(.I),
+  _I_F: VM.Dyad = reshapeVec(.F),
+  _I_S: VM.Dyad = reshapeVec(.S),
+  _I_C: VM.Dyad = reshapeVec(.C),
 
-  _I_L: VM.DyadFn = reshapeListFn,
+  _I_L: VM.Dyad = reshapeListFn,
 };
 
 // atom y: output type is known at comptime as k.container(), no promote needed
-fn reshapeAtom(comptime k: K) VM.DyadFn {
+fn reshapeAtom(comptime k: K) VM.Dyad {
   comptime assert(k.isAtom());
   return struct {
     const T   = K.backing(k);
@@ -52,7 +52,7 @@ fn reshapeAtom(comptime k: K) VM.DyadFn {
 }
 
 // vec y: output type is k, no promote needed — pre-flatten with cycling, then partition
-fn reshapeVec(comptime k: K) VM.DyadFn {
+fn reshapeVec(comptime k: K) VM.Dyad {
   comptime assert(k.isVec());
   return struct {
     const T = K.backing(k);

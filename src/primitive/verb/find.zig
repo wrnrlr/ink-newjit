@@ -9,31 +9,31 @@ const N = @import("../../noun/array.zig").N;
 // TODO k9 returns the length of the vector if nothing is found, why could this be usefull?
 pub const Find = struct {
   pub const op = .@"?";
-  _I_i: VM.DyadFn = findI_i,
-  _I_I: VM.DyadFn = findI_I,
-  _I_L: VM.DyadFn = findI_L,
+  _I_i: VM.Dyad = findI_i,
+  _I_I: VM.Dyad = findI_I,
+  _I_L: VM.Dyad = findI_L,
   
-  _S_s: VM.DyadFn = findS_s,
-  _S_S: VM.DyadFn = findS_S,
-  _S_L: VM.DyadFn = findS_L,
+  _S_s: VM.Dyad = findS_s,
+  _S_S: VM.Dyad = findS_S,
+  _S_L: VM.Dyad = findS_L,
   
-  _C_c: VM.DyadFn = findC_c,
-  _C_C: VM.DyadFn = findC_C,
-  _C_L: VM.DyadFn = findC_L,
+  _C_c: VM.Dyad = findC_c,
+  _C_C: VM.Dyad = findC_C,
+  _C_L: VM.Dyad = findC_L,
   
-  _F_f: VM.DyadFn = findF_f,
-  _F_F: VM.DyadFn = findF_F,
-  _F_L: VM.DyadFn = findF_L,
+  _F_f: VM.Dyad = findF_f,
+  _F_F: VM.Dyad = findF_F,
+  _F_L: VM.Dyad = findF_L,
   
-  _L_i: VM.DyadFn = findFallback,
-  _L_I: VM.DyadFn = findFallback,
-  _L_f: VM.DyadFn = findFallback,
-  _L_F: VM.DyadFn = findFallback,
-  _L_s: VM.DyadFn = findFallback,
-  _L_S: VM.DyadFn = findFallback,
-  _L_c: VM.DyadFn = findFallback,
-  _L_C: VM.DyadFn = findFallback,
-  _L_L: VM.DyadFn = findFallback,
+  _L_i: VM.Dyad = findFallback,
+  _L_I: VM.Dyad = findFallback,
+  _L_f: VM.Dyad = findFallback,
+  _L_F: VM.Dyad = findFallback,
+  _L_s: VM.Dyad = findFallback,
+  _L_S: VM.Dyad = findFallback,
+  _L_c: VM.Dyad = findFallback,
+  _L_C: VM.Dyad = findFallback,
+  _L_L: VM.Dyad = findFallback,
   
   // TODO support find for Dict & Table, maybe this should be part of the fallback logic.
 };
@@ -231,4 +231,3 @@ fn findFallback(vm: *VM, x: V, y: V) V {
   }
   return .{ .I = res };
 }
-

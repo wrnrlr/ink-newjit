@@ -107,15 +107,15 @@ fn writeLinesById(vm: *VM, x: V, y: V) V {
 
 pub const WriteLines = struct {
   pub const op = .@"0:";
-  _s_L: VM.DyadFn = writeLinesBySymbol,
-  _s_C: VM.DyadFn = writeLinesBySymbol,
-  _s_s: VM.DyadFn = writeLinesBySymbol,
-  _C_L: VM.DyadFn = writeLinesByChars,
-  _C_C: VM.DyadFn = writeLinesByChars,
-  _C_s: VM.DyadFn = writeLinesByChars,
-  _i_L: VM.DyadFn = writeLinesById_L,
-  _i_C: VM.DyadFn = writeLinesById_C,
-  _i_s: VM.DyadFn = writeLinesById_s,
+  _s_L: VM.Dyad = writeLinesBySymbol,
+  _s_C: VM.Dyad = writeLinesBySymbol,
+  _s_s: VM.Dyad = writeLinesBySymbol,
+  _C_L: VM.Dyad = writeLinesByChars,
+  _C_C: VM.Dyad = writeLinesByChars,
+  _C_s: VM.Dyad = writeLinesByChars,
+  _i_L: VM.Dyad = writeLinesById_L,
+  _i_C: VM.Dyad = writeLinesById_C,
+  _i_s: VM.Dyad = writeLinesById_s,
 };
 
 // ---------------------------------------------------------------------------
@@ -160,9 +160,9 @@ fn writeBytesByHandle(vm: *VM, x: V, y: V) V {
 
 pub const WriteBytes = struct {
   pub const op = .@"1:";
-  _s_C: VM.DyadFn = writeBytesBySymbol,
-  _C_C: VM.DyadFn = writeBytesByChars,
-  _i_C: VM.DyadFn = writeBytesByHandle,
+  _s_C: VM.Dyad = writeBytesBySymbol,
+  _C_C: VM.Dyad = writeBytesByChars,
+  _i_C: VM.Dyad = writeBytesByHandle,
 };
 
 // ---------------------------------------------------------------------------
@@ -214,33 +214,33 @@ fn writeDataByChars(vm: *VM, x: V, y: V) V {
 
 pub const WriteData = struct {
   pub const op = .@"2:";
-  _s_I: VM.DyadFn = writeDataBySymbol,
-  _s_F: VM.DyadFn = writeDataBySymbol,
-  _s_S: VM.DyadFn = writeDataBySymbol,
-  _s_C: VM.DyadFn = writeDataBySymbol,
-  _s_B: VM.DyadFn = writeDataBySymbol,
-  _s_L: VM.DyadFn = writeDataBySymbol,
-  _s_m: VM.DyadFn = writeDataBySymbol,
-  _s_M: VM.DyadFn = writeDataBySymbol,
-  _s_a: VM.DyadFn = writeDataBySymbol,
-  _C_I: VM.DyadFn = writeDataByChars,
-  _C_F: VM.DyadFn = writeDataByChars,
-  _C_S: VM.DyadFn = writeDataByChars,
-  _C_C: VM.DyadFn = writeDataByChars,
-  _C_B: VM.DyadFn = writeDataByChars,
-  _C_L: VM.DyadFn = writeDataByChars,
-  _C_m: VM.DyadFn = writeDataByChars,
-  _C_M: VM.DyadFn = writeDataByChars,
-  _C_a: VM.DyadFn = writeDataByChars,
-  _i_I: VM.DyadFn = writeDataFallback,
-  _i_F: VM.DyadFn = writeDataFallback,
-  _i_S: VM.DyadFn = writeDataFallback,
-  _i_C: VM.DyadFn = writeDataFallback,
-  _i_B: VM.DyadFn = writeDataFallback,
-  _i_L: VM.DyadFn = writeDataFallback,
-  _i_m: VM.DyadFn = writeDataFallback,
-  _i_M: VM.DyadFn = writeDataFallback,
-  _i_a: VM.DyadFn = writeDataFallback,
+  _s_I: VM.Dyad = writeDataBySymbol,
+  _s_F: VM.Dyad = writeDataBySymbol,
+  _s_S: VM.Dyad = writeDataBySymbol,
+  _s_C: VM.Dyad = writeDataBySymbol,
+  _s_B: VM.Dyad = writeDataBySymbol,
+  _s_L: VM.Dyad = writeDataBySymbol,
+  _s_m: VM.Dyad = writeDataBySymbol,
+  _s_M: VM.Dyad = writeDataBySymbol,
+  _s_a: VM.Dyad = writeDataBySymbol,
+  _C_I: VM.Dyad = writeDataByChars,
+  _C_F: VM.Dyad = writeDataByChars,
+  _C_S: VM.Dyad = writeDataByChars,
+  _C_C: VM.Dyad = writeDataByChars,
+  _C_B: VM.Dyad = writeDataByChars,
+  _C_L: VM.Dyad = writeDataByChars,
+  _C_m: VM.Dyad = writeDataByChars,
+  _C_M: VM.Dyad = writeDataByChars,
+  _C_a: VM.Dyad = writeDataByChars,
+  _i_I: VM.Dyad = writeDataFallback,
+  _i_F: VM.Dyad = writeDataFallback,
+  _i_S: VM.Dyad = writeDataFallback,
+  _i_C: VM.Dyad = writeDataFallback,
+  _i_B: VM.Dyad = writeDataFallback,
+  _i_L: VM.Dyad = writeDataFallback,
+  _i_m: VM.Dyad = writeDataFallback,
+  _i_M: VM.Dyad = writeDataFallback,
+  _i_a: VM.Dyad = writeDataFallback,
 };
 
 pub fn writeDataFallback(vm: *VM, x: V, y: V) V {

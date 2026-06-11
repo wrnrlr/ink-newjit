@@ -39,7 +39,7 @@ fn makeIdentity() type {
 fn makeRight() type {
   @setEvalBranchQuota(1000000);
   const op_default: Op2 = .@":";
-  const handler: VM.DyadFn = &rightFn;
+  const handler: VM.Dyad = &rightFn;
   var names: []const []const u8 = &.{"op"};
   var field_types: []const type = &.{Op2};
   var attrs: []const h.Attr = &.{
@@ -48,7 +48,7 @@ fn makeRight() type {
   for (all_k_types) |xk| {
     for (all_k_types) |yk| {
       names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-      field_types = field_types ++ .{VM.DyadFn};
+      field_types = field_types ++ .{VM.Dyad};
       const attr: h.Attr = .{ .default_value_ptr = @ptrCast(&handler) };
       attrs = attrs ++ .{attr};
     }

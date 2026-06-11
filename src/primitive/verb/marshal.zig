@@ -10,28 +10,28 @@ const binary = @import("../../encoding/binary.zig");
 /// Marshal/Serialize: value -> bytes
 pub const Marshal = struct {
   pub const op = .@"?";
-  _s_C: VM.DyadFn = marshal_s_C,
-  _s_B: VM.DyadFn = marshal_s_B,
-  _s_b: VM.DyadFn = marshal_bin_only,
-  _s_i: VM.DyadFn = marshal_bin_only,
-  _s_f: VM.DyadFn = marshal_bin_only,
-  _s_c: VM.DyadFn = marshal_bin_only,
-  _s_s: VM.DyadFn = marshal_bin_only,
-  _s_I: VM.DyadFn = marshal_bin_only,
-  _s_F: VM.DyadFn = marshal_bin_only,
-  _s_S: VM.DyadFn = marshal_bin_only,
-  _s_L: VM.DyadFn = marshal_bin_only,
-  _s_m: VM.DyadFn = marshal_bin_only,
-  _s_M: VM.DyadFn = marshal_bin_only,
+  _s_C: VM.Dyad = marshal_s_C,
+  _s_B: VM.Dyad = marshal_s_B,
+  _s_b: VM.Dyad = marshal_bin_only,
+  _s_i: VM.Dyad = marshal_bin_only,
+  _s_f: VM.Dyad = marshal_bin_only,
+  _s_c: VM.Dyad = marshal_bin_only,
+  _s_s: VM.Dyad = marshal_bin_only,
+  _s_I: VM.Dyad = marshal_bin_only,
+  _s_F: VM.Dyad = marshal_bin_only,
+  _s_S: VM.Dyad = marshal_bin_only,
+  _s_L: VM.Dyad = marshal_bin_only,
+  _s_m: VM.Dyad = marshal_bin_only,
+  _s_M: VM.Dyad = marshal_bin_only,
 };
 
 /// Unmarshal/Deserialize: bytes -> value
 pub const Unmarshal = struct {
   pub const op = .@"@";
-  _s_C: VM.DyadFn = unmarshal_s_C,
-  _s_B: VM.DyadFn = unmarshal_s_B,
-  _s_s: VM.DyadFn = unmarshal_s_s,
-  _s_i: VM.DyadFn = unmarshal_s_i,
+  _s_C: VM.Dyad = unmarshal_s_C,
+  _s_B: VM.Dyad = unmarshal_s_B,
+  _s_s: VM.Dyad = unmarshal_s_s,
+  _s_i: VM.Dyad = unmarshal_s_i,
 };
 
 fn marshal_s_C(vm: *VM, x: V, y: V) V {

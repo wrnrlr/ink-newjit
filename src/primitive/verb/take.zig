@@ -11,14 +11,14 @@ const promote = @import("../promote.zig").promote;
 // Example: 3#1 2 3 4 5 results in 1 2 3.
 pub const Take = struct {
   pub const op = .@"#";
-  _i_B: VM.DyadFn = takeVec(.B),
-  _i_I: VM.DyadFn = takeVec(.I),
-  _i_F: VM.DyadFn = takeVec(.F),
-  _i_S: VM.DyadFn = takeVec(.S),
-  _i_C: VM.DyadFn = takeVec(.C),
-  _i_L: VM.DyadFn = takeList,
-  _i_i: VM.DyadFn = takeScalarInt,
-  _i_f: VM.DyadFn = takeScalarFloat,
+  _i_B: VM.Dyad = takeVec(.B),
+  _i_I: VM.Dyad = takeVec(.I),
+  _i_F: VM.Dyad = takeVec(.F),
+  _i_S: VM.Dyad = takeVec(.S),
+  _i_C: VM.Dyad = takeVec(.C),
+  _i_L: VM.Dyad = takeList,
+  _i_i: VM.Dyad = takeScalarInt,
+  _i_f: VM.Dyad = takeScalarFloat,
 };
 
 fn takeScalarInt(vm: *VM, x: V, y: V) V {
@@ -48,7 +48,7 @@ pub fn take(vm: *VM, x: V, y: V) V {
   };
 }
 
-fn takeVec(comptime yk: K) VM.DyadFn {
+fn takeVec(comptime yk: K) VM.Dyad {
   return struct {
     fn f(vm: *VM, x: V, y: V) V {
       const T = K.backing(yk);

@@ -126,6 +126,6 @@ fn execCL(vm: *VM, x: V, y: V) V {
 
 pub const ExecDyad = struct {
     pub const op = .exec;
-    _C_C: VM.DyadFn = execCC,
-    _C_L: VM.DyadFn = execCL,
+    _C_C: VM.Dyad = execCC,
+    _C_L: VM.Dyad = execCL,
 };

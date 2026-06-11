@@ -67,7 +67,7 @@ pub const VM = struct {
   argv: V = .blank,
 
   pub const Monad = *const fn (*VM, V) V;
-  pub const DyadFn = *const fn (*VM, V, V) V;
+  pub const Dyad = *const fn (*VM, V, V) V;
   pub const TriadFn = *const fn (*VM, V, V, V) V;
   pub const TetradFn = *const fn (*VM, V, V, V, V) V;
 
