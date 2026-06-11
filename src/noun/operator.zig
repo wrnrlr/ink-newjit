@@ -51,13 +51,13 @@ pub const Op2 = enum(u8) {
   @":",
   exec,
 
-
   pub const COUNT = @typeInfo(Op2).@"enum".fields.len;
   pub const arith = [_]Op2{.@"+", .@"-", .@"*", .@"%"};
   pub const logic = [_]Op2{.@"=", .@"|", .@"&"};
   pub fn fromString(s: []const u8) ?Op2 { return std.meta.stringToEnum(Op2, s); }
   pub fn toString(self: Op2) []const u8 { return @tagName(self); }
   pub inline fn code(op: Op2) usize { return @intFromEnum(op); }
+  pub inline fn isQuick(comptime op: Op2) bool { return @intFromEnum(op) < @intFromEnum(Op2.@"&"); }
 };
 
 /// Triadic primitives. Apply3 bytecode (amend3/drill3).
