@@ -1,5 +1,6 @@
 const std = @import("std");
 const VM = @import("../../runtime/vm.zig").VM;
+const Op1 = @import("../../noun/operator.zig").Op1;
 const Op2 = @import("../../noun/operator.zig").Op2;
 const dispatch = @import("../dispatch.zig");
 const promote = @import("../promote.zig").promote;
@@ -9,9 +10,10 @@ const N = @import("../../noun/array.zig").N;
 const Dict = @import("../../noun/dict.zig").Dict;
 pub const Attr = std.builtin.Type.StructField.Attributes;
 
-pub const numeric_types    = [_]K{ .b, .i, .f, .B, .I, .F };
+pub const all_types = [_]K{ .blank, .err, .b, .i, .f, .s, .c, .m, .B, .I, .F, .S, .C, .M, .L, .x };
+pub const numeric_types = [_]K{ .b, .i, .f, .B, .I, .F };
 pub const arithmetic_types = [_]K{ .b, .i, .f, .B, .I, .F }; //, .L, .m, .M };
-pub const integer_types    = [_]K{ .i, .I };
+pub const integer_types = [_]K{ .i, .I };
 pub const cut_types = [_]K{ .b, .i, .f, .B, .I, .F };
 
 /// Wrap a hand-written handler struct (one that already contains _* fields
@@ -22,13 +24,25 @@ pub fn _X(comptime EnumT: type, comptime op: EnumT, comptime Impl: type) type {
   const op_default: EnumT = op;
   var names: []const []const u8 = &.{ "op" };
   var types: []const type       = &.{ EnumT };
-  var attrs: []const Attr       = &.{
-    .{ .default_value_ptr = @ptrCast(&op_default) },
-  };
+  var attrs: []const Attr       = &.{ .{ .default_value_ptr = @ptrCast(&op_default) } };
   for (std.meta.fields(Impl)) |f| {
     const attr: Attr = .{ .default_value_ptr = f.default_value_ptr.? };
     names = names ++ .{f.name};
     types = types ++ .{f.type};
+    attrs = attrs ++ .{attr};
+  }
+  const n = names.len;
+  return @Struct(.auto, null, names[0..n], &(types[0..n].*), &(attrs[0..n].*));
+}
+
+pub fn _Y(comptime op: Op1, comptime ks: []const K, comptime f: VM.Monad) type {
+  var names: []const []const u8 = &.{ "op" };
+  var types: []const type = &.{ Op1 };
+  var attrs: []const Attr = &.{ .{ .default_value_ptr = @ptrCast(&op) } };
+  for (ks) |xk| {
+    names = names ++ .{"_" ++ @tagName(xk)};
+    types = types ++ .{VM.Monad};
+    const attr: Attr = .{ .default_value_ptr = @ptrCast(&f) };
     attrs = attrs ++ .{attr};
   }
   const n = names.len;
@@ -42,7 +56,6 @@ pub fn makeMonad(
   comptime Impl: type,
   comptime ks: []const K,
 ) type {
-  const Op1 = @import("../../noun/operator.zig").Op1;
   const op_default: Op1 = operator;
   var names: []const []const u8 = &.{ "op" };
   var types: []const type = &.{ Op1 };

@@ -7,8 +7,6 @@ const Op2 = @import("../../noun/operator.zig").Op2;
 const ArrayFlags = @import("../../noun/array.zig").ArrayFlags;
 const h = @import("helper.zig");
 
-// ── Kernel generators ─────────────────────────────────────────────────────────
-
 // Handles any combination where at least one side is .L.
 fn listKernel(comptime xk: K, comptime yk: K) VM.Dyad {
   return &struct {

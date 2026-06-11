@@ -109,8 +109,6 @@ fn unitary(vm: *VM, x: V) V {
   return .{ .L = res };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 const r = @import("../derived/reduce.zig");
 
 const Monads = struct {
@@ -154,7 +152,6 @@ const Monads = struct {
   pub const @".m"  = Values;
   pub const @".s"  = @import("get.zig").GetSymbol;
   pub const exec   = @import("exec.zig").Exec;
-
   // Fused derived verbs — direct monadic reductions over typed arrays.
   pub const @"sum x"     = r.Sum;
   pub const @"product x" = r.Product;
@@ -208,8 +205,6 @@ const Dyads = struct {
   pub const @"x 1: x" = io.WriteBytes;
   pub const @"x 2: x" = io.WriteData;
   pub const @"x: y"    = @import("right.zig").Right;
-  pub const @"9: x"    = @import("graphics.zig").Draw;
-  pub const @"x 9: x"  = @import("graphics.zig").DrawDyad;
   pub const @"x exec" = @import("exec.zig").ExecDyad;
 };
 

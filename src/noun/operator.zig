@@ -41,7 +41,7 @@ pub const Op1 = enum(u8) {
 pub const Op2 = enum(u8) {
   @"+", @"-", @"*", @"%", // arith
   @"=", @"|", @"&", // logic
-  @"<", @">",
+  @"<", @">", // grade
   @"~",
   @"!",
   @",", @"^", @"#", @"_", @"$", @"?", @"@", @".",
@@ -50,6 +50,7 @@ pub const Op2 = enum(u8) {
   @"0:", @"1:", @"2:", @"9:",
   @":",
   exec,
+
 
   pub const COUNT = @typeInfo(Op2).@"enum".fields.len;
   pub const arith = [_]Op2{.@"+", .@"-", .@"*", .@"%"};
@@ -227,27 +228,20 @@ pub const Fn = packed struct(u64) {
 
 test "Fn size and shapes" {
   try std.testing.expect(@sizeOf(Fn) == 8);
-
   const r1 = Fn.dyad(.@"+");
   try std.testing.expect(r1.kind == .callable and isOp2Idx(r1.idx));
   try std.testing.expect(r1.getOp2() == .@"+");
-
   const r2 = Fn.monad(.@"*");
   try std.testing.expect(isOp1Idx(r2.idx) and r2.getOp1() == .@"*");
-
   const r3 = Fn.adverb(.@"/");
   try std.testing.expect(isAdverbIdx(r3.idx) and r3.getAdverbOfIdx() == .@"/" and r3.arity == 2);
-
   const r3b = Fn.adverb(.@"/:");
   try std.testing.expect(isAdverbIdx(r3b.idx) and r3b.arity == 3);
-
   const r4 = Fn.triad(.amend3);
   try std.testing.expect(isOp3Idx(r4.idx) and r4.getOp3() == .amend3);
-
   const r5 = Fn.makeDerived(idxForOp2(.@"+"), 2, .@"/");
   try std.testing.expect(r5.kind == .derived);
   try std.testing.expect(r5.getAdverb() == .@"/");
-
   try std.testing.expect(op2ToOp1[@intFromEnum(Op2.@"+")] == .@"+");
   try std.testing.expect(op2ToOp1[@intFromEnum(Op2.in)] == null);
 }
