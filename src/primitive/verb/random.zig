@@ -1,5 +1,4 @@
 const std = @import("std");
-const util = @import("../../util.zig");
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;

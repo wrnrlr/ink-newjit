@@ -3,7 +3,6 @@ const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
-const util = @import("../../util.zig");
 
 /// i_Y: drop n items from the front (n>0) or back (n<0) of a sequence.
 pub const Drop = struct {

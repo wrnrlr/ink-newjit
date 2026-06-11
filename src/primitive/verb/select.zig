@@ -4,7 +4,6 @@ const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const Dict = @import("../../noun/dict.zig").Dict;
 const Alloc = std.mem.Allocator;
-const util = @import("../../util.zig");
 const pair = @import("pair.zig");
 const promote = @import("../promote.zig").promote;
 const pick = @import("pick.zig");

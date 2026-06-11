@@ -3,7 +3,6 @@ const V = @import("../../noun/value.zig").V;
 const VM = @import("../../runtime/vm.zig").VM;
 const TerseFormatter = @import("../../noun/format.zig").TerseFormatter;
 const MockWriter = @import("../../util.zig").MockWriter;
-const util = @import("../../util.zig");
 
 // TODO maybe we can jump to the precize type directly
 pub const Format = struct {

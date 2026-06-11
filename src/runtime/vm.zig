@@ -7,17 +7,11 @@ const Compiler = @import("compiler.zig").Compiler;
 const Fs = @import("registry.zig").Fs;
 const command = @import("command.zig");
 const FnTables = @import("fntable.zig").FnTables;
-const assert = std.debug.assert;
 const call = @import("call.zig");
 const V = @import("../noun/value.zig").V;
 const N = @import("../noun/array.zig").N;
 const K = @import("../noun/class.zig").K;
 const opmod = @import("../noun/operator.zig");
-const Fn = opmod.Fn;
-const Op1 = opmod.Op1;
-const Op2 = opmod.Op2;
-const Op3 = opmod.Op3;
-const Op4 = opmod.Op4;
 const Adverb = opmod.Adverb;
 const Partial = @import("../noun/partial.zig").Partial;
 const Pool = @import("../noun/symbol.zig").Pool;
@@ -54,7 +48,6 @@ pub const VM = struct {
   frames:     [FRAMES_MAX]Frame = undefined,
   frames_len: usize             = 0,
   partials: Partials,
-
   symbols: Pool,
   globals: [256]V = undefined,
   names: std.StringHashMap(u8),
@@ -195,7 +188,7 @@ pub const VM = struct {
   }
 
   // Direct lambda call without wrapper→apply overhead. Used by hot adverb loops.
-  pub fn callLambdaAndRun(vm: *VM, ref: Fn, args: []const V) V {
+  pub fn callLambdaAndRun(vm: *VM, ref: opmod.Fn, args: []const V) V {
     const prev_frames = vm.frames_len;
     const res_slot = vm.stack_len;
     vm.push(.blank) catch return V{ .err = .memory };
@@ -210,7 +203,7 @@ pub const VM = struct {
   // the Return frame cleanup handles them. This is what lets accumulator-
   // shaped adverb loops (ndo/fold/scan) reach rc==1 inside the lambda body so
   // in-place mutation (e.g. concat append) can fire.
-  pub fn callLambdaAndRunMove(vm: *VM, ref: Fn, args: []const V) V {
+  pub fn callLambdaAndRunMove(vm: *VM, ref: opmod.Fn, args: []const V) V {
     const prev_frames = vm.frames_len;
     const res_slot = vm.stack_len;
     vm.push(.blank) catch return V{ .err = .memory };
@@ -363,7 +356,7 @@ pub const VM = struct {
   fn doReturn(vm: *VM) !void {
     const result = vm.pop();
     const frame = vm.popFrame();
-    assert(vm.stack_len >= frame.base);
+    std.debug.assert(vm.stack_len >= frame.base);
 
     if (vm.frames_len == 0) {
       for (vm.stack[0..vm.stack_len]) |*v| v.deinit(vm.alloc);
@@ -472,18 +465,18 @@ pub const VM = struct {
     return dispatch.dispatch2(vm, @enumFromInt(op), a[0], a[1]);
   }
   pub fn call3(vm: *VM, op: u8, a: []V) V {
-    const o: Op3 = @enumFromInt(op);
-    return if (hasBlank(a)) call.makePartialFromArgs(vm, Fn.triad(o), a)
+    const o: opmod.Op3 = @enumFromInt(op);
+    return if (hasBlank(a)) call.makePartialFromArgs(vm, opmod.Fn.triad(o), a)
            else dispatch.dispatch3(vm, o, a[0], a[1], a[2]);
   }
   pub fn call4(vm: *VM, op: u8, a: []V) V {
-    const o: Op4 = @enumFromInt(op);
-    return if (hasBlank(a)) call.makePartialFromArgs(vm, Fn.tetrad(o), a)
+    const o: opmod.Op4 = @enumFromInt(op);
+    return if (hasBlank(a)) call.makePartialFromArgs(vm, opmod.Fn.tetrad(o), a)
            else dispatch.dispatch4(vm, o, a[0], a[1], a[2], a[3]);
   }
   // Fused reduce-of-zip: reads a second op byte (bin) after the primary (red).
   fn reduceZip(vm: *VM, op: u8, a: []V) V {
-    const bin: Op2 = @enumFromInt(vm.readByte());
+    const bin: opmod.Op2 = @enumFromInt(vm.readByte());
     return fuse.reduceZip(vm, @enumFromInt(op), bin, a[0], a[1]);
   }
 
@@ -506,7 +499,7 @@ pub const VM = struct {
     const func_val = vm.stack[args_start - 1];
 
     // Extract base func and existing args from func (possibly already a partial)
-    var base_ref: Fn = undefined;
+    var base_ref: opmod.Fn = undefined;
     var existing: [8]V = .{.blank} ** 8;
     var existing_fill: u8 = 0;
     if (func_val == .p) {
@@ -554,23 +547,23 @@ pub const VM = struct {
   fn doDerive(vm: *VM) !void {
     const adv: Adverb = @enumFromInt(vm.readByte());
     const base_v = vm.pop();
-    const derived: Fn = if (base_v == .o) blk: {
+    const derived: opmod.Fn = if (base_v == .o) blk: {
       const ref = base_v.o;
       base_v.deinit(vm.alloc);
       break :blk switch (ref.kind) {
         // Any callable (builtin verb/adverb or lambda) uses its global idx.
-        .callable => Fn.makeDerived(ref.idx, ref.arity, adv),
+        .callable => opmod.Fn.makeDerived(ref.idx, ref.arity, adv),
         // Trains as base aren't directly representable as a single global idx;
         // stash the base V in the derived table.
         else => blk2: {
           const idx = try vm.fn_tables.addDerived(.{ .base = V{ .o = ref }, .adverb = adv });
-          break :blk2 Fn.makeDerivedTable(idx, adv);
+          break :blk2 opmod.Fn.makeDerivedTable(idx, adv);
         },
       };
     } else blk: {
       // Data base (e.g. I vector for radix encode/decode, C for join/split)
       const idx = try vm.fn_tables.addDerived(.{ .base = base_v, .adverb = adv });
-      break :blk Fn.makeDerivedTable(idx, adv);
+      break :blk opmod.Fn.makeDerivedTable(idx, adv);
     };
     try vm.push(.{ .o = derived });
   }
@@ -601,7 +594,7 @@ pub const VM = struct {
     try vm.push(result);
   }
 
-  pub fn callLambda(vm: *VM, ref: Fn, argc: usize, slot: usize) !void {
+  pub fn callLambda(vm: *VM, ref: opmod.Fn, argc: usize, slot: usize) !void {
     if (vm.frames_len >= FRAMES_MAX) return VMError.StackOverflow;
     const idx = opmod.lambdaIdxOf(ref.idx);
     const entry = vm.fn_tables.lambdaAt(idx);
@@ -670,25 +663,19 @@ fn hasBlank(vals:[]V) bool {
 }
 
 test "VM simple addition" {
-  const alloc = std.testing.allocator;
-  const vm = try VM.create(alloc);
+  const vm = try VM.create(std.testing.allocator);
   defer vm.deinit();
-
   const c1 = try vm.chunk.addConstant(.{ .i = 10 });
   const c2 = try vm.chunk.addConstant(.{ .i = 20 });
-
   try vm.chunk.writeOp(.Const);
   try vm.chunk.write(c1);
   try vm.chunk.writeOp(.Const);
   try vm.chunk.write(c2);
   try vm.chunk.writeOp(.Apply2);
-  try vm.chunk.write(@intFromEnum(Op2.@"+"));
+  try vm.chunk.write(@intFromEnum(opmod.Op2.@"+"));
   try vm.chunk.writeOp(.Return);
-
   try vm.run();
-
   const res = vm.pop();
-  defer res.deinit(alloc);
-
+  defer res.deinit(std.testing.allocator);
   try std.testing.expectEqual(@as(i32, 30), res.i);
 }

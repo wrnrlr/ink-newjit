@@ -2,7 +2,6 @@ const std = @import("std");
 const VM = @import("../../runtime/vm.zig").VM;
 const value = @import("../../noun/value.zig");
 const Dict = @import("../../noun/dict.zig").Dict;
-const util = @import("../../util.zig");
 const V = value.V;
 
 // Monad handler: 9: cmd_list → {render:`gfx; cmds:L}

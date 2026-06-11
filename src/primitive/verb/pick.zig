@@ -5,7 +5,6 @@ const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const Dict = @import("../../noun/dict.zig").Dict;
 const VM = @import("../../runtime/vm.zig").VM;
-const util = @import("../../util.zig");
 const promote = @import("../promote.zig").promote;
 
 const value = @import("../../noun/value.zig");

@@ -1,6 +1,5 @@
 const std = @import("std");
 const VM = @import("../../runtime/vm.zig").VM;
-const util = @import("../../util.zig");
 const V = @import("../../noun/value.zig").V;
 
 // Core: spawn argv with optional stdin bytes, capture stdout as chars V.

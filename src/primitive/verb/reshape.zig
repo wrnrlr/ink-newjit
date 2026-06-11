@@ -5,7 +5,6 @@ const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const Alloc = std.mem.Allocator;
 const assert = std.debug.assert;
-const util = @import("../../util.zig");
 const promote = @import("../promote.zig").promote;
 
 pub const Reshape = struct {

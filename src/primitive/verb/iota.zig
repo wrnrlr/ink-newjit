@@ -4,7 +4,6 @@ const Rc = @import("../../noun/rc.zig").Rc;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
-const util = @import("../../util.zig");
 
 pub const Iota = struct {
   pub const op = .@"!";

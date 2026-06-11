@@ -5,7 +5,6 @@ const N = @import("../../noun/array.zig").N;
 const Op1 = @import("../../noun/operator.zig").Op1;
 const Op2 = @import("../../noun/operator.zig").Op2;
 const VM = @import("../../runtime/vm.zig").VM;
-const util = @import("../../util.zig");
 const selection = @import("first.zig");
 const pair = @import("pair.zig");
 const io = @import("io.zig");

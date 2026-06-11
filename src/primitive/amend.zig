@@ -1,6 +1,5 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const util = @import("../util.zig");
 const promote = @import("promote.zig").promote;
 const opmod = @import("../noun/operator.zig");
 const V = @import("../noun/value.zig").V;

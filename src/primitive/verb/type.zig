@@ -1,6 +1,5 @@
 const V = @import("../../noun/value.zig").V;
 const VM = @import("../../runtime/vm.zig").VM;
-const util = @import("../../util.zig");
 
 pub const Type = struct {
   pub const op = .@"@";

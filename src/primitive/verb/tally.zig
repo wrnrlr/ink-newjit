@@ -1,4 +1,3 @@
-const util = @import("../../util.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const V = @import("../../noun/value.zig").V;
 const Op1 = @import("../../noun/operator.zig").Op1;

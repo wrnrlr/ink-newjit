@@ -3,7 +3,6 @@ const VM = @import("../../runtime/vm.zig").VM;
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
-const util = @import("../../util.zig");
 const promote = @import("../promote.zig").promote;
 
 // Take creates a new array by selecting the first $x$ elements of $y$ (if $x$ is positive)

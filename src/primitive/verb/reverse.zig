@@ -2,7 +2,6 @@ const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
-const util = @import("../../util.zig");
 
 pub const Reverse = struct {
   pub const op = .@"|";

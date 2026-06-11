@@ -109,7 +109,6 @@ pub fn max(comptime T: type, s: []const T) T {
 
 // ── Comptime generators for fused derived verb structs ────────────────────────
 
-const util      = @import("../../util.zig");
 const VM        = @import("../../runtime/vm.zig").VM;
 const V         = @import("../../noun/value.zig").V;
 const Op1       = @import("../../noun/operator.zig").Op1;
