@@ -2,6 +2,7 @@ const std = @import("std");
 const util = @import("../../util.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 const Dict = @import("../../noun/dict.zig").Dict;
 const K = @import("../../noun/class.zig").K;
 const Op2 = @import("../../noun/operator.zig").Op2;
