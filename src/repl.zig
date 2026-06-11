@@ -130,7 +130,7 @@ pub const Repl = struct {
       var t_fmt = TerseFormatter.init(self.vm, self.alloc, .Repl);
       var mw_out = mock_out.writer();
       if (!is_suppressed) {
-        t_fmt.formatter().format(res, &mw_out.interface) catch {};
+        t_fmt.formatter().fmt(res, &mw_out.interface) catch {};
       }
 
       var result_text = mock_out.getText();
@@ -206,8 +206,8 @@ pub const Repl = struct {
         defer mock_out.deinit();
         var t_fmt = TerseFormatter.init(self.vm, self.alloc, .Repl);
         var mw_out = mock_out.writer();
-        t_fmt.formatter().format(res, &mw_out.interface) catch {};
-  
+        t_fmt.formatter().fmt(res, &mw_out.interface) catch {};
+
         var result_text = mock_out.getText();
         while (result_text.len > 0 and std.ascii.isWhitespace(result_text[result_text.len - 1])) {
           result_text = result_text[0 .. result_text.len - 1];

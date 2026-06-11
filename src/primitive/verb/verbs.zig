@@ -168,24 +168,27 @@ const Dyads = struct {
   pub const @"N|N" = _N_N(.@"|", calc.MaxOp);
   pub const @"B&B" = _B_B(.@"&", calc.AndOp);
   pub const @"B|B" = _B_B(.@"|", calc.OrOp);
-  pub const @"x!y" = pair.Pair;
+  
   pub const @"X=X" = _Cmp(.@"=", EqualOp);
   pub const @"X<X" = _Cmp(.@"<", LessOp);
   pub const @"X>X" = _Cmp(.@">", MoreOp);
   pub const @"X~X" = @import("match.zig").Match;
+  pub const @"x!y" = pair.Pair;
   pub const @"I⌊I"  = _I_I(.mod, calc.ModOp);
   pub const @"I÷I"  = _I_I(.div, calc.DiviOp);
   pub const @"x,y"  = concat.Concat;
+  
   pub const @"i_X"  = @import("drop.zig").Drop;
   pub const @"I_X"  = _X2(.@"_", @import("cut.zig").Cut);
   pub const @"B_X"  = @import("weedout.zig").WeedOut;
   pub const @"X_i"  = @import("delete.zig").Delete;
   pub const @"x_m"  = @import("drop_keys.zig").DropKeys;
+  
   pub const @"m,m"  = @import("merge.zig").DictMerge;
   pub const @"x#m"  = @import("select.zig").SelectKeys;
   pub const @"M,m"  = @import("insert.zig").Insert;
   pub const @"i#X"  = @import("take.zig").Take;
-  pub const @"I⍴X"  = @import("reshape.zig").Reshape;
+  pub const @"I#X"  = @import("reshape.zig").Reshape;
   pub const @"x^X"  = @import("fill.zig").Fill;
   pub const @"X^X"  = @import("without.zig").Without;
   pub const @"i$C"  = @import("pad.zig").Pad;
