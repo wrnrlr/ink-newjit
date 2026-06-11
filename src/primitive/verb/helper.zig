@@ -1,6 +1,5 @@
 const std = @import("std");
 const VM = @import("../../runtime/vm.zig").VM;
-const util = @import("../../util.zig");
 const Op2 = @import("../../noun/operator.zig").Op2;
 const dispatch = @import("../dispatch.zig");
 const promote = @import("../promote.zig").promote;
@@ -51,10 +50,10 @@ pub fn makeMonad(
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
   for (ks) |xk| {
-    const maybe: ?util.MonadFn = monadKernel(xk, CastType, ResultType, Impl);
+    const maybe: ?VM.MonadFn = monadKernel(xk, CastType, ResultType, Impl);
     if (maybe) |handler| {
       names = names ++ .{"_" ++ @tagName(xk)};
-      types = types ++ .{util.MonadFn};
+      types = types ++ .{VM.MonadFn};
       const attr: Attr = .{ .default_value_ptr = @ptrCast(&handler) };
       attrs = attrs ++ .{attr};
     }
@@ -79,10 +78,10 @@ pub fn makeDyad(
   };
   for (types) |xk| {
     for (types) |yk| {
-      const maybe: ?util.DyadFn = dyadKernel(xk, yk, CastType, ResultType, Impl);
+      const maybe: ?VM.DyadFn = dyadKernel(xk, yk, CastType, ResultType, Impl);
       if (maybe) |handler| {
         names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-        field_types = field_types ++ .{util.DyadFn};
+        field_types = field_types ++ .{VM.DyadFn};
         const attr: Attr = .{ .default_value_ptr = @ptrCast(&handler) };
         attrs = attrs ++ .{attr};
       }
@@ -98,7 +97,7 @@ pub fn makeDyad(
     for (all_k) |yk| {
       if (dyadContainerKernel(xk, yk, operator)) |handler| {
         names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-        field_types = field_types ++ .{util.DyadFn};
+        field_types = field_types ++ .{VM.DyadFn};
         const attr: Attr = .{ .default_value_ptr = @ptrCast(&handler) };
         attrs = attrs ++ .{attr};
       }
@@ -146,7 +145,7 @@ fn monadKernel(
   comptime CastType: fn (type) type,
   comptime ResultType: fn (type) type,
   comptime Impl: type,
-) util.MonadFn {
+) VM.MonadFn {
   const XT = xk.backing();
   const C  = CastType(XT);
   const R  = ResultType(XT);
@@ -213,7 +212,7 @@ fn dyadKernel(
   comptime CastType: fn (type, type) type,
   comptime ResultType: fn (type, type) type,
   comptime Impl: type,
-) util.DyadFn {
+) VM.DyadFn {
   const XT = xk.backing();
   const YT = yk.backing();
   const C  = CastType(XT, YT);
@@ -289,7 +288,7 @@ pub fn dyadContainerKernel(
   comptime xk: K,
   comptime yk: K,
   comptime operator: Op2,
-) ?util.DyadFn {
+) ?VM.DyadFn {
   const op2 = operator;
   const xIsDict = comptime xk.isMap();
   const yIsDict = comptime yk.isMap();

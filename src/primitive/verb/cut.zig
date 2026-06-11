@@ -9,15 +9,15 @@ const promote = @import("../promote.zig").promote;
 
 /// I_Y: cut y into segments at the given indices.
 pub const Cut = struct {
-  _I_I: util.DyadFn = cutVec(.I),
-  _I_F: util.DyadFn = cutVec(.F),
-  _I_S: util.DyadFn = cutVec(.S),
-  _I_C: util.DyadFn = cutVec(.C),
-  _I_B: util.DyadFn = cutVec(.B),
-  _I_L: util.DyadFn = cutList,
+  _I_I: VM.DyadFn = cutVec(.I),
+  _I_F: VM.DyadFn = cutVec(.F),
+  _I_S: VM.DyadFn = cutVec(.S),
+  _I_C: VM.DyadFn = cutVec(.C),
+  _I_B: VM.DyadFn = cutVec(.B),
+  _I_L: VM.DyadFn = cutList,
 };
 
-fn cutVec(comptime yk: K) util.DyadFn {
+fn cutVec(comptime yk: K) VM.DyadFn {
   return struct {
     fn f(vm: *VM, x: V, y: V) V {
       const idxs = x.I.slice();

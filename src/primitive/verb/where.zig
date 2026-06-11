@@ -6,10 +6,10 @@ const util = @import("../../util.zig");
 
 pub const Where = struct {
   pub const op = .@"&";
-  _b: util.MonadFn = whereB,
-  _i: util.MonadFn = whereI,
-  _B: util.MonadFn = whereBVec,
-  _I: util.MonadFn = whereIVec,
+  _b: VM.MonadFn = whereB,
+  _i: VM.MonadFn = whereI,
+  _B: VM.MonadFn = whereBVec,
+  _I: VM.MonadFn = whereIVec,
 };
 
 fn whereB(vm: *VM, x: V) V {

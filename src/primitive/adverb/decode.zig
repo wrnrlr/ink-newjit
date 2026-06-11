@@ -44,6 +44,6 @@ pub fn decode(vm: *VM, radix: V, digits: V) V {
 }
 
 // pub const Decode = struct {
-//   _I_i: util.DyadFn,
-//   _I_I: util.DyadFn,
+//   _I_i: VM.DyadFn,
+//   _I_I: VM.DyadFn,
 // };

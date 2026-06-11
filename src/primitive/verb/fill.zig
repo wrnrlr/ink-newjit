@@ -8,23 +8,23 @@ const util = @import("../../util.zig");
 pub const Fill = struct {
   pub const op = .@"^";
   
-  _b_B: util.DyadFn = fillVec(.b), // identity
-  _i_I: util.DyadFn = fillVec(.i),
-  _f_F: util.DyadFn = fillVec(.f),
-  _s_S: util.DyadFn = fillVec(.s),
-  _c_C: util.DyadFn = fillVec(.c),
+  _b_B: VM.DyadFn = fillVec(.b), // identity
+  _i_I: VM.DyadFn = fillVec(.i),
+  _f_F: VM.DyadFn = fillVec(.f),
+  _s_S: VM.DyadFn = fillVec(.s),
+  _c_C: VM.DyadFn = fillVec(.c),
   
-  _i_F: util.DyadFn = fillPromote(.F),
-  _f_I: util.DyadFn = fillPromote(.I),
+  _i_F: VM.DyadFn = fillPromote(.F),
+  _f_I: VM.DyadFn = fillPromote(.I),
   
-  _b_L: util.DyadFn = fillList,
-  _i_L: util.DyadFn = fillList,
-  _f_L: util.DyadFn = fillList,
-  _s_L: util.DyadFn = fillList,
-  _c_L: util.DyadFn = fillList,
+  _b_L: VM.DyadFn = fillList,
+  _i_L: VM.DyadFn = fillList,
+  _f_L: VM.DyadFn = fillList,
+  _s_L: VM.DyadFn = fillList,
+  _c_L: VM.DyadFn = fillList,
 };
 
-fn fillVec(comptime xk: K) util.DyadFn {
+fn fillVec(comptime xk: K) VM.DyadFn {
   const yk = comptime xk.container();
   const T = comptime K.backing(yk);
   return struct {
@@ -39,7 +39,7 @@ fn fillVec(comptime xk: K) util.DyadFn {
   }.f;
 }
 
-fn fillPromote(comptime yk: K) util.DyadFn {
+fn fillPromote(comptime yk: K) VM.DyadFn {
   const T = comptime K.backing(yk);
   const sk: K = comptime if (T == f32) .f else .i;
   return struct {

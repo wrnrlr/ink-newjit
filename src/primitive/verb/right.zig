@@ -20,7 +20,7 @@ const all_k_types = blk: {
 fn makeIdentity() type {
   @setEvalBranchQuota(1000000);
   const op_default: Op1 = .@":";
-  const handler: util.MonadFn = &identityFn;
+  const handler: VM.MonadFn = &identityFn;
   var names: []const []const u8 = &.{"op"};
   var field_types: []const type = &.{Op1};
   var attrs: []const h.Attr = &.{
@@ -28,7 +28,7 @@ fn makeIdentity() type {
   };
   for (all_k_types) |xk| {
     names = names ++ .{"_" ++ @tagName(xk)};
-    field_types = field_types ++ .{util.MonadFn};
+    field_types = field_types ++ .{VM.MonadFn};
     const attr: h.Attr = .{ .default_value_ptr = @ptrCast(&handler) };
     attrs = attrs ++ .{attr};
   }
@@ -39,7 +39,7 @@ fn makeIdentity() type {
 fn makeRight() type {
   @setEvalBranchQuota(1000000);
   const op_default: Op2 = .@":";
-  const handler: util.DyadFn = &rightFn;
+  const handler: VM.DyadFn = &rightFn;
   var names: []const []const u8 = &.{"op"};
   var field_types: []const type = &.{Op2};
   var attrs: []const h.Attr = &.{
@@ -48,7 +48,7 @@ fn makeRight() type {
   for (all_k_types) |xk| {
     for (all_k_types) |yk| {
       names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-      field_types = field_types ++ .{util.DyadFn};
+      field_types = field_types ++ .{VM.DyadFn};
       const attr: h.Attr = .{ .default_value_ptr = @ptrCast(&handler) };
       attrs = attrs ++ .{attr};
     }

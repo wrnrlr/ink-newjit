@@ -5,11 +5,10 @@ const VM = @import("../../runtime/vm.zig").VM;
 const ast = @import("../../parser/ast.zig");
 const Node = ast.Node;
 const parser_mod = @import("../../parser/parser.zig");
-const util = @import("../../util.zig");
 
 pub const Parse = struct {
   pub const op = .parse;
-  _C: util.MonadFn = parseChars,
+  _C: VM.MonadFn = parseChars,
 };
 
 fn parseChars(vm: *VM, x: V) V {

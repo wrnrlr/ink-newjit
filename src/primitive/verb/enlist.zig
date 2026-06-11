@@ -4,32 +4,31 @@ const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
-const util = @import("../../util.zig");
 
 fn enlistListFn(vm: *VM, x: V) V { return enlistToL(vm.alloc, x); }
 
 pub const Enlist = struct {
   pub const op = .@",";
-  _b: util.MonadFn = enlistAtom(.b),
-  _i: util.MonadFn = enlistAtom(.i),
-  _f: util.MonadFn = enlistAtom(.f),
-  _s: util.MonadFn = enlistAtom(.s),
-  _c: util.MonadFn = enlistAtom(.c),
-  _B: util.MonadFn = enlistListFn,
-  _I: util.MonadFn = enlistListFn,
-  _F: util.MonadFn = enlistListFn,
-  _S: util.MonadFn = enlistListFn,
-  _C: util.MonadFn = enlistListFn,
-  _L: util.MonadFn = enlistListFn,
-  _m: util.MonadFn = enlistListFn,
-  _M: util.MonadFn = enlistListFn,
-  _y: util.MonadFn = enlistListFn,
-  _p: util.MonadFn = enlistListFn,
-  _q: util.MonadFn = enlistListFn,
-  _v: util.MonadFn = enlistListFn,
+  _b: VM.MonadFn = enlistAtom(.b),
+  _i: VM.MonadFn = enlistAtom(.i),
+  _f: VM.MonadFn = enlistAtom(.f),
+  _s: VM.MonadFn = enlistAtom(.s),
+  _c: VM.MonadFn = enlistAtom(.c),
+  _B: VM.MonadFn = enlistListFn,
+  _I: VM.MonadFn = enlistListFn,
+  _F: VM.MonadFn = enlistListFn,
+  _S: VM.MonadFn = enlistListFn,
+  _C: VM.MonadFn = enlistListFn,
+  _L: VM.MonadFn = enlistListFn,
+  _m: VM.MonadFn = enlistListFn,
+  _M: VM.MonadFn = enlistListFn,
+  _y: VM.MonadFn = enlistListFn,
+  _p: VM.MonadFn = enlistListFn,
+  _q: VM.MonadFn = enlistListFn,
+  _v: VM.MonadFn = enlistListFn,
 };
 
-fn enlistAtom(comptime k: K) util.MonadFn {
+fn enlistAtom(comptime k: K) VM.MonadFn {
   const ck = comptime k.container();
   const T = comptime K.backing(ck);
   return struct {

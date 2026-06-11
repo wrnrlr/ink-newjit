@@ -4,7 +4,6 @@ const VM = @import("../../runtime/vm.zig").VM;
 const so = @import("setops.zig");
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
-const util = @import("../../util.zig");
 
 // Has: x contains y?
 fn has_B_b(_: *VM, x: V, y: V) V  { return .{ .b = hasBoolAtom(x.B.slice(), y.b) }; }
@@ -30,32 +29,32 @@ fn has_L_vec(vm: *VM, x: V, y: V) V  { return hasListVec(vm.alloc, x.L.slice(), 
 
 pub const Has = struct {
   pub const op = .has;
-  _I_i: util.DyadFn = has_I_i,
-  _I_I: util.DyadFn = has_I_I,
-  _I_L: util.DyadFn = has_I_L,
-  _S_s: util.DyadFn = has_S_s,
-  _S_S: util.DyadFn = has_S_S,
-  _S_L: util.DyadFn = has_S_L,
-  _B_b: util.DyadFn = has_B_b,
-  _B_B: util.DyadFn = has_B_B,
-  _B_L: util.DyadFn = has_B_L,
-  _C_c: util.DyadFn = has_C_c,
-  _C_C: util.DyadFn = has_C_C,
-  _C_L: util.DyadFn = has_C_L,
-  _F_f: util.DyadFn = has_F_f,
-  _F_F: util.DyadFn = has_F_F,
-  _F_L: util.DyadFn = has_F_L,
-  _L_i: util.DyadFn = has_L_atom,
-  _L_f: util.DyadFn = has_L_atom,
-  _L_s: util.DyadFn = has_L_atom,
-  _L_c: util.DyadFn = has_L_atom,
-  _L_b: util.DyadFn = has_L_atom,
-  _L_I: util.DyadFn = has_L_vec,
-  _L_F: util.DyadFn = has_L_vec,
-  _L_S: util.DyadFn = has_L_vec,
-  _L_C: util.DyadFn = has_L_vec,
-  _L_B: util.DyadFn = has_L_vec,
-  _L_L: util.DyadFn = has_L_vec,
+  _I_i: VM.DyadFn = has_I_i,
+  _I_I: VM.DyadFn = has_I_I,
+  _I_L: VM.DyadFn = has_I_L,
+  _S_s: VM.DyadFn = has_S_s,
+  _S_S: VM.DyadFn = has_S_S,
+  _S_L: VM.DyadFn = has_S_L,
+  _B_b: VM.DyadFn = has_B_b,
+  _B_B: VM.DyadFn = has_B_B,
+  _B_L: VM.DyadFn = has_B_L,
+  _C_c: VM.DyadFn = has_C_c,
+  _C_C: VM.DyadFn = has_C_C,
+  _C_L: VM.DyadFn = has_C_L,
+  _F_f: VM.DyadFn = has_F_f,
+  _F_F: VM.DyadFn = has_F_F,
+  _F_L: VM.DyadFn = has_F_L,
+  _L_i: VM.DyadFn = has_L_atom,
+  _L_f: VM.DyadFn = has_L_atom,
+  _L_s: VM.DyadFn = has_L_atom,
+  _L_c: VM.DyadFn = has_L_atom,
+  _L_b: VM.DyadFn = has_L_atom,
+  _L_I: VM.DyadFn = has_L_vec,
+  _L_F: VM.DyadFn = has_L_vec,
+  _L_S: VM.DyadFn = has_L_vec,
+  _L_C: VM.DyadFn = has_L_vec,
+  _L_B: VM.DyadFn = has_L_vec,
+  _L_L: VM.DyadFn = has_L_vec,
 };
 
 // In: x in y? (x and y swapped relative to Has)
@@ -79,32 +78,32 @@ fn in_vec_L(vm: *VM, x: V, y: V) V  { return hasListVec(vm.alloc, y.L.slice(), x
 
 pub const In = struct {
   pub const op = .in;
-  _b_B: util.DyadFn = in_b_B,
-  _i_I: util.DyadFn = in_i_I,
-  _s_S: util.DyadFn = in_s_S,
-  _I_I: util.DyadFn = in_I_I,
-  _L_I: util.DyadFn = in_L_I,
-  _S_S: util.DyadFn = in_S_S,
-  _L_S: util.DyadFn = in_L_S,
-  _B_B: util.DyadFn = in_B_B,
-  _L_B: util.DyadFn = in_L_B,
-  _c_C: util.DyadFn = in_c_C,
-  _C_C: util.DyadFn = in_C_C,
-  _L_C: util.DyadFn = in_L_C,
-  _f_F: util.DyadFn = in_f_F,
-  _F_F: util.DyadFn = in_F_F,
-  _L_F: util.DyadFn = in_L_F,
-  _i_L: util.DyadFn = in_atom_L,
-  _f_L: util.DyadFn = in_atom_L,
-  _s_L: util.DyadFn = in_atom_L,
-  _c_L: util.DyadFn = in_atom_L,
-  _b_L: util.DyadFn = in_atom_L,
-  _I_L: util.DyadFn = in_vec_L,
-  _F_L: util.DyadFn = in_vec_L,
-  _S_L: util.DyadFn = in_vec_L,
-  _C_L: util.DyadFn = in_vec_L,
-  _B_L: util.DyadFn = in_vec_L,
-  _L_L: util.DyadFn = in_vec_L,
+  _b_B: VM.DyadFn = in_b_B,
+  _i_I: VM.DyadFn = in_i_I,
+  _s_S: VM.DyadFn = in_s_S,
+  _I_I: VM.DyadFn = in_I_I,
+  _L_I: VM.DyadFn = in_L_I,
+  _S_S: VM.DyadFn = in_S_S,
+  _L_S: VM.DyadFn = in_L_S,
+  _B_B: VM.DyadFn = in_B_B,
+  _L_B: VM.DyadFn = in_L_B,
+  _c_C: VM.DyadFn = in_c_C,
+  _C_C: VM.DyadFn = in_C_C,
+  _L_C: VM.DyadFn = in_L_C,
+  _f_F: VM.DyadFn = in_f_F,
+  _F_F: VM.DyadFn = in_F_F,
+  _L_F: VM.DyadFn = in_L_F,
+  _i_L: VM.DyadFn = in_atom_L,
+  _f_L: VM.DyadFn = in_atom_L,
+  _s_L: VM.DyadFn = in_atom_L,
+  _c_L: VM.DyadFn = in_atom_L,
+  _b_L: VM.DyadFn = in_atom_L,
+  _I_L: VM.DyadFn = in_vec_L,
+  _F_L: VM.DyadFn = in_vec_L,
+  _S_L: VM.DyadFn = in_vec_L,
+  _C_L: VM.DyadFn = in_vec_L,
+  _B_L: VM.DyadFn = in_vec_L,
+  _L_L: VM.DyadFn = in_vec_L,
 };
 
 // ---------------------------------------------------------------------------
@@ -254,4 +253,3 @@ fn hasListVec(alloc: Alloc, data: []const V, y: V) V {
   }
   return .{ .B = res };
 }
-

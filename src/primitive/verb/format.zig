@@ -8,22 +8,22 @@ const util = @import("../../util.zig");
 // TODO maybe we can jump to the precize type directly
 pub const Format = struct {
   pub const op = .@"$";
-  _b: util.MonadFn = fmt,
-  _i: util.MonadFn = fmt,
-  _f: util.MonadFn = fmt,
-  _s: util.MonadFn = fmt,
-  _c: util.MonadFn = fmt,
-  _func: util.MonadFn = fmt,
-  _partial: util.MonadFn = fmt,
-  _x: util.MonadFn = fmt,
-  _B: util.MonadFn = fmt,
-  _I: util.MonadFn = fmt,
-  _F: util.MonadFn = fmt,
-  _S: util.MonadFn = fmt,
-  _C: util.MonadFn = fmt,
-  _L: util.MonadFn = fmt,
-  _m: util.MonadFn = fmt,
-  _M: util.MonadFn = fmt,
+  _b: VM.MonadFn = fmt,
+  _i: VM.MonadFn = fmt,
+  _f: VM.MonadFn = fmt,
+  _s: VM.MonadFn = fmt,
+  _c: VM.MonadFn = fmt,
+  _o: VM.MonadFn = fmt,
+  _p: VM.MonadFn = fmt,
+  _x: VM.MonadFn = fmt,
+  _B: VM.MonadFn = fmt,
+  _I: VM.MonadFn = fmt,
+  _F: VM.MonadFn = fmt,
+  _S: VM.MonadFn = fmt,
+  _C: VM.MonadFn = fmt,
+  _L: VM.MonadFn = fmt,
+  _m: VM.MonadFn = fmt,
+  _M: VM.MonadFn = fmt,
 };
 
 // TODO: Move TerseFormatter instance to VM
@@ -33,6 +33,6 @@ fn fmt(vm: *VM, x: V) V {
   var tf = TerseFormatter.init(vm, vm.alloc, .Text);
   var f = tf.formatter();
   var w = mock.writer();
-  f.format(x, &w.interface) catch return V{ .err = .io };
+  f.fmt(x, &w.interface) catch return V{ .err = .io };
   return V.Chars(vm.alloc, mock.getText()) catch return V{ .err = .memory };
 }

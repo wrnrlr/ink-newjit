@@ -10,7 +10,7 @@ const Alloc = std.mem.Allocator;
 pub const Insert = struct {
   pub const op = .@",";
   // t , dict — append dict as a new row to table t
-  _M_m: util.DyadFn = insert,
+  _M_m: VM.DyadFn = insert,
 };
 
 pub const Upsert = struct {

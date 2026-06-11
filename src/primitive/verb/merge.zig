@@ -1,7 +1,6 @@
 const std = @import("std");
 const value = @import("../../noun/value.zig");
 const pair = @import("pair.zig");
-const util = @import("../../util.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const N = @import("../../noun/array.zig").N;
 const V = value.V;
@@ -12,7 +11,7 @@ const Alloc = std.mem.Allocator;
 
 pub const DictMerge = struct {
   pub const op = .@",";
-  _m_m: util.DyadFn = merge,
+  _m_m: VM.DyadFn = merge,
 };
 
 fn merge(vm: *VM, x: V, y: V) V {

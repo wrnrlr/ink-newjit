@@ -4,22 +4,21 @@ const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
-const util = @import("../../util.zig");
 const promote = @import("../promote.zig").promote;
 
 /// X_i: delete the element at index i from x.
 pub const Delete = struct {
   pub const op = .@"_";
-  _I_i: util.DyadFn = deleteVec(.I),
-  _F_i: util.DyadFn = deleteVec(.F),
-  _S_i: util.DyadFn = deleteVec(.S),
-  _C_i: util.DyadFn = deleteVec(.C),
-  _B_i: util.DyadFn = deleteVec(.B),
+  _I_i: VM.DyadFn = deleteVec(.I),
+  _F_i: VM.DyadFn = deleteVec(.F),
+  _S_i: VM.DyadFn = deleteVec(.S),
+  _C_i: VM.DyadFn = deleteVec(.C),
+  _B_i: VM.DyadFn = deleteVec(.B),
   // Delete Dict & Table?
-  _L_i: util.DyadFn = deleteList,
+  _L_i: VM.DyadFn = deleteList,
 };
 
-fn deleteVec(comptime xk: K) util.DyadFn {
+fn deleteVec(comptime xk: K) VM.DyadFn {
   return struct {
     fn f(vm: *VM, x: V, y: V) V {
       const n = @field(x, @tagName(xk));
@@ -59,4 +58,3 @@ fn deleteGeneric(alloc: Alloc, x: V, n: usize, idx: usize) V {
   }
   return promote(alloc, res);
 }
-

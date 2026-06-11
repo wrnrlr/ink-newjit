@@ -1,13 +1,12 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
 const VM = @import("../../runtime/vm.zig").VM;
-const util = @import("../../util.zig");
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 
 pub const Pad = struct {
   pub const op = .@"$";
-  _i_C: util.DyadFn = pad,
+  _i_C: VM.DyadFn = pad,
 };
 
 fn pad(vm: *VM, x: V, y: V) V {

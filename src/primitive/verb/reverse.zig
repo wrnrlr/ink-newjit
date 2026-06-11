@@ -6,12 +6,12 @@ const util = @import("../../util.zig");
 
 pub const Reverse = struct {
   pub const op = .@"|";
-  _B: util.MonadFn = reverse(.B),
-  _I: util.MonadFn = reverse(.I),
-  _F: util.MonadFn = reverse(.F),
-  _S: util.MonadFn = reverse(.S),
-  _C: util.MonadFn = reverse(.C),
-  _L: util.MonadFn = reverseList,
+  _B: VM.MonadFn = reverse(.B),
+  _I: VM.MonadFn = reverse(.I),
+  _F: VM.MonadFn = reverse(.F),
+  _S: VM.MonadFn = reverse(.S),
+  _C: VM.MonadFn = reverse(.C),
+  _L: VM.MonadFn = reverseList,
 };
 
 fn reverseList(vm: *VM, x: V) V {
@@ -21,7 +21,7 @@ fn reverseList(vm: *VM, x: V) V {
   return .{ .L = res };
 }
 
-fn reverse(comptime yk: K) util.MonadFn {
+fn reverse(comptime yk: K) VM.MonadFn {
   return struct {
     fn f(vm: *VM, x: V) V {
       const T = K.backing(yk);

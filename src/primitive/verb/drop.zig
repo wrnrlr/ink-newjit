@@ -8,12 +8,12 @@ const util = @import("../../util.zig");
 /// i_Y: drop n items from the front (n>0) or back (n<0) of a sequence.
 pub const Drop = struct {
   pub const op = .@"_";
-  _i_I: util.DyadFn = dropVec(.I),
-  _i_F: util.DyadFn = dropVec(.F),
-  _i_S: util.DyadFn = dropVec(.S),
-  _i_C: util.DyadFn = dropVec(.C),
-  _i_B: util.DyadFn = dropVec(.B),
-  _i_L: util.DyadFn = dropList,
+  _i_I: VM.DyadFn = dropVec(.I),
+  _i_F: VM.DyadFn = dropVec(.F),
+  _i_S: VM.DyadFn = dropVec(.S),
+  _i_C: VM.DyadFn = dropVec(.C),
+  _i_B: VM.DyadFn = dropVec(.B),
+  _i_L: VM.DyadFn = dropList,
 };
 
 fn dropList(vm: *VM, x: V, y: V) V {
@@ -34,7 +34,7 @@ fn dropList(vm: *VM, x: V, y: V) V {
   return .{ .L = result };
 }
 
-fn dropVec(comptime yk: K) util.DyadFn {
+fn dropVec(comptime yk: K) VM.DyadFn {
   return struct {
     fn f(vm: *VM, x: V, y: V) V {
       const b = @field(y, @tagName(yk));

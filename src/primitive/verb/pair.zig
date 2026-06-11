@@ -1,5 +1,4 @@
 const std = @import("std");
-const util = @import("../../util.zig");
 const VM = @import("../../runtime/vm.zig").VM;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
@@ -11,7 +10,7 @@ const h = @import("helper.zig");
 const key_types = [_]K{ .b, .i, .f, .s, .c, .B, .I, .F, .S, .C, .L };
 const val_types = [_]K{ .b, .i, .f, .s, .c, .B, .I, .F, .S, .C, .L, .m, .M };
 
-fn pairHandler(comptime xk: K, comptime yk: K) util.DyadFn {
+fn pairHandler(comptime xk: K, comptime yk: K) VM.DyadFn {
   if (xk.isAtom()) return &dictAtomKey;
   if (yk.isAtom()) return &dictVecAtom;
   return &dictVecVec;
@@ -27,9 +26,9 @@ fn makePair() type {
   };
   for (key_types) |xk| {
     for (val_types) |yk| {
-      const handler: util.DyadFn = pairHandler(xk, yk);
+      const handler: VM.DyadFn = pairHandler(xk, yk);
       names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-      field_types = field_types ++ .{util.DyadFn};
+      field_types = field_types ++ .{VM.DyadFn};
       const attr: h.Attr = .{ .default_value_ptr = @ptrCast(&handler) };
       attrs = attrs ++ .{attr};
     }

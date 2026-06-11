@@ -11,17 +11,17 @@ const eql = std.mem.eql;
 pub const Cast = struct {
   pub const op = .@"$";
 
-  _s_c: util.DyadFn = castChar,
-  _s_i: util.DyadFn = castInt,
-  _s_f: util.DyadFn = castFloat,
+  _s_c: VM.DyadFn = castChar,
+  _s_i: VM.DyadFn = castInt,
+  _s_f: VM.DyadFn = castFloat,
 
-  _s_C: util.DyadFn = castChars,
-  _s_I: util.DyadFn = castInts,
-  _s_F: util.DyadFn = castFloats,
+  _s_C: VM.DyadFn = castChars,
+  _s_I: VM.DyadFn = castInts,
+  _s_F: VM.DyadFn = castFloats,
 
-  _s_L: util.DyadFn = h.dyadContainerKernel(.s, .L, .@"$").?,
-  _s_m: util.DyadFn = h.dyadContainerKernel(.s, .m, .@"$").?,
-  _s_M: util.DyadFn = h.dyadContainerKernel(.s, .M, .@"$").?,
+  _s_L: VM.DyadFn = h.dyadContainerKernel(.s, .L, .@"$").?,
+  _s_m: VM.DyadFn = h.dyadContainerKernel(.s, .m, .@"$").?,
+  _s_M: VM.DyadFn = h.dyadContainerKernel(.s, .M, .@"$").?,
 };
 
 fn castChar(vm: *VM, x: V, y: V) V {

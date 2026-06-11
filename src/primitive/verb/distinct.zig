@@ -1,5 +1,4 @@
 const std = @import("std");
-const util = @import("../../util.zig");
 const promote = @import("../promote.zig").promote;
 const VM = @import("../../runtime/vm.zig").VM;
 const so = @import("setops.zig");
@@ -9,12 +8,12 @@ const Alloc = std.mem.Allocator;
 
 pub const Distinct = struct {
   pub const op = .@"?";
-  _B: util.MonadFn = distinctB,
-  _I: util.MonadFn = distinctI,
-  _F: util.MonadFn = distinctF,
-  _S: util.MonadFn = distinctS,
-  _C: util.MonadFn = distinctC,
-  _L: util.MonadFn = distinctL,
+  _B: VM.MonadFn = distinctB,
+  _I: VM.MonadFn = distinctI,
+  _F: VM.MonadFn = distinctF,
+  _S: VM.MonadFn = distinctS,
+  _C: VM.MonadFn = distinctC,
+  _L: VM.MonadFn = distinctL,
 };
 
 // Bool: at most 2 distinct values, zero allocation regardless of size
@@ -126,4 +125,3 @@ fn distinctL(vm: *VM, x: V) V {
   res_list.deinit(alloc);
   return promote(alloc, res);
 }
-

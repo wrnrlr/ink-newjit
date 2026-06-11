@@ -13,16 +13,16 @@ const pick = @import("pick.zig");
 
 pub const SelectKeys = struct {
   pub const op = .@"#";
-  _s_m: util.DyadFn = takeKeys,
-  _S_m: util.DyadFn = takeKeys,
-  _i_m: util.DyadFn = takeKeys,
-  _I_m: util.DyadFn = takeKeys,
-  _f_m: util.DyadFn = takeKeys,
-  _F_m: util.DyadFn = takeKeys,
-  _c_m: util.DyadFn = takeKeys,
-  _C_m: util.DyadFn = takeKeys,
-  _s_M: util.DyadFn = takeKeysTable,
-  _S_M: util.DyadFn = takeKeysTable,
+  _s_m: VM.DyadFn = takeKeys,
+  _S_m: VM.DyadFn = takeKeys,
+  _i_m: VM.DyadFn = takeKeys,
+  _I_m: VM.DyadFn = takeKeys,
+  _f_m: VM.DyadFn = takeKeys,
+  _F_m: VM.DyadFn = takeKeys,
+  _c_m: VM.DyadFn = takeKeys,
+  _C_m: VM.DyadFn = takeKeys,
+  _s_M: VM.DyadFn = takeKeysTable,
+  _S_M: VM.DyadFn = takeKeysTable,
 };
 
 pub fn takeKeys(vm: *VM, x: V, y: V) V {
@@ -89,18 +89,18 @@ pub fn takeKeysTable(vm: *VM, x: V, y: V) V {
 
 pub const SelectDict = struct {
   pub const op = .@"@";
-  _m_s: util.DyadFn = pick.pickDictSymFn,
-  _m_S: util.DyadFn = pick.pickDictSymVecFn,
-  _m_i: util.DyadFn = pick.pickAtomFn,
-  _m_I: util.DyadFn = pick.pickVecFn,
+  _m_s: VM.DyadFn = pick.pickDictSymFn,
+  _m_S: VM.DyadFn = pick.pickDictSymVecFn,
+  _m_i: VM.DyadFn = pick.pickAtomFn,
+  _m_I: VM.DyadFn = pick.pickVecFn,
 };
 
 // ── SelectTable: M@x → row(s) by integer index or column(s) by symbol ────────
 
 pub const SelectTable = struct {
   pub const op = .@"@";
-  _M_i: util.DyadFn = pick.pickTableRowFn,
-  _M_I: util.DyadFn = pick.pickTableRowVecFn,
-  _M_s: util.DyadFn = pick.pickTableColFn,
-  _M_S: util.DyadFn = pick.pickTableColVecFn,
+  _M_i: VM.DyadFn = pick.pickTableRowFn,
+  _M_I: VM.DyadFn = pick.pickTableRowVecFn,
+  _M_s: VM.DyadFn = pick.pickTableColFn,
+  _M_S: VM.DyadFn = pick.pickTableColVecFn,
 };

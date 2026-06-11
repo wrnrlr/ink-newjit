@@ -12,12 +12,12 @@ const promoteAs = @import("../promote.zig").promoteAs;
 pub const Flip = struct {
   pub const op = .@"+";
 // TODO flip scalar, k9 this is !rank
-  _I: util.MonadFn = flipVector,
-  _F: util.MonadFn = flipVector,
-  _B: util.MonadFn = flipVector,
-  _m: util.MonadFn = flipDict,
-  _M: util.MonadFn = flipTable,
-  _L: util.MonadFn = flipList,
+  _I: VM.MonadFn = flipVector,
+  _F: VM.MonadFn = flipVector,
+  _B: VM.MonadFn = flipVector,
+  _m: VM.MonadFn = flipDict,
+  _M: VM.MonadFn = flipTable,
+  _L: VM.MonadFn = flipList,
 };
 
 // 1D vector → enlist, e.g. +1 2 3 → ,1 2 3

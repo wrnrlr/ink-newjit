@@ -14,41 +14,41 @@ const flip = @import("flip.zig").flip;
 pub const Pick = struct {
   pub const op = .@"@";
 
-  _B_b: util.DyadFn = pickBoolFn,
-  _I_b: util.DyadFn = pickBoolFn,
-  _F_b: util.DyadFn = pickBoolFn,
-  _C_b: util.DyadFn = pickBoolFn,
-  _L_b: util.DyadFn = pickBoolFn,
+  _B_b: VM.DyadFn = pickBoolFn,
+  _I_b: VM.DyadFn = pickBoolFn,
+  _F_b: VM.DyadFn = pickBoolFn,
+  _C_b: VM.DyadFn = pickBoolFn,
+  _L_b: VM.DyadFn = pickBoolFn,
 
-  _B_B: util.DyadFn = pickMaskTyped(.B),
-  _I_B: util.DyadFn = pickMaskTyped(.I),
-  _F_B: util.DyadFn = pickMaskTyped(.F),
-  _C_B: util.DyadFn = pickMaskTyped(.C),
-  _L_B: util.DyadFn = pickMaskFn,
+  _B_B: VM.DyadFn = pickMaskTyped(.B),
+  _I_B: VM.DyadFn = pickMaskTyped(.I),
+  _F_B: VM.DyadFn = pickMaskTyped(.F),
+  _C_B: VM.DyadFn = pickMaskTyped(.C),
+  _L_B: VM.DyadFn = pickMaskFn,
 
-  _B_i: util.DyadFn = pickAtomFn,
-  _I_i: util.DyadFn = pickAtomFn,
-  _F_i: util.DyadFn = pickAtomFn,
-  _S_i: util.DyadFn = pickAtomFn,
-  _C_i: util.DyadFn = pickAtomFn,
-  _L_i: util.DyadFn = pickAtomFn,
+  _B_i: VM.DyadFn = pickAtomFn,
+  _I_i: VM.DyadFn = pickAtomFn,
+  _F_i: VM.DyadFn = pickAtomFn,
+  _S_i: VM.DyadFn = pickAtomFn,
+  _C_i: VM.DyadFn = pickAtomFn,
+  _L_i: VM.DyadFn = pickAtomFn,
 
-  _B_I: util.DyadFn = pickVecTyped(.B),
-  _I_I: util.DyadFn = pickVecTyped(.I),
-  _F_I: util.DyadFn = pickVecTyped(.F),
-  _S_I: util.DyadFn = pickVecTyped(.S),
-  _C_I: util.DyadFn = pickVecTyped(.C),
-  _L_I: util.DyadFn = pickVecFn,
+  _B_I: VM.DyadFn = pickVecTyped(.B),
+  _I_I: VM.DyadFn = pickVecTyped(.I),
+  _F_I: VM.DyadFn = pickVecTyped(.F),
+  _S_I: VM.DyadFn = pickVecTyped(.S),
+  _C_I: VM.DyadFn = pickVecTyped(.C),
+  _L_I: VM.DyadFn = pickVecFn,
 
   // x@(y0;y1;...) → (x@y0; x@y1; ...) — index x at each element of list y
-  _B_L: util.DyadFn = pickListFn,
-  _I_L: util.DyadFn = pickListFn,
-  _F_L: util.DyadFn = pickListFn,
-  _C_L: util.DyadFn = pickListFn,
-  _L_L: util.DyadFn = pickListFn,
+  _B_L: VM.DyadFn = pickListFn,
+  _I_L: VM.DyadFn = pickListFn,
+  _F_L: VM.DyadFn = pickListFn,
+  _C_L: VM.DyadFn = pickListFn,
+  _L_L: VM.DyadFn = pickListFn,
 
-  _S_s: util.DyadFn = pickSymAtomFn,
-  _S_S: util.DyadFn = pickSymVecFn,
+  _S_s: VM.DyadFn = pickSymAtomFn,
+  _S_S: VM.DyadFn = pickSymVecFn,
 };
 
 
@@ -137,7 +137,7 @@ fn pickMaskFn(vm: *VM, x: V, y: V) V { return pickMask(vm.alloc, x, y.B.slice())
 pub fn pickAtomFn(_: *VM, x: V, y: V) V  { return pickAtom(x, y.i); }
 pub fn pickVecFn(vm: *VM, x: V, y: V) V  { return pickVec(vm.alloc, x, y.I.slice()); }
 
-fn pickVecTyped(comptime xk: K) util.DyadFn {
+fn pickVecTyped(comptime xk: K) VM.DyadFn {
   comptime std.debug.assert(xk.isVec());
   return struct {
     const T = K.backing(xk);
@@ -157,7 +157,7 @@ fn pickVecTyped(comptime xk: K) util.DyadFn {
   }.f;
 }
 
-fn pickMaskTyped(comptime xk: K) util.DyadFn {
+fn pickMaskTyped(comptime xk: K) VM.DyadFn {
   comptime std.debug.assert(xk.isVec());
   return struct {
     const T = K.backing(xk);

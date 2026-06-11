@@ -6,8 +6,8 @@ const util = @import("../../util.zig");
 
 pub const GetSymbol = struct {
   pub const op = .@".";
-  _s: util.MonadFn = getSymbol,
-  _C: util.MonadFn = parseString,
+  _s: VM.MonadFn = getSymbol,
+  _C: VM.MonadFn = parseString,
 };
 
 fn getSymbol(vm: *VM, x: V) V {

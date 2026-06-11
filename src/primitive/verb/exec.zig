@@ -104,9 +104,9 @@ fn execL(vm: *VM, x: V) V {
 
 pub const Exec = struct {
     pub const op = .exec;
-    _C: util.MonadFn = execC,
-    _L: util.MonadFn = execL,
-    _s: util.MonadFn = execS,
+    _C: VM.MonadFn = execC,
+    _L: VM.MonadFn = execL,
+    _s: VM.MonadFn = execS,
 };
 
 // ---------------------------------------------------------------------------
@@ -126,6 +126,6 @@ fn execCL(vm: *VM, x: V, y: V) V {
 
 pub const ExecDyad = struct {
     pub const op = .exec;
-    _C_C: util.DyadFn = execCC,
-    _C_L: util.DyadFn = execCL,
+    _C_C: VM.DyadFn = execCC,
+    _C_L: VM.DyadFn = execCL,
 };

@@ -5,34 +5,33 @@ const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const Dict = @import("../../noun/dict.zig").Dict;
 const VM = @import("../../runtime/vm.zig").VM;
-const util = @import("../../util.zig");
 const binary = @import("../../encoding/binary.zig");
 
 /// Marshal/Serialize: value -> bytes
 pub const Marshal = struct {
   pub const op = .@"?";
-  _s_C: util.DyadFn = marshal_s_C,
-  _s_B: util.DyadFn = marshal_s_B,
-  _s_b: util.DyadFn = marshal_bin_only,
-  _s_i: util.DyadFn = marshal_bin_only,
-  _s_f: util.DyadFn = marshal_bin_only,
-  _s_c: util.DyadFn = marshal_bin_only,
-  _s_s: util.DyadFn = marshal_bin_only,
-  _s_I: util.DyadFn = marshal_bin_only,
-  _s_F: util.DyadFn = marshal_bin_only,
-  _s_S: util.DyadFn = marshal_bin_only,
-  _s_L: util.DyadFn = marshal_bin_only,
-  _s_m: util.DyadFn = marshal_bin_only,
-  _s_M: util.DyadFn = marshal_bin_only,
+  _s_C: VM.DyadFn = marshal_s_C,
+  _s_B: VM.DyadFn = marshal_s_B,
+  _s_b: VM.DyadFn = marshal_bin_only,
+  _s_i: VM.DyadFn = marshal_bin_only,
+  _s_f: VM.DyadFn = marshal_bin_only,
+  _s_c: VM.DyadFn = marshal_bin_only,
+  _s_s: VM.DyadFn = marshal_bin_only,
+  _s_I: VM.DyadFn = marshal_bin_only,
+  _s_F: VM.DyadFn = marshal_bin_only,
+  _s_S: VM.DyadFn = marshal_bin_only,
+  _s_L: VM.DyadFn = marshal_bin_only,
+  _s_m: VM.DyadFn = marshal_bin_only,
+  _s_M: VM.DyadFn = marshal_bin_only,
 };
 
 /// Unmarshal/Deserialize: bytes -> value
 pub const Unmarshal = struct {
   pub const op = .@"@";
-  _s_C: util.DyadFn = unmarshal_s_C,
-  _s_B: util.DyadFn = unmarshal_s_B,
-  _s_s: util.DyadFn = unmarshal_s_s,
-  _s_i: util.DyadFn = unmarshal_s_i,
+  _s_C: VM.DyadFn = unmarshal_s_C,
+  _s_B: VM.DyadFn = unmarshal_s_B,
+  _s_s: VM.DyadFn = unmarshal_s_s,
+  _s_i: VM.DyadFn = unmarshal_s_i,
 };
 
 fn marshal_s_C(vm: *VM, x: V, y: V) V {

@@ -9,19 +9,19 @@ const Op1 = @import("../../noun/operator.zig").Op1;
 const h = @import("helper.zig");
 
 const FirstImpl = struct {
-  _b: util.MonadFn = identity,
-  _i: util.MonadFn = identity,
-  _f: util.MonadFn = identity,
-  _s: util.MonadFn = identity,
-  _c: util.MonadFn = identity,
-  _B: util.MonadFn = firstVec(.B),
-  _I: util.MonadFn = firstVec(.I),
-  _F: util.MonadFn = firstVec(.F),
-  _S: util.MonadFn = firstVec(.S),
-  _C: util.MonadFn = firstVec(.C),
-  _L: util.MonadFn = firstFn,
-  _m: util.MonadFn = firstFn,
-  _M: util.MonadFn = firstFn,
+  _b: VM.MonadFn = identity,
+  _i: VM.MonadFn = identity,
+  _f: VM.MonadFn = identity,
+  _s: VM.MonadFn = identity,
+  _c: VM.MonadFn = identity,
+  _B: VM.MonadFn = firstVec(.B),
+  _I: VM.MonadFn = firstVec(.I),
+  _F: VM.MonadFn = firstVec(.F),
+  _S: VM.MonadFn = firstVec(.S),
+  _C: VM.MonadFn = firstVec(.C),
+  _L: VM.MonadFn = firstFn,
+  _m: VM.MonadFn = firstFn,
+  _M: VM.MonadFn = firstFn,
 };
 
 pub const First      = h._X(Op1, .@"*",  FirstImpl);
@@ -29,19 +29,19 @@ pub const First_Name = h._X(Op1, .first, FirstImpl);
 
 pub const Last_Name = struct {
   pub const op = .last;
-  _b: util.MonadFn = identity,
-  _i: util.MonadFn = identity,
-  _f: util.MonadFn = identity,
-  _s: util.MonadFn = identity,
-  _c: util.MonadFn = identity,
-  _B: util.MonadFn = lastVec(.B),
-  _I: util.MonadFn = lastVec(.I),
-  _F: util.MonadFn = lastVec(.F),
-  _S: util.MonadFn = lastVec(.S),
-  _C: util.MonadFn = lastVec(.C),
-  _L: util.MonadFn = lastFn,
-  _m: util.MonadFn = lastFn,
-  _M: util.MonadFn = lastFn,
+  _b: VM.MonadFn = identity,
+  _i: VM.MonadFn = identity,
+  _f: VM.MonadFn = identity,
+  _s: VM.MonadFn = identity,
+  _c: VM.MonadFn = identity,
+  _B: VM.MonadFn = lastVec(.B),
+  _I: VM.MonadFn = lastVec(.I),
+  _F: VM.MonadFn = lastVec(.F),
+  _S: VM.MonadFn = lastVec(.S),
+  _C: VM.MonadFn = lastVec(.C),
+  _L: VM.MonadFn = lastFn,
+  _m: VM.MonadFn = lastFn,
+  _M: VM.MonadFn = lastFn,
 };
 
 pub fn first(alloc: Alloc, x: V) V {
@@ -69,7 +69,7 @@ fn identity(_: *VM, x: V) V { return x; }
 fn firstFn(vm: *VM, x: V) V { return first(vm.alloc, x); }
 fn lastFn(vm: *VM, x: V) V { return last(vm.alloc, x); }
 
-fn firstVec(comptime yk: K) util.MonadFn {
+fn firstVec(comptime yk: K) VM.MonadFn {
   return struct {
     fn f(_: *VM, x: V) V {
       const b = @field(x, @tagName(yk));
@@ -79,7 +79,7 @@ fn firstVec(comptime yk: K) util.MonadFn {
   }.f;
 }
 
-fn lastVec(comptime yk: K) util.MonadFn {
+fn lastVec(comptime yk: K) VM.MonadFn {
   return struct {
     fn f(_: *VM, x: V) V {
       const b = @field(x, @tagName(yk));

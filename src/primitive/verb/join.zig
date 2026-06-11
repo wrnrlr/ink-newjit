@@ -1,6 +1,5 @@
 const std = @import("std");
 const value = @import("../../noun/value.zig");
-const util = @import("../../util.zig");
 const promote = @import("../promote.zig");
 const take = @import("./take.zig").take;
 const VM = @import("../../runtime/vm.zig").VM;
@@ -13,7 +12,7 @@ const Alloc = std.mem.Allocator;
 pub const UnionJoin = struct {
   pub const op = .@",";
   // Union join between two tables: append rows of y to x (requires same columns).
-  _M_M: *util.DyadFn = unionJoin,
+  _M_M: *VM.DyadFn = unionJoin,
 };
 
 pub const LeftJoin = struct {

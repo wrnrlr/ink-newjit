@@ -61,21 +61,21 @@ const Lowercase = h.makeMonad(.@"_", h.Char1, h.Char1, LowercaseOp, &.{.c, .C});
 
 const Keys = struct {
   pub const op = .@"!";
-  _m: util.MonadFn = keysDict,
-  _M: util.MonadFn = keysTable,
+  _m: VM.MonadFn = keysDict,
+  _M: VM.MonadFn = keysTable,
 };
 fn keysDict(_: *VM, x: V) V { return x.m.av().ref(); }
 fn keysTable(_: *VM, x: V) V { return x.M.av().ref(); }
 
 const Values = struct {
   pub const op = .@".";
-  _m: util.MonadFn = valuesDict,
+  _m: VM.MonadFn = valuesDict,
 };
 fn valuesDict(_: *VM, x: V) V { return x.m.bv().ref(); }
 
 const Open = struct {
   pub const op = .@"<";
-  _s: util.MonadFn = openFile,
+  _s: VM.MonadFn = openFile,
 };
 fn openFile(vm: *VM, x: V) V {
   const path = vm.getSymbol(x.s);
@@ -83,7 +83,7 @@ fn openFile(vm: *VM, x: V) V {
   return .{ .i = @intCast(id) };
 }
 
-const UniformOp = struct { _i: util.MonadFn = uniform };
+const UniformOp = struct { _i: VM.MonadFn = uniform };
 fn uniform(vm: *VM, x: V) V {
   if (x.i < 0) return .{ .err = .domain };
   const size: usize = @intCast(x.i);
@@ -95,7 +95,7 @@ fn uniform(vm: *VM, x: V) V {
 
 const Unitary = struct {
   pub const op = .@"=";
-  _i: util.MonadFn = unitary,
+  _i: VM.MonadFn = unitary,
 };
 fn unitary(vm: *VM, x: V) V {
   if (x.i < 0) return .{ .err = .domain };
@@ -225,9 +225,9 @@ fn opOf(comptime Verb: type, comptime EnumT: type) ?EnumT {
   return null;
 }
 
-fn makeMonadArray(comptime Defs: type) [Op1.COUNT * K.COUNT]util.MonadFn {
+fn makeMonadArray(comptime Defs: type) [Op1.COUNT * K.COUNT]VM.MonadFn {
   @setEvalBranchQuota(10000000);
-  var table: [Op1.COUNT * K.COUNT]util.MonadFn = .{typeError1} ** (Op1.COUNT * K.COUNT);
+  var table: [Op1.COUNT * K.COUNT]VM.MonadFn = .{typeError1} ** (Op1.COUNT * K.COUNT);
   for (std.meta.declarations(Defs)) |decl| {
     const Verb = @field(Defs, decl.name);
     const op1 = opOf(Verb, Op1) orelse continue;
@@ -242,9 +242,9 @@ fn makeMonadArray(comptime Defs: type) [Op1.COUNT * K.COUNT]util.MonadFn {
   return table;
 }
 
-fn makeDyadArray(comptime Defs: type) [Op2.COUNT * K.COUNT * K.COUNT]util.DyadFn {
+fn makeDyadArray(comptime Defs: type) [Op2.COUNT * K.COUNT * K.COUNT]VM.DyadFn {
   @setEvalBranchQuota(10000000);
-  var table: [Op2.COUNT * K.COUNT * K.COUNT]util.DyadFn = .{typeError2} ** (Op2.COUNT * K.COUNT * K.COUNT);
+  var table: [Op2.COUNT * K.COUNT * K.COUNT]VM.DyadFn = .{typeError2} ** (Op2.COUNT * K.COUNT * K.COUNT);
   for (std.meta.declarations(Defs)) |decl| {
     const Verb = @field(Defs, decl.name);
     const op2 = opOf(Verb, Op2) orelse continue;

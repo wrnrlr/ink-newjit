@@ -42,25 +42,25 @@ fn drawPlot(vm: *VM, x: V, y: V) V {
 // Monad dispatch table entry: 9: L  and  9: m
 pub const Draw = struct {
   pub const op = .@"9:";
-  _L: util.MonadFn = drawMonad,
-  _m: util.MonadFn = drawMonad,
-  _M: util.MonadFn = drawMonad,
-  _s: util.MonadFn = drawMonad,
+  _L: VM.MonadFn = drawMonad,
+  _m: VM.MonadFn = drawMonad,
+  _M: VM.MonadFn = drawMonad,
+  _s: VM.MonadFn = drawMonad,
 };
 
 // Dyad dispatch table entries: i 9: L/m  and  data 9: spec
 pub const DrawDyad = struct {
   pub const op = .@"9:";
-  _i_L: util.DyadFn = drawDyad,
-  _i_m: util.DyadFn = drawDyad,
-  _i_M: util.DyadFn = drawDyad,
+  _i_L: VM.DyadFn = drawDyad,
+  _i_m: VM.DyadFn = drawDyad,
+  _i_M: VM.DyadFn = drawDyad,
   // ` 9: cmds — blank symbol left = draw inline (same as monad on right)
-  _s_L: util.DyadFn = drawDyad,
-  _s_m: util.DyadFn = drawDyad,
-  _s_M: util.DyadFn = drawDyad,
-  _s_s: util.DyadFn = drawDyad,
-  _M_L: util.DyadFn = drawPlot,
-  _M_m: util.DyadFn = drawPlot,
-  _m_L: util.DyadFn = drawPlot,
-  _m_m: util.DyadFn = drawPlot,
+  _s_L: VM.DyadFn = drawDyad,
+  _s_m: VM.DyadFn = drawDyad,
+  _s_M: VM.DyadFn = drawDyad,
+  _s_s: VM.DyadFn = drawDyad,
+  _M_L: VM.DyadFn = drawPlot,
+  _M_m: VM.DyadFn = drawPlot,
+  _m_L: VM.DyadFn = drawPlot,
+  _m_m: VM.DyadFn = drawPlot,
 };

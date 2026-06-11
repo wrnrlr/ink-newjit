@@ -3,24 +3,23 @@ const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
-const util = @import("../../util.zig");
 
 pub const Nulls = struct {
   pub const op = .@"^";
-  _b: util.MonadFn = nullsAtom(.b),
-  _i: util.MonadFn = nullsAtom(.i),
-  _f: util.MonadFn = nullsAtom(.f),
-  _s: util.MonadFn = nullsAtom(.s),
-  _c: util.MonadFn = nullsAtom(.c),
-  _B: util.MonadFn = nullsVec(.B),
-  _I: util.MonadFn = nullsVec(.I),
-  _F: util.MonadFn = nullsVec(.F),
-  _S: util.MonadFn = nullsVec(.S),
-  _C: util.MonadFn = nullsVec(.C),
-  _L: util.MonadFn = nullsListFn,
+  _b: VM.MonadFn = nullsAtom(.b),
+  _i: VM.MonadFn = nullsAtom(.i),
+  _f: VM.MonadFn = nullsAtom(.f),
+  _s: VM.MonadFn = nullsAtom(.s),
+  _c: VM.MonadFn = nullsAtom(.c),
+  _B: VM.MonadFn = nullsVec(.B),
+  _I: VM.MonadFn = nullsVec(.I),
+  _F: VM.MonadFn = nullsVec(.F),
+  _S: VM.MonadFn = nullsVec(.S),
+  _C: VM.MonadFn = nullsVec(.C),
+  _L: VM.MonadFn = nullsListFn,
 };
 
-fn nullsAtom(comptime k: K) util.MonadFn {
+fn nullsAtom(comptime k: K) VM.MonadFn {
   const isNull = k.isNullFn();
   return struct {
     fn f(_: *VM, x: V) V {
@@ -30,7 +29,7 @@ fn nullsAtom(comptime k: K) util.MonadFn {
   }.f;
 }
 
-fn nullsVec(comptime k: K) util.MonadFn {
+fn nullsVec(comptime k: K) VM.MonadFn {
   const isNull = k.isNullFn();
   return struct {
     fn f(vm: *VM, x: V) V {
