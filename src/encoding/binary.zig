@@ -56,8 +56,8 @@ fn serVal(buf: *std.ArrayList(u8), alloc: Alloc, pool: *const Pool, v: V) anyerr
     .blank => {},
     .err   => |e| try buf.append(alloc, @intFromEnum(e)),
     .b     => |b| try buf.append(alloc, if (b) 1 else 0),
-    .i     => |i| try writeI64(buf, alloc, i),
-    .f     => |f| try writeU64(buf, alloc, @bitCast(f)),
+    .i     => |i| try writeI32(buf, alloc, i),
+    .f     => |f| try writeU32(buf, alloc, @bitCast(f)),
     .s     => |s| try writeStr(buf, alloc, pool.get(s)),
     .c     => |c| try writeU8(buf, alloc, c),
     .B => |n| {
@@ -109,18 +109,6 @@ fn writeI32(buf: *std.ArrayList(u8), alloc: Alloc, v: i32) !void {
   try buf.appendSlice(alloc, &b);
 }
 
-fn writeI64(buf: *std.ArrayList(u8), alloc: Alloc, v: i32) !void {
-  var b: [4]u8 = undefined;
-  std.mem.writeInt(i32, &b, v, .little);
-  try buf.appendSlice(alloc, &b);
-}
-
-fn writeU64(buf: *std.ArrayList(u8), alloc: Alloc, v: u32) !void {
-  var b: [4]u8 = undefined;
-  std.mem.writeInt(u32, &b, v, .little);
-  try buf.appendSlice(alloc, &b);
-}
-
 fn writeStr(buf: *std.ArrayList(u8), alloc: Alloc, s: []const u8) !void {
   try writeU32(buf, alloc, @intCast(s.len));
   try buf.appendSlice(alloc, s);
@@ -153,9 +141,9 @@ fn desVal(alloc: Alloc, pool: *Pool, bytes: []const u8, pos: *usize) anyerror!V 
       pos.* += 1;
       break :blk .{ .b = b };
     },
-    .i => .{ .i = try rdI64(bytes, pos) },
+    .i => .{ .i = try rdI32(bytes, pos) },
     .f => blk: {
-      const bits = try rdU64(bytes, pos);
+      const bits = try rdU32(bytes, pos);
       break :blk .{ .f = @bitCast(bits) };
     },
     .s => blk: {
@@ -258,20 +246,6 @@ fn rdU32(bytes: []const u8, pos: *usize) !u32 {
 fn rdI32(bytes: []const u8, pos: *usize) !i32 {
   if (pos.* + 4 > bytes.len) return error.UnexpectedEof;
   const v = std.mem.readInt(i32, bytes[pos.*..][0..4], .little);
-  pos.* += 4;
-  return v;
-}
-
-fn rdI64(bytes: []const u8, pos: *usize) !i32 {
-  if (pos.* + 4 > bytes.len) return error.UnexpectedEof;
-  const v = std.mem.readInt(i32, bytes[pos.*..][0..4], .little);
-  pos.* += 4;
-  return v;
-}
-
-fn rdU64(bytes: []const u8, pos: *usize) !u32 {
-  if (pos.* + 4 > bytes.len) return error.UnexpectedEof;
-  const v = std.mem.readInt(u32, bytes[pos.*..][0..4], .little);
   pos.* += 4;
   return v;
 }

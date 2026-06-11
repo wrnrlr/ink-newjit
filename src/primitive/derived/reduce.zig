@@ -149,6 +149,54 @@ pub fn listFold(comptime op2: Op2) util.MonadFn {
   }}.f;
 }
 
+// ── Fused derived verb structs ────────────────────────────────────────────────
+
+fn sumB(_: *VM, x: V) V {
+  var acc: i32 = 0;
+  for (x.B.slice()) |v| if (v) { acc += 1; };
+  return .{ .i = acc };
+}
+fn minB(_: *VM, x: V) V {
+  const s = x.B.slice();
+  if (s.len == 0) return .blank;
+  for (s) |v| if (!v) return .{ .b = false };
+  return .{ .b = true };
+}
+fn maxB(_: *VM, x: V) V {
+  const s = x.B.slice();
+  if (s.len == 0) return .blank;
+  for (s) |v| if (v) return .{ .b = true };
+  return .{ .b = false };
+}
+
+pub const Sum = struct {
+  pub const op = .@"+/";
+  _B: util.MonadFn = sumB,
+  _I: util.MonadFn = typedFold(i32, .@"+"),
+  _F: util.MonadFn = typedFold(f32, .@"+"),
+  _L: util.MonadFn = listFold(.@"+"),
+};
+pub const Product = struct {
+  pub const op = .@"*/";
+  _I: util.MonadFn = typedFold(i32, .@"*"),
+  _F: util.MonadFn = typedFold(f32, .@"*"),
+  _L: util.MonadFn = listFold(.@"*"),
+};
+pub const Min = struct {
+  pub const op = .@"&/";
+  _B: util.MonadFn = minB,
+  _I: util.MonadFn = typedFold(i32, .@"&"),
+  _F: util.MonadFn = typedFold(f32, .@"&"),
+  _L: util.MonadFn = listFold(.@"&"),
+};
+pub const Max = struct {
+  pub const op = .@"|/";
+  _B: util.MonadFn = maxB,
+  _I: util.MonadFn = typedFold(i32, .@"|"),
+  _F: util.MonadFn = typedFold(f32, .@"|"),
+  _L: util.MonadFn = listFold(.@"|"),
+};
+
 test "simd reductions match scalar" {
   const ints = [_]i32{ 5, -3, 7, 1, 9, -2, 4, 8, 0, 6, 11, -5, 3, 2, 10, -1, 12 };
   var ssum: i32 = ints[0];

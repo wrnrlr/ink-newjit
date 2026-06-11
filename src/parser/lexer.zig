@@ -4,10 +4,8 @@ const isAlphanumeric = std.ascii.isAlphanumeric;
 const isDigit = std.ascii.isDigit;
 
 pub const TT = enum {
-  int, float,
-  bit, bits,
-  string, symbol,
-  iden,
+  int, float, bit, bits,
+  string, symbol, iden,
   keyword, op, io,
   adverb, adverb_val,
   @":",

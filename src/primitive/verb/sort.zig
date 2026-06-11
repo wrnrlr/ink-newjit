@@ -1,45 +1,26 @@
 const std = @import("std");
-const value = @import("../../noun/value.zig");
-const VM = @import("../../runtime/vm.zig").VM;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
-const Alloc = std.mem.Allocator;
+const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
-
-const mergesort = @import("sort/mergesort.zig");
-const timsort = @import("sort/timsort.zig");
-const radixsort = @import("sort/radixsort.zig");
+const Alloc = std.mem.Allocator;
 
 fn asc(vm: *VM, x: V) V { return sortIndices(vm.alloc, x, false); }
 fn dsc(vm: *VM, x: V) V { return sortIndices(vm.alloc, x, true); }
 
 pub const Ascend = struct {
   pub const op = .@"<";
-  _b: util.MonadFn = asc,
-  _i: util.MonadFn = asc,
-  _f: util.MonadFn = asc,
-  _c: util.MonadFn = asc,
-  _B: util.MonadFn = asc,
-  _I: util.MonadFn = asc,
-  _F: util.MonadFn = asc,
-  _S: util.MonadFn = asc,
-  _C: util.MonadFn = asc,
-  _L: util.MonadFn = asc,
+  _b: util.MonadFn = asc, _i: util.MonadFn = asc, _f: util.MonadFn = asc,
+  _c: util.MonadFn = asc, _B: util.MonadFn = asc, _I: util.MonadFn = asc,
+  _F: util.MonadFn = asc, _S: util.MonadFn = asc, _C: util.MonadFn = asc, _L: util.MonadFn = asc,
 };
 
 pub const Descend = struct {
   pub const op = .@">";
-  _b: util.MonadFn = dsc,
-  _i: util.MonadFn = dsc,
-  _f: util.MonadFn = dsc,
-  _s: util.MonadFn = dsc,
-  _c: util.MonadFn = dsc,
-  _B: util.MonadFn = dsc,
-  _I: util.MonadFn = dsc,
-  _F: util.MonadFn = dsc,
-  _S: util.MonadFn = dsc,
-  _C: util.MonadFn = dsc,
-  _L: util.MonadFn = dsc,
+  _b: util.MonadFn = dsc, _i: util.MonadFn = dsc, _f: util.MonadFn = dsc,
+  _s: util.MonadFn = dsc, _c: util.MonadFn = dsc, _B: util.MonadFn = dsc,
+  _I: util.MonadFn = dsc, _F: util.MonadFn = dsc, _S: util.MonadFn = dsc,
+  _C: util.MonadFn = dsc, _L: util.MonadFn = dsc,
 };
 
 fn compareV(a: V, b: V) std.math.Order {
@@ -78,8 +59,7 @@ fn compareV(a: V, b: V) std.math.Order {
       break :blk std.math.order(sa.len, sb.len);
     },
     .C => blk: {
-      const sa = a.C.slice(); const sb = b.C.slice();
-      break :blk std.mem.order(u8, sa, sb);
+      break :blk std.mem.order(u8, a.C.slice(), b.C.slice());
     },
     .B => blk: {
       const sa = a.B.slice(); const sb = b.B.slice();
@@ -101,21 +81,18 @@ fn Context(comptime T: type) type {
   return struct {
     data: T,
     desc: bool,
-
     fn cmp(self: @This(), lhs: usize, rhs: usize) bool {
       const a = self.data[lhs];
       const b = self.data[rhs];
-
       const VType = std.meta.Child(T);
       if (comptime @typeInfo(VType) == .float) {
         const a_nan = std.math.isNan(a);
         const b_nan = std.math.isNan(b);
         if (a_nan and !b_nan) return !self.desc;
         if (!a_nan and b_nan) return self.desc;
-        if (a_nan and b_nan) return true;
+        if (a_nan and b_nan) return false;
       }
-
-      if (a == b) return true;
+      if (a == b) return false;
       if (comptime VType == bool) return if (self.desc) a else b;
       return if (self.desc) a > b else a < b;
     }
@@ -123,67 +100,40 @@ fn Context(comptime T: type) type {
 }
 
 pub fn sortIndices(alloc: Alloc, v: V, desc: bool) V {
-  const length = v.len();
-
   if (v.isAtom()) {
     const res = N(i32).init(alloc, 1) catch return V{ .err = .memory };
     res.slice()[0] = 0;
     return .{ .I = res };
   }
 
+  const length = v.len();
   var indices = N(i32).init(alloc, length) catch return V{ .err = .memory };
-
-  var idx_buffer = alloc.alloc(usize, length) catch {
+  var idx_buf = alloc.alloc(usize, length) catch {
     (V{ .I = indices }).deinit(alloc);
     return V{ .err = .memory };
   };
-  defer alloc.free(idx_buffer);
-
-  for (0..length) |i| idx_buffer[i] = i;
+  defer alloc.free(idx_buf);
+  for (0..length) |i| idx_buf[i] = i;
 
   switch (v) {
-    // Integer: LSD radix sort — O(8n), no per-element allocations, fastest for large n
-    .I => |n| radixsort.sortI64(alloc, idx_buffer, n.slice(), desc) catch return V{ .err = .memory },
-    // Symbol hashes (u32): LSD radix sort
-    .S => |n| radixsort.sortU64(alloc, idx_buffer, n.slice(), desc) catch return V{ .err = .memory },
-    // Char (u8): LSD radix sort, single pass
-    .C => |n| radixsort.sortU8(alloc, idx_buffer, n.slice(), desc) catch return V{ .err = .memory },
-    // Float: timsort — handles NaN via cmp, great cache behaviour on real data
-    .F => |n| {
-      const Ctx = Context([]const f32);
-      const ctx = Ctx{ .data = n.slice(), .desc = desc };
-      timsort.sort(alloc, idx_buffer, ctx, Ctx.cmp) catch return V{ .err = .memory };
-    },
-    // Bool: timsort
-    .B => |n| {
-      const Ctx = Context([]const bool);
-      const ctx = Ctx{ .data = n.slice(), .desc = desc };
-      timsort.sort(alloc, idx_buffer, ctx, Ctx.cmp) catch return V{ .err = .memory };
+    inline .I, .S, .C, .F, .B => |n| {
+      const Ctx = Context(@TypeOf(n.slice()));
+      std.sort.block(usize, idx_buf, Ctx{ .data = n.slice(), .desc = desc }, Ctx.cmp);
     },
     .L => |n| {
       const LCtx = struct {
-        data: []const V,
-        desc: bool,
-        fn cmp(ctx: @This(), lhs: usize, rhs: usize) bool {
-          const ord = compareV(ctx.data[lhs], ctx.data[rhs]);
-          if (ctx.desc) return ord != .lt;
-          return ord != .gt;
+        data: []const V, desc: bool,
+        fn cmp(self: @This(), lhs: usize, rhs: usize) bool {
+          const ord = compareV(self.data[lhs], self.data[rhs]);
+          return if (self.desc) ord == .gt else ord == .lt;
         }
       };
-      const ctx = LCtx{ .data = n.slice(), .desc = desc };
-      timsort.sort(alloc, idx_buffer, ctx, LCtx.cmp) catch {
-        (V{ .I = indices }).deinit(alloc);
-        return V{ .err = .memory };
-      };
+      std.sort.block(usize, idx_buf, LCtx{ .data = n.slice(), .desc = desc }, LCtx.cmp);
     },
     else => return .{ .err = .@"type" },
   }
 
   const res_slice = indices.slice();
-  for (idx_buffer, 0..) |idx, i| {
-    res_slice[i] = @intCast(idx);
-  }
-
+  for (idx_buf, 0..) |idx, i| res_slice[i] = @intCast(idx);
   return .{ .I = indices };
 }
-

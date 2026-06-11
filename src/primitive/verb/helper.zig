@@ -222,15 +222,8 @@ fn dyadKernel(
   const C  = CastType(XT, YT);
   const R  = ResultType(XT, YT);
   const rk = resultKind2(xk, yk, ResultType);
+  const cast = Caster(C).cast;
   return &struct {
-    inline fn cast(v: anytype) C {
-      const T = @TypeOf(v);
-      if (T == C) return v;
-      if (T == bool) return if (C == f32) (if (v) @as(f32, 1.0) else 0.0) else @intFromBool(v);
-      if (T == i32 and C == f32) return @floatFromInt(v);
-      if (T == f32 and C == i32) return @intFromFloat(v);
-      unreachable;
-    }
     fn kernel(vm: *VM, x: V, y: V) V {
       if (comptime xk.isAtom() and yk.isAtom()) {
         const r: R = Impl.f(cast(V.unwrap(x, xk)), cast(V.unwrap(y, yk)));

@@ -272,34 +272,29 @@ pub const TerseFormatter = struct {
     }
   }
 
+  fn formatDictKey(self: *Self, k: V, w: anytype) anyerror!void {
+    defer k.deinit(self.alloc);
+    if (k.tag() == .s) {
+      if (k.s < self.vm.symbolCount()) try w.writeAll(self.vm.getSymbol(k.s))
+      else try w.print("{d}", .{k.s});
+    } else try self.formatValue(k, w);
+  }
+
   fn formatDict(self: *Self, d: Dict, w: anytype) anyerror!void {
     const keys = d.av();
     const vals = d.bv();
     const n = keys.len();
-
     const can_use_syntax = (keys.tag() == .S) or (keys.tag() == .s) or (keys.tag() == .L and self.allSymbols(keys.L.slice()));
-
     if (!can_use_syntax) {
       try self.formatValue(keys, w);
       try w.writeAll("!");
       try self.formatValue(vals, w);
       return;
     }
-
     try w.writeAll("[");
     for (0..n) |i| {
       if (i > 0) try w.writeAll(";");
-      const k = keys.at(i);
-      defer k.deinit(self.alloc);
-      if (k.tag() == .s) {
-        if (k.s < self.vm.symbolCount()) {
-          try w.writeAll(self.vm.getSymbol(k.s));
-        } else {
-          try w.print("{d}", .{k.s});
-        }
-      } else {
-        try self.formatValue(k, w);
-      }
+      try self.formatDictKey(keys.at(i), w);
       try w.writeAll(":");
       const v = if (n == 1) vals.ref() else vals.at(i);
       defer v.deinit(self.alloc);
@@ -315,17 +310,7 @@ pub const TerseFormatter = struct {
     const n = keys.len();
     for (0..n) |i| {
       if (i > 0) try w.writeAll(";");
-      const k = keys.at(i);
-      defer k.deinit(self.alloc);
-      if (k.tag() == .s) {
-        if (k.s < self.vm.symbolCount()) {
-          try w.writeAll(self.vm.getSymbol(k.s));
-        } else {
-          try w.print("{d}", .{k.s});
-        }
-      } else {
-        try self.formatValue(k, w);
-      }
+      try self.formatDictKey(keys.at(i), w);
       try w.writeAll(":");
       const v = vals.at(i);
       defer v.deinit(self.alloc);

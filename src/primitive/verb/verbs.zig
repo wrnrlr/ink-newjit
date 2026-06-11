@@ -1,13 +1,12 @@
 const std = @import("std");
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
+const N = @import("../../noun/array.zig").N;
 const Op1 = @import("../../noun/operator.zig").Op1;
 const Op2 = @import("../../noun/operator.zig").Op2;
 const VM = @import("../../runtime/vm.zig").VM;
 const util = @import("../../util.zig");
-const toLower = std.ascii.toLower;
 const selection = @import("first.zig");
-const logic = @import("logic.zig");
 const pair = @import("pair.zig");
 const io = @import("io.zig");
 const concat = @import("concat.zig");
@@ -28,8 +27,6 @@ pub fn _N(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Up
 pub fn _F(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Float1,  h.Float1,  F, &at); }
 pub fn _Yf(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Float1, h.Int1,   F, &at); }
 pub fn _X1(comptime op: Op1, comptime Impl: type) type { return h._X(Op1, op, Impl); }
-// pub fn _X(comptime op: Op1, comptime F: type, comptime tip:[]K) type { return h.makeMonad(op, h.Char1, h.Char1, F, tip); }
-// pub fn _F(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Float1, h.Int1, F, &.{.f, .F}); }
 
 // Dyad helpers (op: Op2)
 pub fn _B_B(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Bool2, h.Bool2, f, &.{.b, .B}); }
@@ -37,10 +34,85 @@ pub fn _N_N(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.U
 pub fn _I_I(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Int2, h.Int2, f, &h.integer_types); }
 pub fn _F_F(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Float2,  h.Float2,  f, &at); }
 pub fn _X2(comptime op: Op2, comptime f: type) type { return h._X(Op2, op, f); }
-
 pub fn _Cmp(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Upcast2, h.Bool2, f, &at); }
 
-// const Lowercase = struct { fn f(x: anytype) u8 { return toLower(@intCast(x)); } };
+// ── Inlined from tiny single-file verbs ──────────────────────────────────────
+
+const LessOp  = struct { pub fn f(x: anytype, y: @TypeOf(x)) bool { return x < y; } };
+const MoreOp  = struct { pub fn f(x: anytype, y: @TypeOf(x)) bool { return x > y; } };
+const EqualOp = struct { pub fn f(x: anytype, y: @TypeOf(x)) bool { return x == y; } };
+const NotOp   = struct {
+  pub fn f(x: anytype) bool {
+    const T = @TypeOf(x);
+    if (T == i32) return x == 0;
+    if (T == f32) return x == 0.0 or std.math.isNan(x);
+    unreachable;
+  }
+};
+
+const FloorOp = struct {
+  pub fn f(x: anytype) i32 { return @intFromFloat(std.math.floor(x)); }
+};
+
+const LowercaseOp = struct {
+  pub fn f(x: anytype) u8 { return std.ascii.toLower(@intCast(x)); }
+};
+const Lowercase = h.makeMonad(.@"_", h.Char1, h.Char1, LowercaseOp, &.{.c, .C});
+
+const Keys = struct {
+  pub const op = .@"!";
+  _m: util.MonadFn = keysDict,
+  _M: util.MonadFn = keysTable,
+};
+fn keysDict(_: *VM, x: V) V { return x.m.av().ref(); }
+fn keysTable(_: *VM, x: V) V { return x.M.av().ref(); }
+
+const Values = struct {
+  pub const op = .@".";
+  _m: util.MonadFn = valuesDict,
+};
+fn valuesDict(_: *VM, x: V) V { return x.m.bv().ref(); }
+
+const Open = struct {
+  pub const op = .@"<";
+  _s: util.MonadFn = openFile,
+};
+fn openFile(vm: *VM, x: V) V {
+  const path = vm.getSymbol(x.s);
+  const id = vm.mapFile(path) catch return .{ .err = .io };
+  return .{ .i = @intCast(id) };
+}
+
+const UniformOp = struct { _i: util.MonadFn = uniform };
+fn uniform(vm: *VM, x: V) V {
+  if (x.i < 0) return .{ .err = .domain };
+  const size: usize = @intCast(x.i);
+  const F = N(f32).init(vm.alloc, size) catch return .{ .err = .memory };
+  const random = vm.prng.random();
+  for (F.slice()) |*v| v.* = random.float(f32);
+  return .{ .F = F };
+}
+
+const Unitary = struct {
+  pub const op = .@"=";
+  _i: util.MonadFn = unitary,
+};
+fn unitary(vm: *VM, x: V) V {
+  if (x.i < 0) return .{ .err = .domain };
+  const size: usize = @intCast(x.i);
+  const res = N(V).init(vm.alloc, size) catch return V{ .err = .memory };
+  for (0..size) |i| {
+    const row = N(i32).init(vm.alloc, size) catch return V{ .err = .memory };
+    @memset(row.slice(), 0);
+    row.slice()[i] = 1;
+    res.slice()[i] = .{ .I = row };
+  }
+  return .{ .L = res };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+const r = @import("../derived/reduce.zig");
 
 const Monads = struct {
   // Monadic Primitives
@@ -50,21 +122,20 @@ const Monads = struct {
   pub const @"*|x"  = selection.Last_Name;
   pub const @"⍳i" = @import("iota.zig").Iota;
   pub const @"↕I" = @import("odometer.zig").Odometer;
-  pub const @"!d" = @import("keys.zig").Keys;
+  pub const @"!d" = Keys;
   pub const @"&x" = @import("where.zig").Where;
   pub const @"|x" = @import("reverse.zig").Reverse;
-  pub const @"<s" =  @import("open.zig").Open;
+  pub const @"<s" = Open;
   pub const @"⍋x" = sort.Ascend;
   pub const @"⍒x" = sort.Descend;
   pub const @"=X" = @import("group.zig").Group;
-  pub const @"=i" = _X1(.@"?", @import("uniform.zig").UniformOp);
-  pub const @"~x" = _B(.@"~", logic.NotOp);
+  pub const @"=i" = _X1(.@"?", UniformOp);
+  pub const @"~x" = _B(.@"~", NotOp);
   pub const @",x" = @import("enlist.zig").Enlist;
   pub const @"^x" = @import("nulls.zig").Nulls;
   pub const @"#x" = @import("tally.zig").Tally;
-  pub const @"_c" = @import("lowercase.zig").Lowercase;
-  pub const @"_n" = h.makeMonad(.@"_", h.Float1, h.Int1, @import("floor.zig").FloorOp, &.{.f, .F});
-  // pub const @"9:x"   = @import("graphics.zig").Draw;
+  pub const @"_c" = Lowercase;
+  pub const @"_n" = h.makeMonad(.@"_", h.Float1, h.Int1, FloorOp, &.{.f, .F});
   pub const @"sqrt"  = _F(.sqrt, calc.SqrtOp);
   pub const @"sqr"   = _N(.sqr,  calc.SqrOp);
   pub const @"exp"   = _F(.exp,  calc.ExpOp);
@@ -76,27 +147,23 @@ const Monads = struct {
   pub const @"parse" = @import("parse.zig").Parse;
   pub const @"@x"    = @import("type.zig").Type;
   pub const @":x"    = @import("right.zig").Identity;
-
-  pub const @"=u"  = @import("unitary.zig").Unitary;
-  pub const @"?X"  = @import("distinct.zig").Distinct;
+  pub const @"=u"    = Unitary;
+  pub const @"?X"    = @import("distinct.zig").Distinct;
   pub const @"0:x" = io.ReadLines;
   pub const @"1:x" = io.ReadBytes;
   pub const @"2:x" = io.ReadData;
-  pub const @".m"  = @import("values.zig").Values;
+  pub const @".m"  = Values;
   pub const @".s"  = @import("get.zig").GetSymbol;
   pub const exec   = @import("exec.zig").Exec;
 
   // Fused derived verbs — direct monadic reductions over typed arrays.
-  // The optimizer rewrites `+/x` (Call+Derive) into `Apply1 +/` to hit these.
-  pub const @"sum x"     = @import("../derived/sum.zig").Sum;
-  pub const @"product x" = @import("../derived/product.zig").Product;
-  pub const @"min x"     = @import("../derived/min.zig").Min;
-  pub const @"max x"     = @import("../derived/max.zig").Max;
+  pub const @"sum x"     = r.Sum;
+  pub const @"product x" = r.Product;
+  pub const @"min x"     = r.Min;
+  pub const @"max x"     = r.Max;
 };
 
 const Dyads = struct {
-  // Dyadic Primitives
-  // pub const @"i+i" = _i_i(.@"+", fn f(x: anytype, y: anytype) i32 { return x +% y; });
   pub const @"N+N" = _N_N(.@"+", calc.AddOp);
   pub const @"N-N" = _N_N(.@"-", calc.SubOp);
   pub const @"N*N" = _N_N(.@"*", calc.MulOp);
@@ -106,9 +173,9 @@ const Dyads = struct {
   pub const @"B&B" = _B_B(.@"&", calc.AndOp);
   pub const @"B|B" = _B_B(.@"|", calc.OrOp);
   pub const @"x!y" = pair.Pair;
-  pub const @"X=X" = _Cmp(.@"=", logic.EqualOp);
-  pub const @"X<X" = _Cmp(.@"<", logic.LessOp);
-  pub const @"X>X" = _Cmp(.@">", logic.MoreOp);
+  pub const @"X=X" = _Cmp(.@"=", EqualOp);
+  pub const @"X<X" = _Cmp(.@"<", LessOp);
+  pub const @"X>X" = _Cmp(.@">", MoreOp);
   pub const @"X~X" = @import("match.zig").Match;
   pub const @"I⌊I"  = _I_I(.mod, calc.ModOp);
   pub const @"I÷I"  = _I_I(.div, calc.DiviOp);
@@ -117,16 +184,10 @@ const Dyads = struct {
   pub const @"I_X"  = _X2(.@"_", @import("cut.zig").Cut);
   pub const @"B_X"  = @import("weedout.zig").WeedOut;
   pub const @"X_i"  = @import("delete.zig").Delete;
-  // pub const @"i_m"  = @import("drop_keys.zig").DropKeys;
-  // pub const @"I_m"  = @import("drop_keys.zig").DropKeys;
   pub const @"x_m"  = @import("drop_keys.zig").DropKeys;
   pub const @"m,m"  = @import("merge.zig").DictMerge;
   pub const @"x#m"  = @import("select.zig").SelectKeys;
   pub const @"M,m"  = @import("insert.zig").Insert;
-  // pub const @"M,m" = @import("insert.zig").Upsert;
-  // pub const @"m|m"  = @import("join.zig").UnionJoin;
-  // pub const @"m,m" = @import("join.zig").LeftJoin;
-  // pub const @"m^m"  = dict.OuterJoin;
   pub const @"i#X"  = @import("take.zig").Take;
   pub const @"I⍴X"  = @import("reshape.zig").Reshape;
   pub const @"x^X"  = @import("fill.zig").Fill;
@@ -135,14 +196,13 @@ const Dyads = struct {
   pub const @"s$x"  = @import("cast.zig").Cast;
   pub const @"X?x"  = @import("find.zig").Find;
   pub const @"i?X"  = @import("random.zig").Random;
-  pub const @"f@y"  = @import("apply1.zig").Apply;
+  pub const @"f@y"  = @import("apply.zig").Apply;
   pub const @"m@X"  = @import("select.zig").SelectDict;
   pub const @"M@X"  = @import("select.zig").SelectTable;
   pub const @"x@y"  = @import("apply.zig").Apply;
   pub const @"X@X"  = @import("pick.zig").Pick;
   pub const @"s?x"  = @import("marshal.zig").Marshal;
   pub const @"s@x"  = @import("marshal.zig").Unmarshal;
-  // pub const @"x.y" = @import("apply.zig").ApplyN; // TODO: pick.pick reference broken
   pub const @"x has y"  = member.Has;
   pub const @"x in y"   = member.In;
   pub const @"x 0: x" = io.WriteLines;
@@ -152,47 +212,11 @@ const Dyads = struct {
   pub const @"9: x"    = @import("graphics.zig").Draw;
   pub const @"x 9: x"  = @import("graphics.zig").DrawDyad;
   pub const @"x exec" = @import("exec.zig").ExecDyad;
-
-  // // Special Forms
-  // const @"@[x;y;f]" = struct{};
-  // const @"@[x;y;F;z]" = struct{};
-  // const @".[x;y;f]" = struct{};
-  // const @".[x;y;F;z]" = struct{};
-  // // const @".[f;y;f]" = struct{}; // try
-  // const @"?[x;y;z]" = struct{}; // splice
-  
-  // // Adverbs
-  // const @"i f'" = struct {};
-  // const @"f'" = struct {};
-  // const @"x F'" = struct {};
-  // const @"X'" = struct {};
-  // const @"F/" = struct {};
-  // const @"F\\" = struct {};
-  // const @"x F/" = struct {};
-  // const @"x F\\" = struct {};
-  // const @"i f/" = struct {};
-  // const @"i f\\" = struct {};
-  // const @"f f/" = struct {};
-  // const @"f f\\" = struct {};
-  // const @"f/" = struct {};
-  // const @"f\\" = struct {};
-  // const @"C/" = struct {};
-  // const @"C\\" = struct {};
-  // const @"I/" = struct {};
-  // const @"I\\" = struct {};
-  // const @"i'" = struct {};
-  // const @"i f':" = struct {};
-  // const @"F'" = struct {};
-  // const @"x F':" = struct {};
-  // const @"x F/:" = struct {};
-  // const @"x F\\:" = struct {};
 };
 
 fn typeError1(_: *VM, _:V) V { return .{ .err = .@"type" }; }
 fn typeError2(_: *VM, _:V, _:V) V { return .{ .err = .@"type" }; }
 
-// Read the verb's `op` field — coerces the (possibly anonymous) enum literal
-// to EnumT. Compile error if the verb's op isn't a valid EnumT member.
 fn opOf(comptime Verb: type, comptime EnumT: type) ?EnumT {
   if (@hasDecl(Verb, "op")) return @as(EnumT, @field(Verb, "op"));
   for (std.meta.fields(Verb)) |f|
@@ -235,9 +259,6 @@ fn makeDyadArray(comptime Defs: type) [Op2.COUNT * K.COUNT * K.COUNT]util.DyadFn
   return table;
 }
 
-// Parse "_i" → [.i], "_i_f" → [.i, .f], "_blank" → [.blank].
-// Splits on '_' into segments; each segment must be a K enum tag name or single K char.
-// Returns [] if any segment doesn't map to a K tag.
 fn parseSig(comptime name: []const u8) []const K {
   if (name.len < 2 or name[0] != '_') return &.{};
   comptime var tags: []const K = &.{};

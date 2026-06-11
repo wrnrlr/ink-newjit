@@ -8,7 +8,6 @@ const Op2 = opmod.Op2;
 const Op3 = opmod.Op3;
 const Op4 = opmod.Op4;
 const ir = @import("ir.zig");
-const optimizer = @import("optimizer.zig");
 const fntable = @import("fntable.zig");
 const V = value.V;
 const N = @import("../noun/array.zig").N;
@@ -18,6 +17,7 @@ const Chunk = @import("tape.zig").Chunk;
 const OpCode = @import("tape.zig").OpCode;
 const Pool = @import("../noun/symbol.zig").Pool;
 const Fs = @import("registry.zig").Fs;
+const fold_mod = @import("../primitive/adverb/fold.zig");
 
 pub const Compiler = struct {
   alloc: Alloc,
@@ -56,11 +56,7 @@ pub const Compiler = struct {
   pub fn compile(self: *Compiler, node: *ast.Node, is_tail: bool) anyerror!void {
     const root_id = try self.compileNode(node, is_tail);
     if (self.scope.parent == null) {
-      var opt = optimizer.Optimizer.init(self.alloc);
-      try opt.optimize(&self.scope.ir, root_id);
-      _ = try opt.inlineLambdas(&self.scope.ir, self.fn_tables);
-      try opt.optimize(&self.scope.ir, root_id);
-      try opt.livenessLocals(&self.scope.ir);
+      try self.runOptimizer(&self.scope.ir, root_id);
       try self.lower();
     }
   }
@@ -660,12 +656,8 @@ pub const Compiler = struct {
         }
       }
 
-      var opt = optimizer.Optimizer.init(self.alloc);
       const root_id = if (scope_ptr.ir.instructions.items.len > 0) @as(ir.ValueId, @intCast(scope_ptr.ir.instructions.items.len - 1)) else ir.NO_VALUE;
-      try opt.optimize(&scope_ptr.ir, root_id);
-      _ = try opt.inlineLambdas(&scope_ptr.ir, self.fn_tables);
-      try opt.optimize(&scope_ptr.ir, root_id);
-      try opt.livenessLocals(&scope_ptr.ir);
+      try self.runOptimizer(&scope_ptr.ir, root_id);
       try self.lower();
       break :blk a;
     };
@@ -850,6 +842,13 @@ pub const Compiler = struct {
       else => {},
     }
   }
+
+  fn runOptimizer(self: *Compiler, scope_ir: *ir.IR, root_id: ir.ValueId) !void {
+    try optimize(self.alloc, scope_ir, root_id);
+    _ = try inlineLambdas(self.alloc, scope_ir, self.fn_tables);
+    try optimize(self.alloc, scope_ir, root_id);
+    try livenessLocals(self.alloc, scope_ir);
+  }
 };
 
 const PatchInfo = struct {
@@ -906,3 +905,460 @@ const Scope = struct {
     return 0;
   }
 };
+
+// ── Optimizer ────────────────────────────────────────────────────────────────
+
+const LocalSet = struct {
+  bits: [4]u64 = .{0, 0, 0, 0},
+
+  pub fn set(s: *LocalSet, i: u8) void { s.bits[i >> 6] |= @as(u64, 1) << @as(u6, @truncate(i)); }
+  pub fn clear(s: *LocalSet, i: u8) void { s.bits[i >> 6] &= ~(@as(u64, 1) << @as(u6, @truncate(i))); }
+  pub fn has(s: LocalSet, i: u8) bool { return (s.bits[i >> 6] >> @as(u6, @truncate(i))) & 1 != 0; }
+  pub fn unionWith(s: *LocalSet, o: LocalSet) void { for (0..4) |j| s.bits[j] |= o.bits[j]; }
+  pub fn eql(a: LocalSet, b: LocalSet) bool { for (0..4) |j| if (a.bits[j] != b.bits[j]) return false; return true; }
+  pub fn diff(a: LocalSet, b: LocalSet) LocalSet { var r = a; for (0..4) |j| r.bits[j] &= ~b.bits[j]; return r; }
+};
+
+const BB = struct {
+  start:   u32,
+  end:     u32,
+  succ:    [2]u32 = .{0, 0},
+  n_succ:  u8     = 0,
+  gen:     LocalSet = .{},
+  kill:    LocalSet = .{},
+  livein:  LocalSet = .{},
+  liveout: LocalSet = .{},
+};
+
+inline fn isCall1(inst: *const ir.IRInst) bool {
+  return (inst.op == .Call or inst.op == .TailCall) and inst.arg1 == 1 and inst.inputs.len == 2;
+}
+
+fn isFusableReducer(op: Op1) bool {
+  return switch (op) { .@"+/", .@"*/", .@"&/", .@"|/" => true, else => false };
+}
+
+fn isFusableBin(op: Op2) bool {
+  return switch (op) {
+    .@"+", .@"-", .@"*", .@"&", .@"|", .@"<", .@">", .@"=" => true,
+    else => false,
+  };
+}
+
+fn isBuiltinDyad(inst: *const ir.IRInst, op: Op2) bool {
+  if (inst.op != .Const) return false;
+  const v = inst.val orelse return false;
+  if (v != .o) return false;
+  if (v.o.kind != .callable) return false;
+  if (!opmod.isOp2Idx(v.o.idx)) return false;
+  return v.o.getOp2() == op;
+}
+
+fn optimize(alloc: Alloc, scope_ir: *ir.IR, root_id: ir.ValueId) !void {
+  while (try constantFolding(alloc, scope_ir) or
+         try peepholeIdioms(alloc, scope_ir) or
+         try dce(alloc, scope_ir, root_id)) {}
+}
+
+fn peepholeIdioms(alloc: Alloc, scope_ir: *ir.IR) !bool {
+  const insts = scope_ir.instructions.items;
+  const use_count = try alloc.alloc(u32, insts.len);
+  defer alloc.free(use_count);
+  @memset(use_count, 0);
+  for (insts) |inst| {
+    if (inst.is_dead) continue;
+    for (inst.inputs) |id| {
+      if (id != ir.NO_VALUE and id < use_count.len) use_count[id] += 1;
+    }
+  }
+
+  var changed = false;
+  for (insts) |*inst| {
+    if (inst.is_dead) continue;
+
+    if (inst.op == .Apply1 and inst.inputs.len == 1) {
+      const red: Op1 = @enumFromInt(inst.arg1);
+      if (isFusableReducer(red)) fz: {
+        const prod_id = inst.inputs[0];
+        if (prod_id == ir.NO_VALUE or use_count[prod_id] != 1) break :fz;
+        const prod = scope_ir.get(prod_id);
+        if (prod.op != .Apply2 or prod.inputs.len != 2) break :fz;
+        const bin: Op2 = @enumFromInt(prod.arg1);
+        if (!isFusableBin(bin)) break :fz;
+        const a = prod.inputs[0];
+        const b = prod.inputs[1];
+        if (a == ir.NO_VALUE or b == ir.NO_VALUE) break :fz;
+
+        const old_inputs = inst.inputs;
+        const new_inputs = try scope_ir.alloc.alloc(ir.ValueId, 2);
+        new_inputs[0] = a;
+        new_inputs[1] = b;
+        inst.inputs = new_inputs;
+        inst.op = .ReduceZip;
+        inst.arg1 = @intFromEnum(red);
+        inst.arg2 = prod.arg1;
+        scope_ir.alloc.free(old_inputs);
+        scope_ir.instructions.items[prod_id].is_dead = true;
+        changed = true;
+        continue;
+      }
+    }
+
+    if (!isCall1(inst)) continue;
+    const f_id = inst.inputs[0];
+    const arg_id = inst.inputs[1];
+    if (f_id == ir.NO_VALUE or arg_id == ir.NO_VALUE) continue;
+    const f_inst = scope_ir.get(f_id);
+
+    if (f_inst.op == .Derive
+        and f_inst.arg1 == @intFromEnum(Adverb.@"/")
+        and f_inst.inputs.len == 1
+        and use_count[f_id] == 1)
+    {
+      const base_id = f_inst.inputs[0];
+      if (base_id != ir.NO_VALUE) {
+        const base = scope_ir.get(base_id);
+        if (base.op == .Const) blk: {
+          const v = base.val orelse break :blk;
+          if (v != .o) break :blk;
+          if (v.o.kind != .callable) break :blk;
+          if (!opmod.isOp2Idx(v.o.idx)) break :blk;
+          const fused = fold_mod.fusedReducerOf(v.o.getOp2()) orelse break :blk;
+
+          const old_inputs = inst.inputs;
+          const new_inputs = try scope_ir.alloc.alloc(ir.ValueId, 1);
+          new_inputs[0] = arg_id;
+          inst.inputs = new_inputs;
+          inst.op = .Apply1;
+          inst.arg1 = @intFromEnum(fused);
+          scope_ir.alloc.free(old_inputs);
+
+          scope_ir.instructions.items[f_id].is_dead = true;
+          changed = true;
+          continue;
+        }
+      }
+    }
+
+    if (!isBuiltinDyad(f_inst, .@"*")) continue;
+    const inner = scope_ir.get(arg_id);
+    if (!isCall1(inner)) continue;
+    if (use_count[arg_id] != 1) continue;
+    const f_inner_id = inner.inputs[0];
+    const x_id       = inner.inputs[1];
+    if (f_inner_id == ir.NO_VALUE or x_id == ir.NO_VALUE) continue;
+    if (!isBuiltinDyad(scope_ir.get(f_inner_id), .@"|")) continue;
+
+    const old_inputs = inst.inputs;
+    const new_inputs = try scope_ir.alloc.alloc(ir.ValueId, 1);
+    new_inputs[0] = x_id;
+    inst.inputs = new_inputs;
+    inst.op = .Apply1;
+    inst.arg1 = @intFromEnum(Op1.last);
+    scope_ir.alloc.free(old_inputs);
+
+    scope_ir.instructions.items[arg_id].is_dead = true;
+    changed = true;
+  }
+  return changed;
+}
+
+fn constantFolding(alloc: Alloc, scope_ir: *ir.IR) !bool {
+  var changed = false;
+  for (scope_ir.instructions.items) |*inst| {
+    if (inst.is_dead) continue;
+
+    if (inst.op == .Apply1 and inst.inputs.len > 0 and inst.inputs[0] != ir.NO_VALUE) {
+      const input = scope_ir.get(inst.inputs[0]);
+      if (input.op == .Const) {
+        const op: Op1 = @enumFromInt(inst.arg1);
+        if (foldMonad(op, input.val.?)) |res| {
+          if (inst.val) |v| v.deinit(alloc);
+          alloc.free(inst.inputs);
+          inst.* = .{ .op = .Const, .val = res, .is_pure = true };
+          changed = true;
+        }
+      }
+    }
+
+    if (inst.op == .Apply2 and inst.inputs.len > 1 and
+        inst.inputs[0] != ir.NO_VALUE and inst.inputs[1] != ir.NO_VALUE) {
+      const left = scope_ir.get(inst.inputs[0]);
+      const right = scope_ir.get(inst.inputs[1]);
+      if (left.op == .Const and right.op == .Const) {
+        const op: Op2 = @enumFromInt(inst.arg1);
+        if (foldDyad(op, left.val.?, right.val.?)) |res| {
+          if (inst.val) |v| v.deinit(alloc);
+          alloc.free(inst.inputs);
+          inst.* = .{ .op = .Const, .val = res, .is_pure = true };
+          changed = true;
+        }
+      }
+    }
+  }
+  return changed;
+}
+
+fn dce(alloc: Alloc, scope_ir: *ir.IR, root_id: ir.ValueId) !bool {
+  var changed = false;
+  const insts = scope_ir.instructions.items;
+  const used = try alloc.alloc(bool, insts.len);
+  defer alloc.free(used);
+  @memset(used, false);
+  if (root_id != ir.NO_VALUE) used[root_id] = true;
+
+  var i = insts.len;
+  while (i > 0) {
+    i -= 1;
+    const inst = insts[i];
+    if (inst.is_dead) continue;
+    if (!inst.is_pure or used[i]) {
+      for (inst.inputs) |id| { if (id != ir.NO_VALUE) used[id] = true; }
+    } else {
+      scope_ir.instructions.items[i].is_dead = true;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+fn inlineLambdas(alloc: Alloc, scope_ir: *ir.IR, fn_tables: *const fntable.FnTables) !bool {
+  _ = alloc;
+  var changed = false;
+  const insts = scope_ir.instructions.items;
+  for (insts, 0..) |*inst, i| {
+    if (inst.is_dead) continue;
+    if (inst.op != .Call and inst.op != .TailCall) continue;
+    if (inst.inputs.len < 1) continue;
+    const func_id = inst.inputs[0];
+    if (func_id == ir.NO_VALUE) continue;
+    const func_inst = scope_ir.get(func_id);
+    if (func_inst.op != .Const) continue;
+    const fval = func_inst.val orelse continue;
+    if (fval != .o) continue;
+    const fn_ref = fval.o;
+    if (fn_ref.kind != .callable or !opmod.isLambdaIdx(fn_ref.idx)) continue;
+    const lambda_idx = opmod.lambdaIdxOf(fn_ref.idx);
+    if (lambda_idx >= fn_tables.lambdas.items.len) continue;
+    const entry = fn_tables.lambdas.items[lambda_idx];
+    const op_byte = tryGetSimpleOp(entry.chunk, entry.arity) orelse continue;
+    const n_args = inst.inputs.len - 1;
+    if (n_args != entry.arity) continue;
+    const new_op: OpCode = if (entry.arity == 1) .Apply1 else .Apply2;
+    const new_inputs = try scope_ir.alloc.dupe(ir.ValueId, inst.inputs[1..]);
+    scope_ir.alloc.free(inst.inputs);
+    inst.op = new_op;
+    inst.arg1 = op_byte;
+    inst.inputs = new_inputs;
+    inst.is_pure = true;
+    _ = i;
+    changed = true;
+  }
+  return changed;
+}
+
+fn livenessLocals(alloc: Alloc, scope_ir: *ir.IR) !void {
+  const insts = scope_ir.instructions.items;
+  const n = insts.len;
+  if (n == 0) return;
+
+  const leaders = try alloc.alloc(bool, n);
+  defer alloc.free(leaders);
+  @memset(leaders, false);
+  leaders[0] = true;
+  for (insts, 0..) |inst, i| {
+    if (inst.is_dead) continue;
+    switch (inst.op) {
+      .Jump, .JumpFalse, .JumpTrue => {
+        const t = inst.arg1;
+        if (t < n) leaders[t] = true;
+        if (i + 1 < n) leaders[i + 1] = true;
+      },
+      else => {},
+    }
+  }
+
+  var bbs: std.ArrayList(BB) = .empty;
+  defer bbs.deinit(alloc);
+  const bb_of = try alloc.alloc(u32, n);
+  defer alloc.free(bb_of);
+  {
+    var s: u32 = 0;
+    for (1..n + 1) |i| {
+      if (i == n or leaders[i]) {
+        const id: u32 = @intCast(bbs.items.len);
+        for (s..@as(u32, @intCast(i))) |j| bb_of[j] = id;
+        try bbs.append(alloc, .{ .start = s, .end = @intCast(i) });
+        s = @intCast(i);
+      }
+    }
+  }
+  const nb = bbs.items.len;
+
+  for (bbs.items, 0..) |*bb, bi| {
+    var last_op = OpCode.Nop;
+    var last_arg: u32 = 0;
+    {
+      var j = bb.end;
+      while (j > bb.start) {
+        j -= 1;
+        if (!insts[j].is_dead) { last_op = insts[j].op; last_arg = insts[j].arg1; break; }
+      }
+    }
+    switch (last_op) {
+      .Return => {},
+      .Jump => {
+        if (last_arg < n) { bb.succ[0] = bb_of[last_arg]; bb.n_succ = 1; }
+      },
+      .JumpFalse, .JumpTrue => {
+        if (last_arg < n) { bb.succ[0] = bb_of[last_arg]; bb.n_succ = 1; }
+        if (bi + 1 < nb) { bb.succ[bb.n_succ] = @intCast(bi + 1); bb.n_succ += 1; }
+      },
+      else => {
+        if (bi + 1 < nb) { bb.succ[0] = @intCast(bi + 1); bb.n_succ = 1; }
+      },
+    }
+  }
+
+  for (bbs.items) |*bb| {
+    for (bb.start..bb.end) |i| {
+      const inst = insts[i];
+      if (inst.is_dead) continue;
+      switch (inst.op) {
+        .Local => {
+          const idx: u8 = @intCast(inst.arg1);
+          if (!bb.kill.has(idx)) bb.gen.set(idx);
+        },
+        .AssignLocal => bb.kill.set(@intCast(inst.arg1)),
+        .Nop => if (inst.arg3 == 1) bb.kill.set(@intCast(inst.arg1)),
+        else => {},
+      }
+    }
+  }
+
+  var changed = true;
+  while (changed) {
+    changed = false;
+    var bi = nb;
+    while (bi > 0) {
+      bi -= 1;
+      const bb = &bbs.items[bi];
+      var new_lo = LocalSet{};
+      for (0..bb.n_succ) |si| new_lo.unionWith(bbs.items[bb.succ[si]].livein);
+      var new_li = bb.gen;
+      new_li.unionWith(new_lo.diff(bb.kill));
+      if (!new_lo.eql(bb.liveout) or !new_li.eql(bb.livein)) {
+        bb.liveout = new_lo;
+        bb.livein  = new_li;
+        changed = true;
+      }
+    }
+  }
+
+  for (bbs.items) |*bb| {
+    var live = bb.liveout;
+    var i = bb.end;
+    while (i > bb.start) {
+      i -= 1;
+      const inst = &scope_ir.instructions.items[i];
+      if (inst.is_dead) continue;
+      switch (inst.op) {
+        .AssignLocal => live.clear(@intCast(inst.arg1)),
+        .Nop         => if (inst.arg3 == 1) live.clear(@intCast(inst.arg1)),
+        .Local       => {
+          const idx: u8 = @intCast(inst.arg1);
+          if (!live.has(idx)) inst.is_last = true;
+          live.set(idx);
+        },
+        else => {},
+      }
+    }
+  }
+}
+
+fn foldMonad(op: Op1, x: V) ?V {
+  return switch (x) {
+    .i => |xv| switch (op) {
+      .@"+" => x.ref(),
+      .@"-" => V{ .i = 0 -% xv },
+      .@"~" => V{ .b = xv == 0 },
+      else => null,
+    },
+    .f => |xv| switch (op) {
+      .@"-" => V{ .f = -xv },
+      .@"~" => V{ .b = xv == 0.0 },
+      else => null,
+    },
+    .b => |xv| switch (op) {
+      .@"~" => V{ .b = !xv },
+      else => null,
+    },
+    else => null,
+  };
+}
+
+fn foldDyad(op: Op2, x: V, y: V) ?V {
+  if (x == .i and y == .i) {
+    const xv = x.i; const yv = y.i;
+    return switch (op) {
+      .@"+" => V{ .i = xv +% yv },
+      .@"-" => V{ .i = xv -% yv },
+      .@"*" => V{ .i = xv *% yv },
+      .@"&" => V{ .i = @min(xv, yv) },
+      .@"|" => V{ .i = @max(xv, yv) },
+      .@"<" => V{ .b = xv < yv },
+      .@">" => V{ .b = xv > yv },
+      .@"=" => V{ .b = xv == yv },
+      .@"~" => V{ .b = xv == yv },
+      else => null,
+    };
+  }
+  if (x == .f and y == .f) {
+    const xv = x.f; const yv = y.f;
+    return switch (op) {
+      .@"+" => V{ .f = xv + yv },
+      .@"-" => V{ .f = xv - yv },
+      .@"*" => V{ .f = xv * yv },
+      .@"%" => V{ .f = xv / yv },
+      .@"&" => V{ .f = @min(xv, yv) },
+      .@"|" => V{ .f = @max(xv, yv) },
+      .@"<" => V{ .b = xv < yv },
+      .@">" => V{ .b = xv > yv },
+      .@"=" => V{ .b = xv == yv },
+      .@"~" => V{ .b = xv == yv },
+      else => null,
+    };
+  }
+  if (x == .b and y == .b) {
+    const xv = x.b; const yv = y.b;
+    return switch (op) {
+      .@"=" => V{ .b = xv == yv },
+      .@"~" => V{ .b = xv == yv },
+      else => null,
+    };
+  }
+  return null;
+}
+
+fn tryGetSimpleOp(c: *const Chunk, arity: u8) ?u8 {
+  const code = c.code.items;
+  if (arity == 1 and code.len == 5) {
+    const op0: OpCode = @enumFromInt(code[0]);
+    if ((op0 == .Local or op0 == .LocalLast) and code[1] == 0) {
+      if (@as(OpCode, @enumFromInt(code[2])) == .Apply1 and
+          @as(OpCode, @enumFromInt(code[4])) == .Return)
+        return code[3];
+    }
+  }
+  if (arity == 2 and code.len == 7) {
+    const op0: OpCode = @enumFromInt(code[0]);
+    const op1: OpCode = @enumFromInt(code[2]);
+    if ((op0 == .Local or op0 == .LocalLast) and code[1] == 0 and
+        (op1 == .Local or op1 == .LocalLast) and code[3] == 1) {
+      if (@as(OpCode, @enumFromInt(code[4])) == .Apply2 and
+          @as(OpCode, @enumFromInt(code[6])) == .Return)
+        return code[5];
+    }
+  }
+  return null;
+}
