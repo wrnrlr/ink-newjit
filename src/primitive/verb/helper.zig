@@ -50,10 +50,10 @@ pub fn makeMonad(
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
   for (ks) |xk| {
-    const maybe: ?VM.MonadFn = monadKernel(xk, CastType, ResultType, Impl);
+    const maybe: ?VM.Monad = monadKernel(xk, CastType, ResultType, Impl);
     if (maybe) |handler| {
       names = names ++ .{"_" ++ @tagName(xk)};
-      types = types ++ .{VM.MonadFn};
+      types = types ++ .{VM.Monad};
       const attr: Attr = .{ .default_value_ptr = @ptrCast(&handler) };
       attrs = attrs ++ .{attr};
     }
@@ -145,7 +145,7 @@ fn monadKernel(
   comptime CastType: fn (type) type,
   comptime ResultType: fn (type) type,
   comptime Impl: type,
-) VM.MonadFn {
+) VM.Monad {
   const XT = xk.backing();
   const C  = CastType(XT);
   const R  = ResultType(XT);

@@ -66,7 +66,7 @@ pub const VM = struct {
   prng: std.Random.DefaultPrng,
   argv: V = .blank,
 
-  pub const MonadFn = *const fn (*VM, V) V;
+  pub const Monad = *const fn (*VM, V) V;
   pub const DyadFn = *const fn (*VM, V, V) V;
   pub const TriadFn = *const fn (*VM, V, V, V) V;
   pub const TetradFn = *const fn (*VM, V, V, V, V) V;

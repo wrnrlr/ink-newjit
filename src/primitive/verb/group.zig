@@ -9,15 +9,15 @@ const util = @import("../../util.zig");
 
 pub const Group = struct {
   pub const op = .@"=";
-  _B: VM.MonadFn = genGroupHash(.B),
-  _I: VM.MonadFn = genGroupHash(.I),
-  _S: VM.MonadFn = genGroupHash(.S),
-  _F: VM.MonadFn = groupFloatsFn,
-  _C: VM.MonadFn = groupByteFn,
-  _L: VM.MonadFn = groupValuesFn,
+  _B: VM.Monad = genGroupHash(.B),
+  _I: VM.Monad = genGroupHash(.I),
+  _S: VM.Monad = genGroupHash(.S),
+  _F: VM.Monad = groupFloatsFn,
+  _C: VM.Monad = groupByteFn,
+  _L: VM.Monad = groupValuesFn,
 };
 
-fn genGroupHash(comptime k: K) VM.MonadFn {
+fn genGroupHash(comptime k: K) VM.Monad {
   return struct {
     fn f(vm: *VM, x: V) V {
       return groupHash(K.backing(k), vm.alloc, @field(x, @tagName(k)).slice());

@@ -20,7 +20,7 @@ const all_k_types = blk: {
 fn makeIdentity() type {
   @setEvalBranchQuota(1000000);
   const op_default: Op1 = .@":";
-  const handler: VM.MonadFn = &identityFn;
+  const handler: VM.Monad = &identityFn;
   var names: []const []const u8 = &.{"op"};
   var field_types: []const type = &.{Op1};
   var attrs: []const h.Attr = &.{
@@ -28,7 +28,7 @@ fn makeIdentity() type {
   };
   for (all_k_types) |xk| {
     names = names ++ .{"_" ++ @tagName(xk)};
-    field_types = field_types ++ .{VM.MonadFn};
+    field_types = field_types ++ .{VM.Monad};
     const attr: h.Attr = .{ .default_value_ptr = @ptrCast(&handler) };
     attrs = attrs ++ .{attr};
   }

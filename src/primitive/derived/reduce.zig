@@ -117,7 +117,7 @@ const Op2       = @import("../../noun/operator.zig").Op2;
 const dispatch  = @import("../dispatch.zig");
 
 // typedFold: I or F monadic reducer using the SIMD helpers above.
-pub fn typedFold(comptime T: type, comptime op2: Op2) VM.MonadFn {
+pub fn typedFold(comptime T: type, comptime op2: Op2) VM.Monad {
   return &struct { fn f(_: *VM, x: V) V {
     const s = if (T == i32) x.I.slice() else x.F.slice();
     if (s.len == 0) return .blank;
@@ -133,7 +133,7 @@ pub fn typedFold(comptime T: type, comptime op2: Op2) VM.MonadFn {
 }
 
 // listFold: generic L reducer via dispatch.
-pub fn listFold(comptime op2: Op2) VM.MonadFn {
+pub fn listFold(comptime op2: Op2) VM.Monad {
   return &struct { fn f(vm: *VM, x: V) V {
     const n = x.len();
     if (n == 0) return .blank;
@@ -171,30 +171,30 @@ fn maxB(_: *VM, x: V) V {
 
 pub const Sum = struct {
   pub const op = .@"+/";
-  _B: VM.MonadFn = sumB,
-  _I: VM.MonadFn = typedFold(i32, .@"+"),
-  _F: VM.MonadFn = typedFold(f32, .@"+"),
-  _L: VM.MonadFn = listFold(.@"+"),
+  _B: VM.Monad = sumB,
+  _I: VM.Monad = typedFold(i32, .@"+"),
+  _F: VM.Monad = typedFold(f32, .@"+"),
+  _L: VM.Monad = listFold(.@"+"),
 };
 pub const Product = struct {
   pub const op = .@"*/";
-  _I: VM.MonadFn = typedFold(i32, .@"*"),
-  _F: VM.MonadFn = typedFold(f32, .@"*"),
-  _L: VM.MonadFn = listFold(.@"*"),
+  _I: VM.Monad = typedFold(i32, .@"*"),
+  _F: VM.Monad = typedFold(f32, .@"*"),
+  _L: VM.Monad = listFold(.@"*"),
 };
 pub const Min = struct {
   pub const op = .@"&/";
-  _B: VM.MonadFn = minB,
-  _I: VM.MonadFn = typedFold(i32, .@"&"),
-  _F: VM.MonadFn = typedFold(f32, .@"&"),
-  _L: VM.MonadFn = listFold(.@"&"),
+  _B: VM.Monad = minB,
+  _I: VM.Monad = typedFold(i32, .@"&"),
+  _F: VM.Monad = typedFold(f32, .@"&"),
+  _L: VM.Monad = listFold(.@"&"),
 };
 pub const Max = struct {
   pub const op = .@"|/";
-  _B: VM.MonadFn = maxB,
-  _I: VM.MonadFn = typedFold(i32, .@"|"),
-  _F: VM.MonadFn = typedFold(f32, .@"|"),
-  _L: VM.MonadFn = listFold(.@"|"),
+  _B: VM.Monad = maxB,
+  _I: VM.Monad = typedFold(i32, .@"|"),
+  _F: VM.Monad = typedFold(f32, .@"|"),
+  _L: VM.Monad = listFold(.@"|"),
 };
 
 test "simd reductions match scalar" {

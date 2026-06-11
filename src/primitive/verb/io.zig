@@ -44,9 +44,9 @@ fn readLinesById(vm: *VM, x: V) V {
 
 pub const ReadLines = struct {
   pub const op = .@"0:";
-  _s: VM.MonadFn = readLinesBySymbol,
-  _C: VM.MonadFn = readLinesByChars,
-  _i: VM.MonadFn = readLinesById,
+  _s: VM.Monad = readLinesBySymbol,
+  _C: VM.Monad = readLinesByChars,
+  _i: VM.Monad = readLinesById,
 };
 
 // ---------------------------------------------------------------------------
@@ -136,9 +136,9 @@ fn readBytesById(vm: *VM, x: V) V {
 
 pub const ReadBytes = struct {
   pub const op = .@"1:";
-  _s: VM.MonadFn = readBytesBySymbol,
-  _C: VM.MonadFn = readBytesByChars,
-  _i: VM.MonadFn = readBytesById,
+  _s: VM.Monad = readBytesBySymbol,
+  _C: VM.Monad = readBytesByChars,
+  _i: VM.Monad = readBytesById,
 };
 
 // ---------------------------------------------------------------------------
@@ -183,9 +183,9 @@ fn readDataById(vm: *VM, x: V) V {
 
 pub const ReadData = struct {
   pub const op = .@"2:";
-  _s: VM.MonadFn = readDataBySymbol,
-  _C: VM.MonadFn = readDataByChars,
-  _i: VM.MonadFn = readDataById,
+  _s: VM.Monad = readDataBySymbol,
+  _C: VM.Monad = readDataByChars,
+  _i: VM.Monad = readDataById,
 };
 
 // ---------------------------------------------------------------------------

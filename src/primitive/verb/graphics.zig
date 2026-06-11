@@ -42,10 +42,10 @@ fn drawPlot(vm: *VM, x: V, y: V) V {
 // Monad dispatch table entry: 9: L  and  9: m
 pub const Draw = struct {
   pub const op = .@"9:";
-  _L: VM.MonadFn = drawMonad,
-  _m: VM.MonadFn = drawMonad,
-  _M: VM.MonadFn = drawMonad,
-  _s: VM.MonadFn = drawMonad,
+  _L: VM.Monad = drawMonad,
+  _m: VM.Monad = drawMonad,
+  _M: VM.Monad = drawMonad,
+  _s: VM.Monad = drawMonad,
 };
 
 // Dyad dispatch table entries: i 9: L/m  and  data 9: spec

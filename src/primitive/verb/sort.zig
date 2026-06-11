@@ -11,17 +11,17 @@ fn dsc(vm: *VM, x: V) V { return sortIndices(vm.alloc, x, true); }
 
 pub const Ascend = struct {
   pub const op = .@"<";
-  _b: VM.MonadFn = asc, _i: VM.MonadFn = asc, _f: VM.MonadFn = asc,
-  _c: VM.MonadFn = asc, _B: VM.MonadFn = asc, _I: VM.MonadFn = asc,
-  _F: VM.MonadFn = asc, _S: VM.MonadFn = asc, _C: VM.MonadFn = asc, _L: VM.MonadFn = asc,
+  _b: VM.Monad = asc, _i: VM.Monad = asc, _f: VM.Monad = asc,
+  _c: VM.Monad = asc, _B: VM.Monad = asc, _I: VM.Monad = asc,
+  _F: VM.Monad = asc, _S: VM.Monad = asc, _C: VM.Monad = asc, _L: VM.Monad = asc,
 };
 
 pub const Descend = struct {
   pub const op = .@">";
-  _b: VM.MonadFn = dsc, _i: VM.MonadFn = dsc, _f: VM.MonadFn = dsc,
-  _s: VM.MonadFn = dsc, _c: VM.MonadFn = dsc, _B: VM.MonadFn = dsc,
-  _I: VM.MonadFn = dsc, _F: VM.MonadFn = dsc, _S: VM.MonadFn = dsc,
-  _C: VM.MonadFn = dsc, _L: VM.MonadFn = dsc,
+  _b: VM.Monad = dsc, _i: VM.Monad = dsc, _f: VM.Monad = dsc,
+  _s: VM.Monad = dsc, _c: VM.Monad = dsc, _B: VM.Monad = dsc,
+  _I: VM.Monad = dsc, _F: VM.Monad = dsc, _S: VM.Monad = dsc,
+  _C: VM.Monad = dsc, _L: VM.Monad = dsc,
 };
 
 fn compareV(a: V, b: V) std.math.Order {

@@ -8,7 +8,7 @@ fn odometerFn(vm: *VM, x: V) V { return .{ .L = odometer(vm.alloc, x.I) catch re
 
 pub const Odometer = struct {
   pub const op = .@"!";
-  _I: VM.MonadFn = odometerFn,
+  _I: VM.Monad = odometerFn,
 };
 
 pub fn odometer(alloc: Alloc, shape: N(i32)) !N(V) {

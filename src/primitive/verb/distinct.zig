@@ -8,12 +8,12 @@ const Alloc = std.mem.Allocator;
 
 pub const Distinct = struct {
   pub const op = .@"?";
-  _B: VM.MonadFn = distinctB,
-  _I: VM.MonadFn = distinctI,
-  _F: VM.MonadFn = distinctF,
-  _S: VM.MonadFn = distinctS,
-  _C: VM.MonadFn = distinctC,
-  _L: VM.MonadFn = distinctL,
+  _B: VM.Monad = distinctB,
+  _I: VM.Monad = distinctI,
+  _F: VM.Monad = distinctF,
+  _S: VM.Monad = distinctS,
+  _C: VM.Monad = distinctC,
+  _L: VM.Monad = distinctL,
 };
 
 // Bool: at most 2 distinct values, zero allocation regardless of size

@@ -8,7 +8,7 @@ const util = @import("../../util.zig");
 
 pub const Iota = struct {
   pub const op = .@"!";
-  _i: VM.MonadFn = iota,
+  _i: VM.Monad = iota,
 };
 
 pub fn iota(vm: *VM, x: V) V {

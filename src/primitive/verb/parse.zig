@@ -8,7 +8,7 @@ const parser_mod = @import("../../parser/parser.zig");
 
 pub const Parse = struct {
   pub const op = .parse;
-  _C: VM.MonadFn = parseChars,
+  _C: VM.Monad = parseChars,
 };
 
 fn parseChars(vm: *VM, x: V) V {

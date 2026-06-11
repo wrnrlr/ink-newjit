@@ -8,22 +8,22 @@ const util = @import("../../util.zig");
 // TODO maybe we can jump to the precize type directly
 pub const Format = struct {
   pub const op = .@"$";
-  _b: VM.MonadFn = fmt,
-  _i: VM.MonadFn = fmt,
-  _f: VM.MonadFn = fmt,
-  _s: VM.MonadFn = fmt,
-  _c: VM.MonadFn = fmt,
-  _o: VM.MonadFn = fmt,
-  _p: VM.MonadFn = fmt,
-  _x: VM.MonadFn = fmt,
-  _B: VM.MonadFn = fmt,
-  _I: VM.MonadFn = fmt,
-  _F: VM.MonadFn = fmt,
-  _S: VM.MonadFn = fmt,
-  _C: VM.MonadFn = fmt,
-  _L: VM.MonadFn = fmt,
-  _m: VM.MonadFn = fmt,
-  _M: VM.MonadFn = fmt,
+  _b: VM.Monad = fmt,
+  _i: VM.Monad = fmt,
+  _f: VM.Monad = fmt,
+  _s: VM.Monad = fmt,
+  _c: VM.Monad = fmt,
+  _o: VM.Monad = fmt,
+  _p: VM.Monad = fmt,
+  _x: VM.Monad = fmt,
+  _B: VM.Monad = fmt,
+  _I: VM.Monad = fmt,
+  _F: VM.Monad = fmt,
+  _S: VM.Monad = fmt,
+  _C: VM.Monad = fmt,
+  _L: VM.Monad = fmt,
+  _m: VM.Monad = fmt,
+  _M: VM.Monad = fmt,
 };
 
 // TODO: Move TerseFormatter instance to VM

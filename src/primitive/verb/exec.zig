@@ -104,9 +104,9 @@ fn execL(vm: *VM, x: V) V {
 
 pub const Exec = struct {
     pub const op = .exec;
-    _C: VM.MonadFn = execC,
-    _L: VM.MonadFn = execL,
-    _s: VM.MonadFn = execS,
+    _C: VM.Monad = execC,
+    _L: VM.Monad = execL,
+    _s: VM.Monad = execS,
 };
 
 // ---------------------------------------------------------------------------

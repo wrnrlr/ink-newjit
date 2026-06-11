@@ -9,26 +9,26 @@ fn enlistListFn(vm: *VM, x: V) V { return enlistToL(vm.alloc, x); }
 
 pub const Enlist = struct {
   pub const op = .@",";
-  _b: VM.MonadFn = enlistAtom(.b),
-  _i: VM.MonadFn = enlistAtom(.i),
-  _f: VM.MonadFn = enlistAtom(.f),
-  _s: VM.MonadFn = enlistAtom(.s),
-  _c: VM.MonadFn = enlistAtom(.c),
-  _B: VM.MonadFn = enlistListFn,
-  _I: VM.MonadFn = enlistListFn,
-  _F: VM.MonadFn = enlistListFn,
-  _S: VM.MonadFn = enlistListFn,
-  _C: VM.MonadFn = enlistListFn,
-  _L: VM.MonadFn = enlistListFn,
-  _m: VM.MonadFn = enlistListFn,
-  _M: VM.MonadFn = enlistListFn,
-  _y: VM.MonadFn = enlistListFn,
-  _p: VM.MonadFn = enlistListFn,
-  _q: VM.MonadFn = enlistListFn,
-  _v: VM.MonadFn = enlistListFn,
+  _b: VM.Monad = enlistAtom(.b),
+  _i: VM.Monad = enlistAtom(.i),
+  _f: VM.Monad = enlistAtom(.f),
+  _s: VM.Monad = enlistAtom(.s),
+  _c: VM.Monad = enlistAtom(.c),
+  _B: VM.Monad = enlistListFn,
+  _I: VM.Monad = enlistListFn,
+  _F: VM.Monad = enlistListFn,
+  _S: VM.Monad = enlistListFn,
+  _C: VM.Monad = enlistListFn,
+  _L: VM.Monad = enlistListFn,
+  _m: VM.Monad = enlistListFn,
+  _M: VM.Monad = enlistListFn,
+  _y: VM.Monad = enlistListFn,
+  _p: VM.Monad = enlistListFn,
+  _q: VM.Monad = enlistListFn,
+  _v: VM.Monad = enlistListFn,
 };
 
-fn enlistAtom(comptime k: K) VM.MonadFn {
+fn enlistAtom(comptime k: K) VM.Monad {
   const ck = comptime k.container();
   const T = comptime K.backing(ck);
   return struct {
