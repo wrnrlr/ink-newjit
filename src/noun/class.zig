@@ -11,37 +11,32 @@ pub const K = enum(u8) {
   pub const NON_VEC_COUNT: u8 = 13;   // blank(0)..x(12)
   pub const COUNT: usize      = @typeInfo(K).@"enum".fields.len; // 18
 
+  pub inline fn serCode(k: K) u8 { return @intCast(k.code()); }
+  pub fn isFloat(k: K) bool { return (@intFromEnum(k) & ~@as(u8, VEC_BIT)) == 4; }
+  pub fn isMap(k: K) bool { return k == .m or k == .M; }
+  pub inline fn container(comptime k: K) K { return @enumFromInt(@intFromEnum(k) | VEC_BIT); }
+  pub inline fn atom(comptime k: K) K { return @enumFromInt(@intFromEnum(k) & ~@as(u8, VEC_BIT)); }
+  pub fn isAtom(k: K) bool { const v = @intFromEnum(k); return v >= 2 and v <= 6; }
+  pub fn isVec(k: K)    bool { return @intFromEnum(k) & VEC_BIT != 0; }
+  
+  pub fn isNumeric(k: K) bool {
+    const e = @intFromEnum(k) & ~@as(u8, VEC_BIT);
+    return e >= 2 and e <= 4;
+  }
   pub inline fn code(k: K) usize {
     const v = @intFromEnum(k);
     if (v & VEC_BIT != 0) return @as(usize, v & ~@as(u8, VEC_BIT)) - 2 + NON_VEC_COUNT;
     return v;
   }
-
-  pub inline fn serCode(k: K) u8 { return @intCast(k.code()); }
-
   pub fn fromCode(c: u8) ?K {
     return switch (c) {
-      0  => .blank,
-      1  => .err,
-      2  => .b,   3  => .i,   4  => .f,   5  => .s,   6  => .c,
-      7  => .o,    8 => .p,       9 => .L, 10 => .m, 11 => .M,
-      12 => .x,
-      13 => .B,  14 => .I,  15 => .F,  16 => .S,  17 => .C,
+      0  => .blank, 1  => .err,
+      2  => .b, 3 => .i, 4 => .f, 5 => .s, 6 => .c,
+      7  => .o, 8 => .p, 9 => .L, 10 => .m, 11 => .M, 12 => .x,
+      13 => .B, 14 => .I, 15 => .F, 16 => .S, 17 => .C,
       else => null,
     };
   }
-
-  pub fn isAtom(k: K) bool { const v = @intFromEnum(k); return v >= 2 and v <= 6; }
-  pub fn isVec(k: K)    bool { return @intFromEnum(k) & VEC_BIT != 0; }
-  pub fn isNumeric(k: K) bool {
-    const e = @intFromEnum(k) & ~@as(u8, VEC_BIT);
-    return e >= 2 and e <= 4;
-  }
-  pub fn isFloat(k: K) bool { return (@intFromEnum(k) & ~@as(u8, VEC_BIT)) == 4; }
-  pub fn isMap(k: K) bool { return k == .m or k == .M; }
-  pub inline fn container(comptime k: K) K { return @enumFromInt(@intFromEnum(k) | VEC_BIT); }
-  pub inline fn atom(comptime k: K) K { return @enumFromInt(@intFromEnum(k) & ~@as(u8, VEC_BIT)); }
-
   pub fn backing(comptime k: K) type {
     return switch (k) {
       .blank => void,
