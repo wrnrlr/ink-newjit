@@ -29,7 +29,7 @@ pub const Tester = struct {
     defer res.deinit(self.vm.alloc);
     self.w.buffer.clearRetainingCapacity();
     var mw = self.w.writer();
-    try self.fmt.formatter().format(res, &mw.interface);
+    try self.fmt.formatter().fmt(res, &mw.interface);
     try testing.expectEqualStrings(expected, self.w.getText());
   }
   fn printout(self: *Tester) ![]const u8 {

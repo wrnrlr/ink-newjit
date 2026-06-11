@@ -1,7 +1,5 @@
 [
-  { "label": "parser", "command": "zig", "args": ["test", "src/parser/parser.zig"]},
   { "label": "test", "command": "zig", "args": ["build", "test"]},
-  { "label": "build", "command": "time", "args": ["zig", "build", "-Dui=true"]},
   { "label": "ink", "command": "rlwrap", "args": ["zig-out/bin/ink"]},
-  { "label": "walk", "command": "zig-out/bin/ink", "args": ["test/walk2.k"]},
+  { "label": "walk", "command": "zig-out/bin/ink", "args": ["test/walk.k"]},
 ]

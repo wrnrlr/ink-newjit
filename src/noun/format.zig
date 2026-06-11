@@ -9,29 +9,22 @@ const Alloc = std.mem.Allocator;
 
 fn adverbStr(adv: Adverb) []const u8 {
   return switch (adv) {
-    .@"'" => "'",
-    .@"/" => "/",
-    .@"\\" => "\\",
-    .@"':" => "':",
-    .@"/:" => "/:",
-    .@"\\:" => "\\:",
+    .@"'" => "'", .@"/" => "/", .@"\\" => "\\",
+    .@"':" => "':", .@"/:" => "/:", .@"\\:" => "\\:",
   };
 }
 
 pub const Formatter = struct {
   ctx: *anyopaque,
-  formatFn: *const fn (ctx: *anyopaque, value: V, writer: *std.Io.Writer) anyerror!void,
-
-  pub fn format(self: Formatter, value: V, writer: *std.Io.Writer) !void {
-    try self.formatFn(self.ctx, value, writer);
-  }
+  fmtFn: *const fn (f: *anyopaque, v: V, w: *std.Io.Writer) anyerror!void,
+  pub fn fmt(f: Formatter, v: V, w: *std.Io.Writer) !void { try f.fmtFn(f.ctx, v, w); }
 };
 
 pub const TerseFormatter = struct {
   vm: *const VM,
   alloc: Alloc,
   mode: Mode,
-  indent_level: usize = 0,
+  indent: usize = 0,
   force_single_line: bool = false,
 
   pub const Mode = enum { Repl, Text };
@@ -50,23 +43,20 @@ pub const TerseFormatter = struct {
   pub fn formatter(self: *Self) Formatter {
     return Formatter{
       .ctx = self,
-      .formatFn = struct {
-        fn format(ctx: *anyopaque, value: V, writer: *std.Io.Writer) anyerror!void {
-          const self_ptr: *Self = @ptrCast(@alignCast(ctx));
-          try self_ptr.formatValue(value, writer);
+      .fmtFn = struct {
+        fn fmt(ctx: *anyopaque, v: V, w: *std.Io.Writer) anyerror!void {
+          const s: *Self = @ptrCast(@alignCast(ctx));
+          try s.formatValue(v, w);
         }
-      }.format,
+      }.fmt,
     };
   }
 
   fn formatValue(self: *Self, v: V, w: anytype) anyerror!void {
     switch (v) {
       .i => |a| {
-        if (a == std.math.minInt(i32)) {
-          try w.writeAll("0N");
-        } else {
-          try w.print("{d}", .{a});
-        }
+        if (a == std.math.minInt(i32)) try w.writeAll("0N")
+        else try w.print("{d}", .{a});
       },
       .f => |a| {
         if (std.math.isNan(a)) {
@@ -125,7 +115,7 @@ pub const TerseFormatter = struct {
         const old_single = self.force_single_line;
         if (is_multiline) {
           self.force_single_line = true;
-          self.indent_level += 1;
+          self.indent += 1;
         }
 
         for (slice, 0..) |item, i| {
@@ -139,7 +129,7 @@ pub const TerseFormatter = struct {
           }
           try self.formatValue(item, w);
         }
-        if (is_multiline) self.indent_level -= 1;
+        if (is_multiline) self.indent -= 1;
         self.force_single_line = old_single;
         try w.writeAll(")");
       },
@@ -357,8 +347,6 @@ pub const TerseFormatter = struct {
 
   fn writeIndent(self: *Self, w: anytype) anyerror!void {
     if (self.mode == .Text) return;
-    for (0..self.indent_level) |_| {
-      try w.writeAll(" ");
-    }
+    for (0..self.indent) |_| try w.writeAll(" ");
   }
 };

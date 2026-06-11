@@ -37,7 +37,7 @@ pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
           defer mw.deinit();
           var w = mw.writer();
           var fmt = TerseFormatter.init(vm, vm.alloc, .Text);
-          fmt.formatter().format(val, &w.interface) catch {};
+          fmt.formatter().fmt(val, &w.interface) catch {};
           std.debug.print("{s}: {s}\n", .{ name, mw.getText() });
         }
       }

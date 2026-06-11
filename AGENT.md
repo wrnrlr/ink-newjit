@@ -9,13 +9,10 @@
 - Add debug statements to verify your thinking.
 - Report issues and bugs with the ink language or runtime, and that are not stricktly related to the current task to `report.md`
 - See `doc/spec.md` for most up to date specification (WIP)
-
 # Ink language Overview
 Ink (sometimes called terse) is an array programming language based on k.
-
 ## Tips
 - No `>=`/`<=` — use `~(a<b)`
-
 # Language Reference
 ## Grammar
 Nouns can be combined into an expression using verbs and adverbs.
@@ -176,8 +173,6 @@ A digram is an adverb is written with 2 values on the left hand side: Zip `x F'`
 A command always start at the beginning of a line with `\`.
 ### Time Command `\t:n expr`
 The time elapsed milliseconds after n runs. The n is optional.
-
-
 ### Adverbs `' / \ ': /: \:`
 An adverb is any of these 3 symbols `' / \`, with an optional `:`.
 Some adverbs like encode and decode behave like normals verbs.
@@ -188,14 +183,11 @@ Adverbs are polysemic just like verbs.
 - `':`: [EachPrior](), [Window](), [Stencil]()
 - `/:`: [EachRight](),
 - `\:` [EachLeft]()
-
 # About the Ink array programming language
 Ink is a array programming language for high performance computing.
 It is based on the k array programming languages ngn/k and k9.
 The language parser, compiler and runtime are all written in Zig 0.16.
 The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` (drop), not an identifier. Avoid underscores in names.
-
-
 # Project Overview
 - `bench` benchmarks for ink and ngn/k
   - `alloc.k`
@@ -230,7 +222,6 @@ The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` 
       - `helper.zig` Kernel comptime helpers for arithmetic and logical verbs
       - `verbs.zig` Overview of all monadic and dyadic verbs used in jump table.
     - `amend.zig` Implement amend and drill
-    - `broadcast.zig`
     - `dispatch.zig` Dispatch to kernel based on operator and type of the operand(s)
     - `derived.zig` Derive value from an adverb phrase
     - `promote.zig` Promote between scalars, vectors and lists.
@@ -245,43 +236,21 @@ The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` 
     - `vm.zig`
   - `ffi.zig`
   - `runner.zig`
-  - `runner_ui.zig`
   - `test.zig` All 178 unit tests passed
 - `test`
-  - `corpus` Parser tests in TxtTest format
   - `data`
   - `demo` Example of k code with cool visuals
 - `build.zig`
 - `build.zig.zon`
 - `Makefile`
-
 # Optimalizations
-- JIT: as built is useful for user-defined reduce (`f:{x+y}; f/!N`),
-- Optional GPU accelorator with`--gpu` flag.  `zig build -Dgpu=true && ink --gpu yourscript.ink
 - Static allocated array for `!N` with N<256.
 - Ref counting, copy on write.
-
-# Building
-The JIT build needs to be tested in debug and release mode because the compiler can generate different instructions and this can throw off the JIT.
-
-- Runtime artifect: `zig-out/bin/ink`
-
-Make sure the runtime compiles and builds with the following options for macos arm, linux x86_64 or arm, and windows x86_64
-
-```
-zig build
-zig build -Djit=true
-zig build -Dui=true
-zig build -Djit=true -Dui=true
-
-zig build -Doptimize=ReleaseFast
-zig build -Djit=true -Doptimize=ReleaseFast
-zig build -Dui=true -Doptimize=ReleaseFast
-zig build -Djit=true -Dui=true -Doptimize=ReleaseFast
-```
-
-## QA - Usefull QA commands
-- Test from cmd line: `` echo "1+2" | ./zig-out/bin/ink ``
+## Usefull commands
+- Build debug `` time zig build ``
+- Build release `` time zig build -Doptimize=ReleaseFast ``
 - Unit tests `` time zig test src/test.zig ``
+- Test from cmd line: `` echo "1+2" | ./zig-out/bin/ink ``
 - Walk solutions `` ./zig-out/bin/ink test/walk.k ``
-- Eyes Example `` ./zig-out/bin/ test/gpu_eyes.k ``
+- Eyes Example `` ./zig-out/bin/ink test/gpu_eyes.k ``
+- Artifacts Sizes `` du -h zig-out/*/* ``
