@@ -39,17 +39,12 @@ pub const Op1 = enum(u8) {
 
 /// Dyadic primitives. Apply2 bytecode + dyad dispatch table.
 pub const Op2 = enum(u8) {
-  @"%",
-  @"!",
-  @"&",
-  @"+",
-  @"*", 
-  @"|",
-  @"<",
-  @">",
-  @"=",
+  @"+", @"-", @"*", @"%", // arith
+  @"=", @"|", @"&", // logic
+  @"<", @">",
   @"~",
-  @",", @"^", @"#", @"_", @"$", @"?", @"@", @"-", @".",
+  @"!",
+  @",", @"^", @"#", @"_", @"$", @"?", @"@", @".",
   in, has,
   mod, div,
   @"0:", @"1:", @"2:", @"9:",
@@ -57,7 +52,8 @@ pub const Op2 = enum(u8) {
   exec,
 
   pub const COUNT = @typeInfo(Op2).@"enum".fields.len;
-
+  pub const arith = [_]Op2{.@"+", .@"-", .@"*", .@"%"};
+  pub const logic = [_]Op2{.@"=", .@"|", .@"&"};
   pub fn fromString(s: []const u8) ?Op2 { return std.meta.stringToEnum(Op2, s); }
   pub fn toString(self: Op2) []const u8 { return @tagName(self); }
   pub inline fn code(op: Op2) usize { return @intFromEnum(op); }

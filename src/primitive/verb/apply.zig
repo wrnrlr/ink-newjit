@@ -11,12 +11,9 @@ const Op2 = @import("../../noun/operator.zig").Op2;
 const Call = @import("../../runtime/call.zig").Call;
 const syms = @import("../../runtime/syms.zig");
 const h = @import("helper.zig");
-
 const pick = @import("pick.zig");
 
-// ---------------------------------------------------------------------------
 // Apply1  @ (dyad): func/partial/symbol applied to a single argument
-// ---------------------------------------------------------------------------
 
 const all_k_types = blk: {
   const fields = @typeInfo(K).@"enum".fields;
@@ -107,11 +104,6 @@ pub const ApplyN = struct {
   _L_I: util.DyadFn = dotPath,
   _L_S: util.DyadFn = dotPath,
   _L_L: util.DyadFn = dotPath,
-  
-  // _m_B: util.DyadFn = dotPath,
-  // _m_I: util.DyadFn = dotPath,
-  // _m_S: util.DyadFn = dotPath,
-  // _m_L: util.DyadFn = dotPath,
 };
 
 fn applyAtom(vm: *VM, x: V, y: V) V {
