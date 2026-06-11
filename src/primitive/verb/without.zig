@@ -31,7 +31,7 @@ pub const Without = struct {
   _L_L: VM.Dyad = withoutList,
 };
 
-fn withoutVec(comptime yk: K) DyadFn {
+fn withoutVec(comptime yk: K) VM.Dyad {
   comptime std.debug.assert(yk.isVec());
   return struct {
     const T = K.backing(yk);
