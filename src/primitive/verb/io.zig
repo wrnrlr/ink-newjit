@@ -5,6 +5,7 @@ const sort = @import("sort.zig");
 const format = @import("../../noun/format.zig");
 const util = @import("../../util.zig");
 const V = @import("../../noun/value.zig").V;
+const binary = @import("../../encoding/binary.zig");
 
 fn writeFile(vm: *VM, id: u32, content: []const u8) !void {
   // Guard invalid ids (e.g. `2:` applied to a bogus handle) rather than
@@ -187,7 +188,9 @@ fn readDataByChars(vm: *VM, x: V) V {
   return readDataById(vm, V{ .i = @intCast(id) });
 }
 fn readDataById(vm: *VM, x: V) V {
-  return vm.eval(vm.fs.getFileText(@as(u32, @intCast(x.i)))) catch return V{ .err = .io };
+  const id: u32 = @intCast(x.i);
+  if (Conns.isConn(id)) return readConnBinary(vm, id);
+  return vm.eval(vm.fs.getFileText(id)) catch return V{ .err = .io };
 }
 
 pub const ReadData = struct {
@@ -221,6 +224,23 @@ fn writeDataByChars(vm: *VM, x: V, y: V) V {
   return writeDataOrFfi(vm, x.C.slice(), y);
 }
 
+/// `handle 2: value` — binary-serialize and send over a conn, or write to a file.
+fn writeDataByIdValue(vm: *VM, x: V, y: V) V {
+  const id: u32 = @intCast(x.i);
+  if (Conns.isConn(id)) return writeConnBinary(vm, id, y);
+  return writeDataFallback(vm, x, y);
+}
+
+/// `handle 2: lambda` — attach a per-handle IPC callback.
+fn writeDataByIdCallback(vm: *VM, x: V, y: V) V {
+  const id: u32 = @intCast(x.i);
+  if (Conns.isConn(id)) {
+    vm.conns.setCallback(id, y.ref()) catch return V{ .err = .memory };
+    return .blank;
+  }
+  return writeDataFallback(vm, x, y);
+}
+
 pub const WriteData = struct {
   pub const op = .@"2:";
   _s_I: VM.Dyad = writeDataBySymbol,
@@ -241,15 +261,15 @@ pub const WriteData = struct {
   _C_m: VM.Dyad = writeDataByChars,
   _C_M: VM.Dyad = writeDataByChars,
   _C_a: VM.Dyad = writeDataByChars,
-  _i_I: VM.Dyad = writeDataFallback,
-  _i_F: VM.Dyad = writeDataFallback,
-  _i_S: VM.Dyad = writeDataFallback,
-  _i_C: VM.Dyad = writeDataFallback,
-  _i_B: VM.Dyad = writeDataFallback,
-  _i_L: VM.Dyad = writeDataFallback,
-  _i_m: VM.Dyad = writeDataFallback,
-  _i_M: VM.Dyad = writeDataFallback,
-  _i_a: VM.Dyad = writeDataFallback,
+  _i_I: VM.Dyad = writeDataByIdValue,
+  _i_F: VM.Dyad = writeDataByIdValue,
+  _i_S: VM.Dyad = writeDataByIdValue,
+  _i_C: VM.Dyad = writeDataByIdValue,
+  _i_B: VM.Dyad = writeDataByIdValue,
+  _i_L: VM.Dyad = writeDataByIdValue,
+  _i_m: VM.Dyad = writeDataByIdValue,
+  _i_M: VM.Dyad = writeDataByIdValue,
+  _i_a: VM.Dyad = writeDataByIdCallback,
 };
 
 pub fn writeDataFallback(vm: *VM, x: V, y: V) V {
@@ -322,6 +342,50 @@ pub fn readConnLine(vm: *VM, id: u32) V {
   return readSocketLine(vm, id);
 }
 
+/// Receive one binary IPC message (4-byte LE length prefix + binary payload).
+/// Used by `2: handle` and the event loop in serve.zig.
+pub fn readConnBinary(vm: *VM, id: u32) V {
+  const conn = vm.conns.get(id) orelse return V{ .err = .io };
+  if (conn.stream == null) return V{ .err = .io };
+  const sock = conn.stream.?.socket.handle;
+  var len_buf: [4]u8 = undefined;
+  var total: usize = 0;
+  while (total < 4) {
+    const n = std.posix.read(sock, len_buf[total..]) catch return V{ .err = .io };
+    if (n == 0) return V{ .err = .io };
+    total += n;
+  }
+  const payload_len = std.mem.readInt(u32, &len_buf, .little);
+  const payload = vm.alloc.alloc(u8, payload_len) catch return V{ .err = .memory };
+  defer vm.alloc.free(payload);
+  total = 0;
+  while (total < payload_len) {
+    const n = std.posix.read(sock, payload[total..]) catch return V{ .err = .io };
+    if (n == 0) return V{ .err = .io };
+    total += n;
+  }
+  return binary.deserialize(vm.alloc, &vm.symbols, payload) catch V{ .err = .domain };
+}
+
+/// Send a binary IPC message (4-byte LE length prefix + binary payload).
+/// Used by `handle 2: value` and the event loop in serve.zig.
+pub fn writeConnBinary(vm: *VM, id: u32, y: V) V {
+  const ser = binary.serialize(vm.alloc, &vm.symbols, y) catch return V{ .err = .io };
+  defer ser.deinit(vm.alloc);
+  const data = ser.C.slice();
+  const conn = vm.conns.get(id) orelse return V{ .err = .io };
+  if (conn.stream == null) return V{ .err = .io };
+  const io_ctx = std.Io.Threaded.global_single_threaded.io();
+  var write_buf: [65536]u8 = undefined;
+  var w = conn.stream.?.writer(io_ctx, &write_buf);
+  var len_buf: [4]u8 = undefined;
+  std.mem.writeInt(u32, &len_buf, @intCast(data.len), .little);
+  w.interface.writeAll(&len_buf) catch return V{ .err = .io };
+  w.interface.writeAll(data) catch return V{ .err = .io };
+  w.interface.flush() catch return V{ .err = .io };
+  return .blank;
+}
+
 fn readSocketLine(vm: *VM, id: u32) V {
   const conn = vm.conns.get(id) orelse return V{ .err = .io };
   if (conn.stream == null) return V{ .err = .io };
@@ -390,8 +454,14 @@ fn writeSocketRaw(vm: *VM, id: u32, data: []const u8) V {
 // ---------------------------------------------------------------------------
 
 fn netOpenByInt(vm: *VM, x: V) V {
-  if (x.i <= 0 or x.i > 65535) return V{ .err = .domain };
-  return netListen(vm, @intCast(x.i));
+  if (x.i == 0 or x.i > 65535 or x.i < -65535) return V{ .err = .domain };
+  if (x.i > 0) return netListen(vm, @intCast(x.i));
+  // Negative port: async listen — enter event loop after script.
+  const port: u16 = @intCast(-x.i);
+  const h = netListenOnly(vm, port);
+  if (h.tag() == .err) return h;
+  vm.listen_handle = @intCast(h.i);
+  return h;
 }
 
 fn netOpenByChars(vm: *VM, x: V) V {

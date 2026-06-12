@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const VM = @import("runtime/vm.zig").VM;
 const Repl = @import("repl.zig").Repl;
 const disasm = @import("runtime/disasm.zig");
-const serve = @import("primitive/verb/serve.zig");
+const serve = @import("runtime/serve.zig");
 const ffi = @import("ffi.zig");
 
 /// Called by C extensions (e.g. GPU) to process pending IPC messages from

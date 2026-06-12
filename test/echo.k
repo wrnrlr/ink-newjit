@@ -1,9 +1,10 @@
-/ echo.k — simple echo server
-/ \p sets the port; the interpreter enters its event loop after the script runs.
-/ pg is the sync message handler — return value is sent back as a reply.
+/ echo.k — binary IPC echo server
+/
+/ usage:  ink test/echo.k
+/
+/ >-5005 opens port 5005 async and enters the event loop after the script.
+/ h 2: lambda  attaches a per-handle callback; return value is sent back.
+/ The client sends any value with `handle 2: value`; the server echoes it.
 
-\p 5002
-
-h: >-
-
-pg: {[msg] "echo: ", msg}
+h: >-5005
+h 2: {[msg] msg}

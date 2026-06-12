@@ -118,12 +118,22 @@ A lambda's type symbol is `` `o ``.
 - `x@y` (At/Apply): Indices into x at y; Applies function x to y.
 - `x.y` (Dot/ApplyN): Deep indexing or multi-argument function application.
 ### IO Verbs
+The IO system is organized around file discriptor. 
+A file descriptor can be a filename, port number.
+To release the resource related to the files desciptor it needs to be closed with `<`.
+Positive file number discriptor are used for sync IO.
+Negative file number discriptor are used for async IO.
+- Open file `` <"data.csv" ``.
+- Open port for async io `` <5001 ``.
+- Open port `` <5001 ``.
+- Close File handle `` >s ``.
+The IO verbs to read and write data
 - Read Line `` 0:x ``
 - Write Line `` x 0:y``
 - Read Byte `` 1:x ``
 - Write Byte `` x 1:y``
-- Open `<s` Open file and return handle
-- Close `>s` file handle
+- Read Byte `` 1:x ``
+- Write Byte `` x 1:y``
 ### Special Forms 
 - Amend3 `` @[x;y;f]   amend  @["ABC";1;_:] -> "AbC"   @[2 3;1;{-x}] -> 2 -3 ``
 - Amend4 `` @[x;y;F;z] amend  @["abc";1;:;"x"] -> "axc"   @[2 3;0;+;4] -> 6 3 ``
@@ -207,7 +217,6 @@ The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` 
   - `gpu`
   - `md5`
 - `src` core language components
-  - `graphics` old graphics code
   - `noun` Basic buildings blocks of the language
     - `class.zig` Class enum `K`
     - `value.zig` Value struct `V`, array struct `N`
@@ -230,7 +239,7 @@ The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` 
     - `promote.zig` Promote between scalars, vectors and lists.
   - `runtime`
     - `call.zig`
-    - `command.zig`
+    - `command.zig` Commands for help, variables, functions, declaring/loading namespaces
     - `compiler.zig`
     - `disarm.zig`
     - `fntable.zig`

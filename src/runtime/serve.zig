@@ -67,21 +67,27 @@ fn acceptClient(vm: *VM, listen_id: u32) void {
     const server = if (conn.server) |*s| s else return;
     const iol = std.Io.Threaded.global_single_threaded.io();
     const stream = server.accept(iol) catch return;
-    _ = vm.conns.add(.{ .stream = stream }) catch {
+    const new_id = vm.conns.add(.{ .stream = stream }) catch {
         var s = stream;
         s.close(iol);
+        return;
     };
+    // New client inherits the callback set on the listening socket.
+    const cb = vm.conns.getCallback(listen_id);
+    if (cb.tag() != .blank) {
+        vm.conns.setCallback(new_id, cb.ref()) catch {};
+    }
 }
 
 fn dispatchMsg(vm: *VM, conn_id: u32, handler: V) void {
-    const msg = verb_io.readConnLine(vm, conn_id);
+    const msg = verb_io.readConnBinary(vm, conn_id);
     if (msg.tag() == .err) {
         vm.conns.remove(conn_id);
         return;
     }
     defer msg.deinit(vm.alloc);
 
-    const h = resolveHandler(vm, handler);
+    const h = resolveHandler(vm, conn_id, handler);
     if (h.tag() == .blank) return;
 
     var c = Call{ .vm = vm };
@@ -89,12 +95,15 @@ fn dispatchMsg(vm: *VM, conn_id: u32, handler: V) void {
     defer result.deinit(vm.alloc);
 
     if (result.tag() != .blank and result.tag() != .err) {
-        _ = sendReply(vm, conn_id, result);
+        _ = verb_io.writeConnBinary(vm, conn_id, result);
     }
 }
 
-fn resolveHandler(vm: *VM, explicit: V) V {
+fn resolveHandler(vm: *VM, conn_id: u32, explicit: V) V {
     if (explicit.tag() != .blank) return explicit;
+    // Per-handle callback takes priority over globals.
+    const cb = vm.conns.getCallback(conn_id);
+    if (cb.tag() != .blank) return cb;
     if (vm.names.get("pg")) |slot| {
         const g = vm.globals[slot];
         if (g.tag() != .blank) return g;
@@ -104,23 +113,6 @@ fn resolveHandler(vm: *VM, explicit: V) V {
         if (g.tag() != .blank) return g;
     }
     return .blank;
-}
-
-fn sendReply(vm: *VM, conn_id: u32, v: V) V {
-    switch (v.tag()) {
-        .C => return verb_io.writeConnRaw(vm, conn_id, v.C.slice()),
-        .s => return verb_io.writeConnRaw(vm, conn_id, vm.getSymbol(v.s)),
-        else => {
-            const fmt = @import("../noun/format.zig");
-            const util = @import("../util.zig");
-            var mock = util.MockWriter.init(vm.alloc) catch return V{ .err = .memory };
-            defer mock.deinit();
-            var formatter = fmt.TerseFormatter.init(vm, vm.alloc, .Text);
-            var w = mock.writer();
-            formatter.formatter().fmt(v, &w.interface) catch return V{ .err = .io };
-            return verb_io.writeConnRaw(vm, conn_id, mock.getText());
-        },
-    }
 }
 
 pub fn runLoop(vm: *VM) void {

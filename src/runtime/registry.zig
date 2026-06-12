@@ -2,6 +2,7 @@ const std = @import("std");
 const A = std.ArrayList;
 const Alloc = std.mem.Allocator;
 const net = std.Io.net;
+const V = @import("../noun/value.zig").V;
 
 pub const Span = struct { id: u32, start: u32, end: u32 };
 
@@ -100,19 +101,24 @@ pub const Conn = struct {
 pub const Conns = struct {
   pub const BASE: u32 = 0x8000;
 
-  alloc: Alloc,
-  map:   std.AutoHashMap(u32, Conn),
-  next:  u32,
+  alloc:     Alloc,
+  map:       std.AutoHashMap(u32, Conn),
+  callbacks: std.AutoHashMap(u32, V),
+  next:      u32,
 
   pub fn init(alloc: Alloc) Conns {
     return .{
-      .alloc = alloc,
-      .map   = std.AutoHashMap(u32, Conn).init(alloc),
-      .next  = BASE,
+      .alloc     = alloc,
+      .map       = std.AutoHashMap(u32, Conn).init(alloc),
+      .callbacks = std.AutoHashMap(u32, V).init(alloc),
+      .next      = BASE,
     };
   }
 
   pub fn deinit(self: *Conns) void {
+    var cit = self.callbacks.valueIterator();
+    while (cit.next()) |v| v.deinit(self.alloc);
+    self.callbacks.deinit();
     var it = self.map.valueIterator();
     while (it.next()) |c| c.deinit();
     self.map.deinit();
@@ -130,10 +136,28 @@ pub const Conns = struct {
   }
 
   pub fn remove(self: *Conns, id: u32) void {
+    if (self.callbacks.fetchRemove(id)) |entry| {
+      var v = entry.value;
+      v.deinit(self.alloc);
+    }
     if (self.map.fetchRemove(id)) |entry| {
       var c = entry.value;
       c.deinit();
     }
+  }
+
+  /// Attach a callback to a handle; takes ownership of `v` (caller must .ref() if needed).
+  pub fn setCallback(self: *Conns, id: u32, v: V) !void {
+    if (self.callbacks.fetchRemove(id)) |entry| {
+      var old = entry.value;
+      old.deinit(self.alloc);
+    }
+    try self.callbacks.put(id, v);
+  }
+
+  /// Returns the callback for `id`, or `.blank` if none is set.
+  pub fn getCallback(self: *const Conns, id: u32) V {
+    return self.callbacks.get(id) orelse .blank;
   }
 
   pub fn isConn(id: u32) bool { return id >= BASE; }

@@ -258,10 +258,6 @@ fn rdStr(alloc: Alloc, bytes: []const u8, pos: *usize) ![]u8 {
   return s;
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 const testing = std.testing;
 
 fn roundTrip(alloc: Alloc, pool: *Pool, v: V) !V {
