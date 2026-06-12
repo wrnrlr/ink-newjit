@@ -1,8 +1,8 @@
-/ ipc_server.k — start a TCP server, handle one request, reply, exit
+/ server.k — start a TCP server, handle one request, reply, exit
 /
-/ usage:  ink test/ipc_server.k
+/ usage:  ink test/server.k
 /
-/ Convention (ngn/k style):
+/ Convention:
 /   > port    listen on port, block until first client connects → handle h
 /   0: h      read one newline-terminated message from h
 /   h 0: msg  write newline-terminated message to h

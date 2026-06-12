@@ -1,8 +1,8 @@
-/ ipc_client.k — connect to a running server, send a message, print reply
+/ client.k — connect to a running server, send a message, print reply
 /
-/ usage:  ink test/ipc_client.k
+/ usage:  ink test/client.k
 /
-/ Convention (ngn/k style):
+/ Convention:
 /   > "host:port"   connect to server → handle h  (positive integer)
 /   h 0: msg        synchronous write (send, no wait for reply)
 /   -h 0: msg       asynchronous write (fire-and-forget, same as sync for now)
