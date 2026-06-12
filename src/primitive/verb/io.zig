@@ -1,5 +1,7 @@
 const std = @import("std");
 const VM = @import("../../runtime/vm.zig").VM;
+const Conns = @import("../../runtime/registry.zig").Conns;
+const sort = @import("sort.zig");
 const format = @import("../../noun/format.zig");
 const util = @import("../../util.zig");
 const V = @import("../../noun/value.zig").V;
@@ -30,7 +32,9 @@ fn readLinesByChars(vm: *VM, x: V) V {
   return readLinesById(vm, V{ .i = @intCast(id) });
 }
 fn readLinesById(vm: *VM, x: V) V {
-  const text = vm.fs.getFileText(@as(u32, @intCast(x.i)));
+  const id: u32 = @intCast(@abs(x.i));
+  if (Conns.isConn(id)) return readSocketLine(vm, id);
+  const text = vm.fs.getFileText(id);
   var list = std.ArrayList(V).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
   defer list.deinit(vm.alloc);
   var iter = std.mem.splitScalar(u8, text, '\n');
@@ -87,7 +91,8 @@ fn writeLinesById_L(vm: *VM, x: V, y: V) V { return writeLinesById(vm, x, y); }
 fn writeLinesById_C(vm: *VM, x: V, y: V) V { return writeLinesById(vm, x, y); }
 fn writeLinesById_s(vm: *VM, x: V, y: V) V { return writeLinesById(vm, x, y); }
 fn writeLinesById(vm: *VM, x: V, y: V) V {
-  const id = @as(u32, @intCast(x.i));
+  const id: u32 = @intCast(@abs(x.i));
+  if (Conns.isConn(id)) return writeSocketLine(vm, id, y);
   var out = std.ArrayList(u8).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
   defer out.deinit(vm.alloc);
   switch (y) {
@@ -131,7 +136,9 @@ fn readBytesByChars(vm: *VM, x: V) V {
   return readBytesById(vm, V{ .i = @intCast(id) });
 }
 fn readBytesById(vm: *VM, x: V) V {
-  return V.Chars(vm.alloc, vm.fs.getFileText(@as(u32, @intCast(x.i)))) catch return V{ .err = .memory };
+  const id: u32 = @intCast(@abs(x.i));
+  if (Conns.isConn(id)) return readSocketBytes(vm, id);
+  return V.Chars(vm.alloc, vm.fs.getFileText(id)) catch return V{ .err = .memory };
 }
 
 pub const ReadBytes = struct {
@@ -154,7 +161,9 @@ fn writeBytesByChars(vm: *VM, x: V, y: V) V {
   return writeBytesByHandle(vm, V{ .i = @intCast(id) }, y);
 }
 fn writeBytesByHandle(vm: *VM, x: V, y: V) V {
-  writeFile(vm, @as(u32, @intCast(x.i)), y.C.slice()) catch return V{ .err = .io };
+  const id: u32 = @intCast(@abs(x.i));
+  if (Conns.isConn(id)) return writeSocketBytes(vm, id, y.C.slice());
+  writeFile(vm, id, y.C.slice()) catch return V{ .err = .io };
   return .blank;
 }
 
@@ -252,4 +261,143 @@ pub fn writeDataFallback(vm: *VM, x: V, y: V) V {
   formatter.formatter().fmt(y, &w.interface) catch return V{ .err = .io };
   writeFile(vm, id, mock.getText()) catch return V{ .err = .io };
   return .blank;
+}
+
+// ---------------------------------------------------------------------------
+// Network open/close (> and < verbs)
+// ---------------------------------------------------------------------------
+
+/// Start a TCP server on `port`, accept the first client, return conn handle.
+pub fn netListen(vm: *VM, port: u16) V {
+  const io = std.Io.Threaded.global_single_threaded.io();
+  const addr = std.Io.net.IpAddress{ .ip4 = std.Io.net.Ip4Address.unspecified(port) };
+  var server = addr.listen(io, .{ .reuse_address = true }) catch return V{ .err = .io };
+  const stream = server.accept(io) catch {
+    server.deinit(io);
+    return V{ .err = .io };
+  };
+  const id = vm.conns.add(.{ .server = server, .stream = stream }) catch return V{ .err = .memory };
+  return V{ .i = @intCast(id) };
+}
+
+/// Connect as a TCP client to `host`:`port`, return conn handle.
+pub fn netConnect(vm: *VM, host: []const u8, port: u16) V {
+  const io = std.Io.Threaded.global_single_threaded.io();
+  const addr = std.Io.net.IpAddress.parse(host, port) catch return V{ .err = .io };
+  const stream = addr.connect(io, .{ .mode = .stream }) catch return V{ .err = .io };
+  const id = vm.conns.add(.{ .stream = stream }) catch return V{ .err = .memory };
+  return V{ .i = @intCast(id) };
+}
+
+/// Close a connection handle.
+pub fn netClose(vm: *VM, id: u32) V {
+  vm.conns.remove(id);
+  return .blank;
+}
+
+/// Parse "host:port" string.  Returns null on bad format.
+fn parseHostPort(s: []const u8) ?struct { host: []const u8, port: u16 } {
+  const colon = std.mem.lastIndexOfScalar(u8, s, ':') orelse return null;
+  const port = std.fmt.parseInt(u16, s[colon + 1 ..], 10) catch return null;
+  return .{ .host = s[0..colon], .port = port };
+}
+
+// ---------------------------------------------------------------------------
+// Socket read / write helpers (used by the 0: and 1: handlers above)
+// ---------------------------------------------------------------------------
+
+/// Receive one newline-terminated message from a socket.
+fn readSocketLine(vm: *VM, id: u32) V {
+  const conn = vm.conns.get(id) orelse return V{ .err = .io };
+  const sock = conn.stream.socket.handle;
+  var buf = std.ArrayList(u8).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
+  defer buf.deinit(vm.alloc);
+  var byte: [1]u8 = undefined;
+  while (true) {
+    const n = std.posix.read(sock, &byte) catch return V{ .err = .io };
+    if (n == 0) break;
+    if (byte[0] == '\n') break;
+    buf.append(vm.alloc, byte[0]) catch return V{ .err = .memory };
+  }
+  return V.Chars(vm.alloc, buf.items) catch V{ .err = .memory };
+}
+
+/// Receive all available bytes (up to 64 KiB) from a socket.
+fn readSocketBytes(vm: *VM, id: u32) V {
+  const conn = vm.conns.get(id) orelse return V{ .err = .io };
+  const sock = conn.stream.socket.handle;
+  var buf: [65536]u8 = undefined;
+  const n = std.posix.read(sock, &buf) catch return V{ .err = .io };
+  return V.Chars(vm.alloc, buf[0..n]) catch V{ .err = .memory };
+}
+
+/// Send a value as a newline-terminated line to a socket.
+fn writeSocketLine(vm: *VM, id: u32, y: V) V {
+  const data: []const u8 = switch (y) {
+    .C => y.C.slice(),
+    .s => vm.getSymbol(y.s),
+    else => return V{ .err = .@"type" },
+  };
+  return writeSocketRaw(vm, id, data);
+}
+
+/// Send raw bytes (+ trailing newline) to a socket.
+fn writeSocketBytes(vm: *VM, id: u32, data: []const u8) V {
+  return writeSocketRaw(vm, id, data);
+}
+
+fn writeSocketRaw(vm: *VM, id: u32, data: []const u8) V {
+  const conn = vm.conns.get(id) orelse return V{ .err = .io };
+  const io = std.Io.Threaded.global_single_threaded.io();
+  var write_buf: [65536]u8 = undefined;
+  var w = conn.stream.writer(io, &write_buf);
+  w.interface.writeAll(data) catch return V{ .err = .io };
+  w.interface.writeByte('\n') catch return V{ .err = .io };
+  w.interface.flush() catch return V{ .err = .io };
+  return .blank;
+}
+
+// ---------------------------------------------------------------------------
+// NetOpen  > (monad): open a file, listen for a client, or connect to server
+// ---------------------------------------------------------------------------
+
+fn netOpenByInt(vm: *VM, x: V) V {
+  if (x.i <= 0 or x.i > 65535) return V{ .err = .domain };
+  return netListen(vm, @intCast(x.i));
+}
+
+fn netOpenByChars(vm: *VM, x: V) V {
+  const s = x.C.slice();
+  if (parseHostPort(s)) |hp| return netConnect(vm, hp.host, hp.port);
+  // No colon → fall back to grade-descend (original `>C` semantics)
+  return sort.gradeDescend(vm, x);
+}
+
+fn netOpenBySymbol(vm: *VM, x: V) V {
+  const s = vm.getSymbol(x.s);
+  if (parseHostPort(s)) |hp| return netConnect(vm, hp.host, hp.port);
+  const id = vm.mapFile(s) catch return V{ .err = .io };
+  return V{ .i = @intCast(id) };
+}
+
+pub const NetOpen = struct {
+  pub const op = .@">";
+  _i: VM.Monad = netOpenByInt,
+  _C: VM.Monad = netOpenByChars,
+  _s: VM.Monad = netOpenBySymbol,
+};
+
+// ---------------------------------------------------------------------------
+// CloseHandle  < (integer monad): close an open handle
+// ---------------------------------------------------------------------------
+
+pub fn closeHandle(vm: *VM, x: V) V {
+  if (x.i < 0) return V{ .err = .domain };
+  const id: u32 = @intCast(x.i);
+  if (Conns.isConn(id)) {
+    vm.conns.remove(id);
+    return .blank;
+  }
+  // Not a socket handle — fall back to grade-ascending (degenerate scalar case)
+  return sort.gradeAscend(vm, x);
 }

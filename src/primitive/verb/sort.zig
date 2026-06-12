@@ -8,6 +8,10 @@ const Alloc = std.mem.Allocator;
 fn asc(vm: *VM, x: V) V { return sortIndices(vm.alloc, x, false); }
 fn dsc(vm: *VM, x: V) V { return sortIndices(vm.alloc, x, true); }
 
+/// Exported for use by other verbs that need to fall back to grade operations.
+pub fn gradeDescend(vm: *VM, x: V) V { return dsc(vm, x); }
+pub fn gradeAscend(vm: *VM, x: V) V { return asc(vm, x); }
+
 pub const Ascend = struct {
   pub const op = .@"<";
   _b: VM.Monad = asc, _i: VM.Monad = asc, _f: VM.Monad = asc,

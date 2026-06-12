@@ -82,6 +82,11 @@ fn openFile(vm: *VM, x: V) V {
   return .{ .i = @intCast(id) };
 }
 
+const Close = struct {
+  pub const op = .@"<";
+  _i: VM.Monad = io.closeHandle,
+};
+
 const UniformOp = struct { _i: VM.Monad = uniform };
 fn uniform(vm: *VM, x: V) V {
   if (x.i < 0) return .{ .err = .domain };
@@ -122,9 +127,10 @@ const Monads = struct {
   pub const @"!d" = Keys;
   pub const @"&x" = @import("where.zig").Where;
   pub const @"|x" = @import("reverse.zig").Reverse;
-  pub const @"<s" = Open;
   pub const @"⍋x" = sort.Ascend;
   pub const @"⍒x" = sort.Descend;
+  pub const @"<s" = Open;    // file open by symbol (overrides degenerate sort._s)
+  pub const @"<h" = Close;   // close handle by integer (overrides degenerate sort._i)
   pub const @"=X" = @import("group.zig").Group;
   pub const @"=i" = _X1(.@"?", UniformOp);
   pub const @"~x" = _B(.@"~", NotOp);
@@ -149,6 +155,7 @@ const Monads = struct {
   pub const @"0:x" = io.ReadLines;
   pub const @"1:x" = io.ReadBytes;
   pub const @"2:x" = io.ReadData;
+  pub const @">x"  = io.NetOpen;
   pub const @".m"  = Values;
   pub const @".s"  = @import("get.zig").GetSymbol;
   pub const exec   = @import("exec.zig").Exec;

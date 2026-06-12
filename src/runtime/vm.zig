@@ -4,7 +4,8 @@ const Alloc = std.mem.Allocator;
 const Chunk = @import("tape.zig").Chunk;
 const OpCode = @import("tape.zig").OpCode;
 const Compiler = @import("compiler.zig").Compiler;
-const Fs = @import("registry.zig").Fs;
+const Fs    = @import("registry.zig").Fs;
+const Conns = @import("registry.zig").Conns;
 const command = @import("command.zig");
 const FnTables = @import("fntable.zig").FnTables;
 const call = @import("call.zig");
@@ -53,6 +54,7 @@ pub const VM = struct {
   names: std.StringHashMap(u8),
   current_chunk: *Chunk,
   fs: Fs,
+  conns: Conns,
   fn_tables: FnTables,
   ext: ExtRegistry,
   out: ?*std.Io.Writer = null,
@@ -85,6 +87,7 @@ pub const VM = struct {
       .symbols       = symbols,
       .names = std.StringHashMap(u8).init(alloc),
       .fs      = try Fs.init(alloc),
+      .conns   = Conns.init(alloc),
       .fn_tables     = FnTables.init(alloc),
       .ext           = ExtRegistry.init(alloc),
       .prng          = std.Random.DefaultPrng.init(0),
@@ -114,6 +117,7 @@ pub const VM = struct {
     vm.chunk.deinit();
     vm.alloc.destroy(vm.chunk);
     vm.fs.deinit();
+    vm.conns.deinit();
     if (vm.parser) |p| { p.deinit(); vm.alloc.destroy(p); }
     vm.slab.deinit();
     vm.alloc.destroy(vm);
