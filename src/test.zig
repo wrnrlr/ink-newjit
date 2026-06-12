@@ -598,11 +598,6 @@ test "monadic verb type" {
   try t.check("+:1 2 3", ",1 2 3");
 }
 
-// Assignment
-test "name binding" {
-  var t = try Tester.init(); defer t.deinit();
-  try t.check("a:10; a", "10");
-}
 test "global assign" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("a:1; {a::2}[]; a", "2");

@@ -6,5 +6,5 @@
 / h 2: lambda  attaches a per-handle callback; return value is sent back.
 / The client sends any value with `handle 2: value`; the server echoes it.
 
-h: >-5005
+h: <`:5005
 h 2: {[msg] msg}

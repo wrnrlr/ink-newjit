@@ -251,7 +251,6 @@ pub const WriteData = struct {
   _s_L: VM.Dyad = writeDataBySymbol,
   _s_m: VM.Dyad = writeDataBySymbol,
   _s_M: VM.Dyad = writeDataBySymbol,
-  _s_a: VM.Dyad = writeDataBySymbol,
   _C_I: VM.Dyad = writeDataByChars,
   _C_F: VM.Dyad = writeDataByChars,
   _C_S: VM.Dyad = writeDataByChars,
@@ -260,7 +259,6 @@ pub const WriteData = struct {
   _C_L: VM.Dyad = writeDataByChars,
   _C_m: VM.Dyad = writeDataByChars,
   _C_M: VM.Dyad = writeDataByChars,
-  _C_a: VM.Dyad = writeDataByChars,
   _i_I: VM.Dyad = writeDataByIdValue,
   _i_F: VM.Dyad = writeDataByIdValue,
   _i_S: VM.Dyad = writeDataByIdValue,
@@ -269,7 +267,8 @@ pub const WriteData = struct {
   _i_L: VM.Dyad = writeDataByIdValue,
   _i_m: VM.Dyad = writeDataByIdValue,
   _i_M: VM.Dyad = writeDataByIdValue,
-  _i_a: VM.Dyad = writeDataByIdCallback,
+  _i_o: VM.Dyad = writeDataByIdCallback,
+  _i_p: VM.Dyad = writeDataByIdCallback,
 };
 
 pub fn writeDataFallback(vm: *VM, x: V, y: V) V {

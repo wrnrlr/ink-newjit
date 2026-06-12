@@ -118,18 +118,13 @@ A lambda's type symbol is `` `o ``.
 - `x@y` (At/Apply): Indices into x at y; Applies function x to y.
 - `x.y` (Dot/ApplyN): Deep indexing or multi-argument function application.
 ### IO Verbs
-The IO system is organized around file discriptor. 
-A file descriptor can be a filename, port number.
-To release the resource related to the files desciptor it needs to be closed with `<`.
-Positive file number discriptor are used for sync IO.
-Negative file number discriptor are used for async IO.
-- Open file `` <"data.csv" ``.
-- Open port for async io `` <5001 ``.
-- Open port `` <5001 ``.
-- Close File handle `` >s ``.
-The IO verbs to read and write data
-- Read Line `` 0:x ``
-- Write Line `` x 0:y``
+The IO system is organized around file discriptor. A file descriptor can be a filename, port number.
+- Open file `` <"file.txt" `` or `` <"/path/to/file.txt" ``.
+- Open port `` <":port" `` or `` <"host:port" ``.
+- Close handle with `` >s `` and cleanup resources.
+Information and be read or write from 
+- Read Line `` 0:x `` - Read lines from stdin `` § ``.
+- Write Line `` x 0:y`` - Write text to stdout `` `0 0: "Hi" ``.
 - Read Byte `` 1:x ``
 - Write Byte `` x 1:y``
 - Read Byte `` 1:x ``
@@ -218,8 +213,9 @@ The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` 
   - `md5`
 - `src` core language components
   - `noun` Basic buildings blocks of the language
-    - `class.zig` Class enum `K`
-    - `value.zig` Value struct `V`, array struct `N`
+    - `array.zig` Array struct `N`
+    - `class.zig` Class enum `K` with fields: `` b i f s c B I F S C L m M ``
+    - `value.zig` Value struct `V` for K fields
     - `symbol.zig` Symbols interned in `Pool`
   - `parser` Parser ink code to `IR`
     - `ast.zig` 
