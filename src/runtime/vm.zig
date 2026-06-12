@@ -55,6 +55,7 @@ pub const VM = struct {
   current_chunk: *Chunk,
   fs: Fs,
   conns: Conns,
+  listen_handle: ?u32 = null,
   fn_tables: FnTables,
   ext: ExtRegistry,
   out: ?*std.Io.Writer = null,

@@ -94,8 +94,10 @@ const c_alloc = std.heap.c_allocator;
 
 threadlocal var current_vm: ?*anyopaque = null;
 
-pub fn setCurrentVm(vm: *anyopaque) void { current_vm = vm; }
-pub fn clearCurrentVm() void            { current_vm = null; }
+pub fn setCurrentVm(vm: *anyopaque) void  { current_vm = vm; }
+pub fn clearCurrentVm() void             { current_vm = null; }
+pub fn getCurrentVm() ?*anyopaque        { return current_vm; }
+pub fn restoreVm(prev: ?*anyopaque) void { current_vm = prev; }
 
 // ── Boxing / Unboxing ─────────────────────────────────────────────────────────
 

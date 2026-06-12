@@ -29,7 +29,7 @@ drawEye: {[ex;ey;er;mx;my]
   fillEllipse[px; py; br; br;  0.22; 0.18; 0.15]
   fillEllipse[px; py; br*0.3; br*0.3; 0.05; 0.04; 0.06]}
 
-loop: {[props]
+run: {[props]
   w: props`width; h: props`height
   mx: props`mx;   my: props`my
   er: (w & h) % 6.
@@ -37,4 +37,4 @@ loop: {[props]
   drawEye[(w%2.) - er*1.5; h%2.; er; mx; my]
   drawEye[(w%2.) + er*1.5; h%2.; er; mx; my]}
 
-gpuRun[loop; 800. 600.]
+gpuRun[run; 800. 600.]

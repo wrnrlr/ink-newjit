@@ -3,6 +3,15 @@ const builtin = @import("builtin");
 const VM = @import("runtime/vm.zig").VM;
 const Repl = @import("repl.zig").Repl;
 const disasm = @import("runtime/disasm.zig");
+const serve = @import("primitive/verb/serve.zig");
+const ffi = @import("ffi.zig");
+
+/// Called by C extensions (e.g. GPU) to process pending IPC messages from
+/// within their own event loop.  No-ops when current_vm is not set.
+export fn terse_poll() callconv(.c) void {
+  const vm_ptr = ffi.getCurrentVm() orelse return;
+  serve.pollOnce(@ptrCast(@alignCast(vm_ptr)), .blank);
+}
 
 const build_options = @import("build_options");
 
@@ -153,8 +162,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
     std.process.exit(1);
   };
 
-  // Find 'loop' global — if absent, file was already evaluated; exit cleanly
-  const loop_idx = vm.names.get("loop") orelse return;
-  if (!vm.globals[loop_idx].isLambda()) return;
-  _ = vm.globals[loop_idx];
+  // If the script set \p port, enter the event loop and serve forever.
+  if (vm.listen_handle != null) {
+    ffi.setCurrentVm(vm);
+    serve.runLoop(vm);
+  }
 }

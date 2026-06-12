@@ -73,14 +73,24 @@ pub const Fs = struct {
 // TCP/IPC connection registry
 // ---------------------------------------------------------------------------
 
-/// A live TCP connection — either client-initiated or server-accepted.
+/// A live TCP connection — either client-initiated, server-accepted, or a pure listener.
+/// Pure listeners (created by `netListenOnly`) have server!=null, stream==null.
 pub const Conn = struct {
   server: ?net.Server = null,  // non-null when this side is the listener
-  stream: net.Stream,
+  stream: ?net.Stream = null,  // null only for pure-listening handles
+
+  /// Returns true if this handle is a listening socket that has not yet accepted a client.
+  pub fn isListening(self: Conn) bool { return self.stream == null; }
+
+  /// The underlying file descriptor (server listen fd for listeners, stream fd for connections).
+  pub fn fd(self: *const Conn) std.posix.fd_t {
+    if (self.stream) |s| return s.socket.handle;
+    return self.server.?.socket.handle;
+  }
 
   pub fn deinit(self: *Conn) void {
     const io = std.Io.Threaded.global_single_threaded.io();
-    self.stream.close(io);
+    if (self.stream) |*s| s.close(io);
     if (self.server) |*s| s.deinit(io);
   }
 };

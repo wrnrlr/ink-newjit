@@ -3,6 +3,7 @@ const MockWriter = @import("../util.zig").MockWriter;
 const TerseFormatter = @import("../noun/format.zig").TerseFormatter;
 const VM = @import("vm.zig").VM;
 const V = @import("../noun/value.zig").V;
+const verb_io = @import("../primitive/verb/io.zig");
 
 const Cmd = union {
   h: void,        // show help
@@ -19,7 +20,15 @@ const Cmd = union {
 
 pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
   const io = std.Io.Threaded.global_single_threaded.io();
-  if (std.mem.eql(u8, verb, "h")) {
+  if (std.mem.eql(u8, verb, "p")) {
+    const port_str = std.mem.trim(u8, args, " \t");
+    if (port_str.len == 0) return .blank;
+    const port = std.fmt.parseInt(u16, port_str, 10) catch return V{ .err = .domain };
+    const h = verb_io.netListenOnly(vm, port);
+    if (h.tag() == .err) return h;
+    vm.listen_handle = @intCast(h.i);
+    return .blank;
+  } else if (std.mem.eql(u8, verb, "h")) {
     std.debug.print("{s}\n", .{"TODO"});
     return .blank;
   } else if (std.mem.eql(u8, verb, "l")) {

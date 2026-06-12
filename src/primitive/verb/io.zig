@@ -280,6 +280,16 @@ pub fn netListen(vm: *VM, port: u16) V {
   return V{ .i = @intCast(id) };
 }
 
+/// Create a listening server socket without blocking for a client.
+/// Used by the event loop — accept happens inside `pollOnce`.
+pub fn netListenOnly(vm: *VM, port: u16) V {
+  const io = std.Io.Threaded.global_single_threaded.io();
+  const addr = std.Io.net.IpAddress{ .ip4 = std.Io.net.Ip4Address.unspecified(port) };
+  const server = addr.listen(io, .{ .reuse_address = true }) catch return V{ .err = .io };
+  const id = vm.conns.add(.{ .server = server }) catch return V{ .err = .memory };
+  return V{ .i = @intCast(id) };
+}
+
 /// Connect as a TCP client to `host`:`port`, return conn handle.
 pub fn netConnect(vm: *VM, host: []const u8, port: u16) V {
   const io = std.Io.Threaded.global_single_threaded.io();
@@ -306,26 +316,37 @@ fn parseHostPort(s: []const u8) ?struct { host: []const u8, port: u16 } {
 // Socket read / write helpers (used by the 0: and 1: handlers above)
 // ---------------------------------------------------------------------------
 
-/// Receive one newline-terminated message from a socket.
+/// Receive one newline-terminated message from a connected socket.
+/// Public so that serve.zig can use it for event-loop dispatch.
+pub fn readConnLine(vm: *VM, id: u32) V {
+  return readSocketLine(vm, id);
+}
+
 fn readSocketLine(vm: *VM, id: u32) V {
   const conn = vm.conns.get(id) orelse return V{ .err = .io };
-  const sock = conn.stream.socket.handle;
+  if (conn.stream == null) return V{ .err = .io };
+  const sock = conn.stream.?.socket.handle;
   var buf = std.ArrayList(u8).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
   defer buf.deinit(vm.alloc);
   var byte: [1]u8 = undefined;
   while (true) {
     const n = std.posix.read(sock, &byte) catch return V{ .err = .io };
-    if (n == 0) break;
+    if (n == 0) {
+      // EOF: if nothing was buffered, the connection was closed by the peer.
+      if (buf.items.len == 0) return V{ .err = .io };
+      break;
+    }
     if (byte[0] == '\n') break;
     buf.append(vm.alloc, byte[0]) catch return V{ .err = .memory };
   }
   return V.Chars(vm.alloc, buf.items) catch V{ .err = .memory };
 }
 
-/// Receive all available bytes (up to 64 KiB) from a socket.
+/// Receive all available bytes (up to 64 KiB) from a connected socket.
 fn readSocketBytes(vm: *VM, id: u32) V {
   const conn = vm.conns.get(id) orelse return V{ .err = .io };
-  const sock = conn.stream.socket.handle;
+  if (conn.stream == null) return V{ .err = .io };
+  const sock = conn.stream.?.socket.handle;
   var buf: [65536]u8 = undefined;
   const n = std.posix.read(sock, &buf) catch return V{ .err = .io };
   return V.Chars(vm.alloc, buf[0..n]) catch V{ .err = .memory };
@@ -346,11 +367,18 @@ fn writeSocketBytes(vm: *VM, id: u32, data: []const u8) V {
   return writeSocketRaw(vm, id, data);
 }
 
+/// Send raw bytes (+ trailing newline) to a connected socket.
+/// Public so that serve.zig can send handler replies.
+pub fn writeConnRaw(vm: *VM, id: u32, data: []const u8) V {
+  return writeSocketRaw(vm, id, data);
+}
+
 fn writeSocketRaw(vm: *VM, id: u32, data: []const u8) V {
   const conn = vm.conns.get(id) orelse return V{ .err = .io };
+  if (conn.stream == null) return V{ .err = .io };
   const io = std.Io.Threaded.global_single_threaded.io();
   var write_buf: [65536]u8 = undefined;
-  var w = conn.stream.writer(io, &write_buf);
+  var w = conn.stream.?.writer(io, &write_buf);
   w.interface.writeAll(data) catch return V{ .err = .io };
   w.interface.writeByte('\n') catch return V{ .err = .io };
   w.interface.flush() catch return V{ .err = .io };

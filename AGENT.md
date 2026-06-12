@@ -236,6 +236,7 @@ The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` 
     - `fntable.zig`
     - `ir.zig`
     - `tape.zig` OpCode enum, BasicBlock struct and Chunk struct
+    - `serve.zig` 
     - `vm.zig`
   - `ffi.zig`
   - `runner.zig`
