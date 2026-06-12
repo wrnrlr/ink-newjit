@@ -183,6 +183,9 @@ Adverbs are polysemic just like verbs.
 - `':`: [EachPrior](), [Window](), [Stencil]()
 - `/:`: [EachRight](),
 - `\:` [EachLeft]()
+## Example expressions
+- Function that returns the first n even numbers. `` {2*!x} ``
+- Function that capitalizes the first letter of every word in a string `` {s: ~" "=x; @[x;& s>0,-1_s; `c$-32+]}"hi there" ``
 # About the Ink array programming language
 Ink is a array programming language for high performance computing.
 It is based on the k array programming languages ngn/k and k9.
@@ -252,5 +255,5 @@ The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` 
 - Unit tests `` time zig test src/test.zig ``
 - Test from cmd line: `` echo "1+2" | ./zig-out/bin/ink ``
 - Walk solutions `` ./zig-out/bin/ink test/walk.k ``
-- Eyes Example `` ./zig-out/bin/ink test/gpu_eyes.k ``
+- Eyes Example `` ./zig-out/bin/ink test/eyes.k ``
 - Artifacts Sizes `` du -h zig-out/*/* ``

@@ -1,36 +1,40 @@
+/ test/gpu_eyes.k — GPU eyes demo (mouse tracking)
+/ Build GPU lib first:  zig build gpu
+/ Run:                  ink test/gpu_eyes.k
+
+2: "lib/gpu/gpu.k"
+
+pi: 3.14159265359
+
+/ Flat [x0;y0;x1;y1;...] polygon for an ellipse (n segments)
+ellipsePts: {[cx;cy;rx;ry;n]
+  t: (2.*pi%(n+0.))*!n
+  pts: @[(2*n)#0.; 2*!n; :; cx + rx * cos t]
+  @[pts; 1+2*!n; :; cy + ry * sin t]}
+
+/ Fill a solid-color ellipse
+fillEllipse: {[cx;cy;rx;ry;r;g;b]
+  gpuFill[gpuTess ellipsePts[cx;cy;rx;ry;64]; gpuSolid[r;g;b;1.]]}
+
 drawEye: {[ex;ey;er;mx;my]
-  br: er*0.35;
-  ry: er*0.75;
+  br: er * 0.35
+  ry: er * 0.75
+  dx: mx - ex; dy: my - ey
+  d: (sqrt (dx*dx) + dy*dy) | 0.001
+  maxd: 0.7 * (er*ry*d) % sqrt (sqr(ry*dx)) + sqr(er*dy)
+  offset: d & maxd
+  px: ex + dx * offset % d
+  py: ey + dy * offset % d
+  fillEllipse[ex; ey; er; ry;  0.95; 0.94; 0.90]
+  fillEllipse[px; py; br; br;  0.22; 0.18; 0.15]
+  fillEllipse[px; py; br*0.3; br*0.3; 0.05; 0.04; 0.06]}
 
-  / Pupil tracking: clamp to eye ellipse boundary
-  dx: mx - ex;
-  dy: my - ey;
-  d: sqrt (dx*dx) + dy*dy;
-  d: d | 0.001;
-  maxd: (er*ry*d) % sqrt (sqr (ry*dx)) + sqr(er*dy);
-  maxd: maxd * 0.7;
-  offset: d & maxd;
-  px: ex + dx * offset % d;
-  py: ey + dy * offset % d;
+loop: {[props]
+  w: props`width; h: props`height
+  mx: props`mx;   my: props`my
+  er: (w & h) % 6.
+  fillEllipse[w%2.; h%2.; w; h; 0.08; 0.08; 0.10]
+  drawEye[(w%2.) - er*1.5; h%2.; er; mx; my]
+  drawEye[(w%2.) + er*1.5; h%2.; er; mx; my]}
 
-  (`save;
-    [ellipse: ex,ey,er,ry; fill: [linear: (ex, ey-ry, ex, ey+ry; `Neutral50; `Neutral200)]];
-    [ellipse: px,py,br,br; fill: [radial: (px,py,br*0.1,br; `Zinc500; `Zinc950)]];
-   `restore)
-};
-
-loop: {[window;props;events]
-  w: props`width;
-  h: props`height;
-  er: (w&h) % 6;
-  mx: props`mx;
-  my: props`my;
-
-  window 9: (
-    `animate;
-    [rect: 0,0,w,h; fill: `Neutral900];
-    [rect: 0,0,w%2,h%2; fill: `Red200];
-    drawEye[(w%2)-er*1.5; h%2; er; mx; my];
-    drawEye[(w%2)+er*1.5; h%2; er; mx; my]
-  )
-}
+gpuRun[loop; 800. 600.]
