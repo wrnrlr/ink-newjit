@@ -263,3 +263,42 @@ The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` 
 - Walk solutions `` ./zig-out/bin/ink test/walk.k ``
 - Eyes Example `` ./zig-out/bin/ink test/eyes.k ``
 - Artifacts Sizes `` du -h zig-out/*/* ``
+
+# Open problems
+Add unexpected issue here
+## We don't have good support for modulkes yet, compared to ngn/k
+```
+~/Code/ink ink
+  \l test/mod.k
+\d mod
+\d
+  mod
+mod
+  mod`A
+`Amod
+  mod.A
+!typemod
+
+~/Code/ink k
+ngn/k, (c) 2019-2024 ngn, GNU AGPLv3. type \ for more info
+ \l test/mod.k
+`mod
+ `mod
+`mod
+ .`mod
+'value
+ .`mod
+ ^
+
+ .`mod`A
+1 2 3
+ mod.A
+1 2 3
+
+```
+
+## **Newlines inside `(...)` inject nulls**
+The `types:` section in `buildMod` was a multi-line list literal; each newline became a null word in the SPIR-V binary, corrupting the type declarations section. Fixed by collapsing to one long line.
+
+## **`,/()` returns a unit, not an empty list**
+When no constants are emitted (identity shader, no literals), `Con` stays as `()` and `conWds = ,/()` produces a unit value (null type, length 1). Including that unit in the outer section list prevented `,/` from promoting the result to a flat int vector. Fixed with `$[#Con; ,/Con; !0]`.

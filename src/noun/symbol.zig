@@ -8,6 +8,21 @@ const Alloc = std.mem.Allocator;
 // would perturb index-ordered ops such as group/distinct.)
 pub const builtin_symbols = [_][]const u8{
   "", // 0: empty/blank symbol (null sentinel)
+  "b",
+  "i",
+  "f",
+  "s",
+  "c",
+  "B",
+  "I",
+  "F",
+  "S",
+  "C",
+  "L",
+  "o",
+  "p",
+  "m",
+  "M",
 };
 
 pub const Pool = struct {
