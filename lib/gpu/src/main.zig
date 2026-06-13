@@ -34,6 +34,7 @@ const KApi = struct {
     ki:          *const fn (i32) callconv(.c) ?K,
     kn:          *const fn (?K) callconv(.c) i32,
     kfp:         *const fn (?K) callconv(.c) ?[*]f32,
+    kip:         *const fn (?K) callconv(.c) ?[*]i32,
     KF:          *const fn (i32) callconv(.c) ?K,
     ku:          *const fn (?K) callconv(.c) void,
 };
@@ -49,6 +50,7 @@ fn ki(v: i32) ?K         { return g_api.?.ki(v); }
 fn kf(v: f32) ?K         { return g_api.?.kf(v); }
 fn kn(x: ?K) i32         { return g_api.?.kn(x); }
 fn kfp(x: ?K) ?[*]f32   { return g_api.?.kfp(x); }
+fn kip(x: ?K) ?[*]i32   { return g_api.?.kip(x); }
 fn KF(n: i32) ?K         { return g_api.?.KF(n); }
 fn ku(x: ?K) void        { g_api.?.ku(x); }
 fn k_call(f: K, a: K) ?K { return g_api.?.k_call(f, a); }
@@ -307,6 +309,99 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   return ki(0);
 }
 
+// WebGPU SPIRV descriptor (not in zgpu bindings — defined manually from Dawn C API).
+const ShaderModuleSPIRVDescriptor = extern struct {
+    chain: wgpu.ChainedStruct,
+    code_size: u32,
+    code: [*]const u32,
+};
+
+// ── gpuSpirv ──────────────────────────────────────────────────────────────────
+//
+// words_k: int list — SPIR-V binary (output of compShader in spirv.k)
+// _:       unused (ink 2: requires 2-arg functions)
+// Returns a shader handle > 0 for use with gpuFillShader.
+// Must be called inside the gpuRun frame callback (needs active renderer).
+
+export fn gpuSpirv(words_k: ?K, _: ?K) callconv(.c) ?K {
+    const r = g_renderer orelse return ki(0);
+    const ip = kip(words_k) orelse return ki(0);
+    const n = kn(words_k);
+    if (n < 5) return ki(0);
+
+    const words: [*]const u32 = @ptrCast(@alignCast(ip));
+
+    // Vertex stage: use fill.wgsl vs_main (outputs ftcoord at @location(0)).
+    const fill_wgsl = @embedFile("fill.wgsl");
+    const vert_z = r.allocator.dupeZ(u8, fill_wgsl) catch return ki(0);
+    defer r.allocator.free(vert_z);
+    const vert_module = zgpu.createWgslShaderModule(r.device, vert_z, "vert");
+    defer vert_module.release();
+
+    // Fragment stage: caller-supplied SPIR-V binary.
+    const spirv_desc = ShaderModuleSPIRVDescriptor{
+        .chain = .{ .next = null, .struct_type = .shader_module_spirv_descriptor },
+        .code_size = @intCast(n),
+        .code = words,
+    };
+    const frag_module = r.device.createShaderModule(.{
+        .next_in_chain = @ptrCast(&spirv_desc),
+    });
+    defer frag_module.release();
+
+    const color_targets = [_]wgpu.ColorTargetState{.{
+        .format     = zgpu.GraphicsContext.swapchain_format,
+        .write_mask = wgpu.ColorWriteMask.all,
+        .blend      = &wgpu.BlendState{
+            .color = .{ .operation = .add, .src_factor = .src_alpha, .dst_factor = .one_minus_src_alpha },
+            .alpha = .{ .operation = .add, .src_factor = .one,       .dst_factor = .one_minus_src_alpha },
+        },
+    }};
+    const vtx_attrs = [_]wgpu.VertexAttribute{
+        .{ .format = .float32x2, .offset = 0, .shader_location = 0 },
+        .{ .format = .float32x2, .offset = 8, .shader_location = 1 },
+    };
+    const vtx_bufs = [_]wgpu.VertexBufferLayout{.{
+        .array_stride = 16, .attribute_count = vtx_attrs.len, .attributes = &vtx_attrs,
+    }};
+    const layout = r.device.createPipelineLayout(.{
+        .bind_group_layout_count = 1,
+        .bind_group_layouts = &[_]wgpu.BindGroupLayout{r.bind_group_layout},
+    });
+    defer layout.release();
+
+    const pipeline = r.device.createRenderPipeline(.{
+        .layout  = layout,
+        .vertex  = .{ .module = vert_module, .entry_point = "vs_main",
+                      .buffer_count = vtx_bufs.len, .buffers = &vtx_bufs },
+        .primitive = .{ .topology = .triangle_list },
+        .fragment = &wgpu.FragmentState{
+            .module = frag_module, .entry_point = "main",
+            .target_count = color_targets.len, .targets = &color_targets,
+        },
+    });
+    r.custom_pipelines.append(r.allocator, pipeline) catch return ki(0);
+    return ki(@intCast(r.custom_pipelines.items.len));
+}
+
+// ── gpuFillShader ─────────────────────────────────────────────────────────────
+//
+// verts_k: flat f32 array [x,y,u,v,...] — same layout as gpuFill
+// shader_k: int scalar — handle returned by gpuSpirv
+
+export fn gpuFillShader(verts_k: ?K, shader_k: ?K) callconv(.c) ?K {
+    const r = g_renderer orelse return ki(0);
+    const vf = kfp(verts_k) orelse return ki(0);
+    const vn = kn(verts_k);
+    const shader: i32 = g_api.?.kn(shader_k);
+    if (shader <= 0) return ki(0);
+
+    const n_verts: usize = @intCast(@divTrunc(vn, 4));
+    const verts_slice = @as([*]const render.Vertex, @ptrCast(@alignCast(vf)))[0..n_verts];
+    r.drawShader(verts_slice, shader) catch {};
+    return ki(0);
+}
+
 export fn terse_init(reg: *anyopaque) callconv(.c) void {
     _ = reg;
     g_api = .{
@@ -316,6 +411,7 @@ export fn terse_init(reg: *anyopaque) callconv(.c) void {
         .ki          = lookupFn(*const fn (i32) callconv(.c) ?K, "ki")                 orelse return,
         .kn          = lookupFn(*const fn (?K) callconv(.c) i32, "kn")                 orelse return,
         .kfp         = lookupFn(*const fn (?K) callconv(.c) ?[*]f32, "kfp")            orelse return,
+        .kip         = lookupFn(*const fn (?K) callconv(.c) ?[*]i32, "kip")            orelse return,
         .KF          = lookupFn(*const fn (i32) callconv(.c) ?K, "KF")                 orelse return,
         .ku          = lookupFn(*const fn (?K) callconv(.c) void, "ku")                 orelse return,
     };

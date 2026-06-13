@@ -144,6 +144,18 @@ pub const Renderer = struct {
     });
   }
 
+  // Queue a draw call using a custom SPIR-V pipeline (handle from createSpirvFrag).
+  pub fn drawShader(self: *Renderer, verts: []const Vertex, shader: i32) !void {
+    const offset = self.verts.items.len;
+    try self.verts.appendSlice(self.allocator, verts);
+    try self.draw_calls.append(self.allocator, .{
+      .offset = offset,
+      .count = verts.len,
+      .frag = std.mem.zeroes(FragUniforms),
+      .shader = shader,
+    });
+  }
+
   // Submit all queued draw calls to the render pass and clear the buffers.
   pub fn flush(self: *Renderer, pass: wgpu.RenderPassEncoder, width: f32, height: f32) !void {
     defer pass.end();

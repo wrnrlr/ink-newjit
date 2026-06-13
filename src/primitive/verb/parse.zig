@@ -65,14 +65,23 @@ fn nodeToV(vm: *VM, node: *Node) anyerror!V {
         .s => "symbol", .S => "symbols",
         .@"var" => "var",
       };
-      var list = try std.ArrayList(V).initCapacity(alloc, 2);
+      var list = try std.ArrayList(V).initCapacity(alloc, 3);
       errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
       try list.append(alloc, try sym(vm, "literal"));
       try list.append(alloc, try sym(vm, type_name));
+      switch (lit) {
+        .@"var" => |v| try list.append(alloc, try sym(vm, v)),
+        .f      => |f| try list.append(alloc, V{ .f = f }),
+        .i      => |i| try list.append(alloc, V{ .i = i }),
+        .b      => |b| try list.append(alloc, V{ .b = b }),
+        .s      => |s| try list.append(alloc, try sym(vm, s)),
+        .c      => |c| try list.append(alloc, try sym(vm, c)),
+        else    => {},
+      }
       return transfer(alloc, &list);
     },
-    .op         => return sym(vm, "op"),
-    .io    => return sym(vm, "verb_io"),
+    .op         => |op_str| return sym(vm, op_str),
+    .io    => |io_str| return sym(vm, io_str),
     .adverb_val => return sym(vm, "adverb_val"),
     .monad      => return sym(vm, "monad"),
     .blank      => return sym(vm, "blank"),
@@ -146,7 +155,7 @@ fn nodeToV(vm: *VM, node: *Node) anyerror!V {
         try inner.append(alloc, try sym(vm, "args"));
         for (args, 0..) |arg, i| {
           if (i > 0) try inner.append(alloc, try sym(vm, "div"));
-          if (arg.is_some) try inner.append(alloc, try sym(vm, "var"));
+          if (arg.is_some) try inner.append(alloc, try sym(vm, arg.value));
         }
         try list.append(alloc, try transfer(alloc, &inner));
       }

@@ -45,6 +45,7 @@ fn castFloat(vm: *VM, x: V, y: V) V {
   return if (eql(u8, type_name, "c")) .{ .c = @intFromFloat(y.f) }
          else if (eql(u8, type_name, "i")) .{ .i = @intFromFloat(y.f) }
          else if (eql(u8, type_name, "f")) y
+         else if (eql(u8, type_name, "I")) .{ .i = @bitCast(y.f) }
          else .{ .err = .domain };
 }
 
@@ -101,5 +102,9 @@ fn castFloats(vm: *VM, x: V, y: V) V {
     return .{ .I = res };
   } else if (eql(u8, type_name, "f")) {
     return y;
+  } else if (eql(u8, type_name, "I")) {
+    const res = N(i32).init(vm.alloc, src.len) catch return V{ .err = .memory };
+    for (src, res.slice()) |v, *d| d.* = @bitCast(v);
+    return .{ .I = res };
   } else return .{ .err = .domain };
 }

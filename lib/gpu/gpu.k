@@ -4,9 +4,11 @@
 / Load with:    2: "lib/gpu/gpu.k"
 
 so: "./zig-out/lib/libgpu.dylib"
-gpuRun:  so 2: (`gpuRun;  2)   / (loop_fn; config) → 0 : blocking event loop
-gpuFill: so 2: (`gpuFill; 2)   / (verts_F; frag_F) → 0 : draw triangles in frame
-gpuTess: so 2: (`gpuTess; 1)   / pts_F → verts_F   : tessellate polygon
+gpuRun:       so 2: (`gpuRun;       2)   / (loop_fn; config) → 0 : blocking event loop
+gpuFill:      so 2: (`gpuFill;      2)   / (verts_F; frag_F) → 0 : draw triangles in frame
+gpuTess:      so 2: (`gpuTess;      1)   / pts_F → verts_F   : tessellate polygon
+gpuSpirv:     so 2: (`gpuSpirv;     2)   / (spirv_I; 0) → handle : compile SPIR-V fragment shader
+gpuFillShader:so 2: (`gpuFillShader;2)   / (verts_F; handle) → 0 : draw with custom shader
 
 / Solid-color fragment uniforms (44 floats matching fill.wgsl FragUniforms).
 / r,g,b,a in [0,1].  Returns a flat F vector.
