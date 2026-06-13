@@ -106,11 +106,16 @@ emitW:   emitBuf  / alias for test compatibility
 / Each returns (id; ty_sym) — the SPIR-V result ID and its type symbol.
 
 / Numeric literal: emit OpConstant to Con, return (id; ty_sym)
-compLit: {[node]
-  t: LitTid[node[1]]
+/ Integer literals are coerced to f32 when the surrounding expression demands it
+/ (e.g. x*2 in an f32 shader — 2 must become 2.0 for OpFMul to type-check).
+compLit: {[node; oty]
+  litTy: node[1]
+  useTy: $[(litTy~`int) & (oty~`f32); `float; litTy]
+  t:   LitTid[useTy]
+  val: $[(litTy~`int) & (useTy~`float); 0.+node[2]; node[2]]
   r: newId[]
-  emitCon opConst[t;r;node[2]]
-  (r; LitSym[node[1]])}
+  emitCon opConst[t;r;val]
+  (r; LitSym[useTy])}
 
 / Variable reference: env maps name → (id; ty_sym)
 compVar: {[node; env] env[node[2]]}
@@ -156,7 +161,7 @@ compList: {[node; env; oty]
 / AST node dispatcher
 compNode: {[node; env; oty]
   tag: node[0]
-  $[tag~`literal; $[node[1]~`var; compVar[node;env]; compLit[node]]
+  $[tag~`literal; $[node[1]~`var; compVar[node;env]; compLit[node;oty]]
     tag~`transit; compTrans[node;env;oty]
     tag~`apposit; compAppos[node;env;oty]
     tag~`apply;   compApply[node;env;oty]
@@ -253,7 +258,7 @@ compCompute: {[fn]
 
   / ── Module assembly (SPIR-V 1.3 spec order) ─────────────────────────────
   bnd: Nid+1
-  iface: (gidVar; inBuf; outBuf)   / all used global variables (Dawn requires all)
+  iface: (,gidVar)   / SPIR-V 1.3: only Input/Output vars in interface (not StorageBuffer)
 
   hdr: (0x07230203; 0x00010300; 0; bnd; 0)
   cap: (0x00020011; 1)

@@ -109,7 +109,8 @@ A lambda's type symbol is `` `o ``.
 - Fill `x^y` Replaces nulls in y with x.
 - Without `X^y` Removes occurrences of elements in X from list y.
 - Pad `i$C` Pads string y to length |x|.
-- Cast `x$y` Casts y to type represented by symbol x. String to int `` `I$"-12" `` --> `` -12 `` String to float `` `F$"-12.3" `` --> `` -12.3 `` 
+- Cast `I$y` Casts y to type represented by symbol x. String to int `` `I$"-12" `` --> `` -12 `` String to float `` `F$"-12.3" `` --> `` -12.3 ``
+- Cast to bits `` `B$1.2 `` [TODO]
 - Parse `` `p@C `` Parse ink, return AST ast list.
 - Find `x?y` Returns first index of y in x (null if not found).
 - Roll/Deal `i?x` - i random selections from x (positive: replacement, negative: unique).

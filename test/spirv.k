@@ -225,6 +225,14 @@ chk[0x00050081; wVadd[0]; "dispBin v4+v4 emits opFadd"]
 chk[(0x00070050; Tv4; 30; 10; 11; 12; 13); opCons4[Tv4;30;10;11;12;13]; "opCons4 word sequence"]
 chk[7; #opCons4[Tv4;30;10;11;12;13]; "opCons4 is 7 words"]
 
+/ ══ 5b. Integer literal coercion to f32 ══════════════════════════════════════
+/
+/ x*2 — the literal 2 must become 2.0f (OpConstant %float) not an i32.
+/ If it stays i32, Dawn rejects the shader: "FMul operand index 3" type mismatch.
+
+wdsInt: compShader[{[x] x*2}; [`x:`f32; `out:`f32]]
+chk[1b; |/wdsInt=`I$2.0; "integer literal 2 coerced to f32 in f32 context"]
+
 / ══ 6. compShader v2→v4 via compApply + compList ════════════════════════════
 /
 / Compiles {[uv] (uv[0]; uv[1]; 0.5; 1.0)} : v2 → v4
@@ -248,3 +256,21 @@ chk[1b; |/wds3=0x00050051; "opXtract opword in v2→v4 shader"]
 chk[3; 3;          "module has rank 3"]
 chk[4; #blocks;    "4 tiles at rank 2"]
 chk[16; #locs;     "16 threads per tile at rank 1"]
+
+/ ══ 7. compCompute SPIR-V structure ═════════════════════════════════════════
+/
+/ Compile {[x] x*2} as a 1D map-over-buffer compute shader and inspect binary.
+
+cwds: compCompute[{[x] x*2}]
+
+chk[0x07230203; cwds[0];   "compute magic number"]
+chk[0x00010300; cwds[1];   "compute SPIR-V version 1.3"]
+chk[1b; (#cwds) > 100;     "compute module > 100 words"]
+chk[1b; |/cwds=0x00060010; "OpExecutionMode present"]
+chk[1b; |/cwds=17;         "LocalSize mode id (17) present"]
+chk[1b; |/cwds=64;         "workgroup size 64 present"]
+chk[1b; |/cwds=0x00040047; "decoration instructions present"]
+chk[1b; |/cwds=0x0003001D; "OpTypeRuntimeArray present"]
+chk[1b; |/cwds=0x0003001E; "OpTypeStruct present"]
+chk[1b; |/cwds=0x00060041; "OpAccessChain present"]
+chk[1b; |/cwds=0x00050085; "OpFMul present (x*2 body)"]
