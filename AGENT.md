@@ -303,3 +303,21 @@ The `types:` section in `buildMod` was a multi-line list literal; each newline b
 
 ## **`,/()` returns a unit, not an empty list**
 When no constants are emitted (identity shader, no literals), `Con` stays as `()` and `conWds = ,/()` produces a unit value (null type, length 1). Including that unit in the outer section list prevented `,/` from promoting the result to a flat int vector. Fixed with `$[#Con; ,/Con; !0]`.
+
+## **Underscores in global variable names cause silent failure**
+Global variable names with underscores (`Ku32_0`, `wds_int`) assign `!type` instead of the value. The same issue affects lambda parameter names. Only local variable names (inside a function body) can safely use underscores. The `_` glyph parses as the Drop/WeedOut verb, so `north_r` is parsed as `north _ r`. Avoid underscores in all top-level and parameter names.
+
+## **Constant pool overflow: `u8` index cap of 256**
+The global `Chunk.constants` table used a `u8` index, limiting any session to 256 unique literal constants. Scripts with many hex opcode constants (e.g. loading `lib/gpu/spirv.k`) silently overflowed and caused panics on later statements. Fixed by expanding the index to `u16` in `src/runtime/tape.zig` (addConstant), `src/runtime/compiler.zig` (instSize + write16), and `src/runtime/vm.zig` (Const handler reads 2 bytes). Note: `instSize` in compiler.zig and `instrSize` in tape.zig are separate functions — both had to be updated.
+
+## **Right-to-left arithmetic in SPIR-V instruction word computation**
+k evaluates right-to-left, so `(5+#iface)*65536+15` is parsed as `(5+#iface)*(65536+15)` — completely wrong. Use explicit grouping: `0x000F+(0x10000*(5+#iface))`.
+
+## **SPIR-V 1.3 OpEntryPoint interface: no StorageBuffer variables**
+In SPIR-V 1.3 (version 0x00010300), the OpEntryPoint interface list must only contain Input (1) and Output (3) storage class variables. Listing StorageBuffer (12) variables in the interface — even if they are "used" by the entry point — causes Dawn to reject the module with "OpEntryPoint interfaces must be OpVariables with Storage Class of Input(1) or Output(3)". Only SPIR-V 1.4+ requires all used globals in the interface. For compute shaders targeting SPIR-V 1.3: only list the `GlobalInvocationID` Input variable.
+
+## **Integer literals in f32 shader contexts must be coerced**
+`compLit` in `lib/gpu/spirv.k` ignores the output type context (`oty`), so a literal `2` in `{[x] x*2}` emits an `i32` OpConstant. OpFMul then fails validation: "FMul operand index 3" type mismatch. Fix: pass `oty` to `compLit` and coerce integer literals to f32 when `oty~\`f32` (convert `2` → `2.0` using `0.+v` before passing to opConst).
+
+## **`kn` vs `ki_val` for atom values**
+`kn(K)` returns the LENGTH of a list (or -1 for atoms). To extract the integer value of an atom returned by a K function, use `ki_val(K)`. Using `kn` to get a shader handle (an atom) always returns -1.
