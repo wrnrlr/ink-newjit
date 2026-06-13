@@ -225,6 +225,19 @@ chk[0x00050081; wVadd[0]; "dispBin v4+v4 emits opFadd"]
 chk[(0x00070050; Tv4; 30; 10; 11; 12; 13); opCons4[Tv4;30;10;11;12;13]; "opCons4 word sequence"]
 chk[7; #opCons4[Tv4;30;10;11;12;13]; "opCons4 is 7 words"]
 
+/ ══ 6. compShader v2→v4 via compApply + compList ════════════════════════════
+/
+/ Compiles {[uv] (uv[0]; uv[1]; 0.5; 1.0)} : v2 → v4
+/ Tests: component extract (OpCompositeExtract) + construct (OpCompositeConstruct)
+
+wds3: compShader[{[uv] (uv[0]; uv[1]; 0.5; 1.0)}; [`uv:`v2; `out:`v4]]
+chk[0x07230203; wds3[0]; "v2→v4 magic number"]
+chk[129; #wds3; "v2→v4 module = 129 words"]
+chk[1b; |/wds3=0x3F000000; "0.5 constant in v2→v4 shader"]
+chk[1b; |/wds3=0x3F800000; "1.0 constant in v2→v4 shader"]
+chk[1b; |/wds3=0x00070050; "opCons4 opword in v2→v4 shader"]
+chk[1b; |/wds3=0x00050051; "opXtract opword in v2→v4 shader"]
+
 / The Hasse diagram (face lattice) of the tiling hierarchy as a ranked poset:
 /
 /  rank 3: module (the whole 8x8 iteration space)

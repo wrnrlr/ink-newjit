@@ -132,12 +132,35 @@ compAppos: {[node; env; oty]
   emitBuf dispUn[node[1]; ap[1]; r; ap[0]]
   (r; ap[1])}
 
+/ Index into a composite: uv[0] → OpCompositeExtract %f32 result composite idx
+/ node = (`apply; array_node; (`seq; (`literal;`int;idx)))
+compApply: {[node; env; oty]
+  ap: compNode[node[1]; env; oty]
+  idx: node[2][1][2]
+  r: newId[]
+  emitBuf opXtract[Tf32; r; ap[0]; idx]
+  (r; `f32)}
+
+/ Tuple → vec4: (a;b;c;d) → OpCompositeConstruct
+/ node = (`list; (`seq; e0; `div; e1; `div; e2; `div; e3))
+compList: {[node; env; oty]
+  elems: node[1]@&~node[1] in `seq`div
+  p0: compNode[elems[0]; env; `f32]
+  p1: compNode[elems[1]; env; `f32]
+  p2: compNode[elems[2]; env; `f32]
+  p3: compNode[elems[3]; env; `f32]
+  r: newId[]
+  emitBuf opCons4[Tv4; r; p0[0]; p1[0]; p2[0]; p3[0]]
+  (r; `v4)}
+
 / AST node dispatcher
 compNode: {[node; env; oty]
   tag: node[0]
   $[tag~`literal; $[node[1]~`var; compVar[node;env]; compLit[node]]
     tag~`transit; compTrans[node;env;oty]
     tag~`apposit; compAppos[node;env;oty]
+    tag~`apply;   compApply[node;env;oty]
+    tag~`list;    compList[node;env;oty]
     (0; oty)]}
 
 / ── Layer III helper: emit OpLoad, return (id; ty_sym) ───────────────────────
