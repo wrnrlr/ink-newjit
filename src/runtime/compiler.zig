@@ -774,7 +774,7 @@ pub const Compiler = struct {
         if (inst.val) |v| {
           if (v == .i and v.i >= std.math.minInt(i16) and v.i <= std.math.maxInt(i16)) return 3;
         }
-        return 2;
+        return 3;
       },
       .Global => return 2,
       .Local, .AssignLocal, .AssignGlobal,
@@ -814,7 +814,7 @@ pub const Compiler = struct {
       }
       try chunk.writeOp(.Const);
       const c_idx = try chunk.addConstant(inst.val.?.ref());
-      try chunk.write(c_idx);
+      try chunk.write16(c_idx);
       return;
     }
 

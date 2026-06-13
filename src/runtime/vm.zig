@@ -235,8 +235,8 @@ pub const VM = struct {
         .Drop => vm.pop().deinit(vm.alloc),
         .Dup => try vm.push(vm.peek(0).ref()),
         .Const => {
-          const idx = code[frame.ip];
-          frame.ip += 1;
+          const idx: u16 = @as(u16, code[frame.ip]) | (@as(u16, code[frame.ip + 1]) << 8);
+          frame.ip += 2;
           try vm.push(vm.current_chunk.constants.items[idx].ref());
         },
         .Int => {
@@ -673,9 +673,9 @@ test "VM simple addition" {
   const c1 = try vm.chunk.addConstant(.{ .i = 10 });
   const c2 = try vm.chunk.addConstant(.{ .i = 20 });
   try vm.chunk.writeOp(.Const);
-  try vm.chunk.write(c1);
+  try vm.chunk.write16(c1);
   try vm.chunk.writeOp(.Const);
-  try vm.chunk.write(c2);
+  try vm.chunk.write16(c2);
   try vm.chunk.writeOp(.Apply2);
   try vm.chunk.write(@intFromEnum(opmod.Op2.@"+"));
   try vm.chunk.writeOp(.Return);

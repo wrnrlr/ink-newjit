@@ -206,6 +206,93 @@ buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
   ,/(hdr; cap; ext; mem; ep; exm; decIn; decOut; types; varIn; varOut; conWds; fn; bodWds; ret)
 }
 
+/ ── Compute stencil ──────────────────────────────────────────────────────────
+/ OpAccessChain: index into a runtime-array-in-struct storage buffer
+/ t=result_ptr_type  r=result  base=buffer_var  m=member_const  i=element_idx
+opAccChain: {[t;r;base;m;i] (0x00060041;t;r;base;m;i)}
+
+/ ── compCompute: compile element-wise compute shader ─────────────────────────
+/ fn:  ink lambda {[x] expr} — x:f32, result:f32
+/ Returns SPIR-V word list for a 1D map-over-buffer compute shader.
+/ Dispatched with workgroup size 64; gpuCompute pads dispatch to n_elems.
+/ Use: gpuCompute[compCompute[{[x] sin x * 0.5}]; input_F] → output_F
+compCompute: {[fn]
+  Nid::Nfixed; Buf::(); Con::()
+
+  / Compute-specific type IDs (allocated dynamically — not fixed like Nfixed)
+  Tu32:    newId[]  / OpTypeInt 32 0
+  Tv3u32:  newId[]  / OpTypeVector u32 3
+  Trta:    newId[]  / OpTypeRuntimeArray f32
+  Tbuf:    newId[]  / OpTypeStruct {Trta}
+  Pbufs:   newId[]  / OpTypePointer StorageBuffer Tbuf
+  Pf32s:   newId[]  / OpTypePointer StorageBuffer f32
+  Pv3u32i: newId[]  / OpTypePointer Input v3u32
+
+  / Variable IDs
+  gidVar: newId[]   / GlobalInvocationID (Input)
+  inBuf:  newId[]   / input storage buffer
+  outBuf: newId[]   / output storage buffer
+
+  / u32 constant 0 for struct member access (OpAccessChain member index)
+  Ku32z: newId[]
+  emitCon (0x0004002B; Tu32; Ku32z; 0)
+
+  / Parse lambda: single argument is the element value
+  lam: last parse $fn
+  argName: (lam[1]@&~lam[1] in `args`div)[0]
+
+  / Emit body: load input element, compile expression, store output element
+  gidId:    newId[]; emitBuf opLoad[Tv3u32; gidId; gidVar]
+  gidXId:   newId[]; emitBuf opXtract[Tu32; gidXId; gidId; 0]
+  inPtrId:  newId[]; emitBuf opAccChain[Pf32s; inPtrId; inBuf; Ku32z; gidXId]
+  xId:      newId[]; emitBuf opLoad[Tf32; xId; inPtrId]
+  env:      (,argName)!(,(xId; `f32))
+  rp:       compNode[last lam[2]; env; `f32]
+  outPtrId: newId[]; emitBuf opAccChain[Pf32s; outPtrId; outBuf; Ku32z; gidXId]
+  emitBuf opStore[outPtrId; rp[0]]
+
+  / ── Module assembly (SPIR-V 1.3 spec order) ─────────────────────────────
+  bnd: Nid+1
+  iface: (gidVar; inBuf; outBuf)   / all used global variables (Dawn requires all)
+
+  hdr: (0x07230203; 0x00010300; 0; bnd; 0)
+  cap: (0x00020011; 1)
+  ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
+  mem: (0x0003000E; 0; 1)
+  ep:  (0x000F+(0x10000*(5+#iface)); 5; Fmain; 0x6E69616D; 0), iface
+  exm: (0x00060010; Fmain; 17; 64; 1; 1)   / OpExecutionMode LocalSize 64 1 1
+
+  / Decorations
+  decGid:    (0x00040047; gidVar; 11; 28)   / BuiltIn GlobalInvocationId
+  decStride: (0x00040047; Trta; 6; 4)       / ArrayStride 4
+  decMem:    (0x00050048; Tbuf; 0; 35; 0)   / MemberDecorate Tbuf[0] Offset 0
+  decBlk:    (0x00030047; Tbuf; 2)          / Block
+  decInDs:   (0x00040047; inBuf; 34; 0)     / DescriptorSet 0
+  decInBnd:  (0x00040047; inBuf; 33; 0)     / Binding 0
+  decOutDs:  (0x00040047; outBuf; 34; 0)    / DescriptorSet 0
+  decOutBnd: (0x00040047; outBuf; 33; 1)    / Binding 1
+
+  / Types: basic shared types + compute-specific (one line — ink newline bug)
+  sTypes: (0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid)
+  cTypes: (0x00040015;Tu32;32;0;0x00040017;Tv3u32;Tu32;3;0x0003001D;Trta;Tf32;0x0003001E;Tbuf;Trta;0x00040020;Pbufs;12;Tbuf;0x00040020;Pf32s;12;Tf32;0x00040020;Pv3u32i;1;Tv3u32)
+
+  / Global variables
+  varGid: (0x0004003B; Pv3u32i; gidVar; 1)   / Input
+  varIn:  (0x0004003B; Pbufs;   inBuf;  12)  / StorageBuffer
+  varOut: (0x0004003B; Pbufs;   outBuf; 12)  / StorageBuffer
+
+  label: newId[]
+  fnh: (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
+  ret: (0x000100FD; 0x00010038)
+
+  conWds: $[#Con; ,/Con; !0]
+  bodWds: $[#Buf; ,/Buf; !0]
+
+  decs: decGid,decStride,decMem,decBlk,decInDs,decInBnd,decOutDs,decOutBnd
+  vars: varGid,varIn,varOut
+
+  ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
+
 / ── Layer I+II: public shader compiler ───────────────────────────────────────
 / compShader[fn; ioTypes] → SPIR-V word list (int list)
 / fn:      ink lambda whose args become shader inputs, return value → output

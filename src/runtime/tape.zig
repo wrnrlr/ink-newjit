@@ -131,7 +131,7 @@ pub const Chunk = struct {
     const op: OpCode = @enumFromInt(code[ip]);
     return switch (op) {
       .Nop, .Gap, .Drop, .Return, .Command => 1,
-      .Int, .Jump, .JumpFalse, .JumpTrue, .MakePartial, .ReduceZip => 3,
+      .Const, .Int, .Jump, .JumpFalse, .JumpTrue, .MakePartial, .ReduceZip => 3,
       .ListAssignGlobal, .ListAssignLocal => 2 + code[ip + 1],
       else => 2,
     };
@@ -154,8 +154,8 @@ pub const Chunk = struct {
     self.code.items[idx] = byte;
   }
 
-  pub fn addConstant(self: *Chunk, v: V) !u8 {
-    const index = @as(u8, @intCast(self.constants.items.len));
+  pub fn addConstant(self: *Chunk, v: V) !u16 {
+    const index = @as(u16, @intCast(self.constants.items.len));
     try self.constants.append(self.alloc, v);
     return index;
   }
