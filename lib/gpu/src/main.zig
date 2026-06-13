@@ -35,6 +35,7 @@ const KApi = struct {
     kn:          *const fn (?K) callconv(.c) i32,
     kfp:         *const fn (?K) callconv(.c) ?[*]f32,
     kip:         *const fn (?K) callconv(.c) ?[*]i32,
+    ki_val:      *const fn (?K) callconv(.c) i32,
     KF:          *const fn (i32) callconv(.c) ?K,
     ku:          *const fn (?K) callconv(.c) void,
 };
@@ -51,6 +52,7 @@ fn kf(v: f32) ?K         { return g_api.?.kf(v); }
 fn kn(x: ?K) i32         { return g_api.?.kn(x); }
 fn kfp(x: ?K) ?[*]f32   { return g_api.?.kfp(x); }
 fn kip(x: ?K) ?[*]i32   { return g_api.?.kip(x); }
+fn ki_val(x: ?K) i32    { return g_api.?.ki_val(x); }
 fn KF(n: i32) ?K         { return g_api.?.KF(n); }
 fn ku(x: ?K) void        { g_api.?.ku(x); }
 fn k_call(f: K, a: K) ?K { return g_api.?.k_call(f, a); }
@@ -320,7 +322,7 @@ const ShaderModuleSPIRVDescriptor = extern struct {
 //
 // words_k: int list — SPIR-V binary (output of compShader in spirv.k)
 // _:       unused (ink 2: requires 2-arg functions)
-// Returns a shader handle > 0 for use with gpuFillShader.
+// Returns a negative shader handle (< 0) for use with gpuFillShader.
 // Must be called inside the gpuRun frame callback (needs active renderer).
 
 export fn gpuSpirv(words_k: ?K, _: ?K) callconv(.c) ?K {
@@ -364,12 +366,13 @@ export fn gpuSpirv(words_k: ?K, _: ?K) callconv(.c) ?K {
     const vtx_bufs = [_]wgpu.VertexBufferLayout{.{
         .array_stride = 16, .attribute_count = vtx_attrs.len, .attributes = &vtx_attrs,
     }};
+    // Reuse the renderer's bind_group_layout: vs_main reads group 0 binding 0 (view);
+    // the SPIR-V fragment shader declares no resources but extra bindings are allowed.
     const layout = r.device.createPipelineLayout(.{
         .bind_group_layout_count = 1,
         .bind_group_layouts = &[_]wgpu.BindGroupLayout{r.bind_group_layout},
     });
     defer layout.release();
-
     const pipeline = r.device.createRenderPipeline(.{
         .layout  = layout,
         .vertex  = .{ .module = vert_module, .entry_point = "vs_main",
@@ -380,8 +383,9 @@ export fn gpuSpirv(words_k: ?K, _: ?K) callconv(.c) ?K {
             .target_count = color_targets.len, .targets = &color_targets,
         },
     });
-    r.custom_pipelines.append(r.allocator, pipeline) catch return ki(0);
-    return ki(@intCast(r.custom_pipelines.items.len));
+    // Negative handle signals "spirv pipeline, no bind group" to flush()
+    r.spirv_pipelines.append(r.allocator, pipeline) catch return ki(0);
+    return ki(-@as(i32, @intCast(r.spirv_pipelines.items.len)));
 }
 
 // ── gpuFillShader ─────────────────────────────────────────────────────────────
@@ -393,8 +397,8 @@ export fn gpuFillShader(verts_k: ?K, shader_k: ?K) callconv(.c) ?K {
     const r = g_renderer orelse return ki(0);
     const vf = kfp(verts_k) orelse return ki(0);
     const vn = kn(verts_k);
-    const shader: i32 = g_api.?.kn(shader_k);
-    if (shader <= 0) return ki(0);
+    const shader: i32 = ki_val(shader_k);
+    if (shader == 0) return ki(0);
 
     const n_verts: usize = @intCast(@divTrunc(vn, 4));
     const verts_slice = @as([*]const render.Vertex, @ptrCast(@alignCast(vf)))[0..n_verts];
@@ -412,6 +416,7 @@ export fn terse_init(reg: *anyopaque) callconv(.c) void {
         .kn          = lookupFn(*const fn (?K) callconv(.c) i32, "kn")                 orelse return,
         .kfp         = lookupFn(*const fn (?K) callconv(.c) ?[*]f32, "kfp")            orelse return,
         .kip         = lookupFn(*const fn (?K) callconv(.c) ?[*]i32, "kip")            orelse return,
+        .ki_val      = lookupFn(*const fn (?K) callconv(.c) i32, "ki_val")             orelse return,
         .KF          = lookupFn(*const fn (i32) callconv(.c) ?K, "KF")                 orelse return,
         .ku          = lookupFn(*const fn (?K) callconv(.c) void, "ku")                 orelse return,
     };

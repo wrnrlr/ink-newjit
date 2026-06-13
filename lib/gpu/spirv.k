@@ -60,6 +60,7 @@ opLoad: {[t;r;ptr] (0x0004003D;t;r;ptr)}   / OpLoad 61
 opStore:{[ptr;val] (0x0003003E;ptr;val)}   / OpStore 62
 opConst:{[t;r;v]   (0x0004002B;t;r;$[t=Tf32;`I$v;v])}  / OpConstant 43
 opVTS:  {[t;r;v;s] (0x0005008E;t;r;v;s)}  / OpVectorTimesScalar 142
+opCons4:{[t;r;a;b;c;d](0x00070050;t;r;a;b;c;d)}  / OpCompositeConstruct vec4
 
 / ── Type helpers ─────────────────────────────────────────────────────────────
 / Map AST literal type names → IO type symbols
@@ -159,8 +160,8 @@ buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
   cap:  (0x00020011; 1)
   ext:  (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
   mem:  (0x0003000E; 0; 1)
-  ep:   (((5+#iface)*65536+15); 4; Fmain; 0x6E69616D; 0), iface
-  exm:  (0x00030010; Fmain; 8)
+  ep:   (0x000F+(0x10000*(5+#iface)); 4; Fmain; 0x6E69616D; 0), iface
+  exm:  (0x00030010; Fmain; 7)
 
   decIn:  ,/ inVarIds decInOne' locs
   decOut: (0x00040047; outId; 30; 0)

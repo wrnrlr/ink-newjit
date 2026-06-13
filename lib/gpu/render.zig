@@ -65,6 +65,7 @@ pub const Renderer = struct {
   verts: ArrayList(Vertex),
   draw_calls: ArrayList(DrawCall),
   custom_pipelines: ArrayList(wgpu.RenderPipeline),
+  spirv_pipelines: ArrayList(wgpu.RenderPipeline),
 
   pub fn init(
     allocator: Alloc,
@@ -84,6 +85,7 @@ pub const Renderer = struct {
       .verts = try ArrayList(Vertex).initCapacity(allocator, 4096),
       .draw_calls = try ArrayList(DrawCall).initCapacity(allocator, 64),
       .custom_pipelines = try ArrayList(wgpu.RenderPipeline).initCapacity(allocator, 4),
+      .spirv_pipelines = try ArrayList(wgpu.RenderPipeline).initCapacity(allocator, 4),
       .view_buffer = device.createBuffer(.{
         .label = "view uniform buffer",
         .usage = .{ .uniform = true, .copy_dst = true },
@@ -127,6 +129,8 @@ pub const Renderer = struct {
     self.dummy_sampler.release();
     for (self.custom_pipelines.items) |p| p.release();
     self.custom_pipelines.deinit(self.allocator);
+    for (self.spirv_pipelines.items) |p| p.release();
+    self.spirv_pipelines.deinit(self.allocator);
     self.draw_calls.deinit(self.allocator);
     self.verts.deinit(self.allocator);
     self.allocator.destroy(self);
@@ -191,8 +195,13 @@ pub const Renderer = struct {
         .entries = &bind_entries,
       });
       defer bind_group.release();
-
-      if (dc.shader > 0 and dc.shader <= self.custom_pipelines.items.len) {
+      if (dc.shader < 0) {
+        // SPIR-V pipeline: negative handle indexes into spirv_pipelines
+        const idx: usize = @intCast((-dc.shader) - 1);
+        if (idx < self.spirv_pipelines.items.len) {
+          pass.setPipeline(self.spirv_pipelines.items[idx]);
+        }
+      } else if (dc.shader > 0 and dc.shader <= self.custom_pipelines.items.len) {
         pass.setPipeline(self.custom_pipelines.items[@intCast(dc.shader - 1)]);
       } else {
         pass.setPipeline(self.pipeline);

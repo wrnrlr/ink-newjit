@@ -221,6 +221,10 @@ chk[0x0005008E; wVTSc[0]; "dispBin f32*v4 also emits opVTS"]
 wVadd: dispBin[`+; `v4; 27; `v4; 10; `v4; 11]
 chk[0x00050081; wVadd[0]; "dispBin v4+v4 emits opFadd"]
 
+/ opCons4 (OpCompositeConstruct vec4)
+chk[(0x00070050; Tv4; 30; 10; 11; 12; 13); opCons4[Tv4;30;10;11;12;13]; "opCons4 word sequence"]
+chk[7; #opCons4[Tv4;30;10;11;12;13]; "opCons4 is 7 words"]
+
 / The Hasse diagram (face lattice) of the tiling hierarchy as a ranked poset:
 /
 /  rank 3: module (the whole 8x8 iteration space)
