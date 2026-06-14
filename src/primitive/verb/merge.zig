@@ -1,6 +1,7 @@
 const std = @import("std");
 const value = @import("../../noun/value.zig");
 const pair = @import("pair.zig");
+const promote = @import("../promote.zig").promote;
 const VM = @import("../../runtime/vm.zig").VM;
 const N = @import("../../noun/array.zig").N;
 const V = value.V;
@@ -47,8 +48,12 @@ fn merge(vm: *VM, x: V, y: V) V {
   @memcpy(rk.slice(), keys.items);
   const rv = N(V).init(vm.alloc, vals.items.len) catch return V{ .err = .memory };
   @memcpy(rv.slice(), vals.items);
-  const res = pair.dict(vm, .{ .L = rk }, .{ .L = rv });
-  rk.deinit(vm.alloc);
-  rv.deinit(vm.alloc);
+  // promote so keys get typed (e.g. N(V) of .s atoms → .S), and values
+  // likewise; pickDictSym only handles .S/.s key tags, not .L.
+  const pk = promote(vm.alloc, rk);
+  const pv = promote(vm.alloc, rv);
+  const res = pair.dict(vm, pk, pv);
+  pk.deinit(vm.alloc);
+  pv.deinit(vm.alloc);
   return res;
 }

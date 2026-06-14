@@ -225,21 +225,19 @@ pub const Lexer = struct {
         while (self.i < self.src.len and self.CR() != '"') self.adv();
         if (self.i < self.src.len) self.adv();
       } else {
-        // unquoted symbol: `abc, `123, `+, etc.
-        // Symbol body uses iden = /[a-zA-Z][a-zA-Z\d]*/ — no underscores.
+        // unquoted symbol: `abc, `123, `+, `<=, etc.
+        // If body starts with an op char, consume all consecutive op chars (greedy).
+        // If body starts with alnum, consume alnum and dots only.
+        // The two modes never mix: `<abc reads as symbol `< then identifier abc.
         const sym_ops = "%!&+*|<>=~,^#_$?@/-";
-        while (self.i < self.src.len) {
-          const sc = self.CR();
-          if (isAlphanumeric(sc) or sc == '.') {
+        if (self.i < self.src.len and std.mem.indexOfScalar(u8, sym_ops, self.CR()) != null) {
+          while (self.i < self.src.len and std.mem.indexOfScalar(u8, sym_ops, self.CR()) != null) {
             self.adv();
-          } else if (std.mem.indexOfScalar(u8, sym_ops, sc) != null and
-            self.i == start + 1)
-          {
-            // single-char op symbol: `+, `-, etc. (only at start)
-            self.adv();
-            break;
-          } else {
-            break;
+          }
+        } else {
+          while (self.i < self.src.len) {
+            const sc = self.CR();
+            if (isAlphanumeric(sc) or sc == '.') self.adv() else break;
           }
         }
       }

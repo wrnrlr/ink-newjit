@@ -381,7 +381,7 @@ test "unit verb gives identity matrix" {
 test "group verb" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("=1 2 1", "1 2!(0 2;,1)");
-  try t.check("=`a`b`b`c", "[a:,0;b:1 2;c:,3]");
+  try t.check("=`a`b`b`c", "[b:1 2;c:,3;a:,0]");
   try t.check("=\"mississippi\"", "\"imps\"!(1 4 7 10;,0;8 9;2 3 5 6)");
 }
 test "distinct verb" {
@@ -697,6 +697,15 @@ test "I#y reshape" {
 test "m,m merge dictionaries" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("[a:1;b:2],[b:3;c:4]", "[a:1;b:3;c:4]");
+}
+
+test "m,m merge dictionaries with general-list values" {
+  var t = try Tester.init(); defer t.deinit();
+  _ = try t.eval("d1: (,`a)!(,(1 2))");
+  _ = try t.eval("d2: (,`b)!(,(3 4))");
+  _ = try t.eval("d: d1,d2");
+  try t.check("d[`a]", "1 2");
+  try t.check("d[`b]", "3 4");
 }
 
 test "i#y take i number of elements from y" {
