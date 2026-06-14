@@ -178,7 +178,7 @@ chk[0x07230203; wds[0]; "SPIR-V magic number"]
 chk[0x00010300; wds[1]; "SPIR-V version 1.3"]
 chk[0;          wds[2]; "generator = 0"]
 chk[1b; wds[3] > Nfixed; "bound > fixed-id range"]
-chk[104; #wds;           "passthrough module = 104 words"]
+chk[116; #wds;           "passthrough module = 116 words (incl. v3 types)"]
 
 / First section after header: OpCapability Shader (opword = 0x00020011, value = 1)
 chk[0x00020011; wds[5]; "OpCapability instruction"]
@@ -188,7 +188,7 @@ chk[1;          wds[6]; "Capability Shader = 1"]
 fn2: {[x] x+1.0}
 wds2: compShader[fn2; [`x:`f32; `out:`f32]]
 chk[0x07230203; wds2[0]; "x+1.0 magic number"]
-chk[113; #wds2; "x+1.0 module = 113 words (9 more for OpConstant)"]
+chk[125; #wds2; "x+1.0 module = 125 words (9 more for OpConstant, 12 for v3 types)"]
 chk[1b; |/wds2=0x3F800000; "1.0 bit pattern present in module"]
 
 / ══ 5. Type-directed dispatch ════════════════════════════════════════════════
@@ -240,7 +240,7 @@ chk[1b; |/wdsInt=`I$2.0; "integer literal 2 coerced to f32 in f32 context"]
 
 wds3: compShader[{[uv] (uv[0]; uv[1]; 0.5; 1.0)}; [`uv:`v2; `out:`v4]]
 chk[0x07230203; wds3[0]; "v2→v4 magic number"]
-chk[129; #wds3; "v2→v4 module = 129 words"]
+chk[141; #wds3; "v2→v4 module = 141 words (12 more for v3 types)"]
 chk[1b; |/wds3=0x3F000000; "0.5 constant in v2→v4 shader"]
 chk[1b; |/wds3=0x3F800000; "1.0 constant in v2→v4 shader"]
 chk[1b; |/wds3=0x00070050; "opCons4 opword in v2→v4 shader"]

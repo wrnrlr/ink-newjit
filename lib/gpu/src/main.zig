@@ -35,6 +35,7 @@ const KApi = struct {
     kn:          *const fn (?K) callconv(.c) i32,
     kfp:         *const fn (?K) callconv(.c) ?[*]f32,
     kip:         *const fn (?K) callconv(.c) ?[*]i32,
+    kcp:         *const fn (?K) callconv(.c) ?[*]u8,
     ki_val:      *const fn (?K) callconv(.c) i32,
     KF:          *const fn (i32) callconv(.c) ?K,
     ku:          *const fn (?K) callconv(.c) void,
@@ -52,6 +53,7 @@ fn kf(v: f32) ?K         { return g_api.?.kf(v); }
 fn kn(x: ?K) i32         { return g_api.?.kn(x); }
 fn kfp(x: ?K) ?[*]f32   { return g_api.?.kfp(x); }
 fn kip(x: ?K) ?[*]i32   { return g_api.?.kip(x); }
+fn kcp(x: ?K) ?[*]u8    { return g_api.?.kcp(x); }
 fn ki_val(x: ?K) i32    { return g_api.?.ki_val(x); }
 fn KF(n: i32) ?K         { return g_api.?.KF(n); }
 fn ku(x: ?K) void        { g_api.?.ku(x); }
@@ -298,7 +300,7 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
     }
     ku(v_w); ku(v_h); ku(v_mx); ku(v_my); ku(v_t);
 
-    renderer.flush(pass, fw, fh) catch {};
+    renderer.flush(pass, fw, fh, t) catch {};
     pass.release();
 
     const cmd = encoder.finish(.{});
@@ -541,6 +543,24 @@ export fn gpuCompute(words_k: ?K, input_k: ?K) callconv(.c) ?K {
     return result_k;
 }
 
+// ── gpuWgsl ───────────────────────────────────────────────────────────────────
+//
+// source_k: K char array (ink string) containing a complete WGSL module.
+//   Must define vs_main and fs_main using the same bind group layout as fill.wgsl.
+//   Binding 0 (@group(0) @binding(0)) is ViewUniforms {viewSize, time, _pad}.
+// Returns a positive shader handle for use with gpuFillShader.
+// Must be called inside the gpuRun frame callback.
+
+export fn gpuWgsl(source_k: ?K) callconv(.c) ?K {
+    const r = g_renderer orelse return ki(0);
+    const cp = kcp(source_k) orelse return ki(0);
+    const n = kn(source_k);
+    if (n <= 0) return ki(0);
+    const source = cp[0..@intCast(n)];
+    const handle = r.createShader(source) catch return ki(0);
+    return ki(handle);
+}
+
 export fn terse_init(reg: *anyopaque) callconv(.c) void {
     _ = reg;
     g_api = .{
@@ -551,6 +571,7 @@ export fn terse_init(reg: *anyopaque) callconv(.c) void {
         .kn          = lookupFn(*const fn (?K) callconv(.c) i32, "kn")                 orelse return,
         .kfp         = lookupFn(*const fn (?K) callconv(.c) ?[*]f32, "kfp")            orelse return,
         .kip         = lookupFn(*const fn (?K) callconv(.c) ?[*]i32, "kip")            orelse return,
+        .kcp         = lookupFn(*const fn (?K) callconv(.c) ?[*]u8, "kcp")             orelse return,
         .ki_val      = lookupFn(*const fn (?K) callconv(.c) i32, "ki_val")             orelse return,
         .KF          = lookupFn(*const fn (i32) callconv(.c) ?K, "KF")                 orelse return,
         .ku          = lookupFn(*const fn (?K) callconv(.c) void, "ku")                 orelse return,

@@ -267,7 +267,7 @@ The underscore glyph `_` is a verb in k — `north_r` parses as `north` `_` `r` 
 
 # Open problems
 Add unexpected issue here
-## We don't have good support for modulkes yet, compared to ngn/k
+## We don't have good support for modules yet, compared to ngn/k
 ```
 ~/Code/ink ink
   \l test/mod.k
@@ -321,3 +321,24 @@ In SPIR-V 1.3 (version 0x00010300), the OpEntryPoint interface list must only co
 
 ## **`kn` vs `ki_val` for atom values**
 `kn(K)` returns the LENGTH of a list (or -1 for atoms). To extract the integer value of an atom returned by a K function, use `ki_val(K)`. Using `kn` to get a shader handle (an atom) always returns -1.
+
+## Dict join (`,`) is broken for general-list values
+`d1 , d2` (dict concatenation) produces a dict where ALL lookups return empty when the values are general lists (e.g., `(id; type_sym)` pairs). This is a runtime bug.
+
+**Workaround**: rebuild the dict from scratch using key extraction:
+```k
+ks: !env
+vs: env[ks]         / extracts values as a list
+e2: (ks,new_key)!(vs,(,new_val))  / extend by rebuilding
+```
+This pattern works correctly even for nested multi-level extensions.
+
+**Why:** `d , dict` doesn't properly merge when values are heterogeneous (general list type).
+**How to apply:** Never use `env,(key)!(val)` to extend env dicts in ink. Always use the `(!env),key)!(env[!env],(,val))` rebuild pattern. See [[gpu-ffi-patterns]].
+
+## Inline operator symbol lists with `<=`/`>=` are broken
+`` `<`>`<=`>=`=`~ `` doesn't create a 7-symbol list as expected. The lexer reads `` `<= `` as `` `< `` (symbol) followed by `=` (operator token), which breaks list construction.
+
+**Fix:** Use explicit list form: `(\`<;\`>;\`=;\`~;\`&;\`|)` instead of backtick-chained form when the list contains multi-char operators.
+
+**Why:** ink's lexer only reads ONE op-character after a backtick (at position start+1). So `` `<= `` = symbol `` `< `` + op `=`, not symbol `` `<= ``.

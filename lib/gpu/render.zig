@@ -161,7 +161,7 @@ pub const Renderer = struct {
   }
 
   // Submit all queued draw calls to the render pass and clear the buffers.
-  pub fn flush(self: *Renderer, pass: wgpu.RenderPassEncoder, width: f32, height: f32) !void {
+  pub fn flush(self: *Renderer, pass: wgpu.RenderPassEncoder, width: f32, height: f32, time: f32) !void {
     defer pass.end();
     defer {
       self.draw_calls.clearRetainingCapacity();
@@ -169,7 +169,7 @@ pub const Renderer = struct {
     }
     if (self.verts.items.len == 0) return;
 
-    const view = ViewUniforms{ .viewSize = .{ width, height } };
+    const view = ViewUniforms{ .viewSize = .{ width, height }, ._pad = .{ time, 0 } };
     self.queue.writeBuffer(self.view_buffer, 0, ViewUniforms, &[_]ViewUniforms{view});
 
     const verts = self.verts.items;

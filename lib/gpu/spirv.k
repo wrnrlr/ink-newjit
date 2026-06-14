@@ -7,9 +7,9 @@
 /
 / Load with:  2: "lib/gpu/spirv.k"
 / Compile:    compShader[fn; ioTypes] → int list (SPIR-V words)
-/ Example:    compShader[{[x] sin x * 0.5}; [`x:`f32; `out:`f32]]
+/ Example:    compShader[{[uv] smoothstep[0.02;-0.02; sqrt[(uv[0]-0.5)*(uv[0]-0.5)+(uv[1]-0.5)*(uv[1]-0.5)]-0.3]}; [`uv:`v2; `out:`f32]]
 
-/ ── Reserved SPIR-V IDs (1–15 fixed in every module) ────────────────────────
+/ ── Reserved SPIR-V IDs (1–19 fixed in every module) ────────────────────────
 Tvoid:   1  / OpTypeVoid
 Tfunc:   2  / OpTypeFunction void()
 Tf32:    3  / OpTypeFloat 32
@@ -25,14 +25,17 @@ PinV4:   12 / OpTypePointer Input  v4
 PoutV4:  13 / OpTypePointer Output v4
 PinV2:   14 / OpTypePointer Input  v2
 PoutV2:  15 / OpTypePointer Output v2
-Nfixed:  16 / first dynamic id
+Tv3:     17 / OpTypeVector f32 3
+PinV3:   18 / OpTypePointer Input  v3
+PoutV3:  19 / OpTypePointer Output v3
+Nfixed:  20 / first dynamic id
 
 / ── Type ID lookup tables ─────────────────────────────────────────────────────
 / ioType symbol → SPIR-V type ID
-Tid:    [`f32:Tf32; `v4:Tv4; `v2:Tv2; `bool:Tbool; `i32:Ti32; `void:Tvoid]
+Tid:    [`f32:Tf32; `v4:Tv4; `v2:Tv2; `v3:Tv3; `bool:Tbool; `i32:Ti32; `void:Tvoid]
 / ioType symbol → input/output pointer type ID
-PtrIn:  [`f32:PinF32; `v4:PinV4; `v2:PinV2]
-PtrOut: [`f32:PoutF32; `v4:PoutV4; `v2:PoutV2]
+PtrIn:  [`f32:PinF32; `v4:PinV4; `v2:PinV2; `v3:PinV3]
+PtrOut: [`f32:PoutF32; `v4:PoutV4; `v2:PoutV2; `v3:PoutV3]
 / AST literal type name → SPIR-V type ID
 LitTid: [`float:Tf32; `int:Ti32; `bool:Tbool]
 
@@ -47,67 +50,146 @@ opIadd: {[t;r;a;b] (0x00050080;t;r;a;b)}   / OpIAdd  128
 opIsub: {[t;r;a;b] (0x00050082;t;r;a;b)}   / OpISub  130
 opImul: {[t;r;a;b] (0x00050084;t;r;a;b)}   / OpIMul  132
 opFneg: {[t;r;a]   (0x0004007F;t;r;a)}     / OpFNegate 127
-opSin:  {[t;r;a]   (0x0006000C;t;r;Glsl;13;a)}    / GLSL.std.450 sin
-opCos:  {[t;r;a]   (0x0006000C;t;r;Glsl;14;a)}    / GLSL.std.450 cos
-opSqrt: {[t;r;a]   (0x0006000C;t;r;Glsl;31;a)}    / GLSL.std.450 sqrt
-opFmin: {[t;r;a;b] (0x0007000C;t;r;Glsl;37;a;b)}  / GLSL.std.450 FMin
-opFmax: {[t;r;a;b] (0x0007000C;t;r;Glsl;40;a;b)}  / GLSL.std.450 FMax
+opFmod: {[t;r;a;b] (0x0005008D;t;r;a;b)}   / OpFMod  141 (GLSL mod: result sign = divisor)
+/ GLSL.std.450 extended instructions — 1-arg
+opSin:  {[t;r;a]   (0x0006000C;t;r;Glsl;13;a)}    / sin
+opCos:  {[t;r;a]   (0x0006000C;t;r;Glsl;14;a)}    / cos
+opSqrt: {[t;r;a]   (0x0006000C;t;r;Glsl;31;a)}    / sqrt
+opAbs:  {[t;r;a]   (0x0006000C;t;r;Glsl;4;a)}     / FAbs
+opFloor:{[t;r;a]   (0x0006000C;t;r;Glsl;8;a)}     / Floor
+opFract:{[t;r;a]   (0x0006000C;t;r;Glsl;10;a)}    / Fract
+opSign: {[t;r;a]   (0x0006000C;t;r;Glsl;6;a)}     / FSign
+opLen:  {[t;r;a]   (0x0006000C;Tf32;r;Glsl;65;a)} / Length → always f32
+opNrm:  {[t;r;a]   (0x0006000C;t;r;Glsl;68;a)}    / Normalize → same type
+/ GLSL.std.450 extended instructions — 2-arg
+opFmin: {[t;r;a;b] (0x0007000C;t;r;Glsl;37;a;b)}  / FMin
+opFmax: {[t;r;a;b] (0x0007000C;t;r;Glsl;40;a;b)}  / FMax
+opPow:  {[t;r;a;b] (0x0007000C;t;r;Glsl;26;a;b)}  / Pow
+opStep: {[t;r;a;b] (0x0007000C;t;r;Glsl;48;a;b)}  / Step (edge, x) → same type as x
+opCrs:  {[t;r;a;b] (0x0007000C;Tv3;r;Glsl;67;a;b)} / Cross → always v3
+/ GLSL.std.450 extended instructions — 3-arg
+opClamp:{[t;r;a;b;c] (0x0008000C;t;r;Glsl;43;a;b;c)} / FClamp
+opMix:  {[t;r;a;b;c] (0x0008000C;t;r;Glsl;46;a;b;c)} / FMix (lerp)
+opSS:   {[t;r;a;b;c] (0x0008000C;t;r;Glsl;49;a;b;c)} / SmoothStep
+/ Arithmetic / conversion
 opI2f:  {[t;r;a]   (0x0004006F;t;r;a)}     / OpConvertSToF 111
 opF2i:  {[t;r;a]   (0x00040070;t;r;a)}     / OpConvertFToS 112
-opXtract:{[t;r;v;i](0x00050051;t;r;v;i)}   / OpCompositeExtract 81
 opDot:  {[t;r;a;b] (0x00050094;t;r;a;b)}   / OpDot 148
 opLoad: {[t;r;ptr] (0x0004003D;t;r;ptr)}   / OpLoad 61
 opStore:{[ptr;val] (0x0003003E;ptr;val)}   / OpStore 62
 opConst:{[t;r;v]   (0x0004002B;t;r;$[t=Tf32;`I$v;v])}  / OpConstant 43
 opVTS:  {[t;r;v;s] (0x0005008E;t;r;v;s)}  / OpVectorTimesScalar 142
-opCons4:{[t;r;a;b;c;d](0x00070050;t;r;a;b;c;d)}  / OpCompositeConstruct vec4
+opXtract:{[t;r;v;i](0x00050051;t;r;v;i)}   / OpCompositeExtract 81
+opCons2:{[t;r;a;b]     (0x00050050;t;r;a;b)}        / OpCompositeConstruct vec2
+opCons3:{[t;r;a;b;c]   (0x00060050;t;r;a;b;c)}      / OpCompositeConstruct vec3
+opCons4:{[t;r;a;b;c;d] (0x00070050;t;r;a;b;c;d)}    / OpCompositeConstruct vec4
+/ Float comparison → always produce bool result type
+opFOlt: {[t;r;a;b] (0x000500B8;Tbool;r;a;b)}  / OpFOrdLessThan 184
+opFOgt: {[t;r;a;b] (0x000500BA;Tbool;r;a;b)}  / OpFOrdGreaterThan 186
+opFOle: {[t;r;a;b] (0x000500BC;Tbool;r;a;b)}  / OpFOrdLessThanEqual 188
+opFOge: {[t;r;a;b] (0x000500BE;Tbool;r;a;b)}  / OpFOrdGreaterThanEqual 190
+opFOeq: {[t;r;a;b] (0x000500B4;Tbool;r;a;b)}  / OpFOrdEqual 180
+opFOne: {[t;r;a;b] (0x000500B6;Tbool;r;a;b)}  / OpFOrdNotEqual 182
+opLAnd: {[t;r;a;b] (0x000500A7;Tbool;r;a;b)}  / OpLogicalAnd 167
+opLOr:  {[t;r;a;b] (0x000500A6;Tbool;r;a;b)}  / OpLogicalOr 166
+opLNot: {[t;r;a]   (0x000400A8;Tbool;r;a)}    / OpLogicalNot 168
+/ Ternary select: cond ? a : b (condition must be bool, a/b same type as result)
+opSel:  {[t;r;c;a;b] (0x000600A9;t;r;c;a;b)}  / OpSelect 169
 
 / ── Type helpers ─────────────────────────────────────────────────────────────
-/ Map AST literal type names → IO type symbols
 LitSym: [`float:`f32; `int:`i32; `bool:`bool]
 
-/ True if type symbol is a vector (v4 or v2)
-isVecTy: {[ty] (ty~`v4) | (ty~`v2)}
+isVecTy: {[ty] (ty~`v4) | (ty~`v2) | (ty~`v3)}
 
-/ Result type for binary op: widest operand type, else inherit output type
-binRty: {[op;aty;bty;oty] $[isVecTy[aty]; aty; isVecTy[bty]; bty; oty]}
+/ Comparison ops always produce bool; others propagate vector type or use operand type
+cmpOps: (`<;`>;`=;`~;`&;`|)
+binRty: {[op;aty;bty;oty] $[op in cmpOps; `bool; isVecTy[aty]; aty; isVecTy[bty]; bty; aty]}
 
-/ ── Verb dispatch: type-aware, avoid dict-of-lambda (ink limitation) ──────────
-/ rty,aty,bty are type symbols (`f32 `v4 `v2 `i32 `bool)
+/ ── Known 1-arg and multi-arg math function names ────────────────────────────
+mathFns1: `abs`floor`fract`sign`sqrt`sin`cos`length`normalize
+mathFns:  `abs`floor`fract`sign`sqrt`sin`cos`length`normalize`pow`min`max`dot`cross`step`mod`clamp`mix`smoothstep
+
+/ ── Verb dispatch ────────────────────────────────────────────────────────────
 dispBin: {[op;rty;r;aty;a;bty;b]
   rt: Tid[rty]
-  $[op~`+; opFadd[rt;r;a;b]
-    op~`-; opFsub[rt;r;a;b]
-    op~`%; opFdiv[rt;r;a;b]
-    op~`*; $[isVecTy[aty] & ~isVecTy[bty]; opVTS[rt;r;a;b]
-             isVecTy[bty] & ~isVecTy[aty]; opVTS[rt;r;b;a]
-             opFmul[rt;r;a;b]]
+  at: Tid[aty]
+  $[op~`+;   opFadd[rt;r;a;b]
+    op~`-;   opFsub[rt;r;a;b]
+    op~`%;   opFdiv[rt;r;a;b]
+    op~`*;   $[isVecTy[aty] & ~isVecTy[bty]; opVTS[rt;r;a;b]
+               isVecTy[bty] & ~isVecTy[aty]; opVTS[rt;r;b;a]
+               opFmul[rt;r;a;b]]
+    op~`<;   opFOlt[at;r;a;b]
+    op~`>;   opFOgt[at;r;a;b]
+    op~`<=;  opFOle[at;r;a;b]
+    op~`>=;  opFOge[at;r;a;b]
+    op~`=;   opFOeq[at;r;a;b]
+    op~`~;   opFOne[at;r;a;b]
+    op~`&;   opLAnd[at;r;a;b]
+    op~`|;   opLOr[at;r;a;b]
     opFadd[rt;r;a;b]]}
 
 dispUn: {[op;ty;r;a]
   t: Tid[ty]
-  $[op~`sin;  opSin[t;r;a]
-    op~`cos;  opCos[t;r;a]
-    op~`sqrt; opSqrt[t;r;a]
-    op~`-;    opFneg[t;r;a]
+  $[op~`sin;       opSin[t;r;a]
+    op~`cos;       opCos[t;r;a]
+    op~`sqrt;      opSqrt[t;r;a]
+    op~`-;         opFneg[t;r;a]
+    op~`~;         opLNot[Tbool;r;a]
+    op~`abs;       opAbs[t;r;a]
+    op~`floor;     opFloor[t;r;a]
+    op~`fract;     opFract[t;r;a]
+    op~`sign;      opSign[t;r;a]
+    op~`length;    opLen[Tf32;r;a]
+    op~`normalize; opNrm[t;r;a]
     opFneg[t;r;a]]}
 
 / ── Compiler state (reset per compShader call) ───────────────────────────────
-Nid:: Nfixed  / next free SPIR-V id
-Con:: ()      / OpConstant instructions (list-of-word-lists, global scope)
-Buf:: ()      / function body instructions (list-of-word-lists)
+Nid:: Nfixed
+Con:: ()
+Buf:: ()
 
 newId:   {[] r:Nid; Nid::Nid+1; r}
 emitCon: {[ws] Con,:: ,ws}
 emitBuf: {[ws] Buf,:: ,ws}
-emitW:   emitBuf  / alias for test compatibility
+emitW:   emitBuf
+
+/ ── Layer III: math function call compiler ───────────────────────────────────
+/ Compile f[a; b; c] where f is a known GLSL built-in.
+/ argsSeq = (`seq; arg0; `div; arg1; ...)
+compFnCall: {[name; argsSeq; env; oty]
+  args: argsSeq@&~argsSeq in `seq`div
+  n:    #args
+  a0:   compNode[args[0];env;`f32]
+  a1:   $[n>1; compNode[args[1];env;`f32]; (0;`f32)]
+  a2:   $[n>2; compNode[args[2];env;`f32]; (0;`f32)]
+  at:   Tid[a0[1]]
+  rty:  $[(name~`length)|(name~`dot); `f32; (name~`cross); `v3; a0[1]]
+  r:    newId[]
+  $[name~`abs;        emitBuf opAbs[at;r;a0[0]]
+    name~`floor;      emitBuf opFloor[at;r;a0[0]]
+    name~`fract;      emitBuf opFract[at;r;a0[0]]
+    name~`sign;       emitBuf opSign[at;r;a0[0]]
+    name~`sqrt;       emitBuf opSqrt[at;r;a0[0]]
+    name~`sin;        emitBuf opSin[at;r;a0[0]]
+    name~`cos;        emitBuf opCos[at;r;a0[0]]
+    name~`length;     emitBuf opLen[Tf32;r;a0[0]]
+    name~`normalize;  emitBuf opNrm[at;r;a0[0]]
+    name~`pow;        emitBuf opPow[at;r;a0[0];a1[0]]
+    name~`min;        emitBuf opFmin[at;r;a0[0];a1[0]]
+    name~`max;        emitBuf opFmax[at;r;a0[0];a1[0]]
+    name~`dot;        emitBuf opDot[Tf32;r;a0[0];a1[0]]
+    name~`cross;      emitBuf opCrs[Tv3;r;a0[0];a1[0]]
+    name~`step;       emitBuf opStep[at;r;a0[0];a1[0]]
+    name~`mod;        emitBuf opFmod[at;r;a0[0];a1[0]]
+    name~`clamp;      emitBuf opClamp[at;r;a0[0];a1[0];a2[0]]
+    name~`mix;        emitBuf opMix[at;r;a0[0];a1[0];a2[0]]
+    name~`smoothstep; emitBuf opSS[at;r;a0[0];a1[0];a2[0]]
+    0]
+  (r; rty)}
 
 / ── Layer III: expression compilers ─────────────────────────────────────────
-/ Each returns (id; ty_sym) — the SPIR-V result ID and its type symbol.
 
-/ Numeric literal: emit OpConstant to Con, return (id; ty_sym)
-/ Integer literals are coerced to f32 when the surrounding expression demands it
-/ (e.g. x*2 in an f32 shader — 2 must become 2.0 for OpFMul to type-check).
 compLit: {[node; oty]
   litTy: node[1]
   useTy: $[(litTy~`int) & (oty~`f32); `float; litTy]
@@ -117,66 +199,111 @@ compLit: {[node; oty]
   emitCon opConst[t;r;val]
   (r; LitSym[useTy])}
 
-/ Variable reference: env maps name → (id; ty_sym)
 compVar: {[node; env] env[node[2]]}
 
-/ Binary transit: a op b — uses operand types to choose opcode
 compTrans: {[node; env; oty]
-  ap: compNode[node[1]; env; oty]
-  bp: compNode[node[3]; env; oty]
+  op: node[2]
+  / Feed the right hint to operands: numeric comparisons want f32, bool ops want bool
+  opTy: $[op in (`<;`>;`=;`~); `f32; op in (`&;`|); `bool; oty]
+  ap: compNode[node[1]; env; opTy]
+  bp: compNode[node[3]; env; opTy]
   aty: ap[1]; bty: bp[1]
-  rty: binRty[node[2]; aty; bty; oty]
+  rty: binRty[op; aty; bty; oty]
   r: newId[]
-  emitBuf dispBin[node[2]; rty; r; aty; ap[0]; bty; bp[0]]
+  emitBuf dispBin[op; rty; r; aty; ap[0]; bty; bp[0]]
   (r; rty)}
 
-/ Unary apposit: fn arg — preserves operand type
 compAppos: {[node; env; oty]
   ap: compNode[node[2]; env; oty]
   r: newId[]
   emitBuf dispUn[node[1]; ap[1]; r; ap[0]]
-  (r; ap[1])}
+  rty: $[node[1]~`length; `f32; node[1]~`~; `bool; ap[1]]
+  (r; rty)}
 
-/ Index into a composite: uv[0] → OpCompositeExtract %f32 result composite idx
-/ node = (`apply; array_node; (`seq; (`literal;`int;idx)))
-compApply: {[node; env; oty]
-  ap: compNode[node[1]; env; oty]
-  idx: node[2][1][2]
-  r: newId[]
+/ Composite indexing fallback: v[i] → OpCompositeExtract
+compApplyIdx: {[fn; argsSeq; env; oty]
+  ap:  compNode[fn; env; oty]
+  idx: argsSeq[1][2]
+  r:   newId[]
   emitBuf opXtract[Tf32; r; ap[0]; idx]
   (r; `f32)}
 
-/ Tuple → vec4: (a;b;c;d) → OpCompositeConstruct
-/ node = (`list; (`seq; e0; `div; e1; `div; e2; `div; e3))
+/ Explicit apply: f[a;b;c]
+/ Handles: math function calls AND composite indexing (v[0])
+/ fn can be a symbol atom (`sqrt) or a (`literal;`var;name) node
+compApply: {[node; env; oty]
+  fn:     node[1]
+  fnName: $[(fn[0]~`literal) & (fn[1]~`var); fn[2]; fn]
+  isMath: fnName in mathFns
+  $[isMath
+    ; compFnCall[fnName; node[2]; env; oty]
+    ; compApplyIdx[fn; node[2]; env; oty]]}
+
+/ Tuple → vec2/vec3/vec4 via OpCompositeConstruct
+/ Dispatch on element count.
 compList: {[node; env; oty]
   elems: node[1]@&~node[1] in `seq`div
-  p0: compNode[elems[0]; env; `f32]
-  p1: compNode[elems[1]; env; `f32]
-  p2: compNode[elems[2]; env; `f32]
-  p3: compNode[elems[3]; env; `f32]
-  r: newId[]
-  emitBuf opCons4[Tv4; r; p0[0]; p1[0]; p2[0]; p3[0]]
-  (r; `v4)}
+  n:  #elems
+  p0: compNode[elems[0];env;`f32]
+  p1: compNode[elems[1];env;`f32]
+  p2: $[n>2; compNode[elems[2];env;`f32]; (0;`f32)]
+  p3: $[n>3; compNode[elems[3];env;`f32]; (0;`f32)]
+  r:   newId[]
+  rty: $[n=2; `v2; n=3; `v3; `v4]
+  rt:  $[n=2; Tv2; n=3; Tv3;  Tv4]
+  $[n=2; emitBuf opCons2[rt;r;p0[0];p1[0]]
+    n=3; emitBuf opCons3[rt;r;p0[0];p1[0];p2[0]]
+    emitBuf opCons4[rt;r;p0[0];p1[0];p2[0];p3[0]]]
+  (r; rty)}
+
+/ $[c; then; else] and chained $[c1;t1;c2;t2;...;default] → OpSelect (eager both branches)
+/ Handles scalar bool condition selecting scalar or vector values.
+compCond: {[node; env; oty]
+  n:   #node
+  cp:  compNode[node[1]; env; `bool]
+  tp:  compNode[node[2]; env; oty]
+  ep:  $[n=4; compNode[node[3]; env; oty]; compCond[(,`cond), 3_node; env; oty]]
+  r:   newId[]
+  rty: tp[1]
+  emitBuf opSel[Tid[rty]; r; cp[0]; tp[0]; ep[0]]
+  (r; rty)}
 
 / AST node dispatcher
 compNode: {[node; env; oty]
   tag: node[0]
-  $[tag~`literal; $[node[1]~`var; compVar[node;env]; compLit[node;oty]]
-    tag~`transit; compTrans[node;env;oty]
-    tag~`apposit; compAppos[node;env;oty]
-    tag~`apply;   compApply[node;env;oty]
-    tag~`list;    compList[node;env;oty]
+  $[tag~`literal;  $[node[1]~`var; compVar[node;env]; compLit[node;oty]]
+    tag~`transit;  compTrans[node;env;oty]
+    tag~`apposit;  compAppos[node;env;oty]
+    tag~`apply;    compApply[node;env;oty]
+    tag~`list;     compList[node;env;oty]
+    tag~`cond;     compCond[node;env;oty]
+    tag~`right;    compNode[node[1];env;oty]   / parenthesised expression
+    tag~`group;    compNode[node[1];env;oty]
     (0; oty)]}
 
-/ ── Layer III helper: emit OpLoad, return (id; ty_sym) ───────────────────────
+/ ── Layer III: sequential body with local bindings ──────────────────────────
+/ stmts: list of statement nodes (seq/div markers already stripped)
+/ For bind nodes (y: expr), compile rhs and extend env with name→result.
+/ Returns (id; ty_sym) of the last expression.
+compSeqTail: {[stmts; env; oty]
+  s:   stmts[0]
+  isb: (s[0]~`bind) & (3=#s)
+  e2:  $[isb; ((!env),s[1][2])!(env[!env],(,compNode[s[2];env;oty])); env]
+  compSeq[1_stmts;e2;oty]}
+
+compSeq: {[stmts; env; oty]
+  n: #stmts
+  $[n=0; (0;oty)
+    n=1; compNode[stmts[0];env;oty]
+    compSeqTail[stmts;env;oty]]}
+
+/ ── Layer III helper ──────────────────────────────────────────────────────────
 loadOnePair: {[vid; tsym]
   r: newId[]
   emitBuf opLoad[Tid[tsym]; r; vid]
   (r; tsym)}
 
 / ── Layer IV: SPIR-V module assembly ─────────────────────────────────────────
-/ buildMod[outId; inVarIds; inTys; inPtrs; outPtr; locs] → SPIR-V word list
-/ Assembles sections in SPIR-V 1.3 spec order.
 decInOne: {[vid;loc] (0x00040047; vid; 30; loc)}
 varInOne: {[ptr;vid] (0x0004003B; ptr; vid; 1)}
 
@@ -195,7 +322,7 @@ buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
   decOut: (0x00040047; outId; 30; 0)
 
   / types: one line — newlines inside (...) inject null words in ink
-  types: (0x00020013; Tvoid; 0x00020014; Tbool; 0x00030016; Tf32; 32; 0x00040017; Tv4; Tf32; 4; 0x00040017; Tv2; Tf32; 2; 0x00040015; Ti32; 32; 1; 0x00030021; Tfunc; Tvoid; 0x00040020; PinF32; 1; Tf32; 0x00040020; PoutF32; 3; Tf32; 0x00040020; PinV4; 1; Tv4; 0x00040020; PoutV4; 3; Tv4; 0x00040020; PinV2; 1; Tv2; 0x00040020; PoutV2; 3; Tv2)
+  types: (0x00020013; Tvoid; 0x00020014; Tbool; 0x00030016; Tf32; 32; 0x00040017; Tv4; Tf32; 4; 0x00040017; Tv2; Tf32; 2; 0x00040017; Tv3; Tf32; 3; 0x00040015; Ti32; 32; 1; 0x00030021; Tfunc; Tvoid; 0x00040020; PinF32; 1; Tf32; 0x00040020; PoutF32; 3; Tf32; 0x00040020; PinV4; 1; Tv4; 0x00040020; PoutV4; 3; Tv4; 0x00040020; PinV2; 1; Tv2; 0x00040020; PoutV2; 3; Tv2; 0x00040020; PinV3; 1; Tv3; 0x00040020; PoutV3; 3; Tv3)
 
   varIn:  ,/ inPtrs varInOne' inVarIds
   varOut: (0x0004003B; outPtr; outId; 3)
@@ -204,7 +331,6 @@ buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
   fn:  (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
   ret: (0x000100FD; 0x00010038)
 
-  / ,/() = unit (length 1) in ink — use !0 for truly empty sections
   conWds: $[#Con; ,/Con; !0]
   bodWds: $[#Buf; ,/Buf; !0]
 
@@ -212,79 +338,67 @@ buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
 }
 
 / ── Compute stencil ──────────────────────────────────────────────────────────
-/ OpAccessChain: index into a runtime-array-in-struct storage buffer
-/ t=result_ptr_type  r=result  base=buffer_var  m=member_const  i=element_idx
 opAccChain: {[t;r;base;m;i] (0x00060041;t;r;base;m;i)}
 
 / ── compCompute: compile element-wise compute shader ─────────────────────────
-/ fn:  ink lambda {[x] expr} — x:f32, result:f32
-/ Returns SPIR-V word list for a 1D map-over-buffer compute shader.
-/ Dispatched with workgroup size 64; gpuCompute pads dispatch to n_elems.
-/ Use: gpuCompute[compCompute[{[x] sin x * 0.5}]; input_F] → output_F
 compCompute: {[fn]
   Nid::Nfixed; Buf::(); Con::()
 
-  / Compute-specific type IDs (allocated dynamically — not fixed like Nfixed)
-  Tu32:    newId[]  / OpTypeInt 32 0
-  Tv3u32:  newId[]  / OpTypeVector u32 3
-  Trta:    newId[]  / OpTypeRuntimeArray f32
-  Tbuf:    newId[]  / OpTypeStruct {Trta}
-  Pbufs:   newId[]  / OpTypePointer StorageBuffer Tbuf
-  Pf32s:   newId[]  / OpTypePointer StorageBuffer f32
-  Pv3u32i: newId[]  / OpTypePointer Input v3u32
+  Tu32:    newId[]
+  Tv3u32:  newId[]
+  Trta:    newId[]
+  Tbuf:    newId[]
+  Pbufs:   newId[]
+  Pf32s:   newId[]
+  Pv3u32i: newId[]
 
-  / Variable IDs
-  gidVar: newId[]   / GlobalInvocationID (Input)
-  inBuf:  newId[]   / input storage buffer
-  outBuf: newId[]   / output storage buffer
+  gidVar: newId[]
+  inBuf:  newId[]
+  outBuf: newId[]
 
-  / u32 constant 0 for struct member access (OpAccessChain member index)
   Ku32z: newId[]
   emitCon (0x0004002B; Tu32; Ku32z; 0)
 
-  / Parse lambda: single argument is the element value
   lam: last parse $fn
   argName: (lam[1]@&~lam[1] in `args`div)[0]
 
-  / Emit body: load input element, compile expression, store output element
   gidId:    newId[]; emitBuf opLoad[Tv3u32; gidId; gidVar]
   gidXId:   newId[]; emitBuf opXtract[Tu32; gidXId; gidId; 0]
   inPtrId:  newId[]; emitBuf opAccChain[Pf32s; inPtrId; inBuf; Ku32z; gidXId]
   xId:      newId[]; emitBuf opLoad[Tf32; xId; inPtrId]
   env:      (,argName)!(,(xId; `f32))
-  rp:       compNode[last lam[2]; env; `f32]
+  bodySeq: lam[2]
+  stmts:   bodySeq@&~bodySeq in `seq`div
+  rp:      compSeq[stmts; env; `f32]
   outPtrId: newId[]; emitBuf opAccChain[Pf32s; outPtrId; outBuf; Ku32z; gidXId]
   emitBuf opStore[outPtrId; rp[0]]
 
-  / ── Module assembly (SPIR-V 1.3 spec order) ─────────────────────────────
   bnd: Nid+1
-  iface: (,gidVar)   / SPIR-V 1.3: only Input/Output vars in interface (not StorageBuffer)
+  iface: (,gidVar)
 
   hdr: (0x07230203; 0x00010300; 0; bnd; 0)
   cap: (0x00020011; 1)
   ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
   mem: (0x0003000E; 0; 1)
   ep:  (0x000F+(0x10000*(5+#iface)); 5; Fmain; 0x6E69616D; 0), iface
-  exm: (0x00060010; Fmain; 17; 64; 1; 1)   / OpExecutionMode LocalSize 64 1 1
+  exm: (0x00060010; Fmain; 17; 64; 1; 1)
 
-  / Decorations
-  decGid:    (0x00040047; gidVar; 11; 28)   / BuiltIn GlobalInvocationId
-  decStride: (0x00040047; Trta; 6; 4)       / ArrayStride 4
-  decMem:    (0x00050048; Tbuf; 0; 35; 0)   / MemberDecorate Tbuf[0] Offset 0
-  decBlk:    (0x00030047; Tbuf; 2)          / Block
-  decInDs:   (0x00040047; inBuf; 34; 0)     / DescriptorSet 0
-  decInBnd:  (0x00040047; inBuf; 33; 0)     / Binding 0
-  decOutDs:  (0x00040047; outBuf; 34; 0)    / DescriptorSet 0
-  decOutBnd: (0x00040047; outBuf; 33; 1)    / Binding 1
+  decGid:    (0x00040047; gidVar; 11; 28)
+  decStride: (0x00040047; Trta; 6; 4)
+  decMem:    (0x00050048; Tbuf; 0; 35; 0)
+  decBlk:    (0x00030047; Tbuf; 2)
+  decInDs:   (0x00040047; inBuf; 34; 0)
+  decInBnd:  (0x00040047; inBuf; 33; 0)
+  decOutDs:  (0x00040047; outBuf; 34; 0)
+  decOutBnd: (0x00040047; outBuf; 33; 1)
 
-  / Types: basic shared types + compute-specific (one line — ink newline bug)
-  sTypes: (0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid)
+  / shared base types + Tv3 (one line — ink newline bug)
+  sTypes: (0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid)
   cTypes: (0x00040015;Tu32;32;0;0x00040017;Tv3u32;Tu32;3;0x0003001D;Trta;Tf32;0x0003001E;Tbuf;Trta;0x00040020;Pbufs;12;Tbuf;0x00040020;Pf32s;12;Tf32;0x00040020;Pv3u32i;1;Tv3u32)
 
-  / Global variables
-  varGid: (0x0004003B; Pv3u32i; gidVar; 1)   / Input
-  varIn:  (0x0004003B; Pbufs;   inBuf;  12)  / StorageBuffer
-  varOut: (0x0004003B; Pbufs;   outBuf; 12)  / StorageBuffer
+  varGid: (0x0004003B; Pv3u32i; gidVar; 1)
+  varIn:  (0x0004003B; Pbufs;   inBuf;  12)
+  varOut: (0x0004003B; Pbufs;   outBuf; 12)
 
   label: newId[]
   fnh: (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
@@ -302,18 +416,15 @@ compCompute: {[fn]
 / compShader[fn; ioTypes] → SPIR-V word list (int list)
 / fn:      ink lambda whose args become shader inputs, return value → output
 / ioTypes: dict of arg_name→type_sym, plus `out for the output type
-/          type symbols: `f32 `v4 `v2 `i32 `bool
-/ Example:
-/   compShader[{[x] sin x * 0.5}; [`x:`f32; `out:`f32]]
+/          type symbols: `f32 `v4 `v2 `v3 `i32 `bool
+/ Lambdas can have local bindings: {[uv] d: sqrt[...]; (d;d;d;1.0)}
 compShader: {[fn; ioTypes]
   Nid::Nfixed; Buf::(); Con::()
 
-  / Layer I: parse ink lambda source → AST
   lam: last parse $fn
   argsNode: lam[1]
   argNames: argsNode@&~argsNode in `args`div
 
-  / Layer II: resolve types from ioTypes
   outTySym: ioTypes[`out]
   outTy:  Tid[outTySym]
   outPtr: PtrOut[outTySym]
@@ -321,22 +432,19 @@ compShader: {[fn; ioTypes]
   inTys:  Tid'  inTySyms
   inPtrs: PtrIn' inTySyms
 
-  / Layer III: allocate SPIR-V variable IDs
   inVarIds: {[x] newId[]}' argNames
   outId: newId[]
 
-  / Layer III: emit OpLoad for each input; env maps name → (id; ty_sym)
   loadedPairs: inVarIds loadOnePair' inTySyms
   env: argNames!loadedPairs
 
-  / Layer III: compile expression body; compNode returns (id; ty_sym)
-  body: last lam[2]
-  rp: compNode[body; env; outTySym]
+  / Compile body: strip seq/div markers, process bind nodes for locals
+  bodySeq: lam[2]
+  stmts: bodySeq@&~bodySeq in `seq`div
+  rp: compSeq[stmts; env; outTySym]
   result: rp[0]
 
-  / Layer III: emit OpStore result to output variable
   emitBuf opStore[outId; result]
 
-  / Layer IV: assemble and return SPIR-V module
   locs: !#argNames
   buildMod[outId; inVarIds; inTys; inPtrs; outPtr; locs]}
