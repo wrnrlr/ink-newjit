@@ -14,7 +14,7 @@
 
 plWds: compShader[{[uv]
   / Screen coords, y up
-  sx: uv[0]*2.0-1.0
+  sx: (uv[0]*2.0)-1.0
   sy: 1.0-uv[1]*2.0
   / Fixed camera
   roX: 2.8; roY: 1.8; roZ: 2.8
@@ -26,11 +26,11 @@ plWds: compShader[{[uv]
   rtL: sqrt[(rtX*rtX)+(rtZ*rtZ)]
   rtX: rtX%rtL; rtZ: rtZ%rtL
   / Up = cross(rt, fw)
-  upX: 0.0-rtZ*fwY; upY: rtZ*fwX-rtX*fwZ; upZ: rtX*fwY
+  upX: 0.0-rtZ*fwY; upY: (rtZ*fwX)-(rtX*fwZ); upZ: rtX*fwY
   / Ray direction, focal 1.6
-  rdX: fwX*1.6 + rtX*sx + upX*sy
-  rdY: fwY*1.6 + 0.0*sx + upY*sy
-  rdZ: fwZ*1.6 + rtZ*sx + upZ*sy
+  rdX: (fwX*1.6)+(rtX*sx)+(upX*sy)
+  rdY: (fwY*1.6)+(0.0*sx)+(upY*sy)
+  rdZ: (fwZ*1.6)+(rtZ*sx)+(upZ*sy)
   rdL: sqrt[(rdX*rdX)+(rdY*rdY)+(rdZ*rdZ)]
   rdX: rdX%rdL; rdY: rdY%rdL; rdZ: rdZ%rdL
   / Avoid divide-by-zero with safe denominators

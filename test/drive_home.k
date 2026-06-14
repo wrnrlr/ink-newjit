@@ -34,9 +34,9 @@ dhWds: compShader[{[uv]
   / Night sky: dark blue-grey to very dark near horizon
   skR: skyFrac*0.06
   skG: skyFrac*0.05
-  skB: skyFrac*0.12 + 0.03
+  skB: (skyFrac*0.12)+0.03
   / Simple star noise: hash of direction
-  hv: sin[rdX*127.1+rdY*311.7+rdZ*74.7]*43758.5
+  hv: sin[(rdX*127.1)+(rdY*311.7)+(rdZ*74.7)]*43758.5
   star: max[fract[hv]-0.992; 0.0]*120.0*skyFrac
   skR: skR+star; skG: skG+star; skB: skB+star
   / ── Road (y=0 plane) ────────────────────────────────────────────────────
@@ -60,25 +60,25 @@ dhWds: compShader[{[uv]
   / Head light 1: left lane, coming toward camera
   h1X: 0.0-0.35; h1Y: 0.12; h1Z: 8.0
   o1X: h1X-roX; o1Y: h1Y-roY; o1Z: h1Z-roZ
-  d1: o1X*rdX+o1Y*rdY+o1Z*rdZ
+  d1: (o1X*rdX)+(o1Y*rdY)+(o1Z*rdZ)
   c1X: o1X-rdX*d1; c1Y: o1Y-rdY*d1; c1Z: o1Z-rdZ*d1
   bk1: smoothstep[0.08;0.0;sqrt[(c1X*c1X)+(c1Y*c1Y)+(c1Z*c1Z)]]
   / Head light 2: right lane
   h2X: 0.35; h2Y: 0.12; h2Z: 8.0
   o2X: h2X-roX; o2Y: h2Y-roY; o2Z: h2Z-roZ
-  d2: o2X*rdX+o2Y*rdY+o2Z*rdZ
+  d2: (o2X*rdX)+(o2Y*rdY)+(o2Z*rdZ)
   c2X: o2X-rdX*d2; c2Y: o2Y-rdY*d2; c2Z: o2Z-rdZ*d2
   bk2: smoothstep[0.08;0.0;sqrt[(c2X*c2X)+(c2Y*c2Y)+(c2Z*c2Z)]]
   / Tail light 1: slightly ahead, red
   t1X: 0.0-0.2; t1Y: 0.1; t1Z: 3.0
   ot1X: t1X-roX; ot1Y: t1Y-roY; ot1Z: t1Z-roZ
-  dt1: ot1X*rdX+ot1Y*rdY+ot1Z*rdZ
+  dt1: (ot1X*rdX)+(ot1Y*rdY)+(ot1Z*rdZ)
   ct1X: ot1X-rdX*dt1; ct1Y: ot1Y-rdY*dt1; ct1Z: ot1Z-rdZ*dt1
   bkt1: smoothstep[0.05;0.0;sqrt[(ct1X*ct1X)+(ct1Y*ct1Y)+(ct1Z*ct1Z)]]
   / Tail light 2
   t2X: 0.2; t2Y: 0.1; t2Z: 3.0
   ot2X: t2X-roX; ot2Y: t2Y-roY; ot2Z: t2Z-roZ
-  dt2: ot2X*rdX+ot2Y*rdY+ot2Z*rdZ
+  dt2: (ot2X*rdX)+(ot2Y*rdY)+(ot2Z*rdZ)
   ct2X: ot2X-rdX*dt2; ct2Y: ot2Y-rdY*dt2; ct2Z: ot2Z-rdZ*dt2
   bkt2: smoothstep[0.05;0.0;sqrt[(ct2X*ct2X)+(ct2Y*ct2Y)+(ct2Z*ct2Z)]]
   / ── Composite ────────────────────────────────────────────────────────────
@@ -86,13 +86,13 @@ dhWds: compShader[{[uv]
   baseG: $[hitRoad; roadG; skG]
   baseB: $[hitRoad; roadB; skB]
   / Add white headlights (bloom)
-  lR: bk1*0.9 + bk2*0.9
-  lG: bk1*0.9 + bk2*0.9
-  lB: bk1*1.0 + bk2*1.0
+  lR: (bk1*0.9)+(bk2*0.9)
+  lG: (bk1*0.9)+(bk2*0.9)
+  lB: (bk1*1.0)+(bk2*1.0)
   / Add red tail lights
-  lR: lR + bkt1*1.0 + bkt2*1.0
-  lG: lG + bkt1*0.08 + bkt2*0.08
-  lB: lB + bkt1*0.08 + bkt2*0.08
+  lR: lR+(bkt1*1.0)+(bkt2*1.0)
+  lG: lG+(bkt1*0.08)+(bkt2*0.08)
+  lB: lB+(bkt1*0.08)+(bkt2*0.08)
   oR: pow[clamp[baseR+lR;0.0;1.0]; 0.4545]
   oG: pow[clamp[baseG+lG;0.0;1.0]; 0.4545]
   oB: pow[clamp[baseB+lB;0.0;1.0]; 0.4545]

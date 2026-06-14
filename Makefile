@@ -17,12 +17,11 @@ release:
 	# find src \( -path 'src/graphics' -o -path 'src/encoding' \) -prune -o -name '*.zig' -print | xargs wc -l
 
 demo:
-	@echo "Total lines:" && find src -name '*.zig' | xargs wc -l | tail -n 1
-	INK test/circle_sdf.k
-	INK test/drive_home.k
-	INK test/fill_demo.k
-	INK test/planes_3d.k
-	INK test/sphere_phong.k
+	$(INK) test/circle_sdf.k
+	$(INK) test/drive_home.k
+	$(INK) test/fill_demo.k
+	$(INK) test/planes_3d.k
+	$(INK) test/sphere_phong.k
 
 info:
 	@echo "Total lines:" && find src -name '*.zig' | xargs wc -l | tail -n 1

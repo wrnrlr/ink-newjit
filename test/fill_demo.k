@@ -18,14 +18,14 @@
 / uv in [0,1]x[0,1], draws a soft white rounded rectangle in the centre.
 / Useful as a primitive for custom UI elements drawn via gpuFillShader.
 rrSdf: compShader[{[uv]
-  px: uv[0]*2.0-1.0
-  py: uv[1]*2.0-1.0
+  px: (uv[0]*2.0)-1.0
+  py: (uv[1]*2.0)-1.0
   / Rounded rect SDF: box half-size 0.6x0.7, radius 0.15
-  qx: abs[px]-0.6+0.15
-  qy: abs[py]-0.7+0.15
+  qx: (abs[px]-0.6)+0.15
+  qy: (abs[py]-0.7)+0.15
   mx: max[qx;0.0]
   my: max[qy;0.0]
-  d: sqrt[(mx*mx)+(my*my)] + min[max[qx;qy]; 0.0] - 0.15
+  d: (sqrt[(mx*mx)+(my*my)] + min[max[qx;qy]; 0.0]) - 0.15
   c: smoothstep[0.02; -0.02; d]
   (c; c*0.9; c*0.7; c)}; [`uv:`v2; `out:`v4]]
 
