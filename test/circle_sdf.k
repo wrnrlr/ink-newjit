@@ -33,7 +33,7 @@
 /   (c; c; c; 1.0)
 
 spirvWds: compShader[{[uv]
-  ux: (uv[0]*2.0)-1.0
+  ux: ((uv[0]*2.0)-1.0)*(4.0%3.0)
   uy: (uv[1]*2.0)-1.0
   d: sqrt[(ux*ux)+(uy*uy)]-0.45
   c: smoothstep[0.015;-0.015;d]

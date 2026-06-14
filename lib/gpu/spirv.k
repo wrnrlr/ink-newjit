@@ -1,9 +1,9 @@
 / lib/gpu/spirv.k — SPIR-V copy-and-patch compiler for ink shaders
 / Tiramisu 4-layer model applied to ink→SPIR-V:
-/   Layer I  (Abstract Algorithm)   : ink lambda AST via `parse`
-/   Layer II (Computation Mgmt)     : type-annotate, schedule (trivial for shaders)
-/   Layer III (Data Mgmt)           : assign SPIR-V IDs, emit typed sections
-/   Layer IV (Communication Mgmt)  : assemble SPIR-V binary in spec order
+/   Layer 1  (Abstract Algorithm)   : ink lambda AST via `parse`
+/   Layer 2 (Computation Mgmt)     : type-annotate, schedule (trivial for shaders)
+/   Layer 3 (Data Mgmt)           : assign SPIR-V IDs, emit typed sections
+/   Layer 4 (Communication Mgmt)   : assemble SPIR-V binary in spec order
 /
 / Load with:  2: "lib/gpu/spirv.k"
 / Compile:    compShader[fn; ioTypes] → int list (SPIR-V words)
@@ -154,7 +154,7 @@ emitCon: {[ws] Con,:: ,ws}
 emitBuf: {[ws] Buf,:: ,ws}
 emitW:   emitBuf
 
-/ ── Layer III: math function call compiler ───────────────────────────────────
+/ ── Layer 3: math function call compiler ───────────────────────────────────
 / Compile f[a; b; c] where f is a known GLSL built-in.
 / argsSeq = (`seq; arg0; `div; arg1; ...)
 compFnCall: {[name; argsSeq; env; oty]
@@ -188,7 +188,7 @@ compFnCall: {[name; argsSeq; env; oty]
     0]
   (r; rty)}
 
-/ ── Layer III: expression compilers ─────────────────────────────────────────
+/ ── Layer 3: expression compilers ─────────────────────────────────────────
 
 compLit: {[node; oty]
   litTy: node[1]
@@ -281,7 +281,7 @@ compNode: {[node; env; oty]
     tag~`group;    compNode[node[1];env;oty]
     (0; oty)]}
 
-/ ── Layer III: sequential body with local bindings ──────────────────────────
+/ ── Layer 3: sequential body with local bindings ──────────────────────────
 / stmts: list of statement nodes (seq/div markers already stripped)
 / For bind nodes (y: expr), compile rhs and extend env with name→result.
 / Returns (id; ty_sym) of the last expression.
@@ -412,7 +412,7 @@ compCompute: {[fn]
 
   ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
 
-/ ── Layer I+II: public shader compiler ───────────────────────────────────────
+/ ── Layer 1+2: public shader compiler ───────────────────────────────────────
 / compShader[fn; ioTypes] → SPIR-V word list (int list)
 / fn:      ink lambda whose args become shader inputs, return value → output
 / ioTypes: dict of arg_name→type_sym, plus `out for the output type

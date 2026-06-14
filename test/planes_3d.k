@@ -13,8 +13,8 @@
 2: "lib/gpu/gpu.k"
 
 plWds: compShader[{[uv]
-  / Screen coords, y up
-  sx: (uv[0]*2.0)-1.0
+  / Screen coords, y up, aspect corrected
+  sx: ((uv[0]*2.0)-1.0)*(4.0%3.0)
   sy: 1.0-uv[1]*2.0
   / Fixed camera
   roX: 2.8; roY: 1.8; roZ: 2.8
@@ -26,7 +26,7 @@ plWds: compShader[{[uv]
   rtL: sqrt[(rtX*rtX)+(rtZ*rtZ)]
   rtX: rtX%rtL; rtZ: rtZ%rtL
   / Up = cross(rt, fw)
-  upX: 0.0-rtZ*fwY; upY: (rtZ*fwX)-(rtX*fwZ); upZ: rtX*fwY
+  upX: fwY*rtZ; upY: (fwZ*rtX)-(fwX*rtZ); upZ: 0.0-fwY*rtX
   / Ray direction, focal 1.6
   rdX: (fwX*1.6)+(rtX*sx)+(upX*sy)
   rdY: (fwY*1.6)+(0.0*sx)+(upY*sy)

@@ -10,8 +10,8 @@
 2: "lib/gpu/gpu.k"
 
 sphWds: compShader[{[uv]
-  / Map uv → centred screen coords, y up
-  sx: (uv[0]*2.0)-1.0
+  / Map uv → centred screen coords, y up, aspect corrected
+  sx: ((uv[0]*2.0)-1.0)*(4.0%3.0)
   sy: 1.0-uv[1]*2.0
   / Fixed camera at (3; 2; -4)
   roX: 3.0; roY: 2.0; roZ: 0.0-4.0
@@ -24,10 +24,10 @@ sphWds: compShader[{[uv]
   rtX: fwZ; rtZ: 0.0-fwX
   rtL: sqrt[(rtX*rtX)+(rtZ*rtZ)]
   rtX: rtX%rtL; rtZ: rtZ%rtL
-  / Up = cross(rt, fw)
-  upX: (0.0*fwZ)-(rtZ*fwY)
-  upY: (rtZ*fwX)-(rtX*fwZ)
-  upZ: (rtX*fwY)-(0.0*fwX)
+  / Up = cross(fw, rt)
+  upX: fwY*rtZ
+  upY: (fwZ*rtX)-(fwX*rtZ)
+  upZ: 0.0-fwY*rtX
   / Ray direction (focal length 2.0)
   rdX: (fwX*2.0)+(rtX*sx)+(upX*sy)
   rdY: (fwY*2.0)+(0.0*sx)+(upY*sy)
