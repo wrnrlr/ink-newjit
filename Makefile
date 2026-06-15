@@ -23,6 +23,12 @@ demo:
 	$(INK) test/planes.k
 	$(INK) test/sphere.k
 
+qa:
+	$(INK) test/circle.k
+	$(INK) test/walk.k
+	$(INK) test/eyes.k
+	$(INK) lib/stats.k
+	
 info:
 	@echo "Total lines:" && find src -name '*.zig' | xargs wc -l | tail -n 1
 	@echo "Binary size:" && du -h zig-out/bin/*
