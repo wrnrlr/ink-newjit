@@ -49,12 +49,12 @@ phongFrag: FragmentShader[`nor`out!`v3`v4; {[nor]
   diff: smoothstep[0.0; 0.05; dot[nor; ld]]
   hi: smoothstep[0.92; 0.98; dot[normalize[nor+spec]; nor]]
   base: (0.2; 0.5; 0.9)
-  col: (base[0]*(amb+diff)+hi; base[1]*(amb+diff)+hi; base[2]*(amb+diff)+hi; 1.0)
+  col: ((base[0]*(amb+diff))+hi; (base[1]*(amb+diff))+hi; (base[2]*(amb+diff))+hi; 1.0)
   col}]
 
 / Vertex shader: remap z from [-1,1] to WebGPU depth range [0,1].
 phongVtx: VertexShader[`pos`nor!`v3`v3; (,`vNor)!(,`v3); {[pos;nor]
-  clipPos: (pos[0]; pos[1]; pos[2]*0.5+0.5; 1.0)
+  clipPos: (pos[0]; pos[1]; 0.5+(0.0-pos[2]*0.5); 1.0)
   (clipPos; nor)}]
 
 / Render loop

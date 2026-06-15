@@ -24,9 +24,8 @@
 
 / Divide element at column `col` of row `k1[j]` by `piv`. State: (A;col;piv;k1;j).
 luDivRow:{[st]
-  A:st@0;col:st@1;piv:st@2;k1:st@3;j:st@4
-  r:k1@j
-  (@[A;r;:;@[A@r;col;%;piv]];col;piv;k1;1+j)
+  A:st@0; col:st@1; piv:st@2; k1:st@3; j:st@4 r:k1@j
+  (@[A;r;:;@[A@r;col;%;piv]]; col; piv; k1; 1+j)
 }
 
 / Rank-1 update row cols[j]: A[r;cols] -= A[r;col]*pivrow. State: (A;col;cols;pivrow;j).
@@ -84,7 +83,7 @@ solveL:{[st]
 
 / Backward substitution: solve U x = b. State: (x;A;j) where i = (n-1)-j.
 solveU:{[st]
-  x:st@0;A:st@1;j:st@2
+  x: st@0; A: st@1; j: st@2
   n:#x
   i:(n-1)-j
   k:(1+i)+!n-(1+i)

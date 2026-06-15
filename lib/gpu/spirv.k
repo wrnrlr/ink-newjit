@@ -59,14 +59,14 @@ opAbs:  {[t;r;a]   (0x0006000C;t;r;Glsl;4;a)}     / FAbs
 opFloor:{[t;r;a]   (0x0006000C;t;r;Glsl;8;a)}     / Floor
 opFract:{[t;r;a]   (0x0006000C;t;r;Glsl;10;a)}    / Fract
 opSign: {[t;r;a]   (0x0006000C;t;r;Glsl;6;a)}     / FSign
-opLen:  {[t;r;a]   (0x0006000C;Tf32;r;Glsl;65;a)} / Length → always f32
-opNrm:  {[t;r;a]   (0x0006000C;t;r;Glsl;68;a)}    / Normalize → same type
+opLen:  {[t;r;a]   (0x0006000C;Tf32;r;Glsl;66;a)} / Length → always f32
+opNrm:  {[t;r;a]   (0x0006000C;t;r;Glsl;69;a)}    / Normalize → same type
 / GLSL.std.450 extended instructions — 2-arg
 opFmin: {[t;r;a;b] (0x0007000C;t;r;Glsl;37;a;b)}  / FMin
 opFmax: {[t;r;a;b] (0x0007000C;t;r;Glsl;40;a;b)}  / FMax
 opPow:  {[t;r;a;b] (0x0007000C;t;r;Glsl;26;a;b)}  / Pow
 opStep: {[t;r;a;b] (0x0007000C;t;r;Glsl;48;a;b)}  / Step (edge, x) → same type as x
-opCrs:  {[t;r;a;b] (0x0007000C;Tv3;r;Glsl;67;a;b)} / Cross → always v3
+opCrs:  {[t;r;a;b] (0x0007000C;Tv3;r;Glsl;68;a;b)} / Cross → always v3
 / GLSL.std.450 extended instructions — 3-arg
 opClamp:{[t;r;a;b;c] (0x0008000C;t;r;Glsl;43;a;b;c)} / FClamp
 opMix:  {[t;r;a;b;c] (0x0008000C;t;r;Glsl;46;a;b;c)} / FMix (lerp)

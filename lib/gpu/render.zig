@@ -156,7 +156,7 @@ pub const Renderer = struct {
     self.custom_pipelines.deinit(self.allocator);
     for (self.spirv_pipelines.items) |p| p.release();
     self.spirv_pipelines.deinit(self.allocator);
-    for (self.mesh_pipelines.items) |p| p.release();
+    for (self.mesh_pipelines.items) |p| { if (@intFromPtr(p) != 0) p.release(); }
     self.mesh_pipelines.deinit(self.allocator);
     self.mesh_vertex_buffer.release();
     self.mesh_calls.deinit(self.allocator);
@@ -285,8 +285,8 @@ pub const Renderer = struct {
       }},
       .depth_stencil_attachment = &depth_att,
     });
-    defer pass.end();
     defer pass.release();
+    defer pass.end();
 
     pass.setVertexBuffer(0, self.mesh_vertex_buffer, 0, write_count * @sizeOf(MeshVertex));
     for (self.mesh_calls.items) |mc| {

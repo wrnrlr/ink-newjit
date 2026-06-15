@@ -229,6 +229,17 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   }, .{}) catch return ki(-1);
   defer gctx.destroy(alloc);
 
+  gctx.device.setUncapturedErrorCallback(struct {
+    fn cb(typ: wgpu.ErrorType, msg: ?[*:0]const u8, _: ?*anyopaque) callconv(.c) void {
+      std.debug.print("[Dawn error] type={} msg={s}\n", .{ typ, msg orelse "(null)" });
+    }
+  }.cb, null);
+  gctx.device.setDeviceLostCallback(struct {
+    fn cb(reason: wgpu.DeviceLostReason, msg: ?[*:0]const u8, _: ?*anyopaque) callconv(.c) void {
+      std.debug.print("[Dawn device lost] reason={} msg={s}\n", .{ reason, msg orelse "(null)" });
+    }
+  }.cb, null);
+
   const bgl_entries = [_]wgpu.BindGroupLayoutEntry{
     zgpu.bufferEntry(0, .{ .vertex = true, .fragment = true }, .uniform, false, 0),
     zgpu.bufferEntry(1, .{ .fragment = true }, .uniform, false, 0),
@@ -644,8 +655,9 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
             .target_count = color_targets.len, .targets = &color_targets,
         },
     });
+    if (@intFromPtr(pipeline) == 0) return ki(0);
     r.mesh_pipelines.append(r.allocator, pipeline) catch return ki(0);
-    return ki(@intCast(r.mesh_pipelines.items.len - 1));
+    return ki(@intCast(r.mesh_pipelines.items.len));
 }
 
 // ── gpuDrawMesh ───────────────────────────────────────────────────────────────
@@ -658,11 +670,11 @@ export fn gpuDrawMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
     const vf = kfp(verts_k) orelse return ki(0);
     const vn = kn(verts_k);
     const handle = ki_val(handle_k);
-    if (handle < 0 or vn < 6) return ki(0);
+    if (handle <= 0 or vn < 6) return ki(0);
 
     const n_verts: usize = @intCast(@divTrunc(vn, 6));
     const verts_slice = @as([*]const render.MeshVertex, @ptrCast(@alignCast(vf)))[0..n_verts];
-    r.drawMesh(verts_slice, @intCast(handle)) catch {};
+    r.drawMesh(verts_slice, @intCast(handle - 1)) catch {};
     return ki(0);
 }
 
