@@ -14,11 +14,11 @@
 Ink (sometimes called terse) is an array programming language based on k.
 
 ## Tips
-- No `>=`/`<=` — use `~(a>b)` and `~(a<b)` respectively.
+- No `>=`/`<=` - use `~(a>b)` and `~(a<b)` respectively.
 - `_` is always the Drop/WeedOut verb; underscores are never valid in variable names.
 - Expressions evaluate right-to-left; no operator precedence rules.
-- Newlines inside `(...)` inject null elements — keep list literals on one line.
-- `,/()` returns a unit, not an empty list — use `$[#x;,/x;!0]` when folding possibly-empty lists.
+- Newlines inside `(...)` inject null elements - keep list literals on one line.
+- `,/()` returns a unit, not an empty list - use `$[#x;,/x;!0]` when folding possibly-empty lists.
 
 # Language Reference
 ## Grammar
@@ -26,16 +26,16 @@ Nouns can be combined into expressions using verbs and adverbs.
 Expressions are evaluated right-to-left. There are no special precedence rules for operators.
 
 ## Types `` ` `i`f`s`c`m`I`F`S`C`M`L ``
-- Integer — numbers like `-2 0 1 0N`, type symbol `` `i ``.
-- Float — floating point numbers `0.1 2. -3. 0n 0w -0w`, type symbol `` `f ``.
-- Symbol — interned names, e.g. `` `id`Red100 ``, type symbol `` `s ``.
-- Char — single u8 character; whitespace is interpreted as empty `" "`. E.g. `"H"`, type symbol `` `c ``.
-- Integers — vector of integers, type symbol `` `I ``.
-- Floats — vector of floats, type symbol `` `F ``.
-- Symbols — array of symbols, type symbol `` `S ``.
-- Chars — string of characters (`[]u8`), type symbol `` `C ``.
-- List — heterogeneous list; empty list is `` ,() ``, type symbol `` `L ``.
-- Table — e.g. `` [[]a:1 2] ``, type symbol `` `M ``.
+- Integer - numbers like `-2 0 1 0N`, type symbol `` `i ``.
+- Float - floating point numbers `0.1 2. -3. 0n 0w -0w`, type symbol `` `f ``.
+- Symbol - interned names, e.g. `` `id`Red100 ``, type symbol `` `s ``.
+- Char - single u8 character; whitespace is interpreted as empty `" "`. E.g. `"H"`, type symbol `` `c ``.
+- Integers - vector of integers, type symbol `` `I ``.
+- Floats - vector of floats, type symbol `` `F ``.
+- Symbols - array of symbols, type symbol `` `S ``.
+- Chars - string of characters (`[]u8`), type symbol `` `C ``.
+- List - heterogeneous list; empty list is `` ,() ``, type symbol `` `L ``.
+- Table - e.g. `` [[]a:1 2] ``, type symbol `` `M ``.
 
 Types are organized into classes:
 - Atoms: Integer, Float, Symbol, Char
@@ -75,98 +75,98 @@ Blanks are used for empty assignment and defining partials.
 #### Global Assign `` :: ``
 
 ### Monadic Operators `:+-*!#@&|<>=?,^~$.`
-- Identity `:x` — return right-hand side
-- Flip `+x` — transpose. `` +(1 2 3;4 5 6) `` → `` (1 4;2 5;3 6) ``
-- Pivot `+d` — table to dict-of-lists and vice versa. `` +[[]n:`b`c;i:2 3] `` → `` [n:`b`c;i:2 3] ``
-- Negate `-x` — numeric negation
-- First `*x` — first item
-- Iota `!i` — integers 0..i-1
-- Odometer `!I` — Cartesian product indices for an integer list
-- Tally `#x` — number of elements
-- Type `@x` — type symbol (e.g. `` `i ``, `` `F ``)
-- Where `&I` — convert counts to repeated indices
-- Reverse `|x` — elements in reverse order
-- Ascend `<X` — indices that sort X ascending
-- Descend `>X` — indices that sort X descending
-- Group `=X` — for each distinct value, the indices where it occurs
-- Unit `=i` — identity matrix
-- Distinct `?X` — distinct elements in order
-- Uniform `?i` — i random floats in [0,1)
-- Enlist `,x` — wrap x in a list
-- Null `^x` — boolean mask of null/missing elements
-- Not `~x` — logical negation
-- String `$x` — string representation
-- Value/Get `.x` — extract dictionary values; retrieve global by symbol name
+- Identity `:x` - return right-hand side
+- Flip `+x` - transpose. `` +(1 2 3;4 5 6) `` → `` (1 4;2 5;3 6) ``
+- Pivot `+d` - table to dict-of-lists and vice versa. `` +[[]n:`b`c;i:2 3] `` → `` [n:`b`c;i:2 3] ``
+- Negate `-x` - numeric negation
+- First `*x` - first item
+- Iota `!i` - integers 0..i-1
+- Odometer `!I` - Cartesian product indices for an integer list
+- Tally `#x` - number of elements
+- Type `@x` - type symbol (e.g. `` `i ``, `` `F ``)
+- Where `&I` - convert counts to repeated indices
+- Reverse `|x` - elements in reverse order
+- Ascend `<X` - indices that sort X ascending
+- Descend `>X` - indices that sort X descending
+- Group `=X` - for each distinct value, the indices where it occurs
+- Unit `=i` - identity matrix
+- Distinct `?X` - distinct elements in order
+- Uniform `?i` - i random floats in [0,1)
+- Enlist `,x` - wrap x in a list
+- Null `^x` - boolean mask of null/missing elements
+- Not `~x` - logical negation
+- String `$x` - string representation
+- Value/Get `.x` - extract dictionary values; retrieve global by symbol name
 - `sqrt n`, `sqr n`, `log n`, `exp n`, `sin n`, `cos n`, `abs n`
 
 ### Dyadic Operators
-- Right `x:y` — return right-hand side
+- Right `x:y` - return right-hand side
 - Add `x+y`
 - Sub `x-y`
 - Mul `x*y`
-- Div `x%y` — divFloor for integers, float division for floats
-- Modulo `x mod y` — remainder of x÷y (integer)
-- Integer division `x div y` — floor(x÷y)
-- Key `x!y` — dictionary creation
-- Equal `x=y` — elementwise equality
-- Match `x~y` — identity check (same type and value)
-- Drop `i_Y` — drop i items from start (positive) or end (negative)
-- Drop keys `X_d` — remove keys X from dictionary d
-- Cut `I_Y` — slice Y at indices I
-- WeedOut `f_Y` — remove elements where boolean mask f is 1
-- Delete `X_i` — remove element at index i from list X
-- Join `x,y` — join atoms/lists; merge dictionaries (right-side wins)
-- Take `x#y` — resize/cycle y to length |x|
-- TakeKeys `X#d` — filter dictionary d to keys X
-- Reshape `I#y` — reshape y to shape I
-- Fill `x^y` — replace nulls in y with x
-- Without `X^y` — remove occurrences of X from y
-- Pad `i$C` — pad string to length |i|
-- Cast `s$y` — cast y to type s. `` `I$"-12" `` → `-12`; `` `F$"-12.3" `` → `-12.3`
-- Find `x?y` — first index of y in x (null if not found)
-- Roll/Deal `i?x` — i random selections from x
-- `x@y` (At/Apply) — index into x at y; apply function x to y
-- `x.y` (Dot/ApplyN) — deep indexing or multi-argument application
+- Div `x%y` - divFloor for integers, float division for floats
+- Modulo `x mod y` - remainder of x÷y (integer)
+- Integer division `x div y` - floor(x÷y)
+- Key `x!y` - dictionary creation
+- Equal `x=y` - elementwise equality
+- Match `x~y` - identity check (same type and value)
+- Drop `i_Y` - drop i items from start (positive) or end (negative)
+- Drop keys `X_d` - remove keys X from dictionary d
+- Cut `I_Y` - slice Y at indices I
+- WeedOut `f_Y` - remove elements where boolean mask f is 1
+- Delete `X_i` - remove element at index i from list X
+- Join `x,y` - join atoms/lists; merge dictionaries (right-side wins)
+- Take `x#y` - resize/cycle y to length |x|
+- TakeKeys `X#d` - filter dictionary d to keys X
+- Reshape `I#y` - reshape y to shape I
+- Fill `x^y` - replace nulls in y with x
+- Without `X^y` - remove occurrences of X from y
+- Pad `i$C` - pad string to length |i|
+- Cast `s$y` - cast y to type s. `` `I$"-12" `` → `-12`; `` `F$"-12.3" `` → `-12.3`
+- Find `x?y` - first index of y in x (null if not found)
+- Roll/Deal `i?x` - i random selections from x
+- `x@y` (At/Apply) - index into x at y; apply function x to y
+- `x.y` (Dot/ApplyN) - deep indexing or multi-argument application
 
 ### IO Verbs
 The IO system is organized around file descriptors (filename, port number, etc.).
 - Open file `` <"file.txt" `` or `` <"/path/to/file.txt" ``
 - Open port `` <":port" `` or `` <"host:port" ``
 - Close handle `` >s ``
-- Read line `` 0:x `` — read lines from stdin
-- Write line `` x 0:y `` — write text. `` `0 0:"Hi" ``
+- Read line `` 0:x `` - read lines from stdin
+- Write line `` x 0:y `` - write text. `` `0 0:"Hi" ``
 - Read bytes `` 1:x ``
 - Write bytes `` x 1:y ``
 
 ### Special Forms
-- Amend3 `` @[x;y;f] `` — `` @["ABC";1;_:] `` → `"AbC"`
-- Amend4 `` @[x;y;F;z] `` — `` @["abc";1;:;"x"] `` → `"axc"`
-- Drill3 `` .[x;y;f] `` — `` .[("AB";"CD");1 0;_:] `` → `("AB";"cD")`
-- Drill4 `` .[x;y;F;z] `` — `` .[("ab";"cd");1 0;:;"x"] `` → `("ab";"xd")`
+- Amend3 `` @[x;y;f] `` - `` @["ABC";1;_:] `` → `"AbC"`
+- Amend4 `` @[x;y;F;z] `` - `` @["abc";1;:;"x"] `` → `"axc"`
+- Drill3 `` .[x;y;f] `` - `` .[("AB";"CD");1 0;_:] `` → `("AB";"cD")`
+- Drill4 `` .[x;y;F;z] `` - `` .[("ab";"cd");1 0;:;"x"] `` → `("ab";"xd")`
 
 ## Adverbs
-- Each `f'` — apply f to each item. `` #'("abc";3 4 5 6) `` → `3 4`
-- Zip `x F'` — elementwise dyad. `` 2 3#'"ab" `` → `("aa";"bbb")`
-- Fold `F/` — left fold. `+/1 2 3` → `6`
-- Scan `F\` — running fold. `+\1 2 3` → `1 3 6`
-- Seeded fold `x F/` — fold with seed. `10+/1 2 3` → `16`
-- Seeded scan `x F\` — running fold with seed. `10+\1 2 3` → `11 13 16`
-- N-do `i f/` — apply f i times. `` 5(2*)/1 `` → `32`
-- N-dos `i f\` — all intermediate results. `` 5(2*)\1 `` → `1 2 4 8 16 32`
-- While `f f/` — apply until condition fails. `(1<){:[2!x;1+3*x;-2!x]}/3` → `1`
-- Whiles `f f\` — all states while condition holds
-- Converge `f/` — iterate until stable. `` {1+1.0%x}/1 `` → `1.618...`
-- Converges `f\` — successive results until convergence
-- Join `C/` — join list with separator. `"ra"/("ab";"cadab";"")` → `"abracadabra"`
-- Split `C\` — split by separator. `"ra"\"abracadabra"` → `("ab";"cadab";"")`
-- Decode `I/` — mixed-base to number. `24 60 60/1 2 3` → `3723`
-- Encode `I\` — number to mixed-base. `24 60 60\3723` → `1 2 3`
-- Window `i'` — sliding windows. `3':"abcdef"` → `("abc";"bcd";"cde";"def")`
-- Stencil `i f'` — apply f to each window. `` 3{x,"."}'"abcde" ``
-- Eachprior `F':` — apply F between each item and its predecessor. `-':12 13 11 17 14` → `12 1 -2 6 -3`
-- Eachprior seeded `x F':` — like eachprior with seed. `10-':12 13 11 17 14` → `2 1 -2 6 -3`
-- Eachright `x F/:` — fixed right arg to each left item. `1 2*/:3 4` → `(3 6;4 8)`
-- Eachleft `x F\:` — fixed left arg to each right item. `1 2*\:3 4` → `(3 4;6 8)`
+- Each `f'` - apply f to each item. `` #'("abc";3 4 5 6) `` → `3 4`
+- Zip `x F'` - elementwise dyad. `` 2 3#'"ab" `` → `("aa";"bbb")`
+- Fold `F/` - left fold. `+/1 2 3` → `6`
+- Scan `F\` - running fold. `+\1 2 3` → `1 3 6`
+- Seeded fold `x F/` - fold with seed. `10+/1 2 3` → `16`
+- Seeded scan `x F\` - running fold with seed. `10+\1 2 3` → `11 13 16`
+- N-do `i f/` - apply f i times. `` 5(2*)/1 `` → `32`
+- N-dos `i f\` - all intermediate results. `` 5(2*)\1 `` → `1 2 4 8 16 32`
+- While `f f/` - apply until condition fails. `(1<){:[2!x;1+3*x;-2!x]}/3` → `1`
+- Whiles `f f\` - all states while condition holds
+- Converge `f/` - iterate until stable. `` {1+1.0%x}/1 `` → `1.618...`
+- Converges `f\` - successive results until convergence
+- Join `C/` - join list with separator. `"ra"/("ab";"cadab";"")` → `"abracadabra"`
+- Split `C\` - split by separator. `"ra"\"abracadabra"` → `("ab";"cadab";"")`
+- Decode `I/` - mixed-base to number. `24 60 60/1 2 3` → `3723`
+- Encode `I\` - number to mixed-base. `24 60 60\3723` → `1 2 3`
+- Window `i'` - sliding windows. `3':"abcdef"` → `("abc";"bcd";"cde";"def")`
+- Stencil `i f'` - apply f to each window. `` 3{x,"."}'"abcde" ``
+- Eachprior `F':` - apply F between each item and its predecessor. `-':12 13 11 17 14` → `12 1 -2 6 -3`
+- Eachprior seeded `x F':` - like eachprior with seed. `10-':12 13 11 17 14` → `2 1 -2 6 -3`
+- Eachright `x F/:` - fixed right arg to each left item. `1 2*/:3 4` → `(3 6;4 8)`
+- Eachleft `x F\:` - fixed left arg to each right item. `1 2*\:3 4` → `(3 4;6 8)`
 
 Adverb glyphs: `` ' / \ ': /: \: ``
 
@@ -179,8 +179,8 @@ Adverbs are polysemic based on operand types:
 - `\:`: Eachleft
 
 ## Special Symbols
-- Arguments `` `argv[] `` — list of cmd-line args (also in global `x`)
-- Environment variables `` `env[] `` — dict of env variables
+- Arguments `` `argv[] `` - list of cmd-line args (also in global `x`)
+- Environment variables `` `env[] `` - dict of env variables
 - Random number `` `prng[] ``
 - Exit `` `exit@i ``
 
@@ -193,55 +193,68 @@ Time elapsed in milliseconds after n runs (n is optional).
 ### Adverbs `' / \ ': /: \:`
 An adverb is any of `` ' / \ `` with an optional `:`.
 
-## Example Expressions
-- First n even numbers: `` {2*!x} ``
-- Capitalize first letter of each word: `` {s:~" "=x;@[x;&s>0,-1_s;`c$-32+]}"hi there" ``
-
 # About Ink
 Ink is an array programming language for high-performance computing, based on ngn/k and k9.
 The parser, compiler, and runtime are all written in Zig 0.16.
 
 # Project Overview
-- `bench` — benchmarks for ink and ngn/k
+- `bench` - benchmarks for ink and ngn/k
   - `alloc.k`
-  - `simulate.k` — Monte Carlo simulation of random walks
+  - `simulate.k` - Monte Carlo simulation of random walks
 - `doc`
-  - `triage.md` — open correctness issues
-  - `spec.md` — language specification (WIP)
-  - `changelog.md` — change log
-  - `future.md` — planned features
-- `lib` — language extensions
-  - `csv`, `font`, `json`, `gpu`, `md5`
-- `src` — core language components
-  - `noun/` — basic building blocks
-    - `array.zig` — array struct `N`
-    - `class.zig` — class enum `K` with fields: `b i f s c B I F S C L m M`
-    - `value.zig` — value struct `V`
-    - `symbol.zig` — symbols interned in `Pool`
+  - `triage.md` - open correctness issues
+  - `spec.md` - language specification (WIP)
+  - `changelog.md` - change log
+  - `future.md` - planned features
+- `lib` - language extensions
+  - `csv`
+  - `font`
+  - `json`
+  - `gpu`
+    - `src`
+      - `fill.wgsl`
+      - `main.zig`
+    - `gpu.k` Load functions from `libgpu.dylib`
+    - `render.zig`
+    - `spirv.k`
+    - `triangulate.zig`
+  - `md5`
+- `src` - core language components
+  - `noun/` - basic building blocks
+    - `array.zig` - array struct `N`
+    - `class.zig` - class enum `K` with fields: `b i f s c B I F S C L m M`
+    - `value.zig` - value struct `V`
+    - `symbol.zig` - symbols interned in `Pool`
   - `parser/`
     - `ast.zig`, `lexer.zig`, `parser.zig`
   - `primitive/`
-    - `adverb/` — ~15 adverb implementations; `adverbs.zig` is the overview
-    - `verb/` — ~60 verb implementations
-      - `calc.zig` — arithmetic `+ - * %`, numeric functions
-      - `logic.zig` — `< > = ~`
-      - `helper.zig` — comptime kernel helpers
-      - `verbs.zig` — monadic/dyadic jump table
-    - `amend.zig` — amend and drill
-    - `dispatch.zig` — type-based dispatch
-    - `derived.zig` — adverb-derived values
-    - `promote.zig` — scalar/vector/list promotion
+    - `adverb/` - ~15 adverb implementations; `adverbs.zig` is the overview
+    - `verb/` - ~60 verb implementations
+      - `calc.zig` - arithmetic `+ - * %`, numeric functions
+      - `logic.zig` - `< > = ~`
+      - `helper.zig` - comptime kernel helpers
+      - `verbs.zig` - monadic/dyadic jump table
+    - `amend.zig` - amend and drill
+    - `dispatch.zig` - type-based dispatch
+    - `derived.zig` - adverb-derived values
+    - `promote.zig` - scalar/vector/list promotion
   - `runtime/`
     - `call.zig`, `command.zig`, `compiler.zig`, `disarm.zig`
     - `fntable.zig`, `ir.zig`
-    - `tape.zig` — OpCode enum, BasicBlock, Chunk
+    - `tape.zig` - OpCode enum, BasicBlock, Chunk
     - `vm.zig`
   - `ffi.zig`, `runner.zig`, `test.zig`
-- `test/` — test scripts and data
+- `test/` - test scripts and data
 
 # Optimizations
 - Static allocated array for `!N` with N<256.
 - Ref counting, copy-on-write.
+
+## Common Idioms
+- First n even numbers: `` {2*!x} ``
+- Capitalize first letter of each word: `` {s:~" "=x;@[x;&s>0,-1_s;`c$-32+]}"hi an" ``
+- Flatten list `` ,/(1 0 0; 0 1 0) `` -> `1 0 0 0 1 0`.
+- No `<=`/`>=` operators `x <= y` parses as `x < (= y)`, use `~(x > y)` and `~(x < y)`.
 
 ## Useful Commands
 - Build debug: `time zig build`
@@ -258,9 +271,9 @@ The parser, compiler, and runtime are all written in Zig 0.16.
 `\l file.k` loads a file but namespace access from ngn/k doesn't work: `\d mod`, `mod.A`, `.mod`, etc. Current code uses `2:"code.k"` for file loading. A proper module system requires names to support dots.
 
 ## Language gotchas
-- **No `<=`/`>=` operators:** `x <= y` parses as `x < (= y)` where `=y` is monadic group-by — silently wrong. Use `~(x > y)` and `~(x < y)`.
+- 
 - **Underscores in names:** `_` is always Drop/WeedOut. `foo_bar` parses as `foo _ bar`. Use camelCase.
 - **Newlines in list literals:** a newline inside `(a;b;\n c)` injects a null element. Keep list literals on one line.
 - **Fold over empty list:** `,/()` returns a unit value, not an empty list. Use `$[#x;,/x;!0]`.
 - **Multi-char operator symbols:** `` `<= `` is the symbol `<=` (lexer greedily consumes op chars). Operator-char and alnum modes don't mix: `` `<abc `` is symbol `` `< `` then identifier `abc`.
-- **`list in symlist`:** returns a boolean list (element-wise), not a scalar — always truthy. Use `~` for scalar match or check a specific element.
+- **`list in symlist`:** returns a boolean list (element-wise), not a scalar - always truthy. Use `~` for scalar match or check a specific element.
