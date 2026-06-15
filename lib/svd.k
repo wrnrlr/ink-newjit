@@ -1,0 +1,149 @@
+/ SVD — Singular Value Decomposition via the Jacobi-Hestenes algorithm.
+/
+/ WHAT IS SVD?
+/ Every matrix A can be written as A = U * diag(s) * V':
+/   U  — orthogonal matrix: pure rotation/reflection (columns = left singular vectors)
+/   s  — non-negative scalars: singular values (how much each direction is scaled)
+/   V  — orthogonal matrix: pure rotation/reflection (columns = right singular vectors)
+/ Think of A as "rotate to V-frame, scale by s, rotate to U-frame".
+/ The singular values measure how much the matrix stretches space along each principal axis.
+/
+/ HOW DOES JACOBI RELATE TO walk.k?
+/ walk.k — Jacobi RELAXATION: updates each cell to the average of its neighbours,
+/   repeatedly, until the energy function stabilises (fixed-point iteration / linear solve).
+/ svd     — Jacobi ROTATIONS: applies 2×2 Givens rotations to pairs of columns
+/   repeatedly, until all cross-products vanish (orthogonalisation).
+/ Both share the pattern: local two-element update iterated until convergence.
+/ A Givens rotation is exactly the 2×2 "Jacobian step" you know from Newton's method —
+/ finding the angle that zeros one off-diagonal entry of A'A.
+/
+/ FORMAT: A = list of column vectors, e.g. A:(col0;col1;col2).
+/ Real matrices only — kyte's original handles complex via conj/imag; ink does not.
+/ RETURNS: (U; s; V) sorted by decreasing singular value.
+/
+/ kyte→ink differences:
+/   kyte `%x` (monadic sqrt)          → ink `sqrt x`
+/   kyte `f.list` (multi-arg apply)   → ink `f[a;b;c]` (brackets required)
+/   kyte `[stmt;stmt;val]` in $[;;]   → factored into helper svdRot (ink blocks unsupported)
+/   kyte complex conj/imag            → dropped; real matrices only
+/   kyte lambdas close over outer scope → ink lambdas DO NOT; all helpers are global
+
+/ ── global helpers (ink lambdas don't close over parent scope) ───────────────
+
+/ inner product of two real column vectors: Σ xᵢyᵢ
+svdD:{+/x*y}
+
+/ Jacobi rotation parameters for column pair (x,y) with cross-product z = svdD[x;y].
+/ q = cot(2θ): ratio of norm-difference to twice the overlap magnitude.
+/ t = tan(θ): numerically stable form sign(q)/(|q|+√(1+q²)) — avoids cancellation.
+/ Special case q=0 (equal column norms): sign(0)=0 gives t=0 (identity), but we need
+/ t=1 (45° rotation) to actually zero the cross-product.
+/ s gets a sign factor z/|z| so the rotation always makes svdD[new_x;new_y] → 0.
+svdJ:{[x;y;z]
+  a:abs z
+  q:(svdD[y;y]-svdD[x;x])%2.*a
+  t:$[0.=q;1.;((q>0)-(q<0))%(abs q)+sqrt 1+q*q]
+  c:1%sqrt 1+t*t
+  (c;(z%a)*t*c)
+}
+
+/ Apply Givens rotation (c,s) to column pair (x,y):
+/   new_x = c*x - s*y    new_y = s*x + c*y
+svdR:{[c;s;x;y]((x*c)-y*s;(x*s)+y*c)}
+
+/ Update A and V at column indices ik by one Jacobi rotation.
+/ Factored out of svdP because ink's $[;;] branches must be single expressions.
+svdRot:{[A;V;ik;z]
+  r:svdJ[A@ik@0;A@ik@1;z]
+  nc:svdR[r@0;r@1;A@ik@0;A@ik@1]
+  nA:@[@[A;ik@0;:;nc@0];ik@1;:;nc@1]
+  nv:svdR[r@0;r@1;V@ik@0;V@ik@1]
+  nV:@[@[V;ik@0;:;nv@0];ik@1;:;nv@1]
+  (nA;nV)
+}
+
+/ One Jacobi step on state (A;V) for column pair ik.
+/ Threshold 1e-6: f32 machine epsilon is ~1.19e-7; using 1e-14 (f64-era) would
+/ never converge in f32 arithmetic, causing infinite iteration.
+svdP:{[st;ik]
+  A:st@0; V:st@1
+  z:svdD[A@ik@0;A@ik@1]
+  $[1e-6<abs z;svdRot[A;V;ik;z];st]
+}
+
+/ All unordered column pairs (i,k) with i<k — no nested lambdas needed.
+/ For n=3: ((0;1);(0;2);(1;2)); for n=4: adds (0;3);(1;3);(2;3)
+svdPairs:{[n]a:!n*n;r:a div n;c:a mod n;k:&r<c;+(r[k];c[k])}
+
+/ One full sweep: fold svdP over (A;V) and every column pair.
+/ Takes I as explicit first arg (ink lambdas can't close over parent locals).
+svdSweep:{[I;st]svdP/(,st),I}
+
+/ ── main function ────────────────────────────────────────────────────────────
+
+svd:{[A]
+  n:#A
+  V:1.*(!n)=/:!n             / float identity: right-singular-vector accumulator
+  I:svdPairs n               / all (i,k) pairs with i<k
+  / n*n sweeps: converge adverb loops forever in f32 (cross-products oscillate
+  / near 1e-6 threshold); n*n sweeps is the standard Jacobi convergence budget.
+  st:(n*n)(svdSweep I)/(A;V)
+  A2:st@0; V2:st@1
+  s:{sqrt+/x*x}'A2           / singular values = column norms after orthogonalisation
+  U:A2 {x%y}' s              / normalise columns → left singular vectors
+  g:>s                       / sort indices descending
+  (U@g;s@g;V2@g)
+}
+
+/ ── derived functions ────────────────────────────────────────────────────────
+
+/ Condition number: ratio of largest to smallest singular value.
+/ > 1 always; > 1e6 signals numerical ill-conditioning.
+/ Ex: cond (1. 0.;0. 1.)   / identity → 1.0
+cond:{s:(svd x)@1;(*s)%*|s}
+
+/ svq: thin SVD via QR (faster for tall matrices: more rows than columns).
+/ NOT TRANSLATED: requires qr function (not defined here).
+/ svq:{q:qr x; ...}
+
+/ ── verification helpers ─────────────────────────────────────────────────────
+
+/ n×n identity matrix (list of column vectors).
+/ Ex: eye 3  →  (1.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0)
+eye:{1.*(!x)=/:!x}
+
+/ Diagonal matrix from vector v; col j = v[j]*eⱼ
+/ Ex: dia 3. 1. 4.  →  diagonal columns
+dia:{x*(!#x)=/:!#x}
+
+/ Matrix multiply (A, B as lists of column vectors).
+/ Uses /: (each-right) to fix A as left arg — avoids nested-closure issue.
+/ In x {+/x{x*y}'y}/: B: outer x=A (fixed matrix), y=each column of B.
+/ Ex: mmul[eye 3;eye 3]  →  identity
+mmul:{[A;B]A {+/x{x*y}'y}/: B}
+
+/ Max absolute value across all entries of a matrix (list of columns).
+maxabs:{|/{|/abs x}'x}
+
+/ ── examples ─────────────────────────────────────────────────────────────────
+/ (paste into ink REPL or a .k file after loading this one)
+
+/ Diagonal matrix — singular values should be the diagonal entries:
+/ A:(3. 0.;0. 2.)
+/ (svd A)@1   / → 3.0 2.0
+
+/ Symmetric equal-norm matrix — exercises the q=0 special case:
+/ A:(2. 1.;1. 2.)
+/ (svd A)@1   / → ~3.0 ~1.0
+
+/ Random 4×4 (use ?n for ink random floats, not n?1.):
+/ n:4; A:{?n}'!n
+/ (U;s;V):svd A
+/ s         / singular values sorted descending
+/ cond A    / condition number
+
+/ Verify reconstruction A ≈ U*diag(s)*V' (should be ~1e-7 for f32):
+/ maxabs mmul[U;mmul[dia s;+V]]-A
+
+/ Verify U is orthogonal (U'U ≈ I) (should be ~1e-7 for f32):
+/ maxabs mmul[+U;U]-eye@#U
