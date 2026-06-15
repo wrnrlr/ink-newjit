@@ -106,8 +106,8 @@ cmpOps: (`<;`>;`=;`~;`&;`|)
 binRty: {[op;aty;bty;oty] $[op in cmpOps; `bool; isVecTy[aty]; aty; isVecTy[bty]; bty; aty]}
 
 / ── Known 1-arg and multi-arg math function names ────────────────────────────
-mathFns1: `abs`floor`fract`sign`sqrt`sin`cos`length`normalize
-mathFns:  `abs`floor`fract`sign`sqrt`sin`cos`length`normalize`pow`min`max`dot`cross`step`mod`clamp`mix`smoothstep
+mathFns1: `abs`floor`fract`sign`sqrt`sqr`sin`cos`length`normalize
+mathFns:  `abs`floor`fract`sign`sqrt`sqr`sin`cos`length`normalize`pow`min`max`dot`cross`step`mod`clamp`mix`smoothstep
 
 / ── Verb dispatch ────────────────────────────────────────────────────────────
 dispBin: {[op;rty;r;aty;a;bty;b]
@@ -140,6 +140,7 @@ dispUn: {[op;ty;r;a]
     op~`floor;     opFloor[t;r;a]
     op~`fract;     opFract[t;r;a]
     op~`sign;      opSign[t;r;a]
+    op~`sqr;       opFmul[t;r;a;a]
     op~`length;    opLen[Tf32;r;a]
     op~`normalize; opNrm[t;r;a]
     opFneg[t;r;a]]}
@@ -171,6 +172,7 @@ compFnCall: {[name; argsSeq; env; oty]
     name~`fract;      emitBuf opFract[at;r;a0[0]]
     name~`sign;       emitBuf opSign[at;r;a0[0]]
     name~`sqrt;       emitBuf opSqrt[at;r;a0[0]]
+    name~`sqr;        emitBuf opFmul[at;r;a0[0];a0[0]]
     name~`sin;        emitBuf opSin[at;r;a0[0]]
     name~`cos;        emitBuf opCos[at;r;a0[0]]
     name~`length;     emitBuf opLen[Tf32;r;a0[0]]
@@ -413,12 +415,12 @@ compCompute: {[fn]
   ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
 
 / ── Layer 1+2: public shader compiler ───────────────────────────────────────
-/ compShader[fn; ioTypes] → SPIR-V word list (int list)
-/ fn:      ink lambda whose args become shader inputs, return value → output
+/ FragmentShader[ioTypes; fn] → SPIR-V word list (int list)
 / ioTypes: dict of arg_name→type_sym, plus `out for the output type
 /          type symbols: `f32 `v4 `v2 `v3 `i32 `bool
+/ fn:      ink lambda whose args become shader inputs, return value → output
 / Lambdas can have local bindings: {[uv] d: sqrt[...]; (d;d;d;1.0)}
-compShader: {[fn; ioTypes]
+FragmentShader: {[ioTypes; fn]
   Nid::Nfixed; Buf::(); Con::()
 
   lam: last parse $fn

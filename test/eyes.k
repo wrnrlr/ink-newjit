@@ -14,7 +14,7 @@ ellipsePts: {[cx;cy;rx;ry;n]
 
 / Fill a solid-color ellipse
 fillEllipse: {[cx;cy;rx;ry;r;g;b]
-  gpuFill[gpuTess ellipsePts[cx;cy;rx;ry;64]; gpuSolid[r;g;b;1.]]}
+  FillFrame[Tessellate ellipsePts[cx;cy;rx;ry;64]; gpuSolid[r;g;b;1.]]}
 
 drawEye: {[ex;ey;er;mx;my]
   br: er * 0.35
@@ -37,4 +37,4 @@ run: {[props]
   drawEye[(w%2.) - er*1.5; h%2.; er; mx; my]
   drawEye[(w%2.) + er*1.5; h%2.; er; mx; my]}
 
-gpuRun[run; 800. 600.]
+RunWindow[run; 800. 600.]

@@ -166,12 +166,12 @@ chk[64; #allThreadPts;          "64 thread assignments"]
 chk[64; #? allThreadPts;        "all unique (bijection)"]
 chk[64; +/ inDomain' allThreadPts; "all thread pts in domain"]
 
-/ ══ 4. compShader end-to-end ════════════════════════════════════════════════
+/ ══ 4. FragmentShader end-to-end ════════════════════════════════════════════
 /
-/ Call compShader with a trivial passthrough lambda and inspect the binary.
+/ Call FragmentShader with a trivial passthrough lambda and inspect the binary.
 
 fn1: {[x] x}
-wds: compShader[fn1; [`x:`f32; `out:`f32]]
+wds: FragmentShader[`x`out!`f32`f32; fn1]
 
 / Structural headers
 chk[0x07230203; wds[0]; "SPIR-V magic number"]
@@ -186,7 +186,7 @@ chk[1;          wds[6]; "Capability Shader = 1"]
 
 / Constant-bearing shader: x + 1.0 introduces OpConstant with 1.0 bit pattern
 fn2: {[x] x+1.0}
-wds2: compShader[fn2; [`x:`f32; `out:`f32]]
+wds2: FragmentShader[`x`out!`f32`f32; fn2]
 chk[0x07230203; wds2[0]; "x+1.0 magic number"]
 chk[125; #wds2; "x+1.0 module = 125 words (9 more for OpConstant, 12 for v3 types)"]
 chk[1b; |/wds2=0x3F800000; "1.0 bit pattern present in module"]
@@ -230,15 +230,15 @@ chk[7; #opCons4[Tv4;30;10;11;12;13]; "opCons4 is 7 words"]
 / x*2 — the literal 2 must become 2.0f (OpConstant %float) not an i32.
 / If it stays i32, Dawn rejects the shader: "FMul operand index 3" type mismatch.
 
-wdsInt: compShader[{[x] x*2}; [`x:`f32; `out:`f32]]
+wdsInt: FragmentShader[`x`out!`f32`f32; {[x] x*2}]
 chk[1b; |/wdsInt=`I$2.0; "integer literal 2 coerced to f32 in f32 context"]
 
-/ ══ 6. compShader v2→v4 via compApply + compList ════════════════════════════
+/ ══ 6. FragmentShader v2→v4 via compApply + compList ════════════════════════
 /
 / Compiles {[uv] (uv[0]; uv[1]; 0.5; 1.0)} : v2 → v4
 / Tests: component extract (OpCompositeExtract) + construct (OpCompositeConstruct)
 
-wds3: compShader[{[uv] (uv[0]; uv[1]; 0.5; 1.0)}; [`uv:`v2; `out:`v4]]
+wds3: FragmentShader[`uv`out!`v2`v4; {[uv] (uv[0]; uv[1]; 0.5; 1.0)}]
 chk[0x07230203; wds3[0]; "v2→v4 magic number"]
 chk[141; #wds3; "v2→v4 module = 141 words (12 more for v3 types)"]
 chk[1b; |/wds3=0x3F000000; "0.5 constant in v2→v4 shader"]

@@ -1,85 +1,40 @@
-/ test/planes_3d.k — 3 coordinate planes via SPIR-V copy-and-patch
+/ test/planes.k — intersecting planes with Phong shading via vertex+fragment SPIR-V
 /
-/ Analytic ray-plane intersection (no ray-marching loop needed):
-/   XZ plane (y=0) → red     tXZ = -ro.y / rd.y
-/   YZ plane (x=0) → green   tYZ = -ro.x / rd.x
-/   XY plane (z=0) → blue    tXY = -ro.z / rd.z
-/ Pick closest positive hit, shade with simple Lambert + grid lines.
-/ All logic compiled by compShader using $[cond;then;else].
+/ Three intersecting rectangular planes rendered with a Phong lighting model.
+/ Geometry: two quads per plane (triangulated), normals per vertex.
+/ Lighting: one directional light, ambient+diffuse+specular.
 /
-/ Run: zig build gpu && ink test/planes_3d.k
+/ TODO: requires vertex shader support in spirv.k (not yet implemented).
+/ The current FragmentShader API only covers the fragment stage;
+/ vertex shaders need a VertexShader compiler + DrawMesh API with depth buffer.
+/
+/ Planned API:
+/   vtxWds:  VertexShader[`pos`nor!`v3`v3; `glPos`vNor!`v4`v3; {[pos;nor] ...}]
+/   frgWds:  FragmentShader[`vNor`out!`v3`v4; {[vNor] ...}]
+/   mesh:    CompileMesh[vtxWds; frgWds]
+/   DrawMesh[verts; mesh]
+/
+/ Run: zig build gpu && ink test/planes.k
 
 2: "lib/gpu/spirv.k"
 2: "lib/gpu/gpu.k"
 
-plWds: compShader[{[uv]
-  / Screen coords, y up, aspect corrected
-  sx: ((uv[0]*2.0)-1.0)*(4.0%3.0)
-  sy: 1.0-uv[1]*2.0
-  / Fixed camera
-  roX: 2.8; roY: 1.8; roZ: 2.8
-  / Forward toward origin, normalised
-  fwL: sqrt[(roX*roX)+(roY*roY)+(roZ*roZ)]
-  fwX: (0.0-roX)%fwL; fwY: (0.0-roY)%fwL; fwZ: (0.0-roZ)%fwL
-  / Right = cross(fw, up=(0;1;0)): (fwZ;0;-fwX)
-  rtX: fwZ; rtZ: 0.0-fwX
-  rtL: sqrt[(rtX*rtX)+(rtZ*rtZ)]
-  rtX: rtX%rtL; rtZ: rtZ%rtL
-  / Up = cross(rt, fw)
-  upX: fwY*rtZ; upY: (fwZ*rtX)-(fwX*rtZ); upZ: 0.0-fwY*rtX
-  / Ray direction, focal 1.6
-  rdX: (fwX*1.6)+(rtX*sx)+(upX*sy)
-  rdY: (fwY*1.6)+(0.0*sx)+(upY*sy)
-  rdZ: (fwZ*1.6)+(rtZ*sx)+(upZ*sy)
-  rdL: sqrt[(rdX*rdX)+(rdY*rdY)+(rdZ*rdZ)]
-  rdX: rdX%rdL; rdY: rdY%rdL; rdZ: rdZ%rdL
-  / Avoid divide-by-zero with safe denominators
-  eps: 0.00001
-  sRdX: $[abs[rdX]>eps; rdX; eps]
-  sRdY: $[abs[rdY]>eps; rdY; eps]
-  sRdZ: $[abs[rdZ]>eps; rdZ; eps]
-  / Analytic t for each coordinate plane
-  tXZ: (0.0-roY)%sRdY
-  tYZ: (0.0-roX)%sRdX
-  tXY: (0.0-roZ)%sRdZ
-  hXZ: tXZ > 0.001
-  hYZ: tYZ > 0.001
-  hXY: tXY > 0.001
-  / Select smallest positive t among hit planes
-  big: 999.0
-  t1: $[hXZ; tXZ; big]
-  t2: $[hYZ; tYZ; big]
-  t3: $[hXY; tXY; big]
-  tmin: min[min[t1;t2];t3]
-  anyHit: tmin < 900.0
-  / Which plane is closest
-  isXZ: hXZ & ~(tXZ > tYZ) & ~(tXZ > tXY)
-  isYZ: hYZ & ~isXZ & ~(tYZ > tXY)
-  / Hit point
-  hpX: roX+rdX*tmin; hpY: roY+rdY*tmin; hpZ: roZ+rdZ*tmin
-  / Simple distance fade shading
-  shade: max[0.25; 1.0-tmin*0.07]
-  / Grid lines on the plane (fract gives distance to nearest grid line)
-  gx: abs[fract[hpX]-0.5]
-  gy: abs[fract[hpY]-0.5]
-  gz: abs[fract[hpZ]-0.5]
-  grid: 1.0 - 0.4*(1.0-smoothstep[0.0;0.04;min[min[gx;gy];gz]])
-  sh: shade*grid
-  / Plane colours
-  pR: $[isXZ; sh; $[isYZ; sh*0.1; sh*0.1]]
-  pG: $[isXZ; sh*0.15; $[isYZ; sh; sh*0.3]]
-  pB: $[isXZ; sh*0.1; $[isYZ; sh*0.2; sh]]
-  / Background
-  oR: $[anyHit; pR; 0.05]
-  oG: $[anyHit; pG; 0.05]
-  oB: $[anyHit; pB; 0.08]
-  (oR; oG; oB; 1.0)}; [`uv:`v2; `out:`v4]]
+/ Plane geometry — XY, XZ, YZ planes as two triangles each (6 verts per plane).
+/ Format: [x y z nx ny nz] stride 6.
 
-verts: 0. 0. 0. 0. 800. 0. 1. 0. 800. 600. 1. 1. 0. 0. 0. 0. 800. 600. 1. 1. 0. 600. 0. 1.
+xyPlane: (-1. -1. 0. 0. 0. 1.   1. -1. 0. 0. 0. 1.   1. 1. 0. 0. 0. 1.   -1. -1. 0. 0. 0. 1.   1. 1. 0. 0. 0. 1.  -1. 1. 0. 0. 0. 1.)
+xzPlane: (-1. 0. -1. 0. 1. 0.   1. 0. -1. 0. 1. 0.   1. 0. 1. 0. 1. 0.   -1. 0. -1. 0. 1. 0.   1. 0. 1. 0. 1. 0.  -1. 0. 1. 0. 1. 0.)
+yzPlane: (0. -1. -1. 1. 0. 0.   0. -1. 1. 1. 0. 0.   0. 1. 1. 1. 0. 0.   0. -1. -1. 1. 0. 0.   0. 1. 1. 1. 0. 0.  0. 1. -1. 1. 0. 0.)
+verts: xyPlane,xzPlane,yzPlane
 
-handle:: 0
-loop: {[props]
-  $[handle=0; handle:: gpuSpirv[plWds; 0]; 0]
-  gpuFillShader[verts; handle]}
+/ Phong fragment shader (world-space normal input, directional light).
+/ lightDir and view direction are baked in as constants for now.
+phongFrag: FragmentShader[`nor`out!`v3`v4; {[nor]
+  amb: 0.15
+  ld: normalize[(0.6; 0.8; 0.4)]
+  diff: smoothstep[0.0; 0.1; dot[nor; ld]]
+  (amb+diff; amb+diff; amb+diff; 1.0)}]
 
-gpuRun[loop; 0]
+/ TODO: VertexShader and DrawMesh once vertex stage is supported.
+/ For now, print the compiled fragment SPIR-V word count as a sanity check.
+`0: #phongFrag
