@@ -4,6 +4,90 @@
 **Slides:** https://matthias-research.github.io/pages/tenMinutePhysics/18-flip.pdf
 **Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/18-flip.html
 
+## Lecture Notes
+
+### Goal
+
+Extend the Eulerian fluid simulator (ch17) to handle a **free surface** — water + air in one domain.
+
+---
+
+### Two-Phase Setup
+
+Grid cells are classified as: **water** (contains particles), **air** (empty), or **solid**.
+
+- Density of water ≈ 1000 kg/m³ vs air ≈ 1 kg/m³ → treat air as nothing
+- Do NOT process air cells in the solver
+- Do NOT read velocities between air cells (they are undefined)
+
+---
+
+### PIC Method (Particle-In-Cell)
+
+Particles carry position and velocity. Steps per frame:
+
+1. Simulate particles (integrate gravity + push out of obstacles)
+2. Transfer velocity: **Particles → Grid**
+3. Make grid velocity incompressible (projection)
+4. Transfer velocity: **Grid → Particles**
+
+Particle advection replaces grid advection — skip the semi-Lagrangian step.
+
+Problem: PIC is **very viscous** — most individual particle motion is lost when averaging to/from the grid.
+
+---
+
+### FLIP Method (Fluid Implicit Particles)
+
+Replace the final velocity transfer with: add the **change** in grid velocity to the particles.
+
+1. Particles velocity → Grid
+2. **Copy the grid** (save old velocities)
+3. Make grid incompressible
+4. Add (grid_new − grid_old) to each particle's velocity
+
+FLIP preserves fine detail but adds noise.
+**Best result:** mix 10% PIC + 90% FLIP.
+
+---
+
+### Particle ↔ Grid Transfer
+
+**Grid offsets:** u is at left edges (shifted h/2 in y), v at bottom edges (shifted h/2 in x). Adjust lookup position accordingly.
+
+**From particles to grid** (weighted scatter):
+
+```
+clear q and r for all cells
+for each particle p:
+    compute bilinear weights w1…w4
+    q_k ← q_k + w_k · q_p     (accumulate weighted value)
+    r_k ← r_k + w_k            (accumulate weight)
+for all cells:
+    q ← q / r
+```
+
+**From grid to particles** (weighted gather):
+
+q_p = (w1·q1 + w2·q2 + w3·q3 + w4·q4) / (w1+w2+w3+w4)
+
+If a cell is air (undefined), omit it from the sum.
+
+---
+
+### Drift Fix
+
+Particles drift and clump even with incompressible velocities. Two fixes:
+
+1. **Push particles apart** using spatial hash (same as ch11)
+
+2. **Modify divergence** to account for local particle density ρ:
+
+d ← o(u[i+1,j]−u[i,j]+v[i,j+1]−v[i,j]) − k(ρ − ρ₀)
+
+ρ₀ = rest density (average before sim starts), k = stiffness ≈ 1. Dense regions get extra outward push.
+
+
 ## Video Transcript
 
 hi not just from 10 minute physics here Welcome To tutorial number 18. I'm very happy about the positive feedback I get for the last video on eulerian fluid simulation so I decided to create a new one about an extension of that method which produces as I think even cooler simulations so let's start here you see my new demo running in the browser I put a direct link in the description so you can play with it right away what you see here is a water simulation using the flip method which is popular in the movie industry it is a 2d simulation but the method Works in 3D as well of course I will talk about 3D flip and how to extract the water surface in an upcoming tutorial I like 2D physics a lot though especially for fluid simulations because they allow to see what happens below the surface as you can see the demo is very fast and very stable and a lot of fun to play with if you watch the video to the end I will describe everything that you need to reproduce this demo of course as usual I will also provide the source code in the last tutorial I showed you how to either simulate gases or liquids in separate simulations today I will show you how to create a combined simulation of water and air with a free surface in between the approach is based on the eulerian fluid simulation method therefore I recommend to watch the tutorial number 17 first I tried to make this tutorial self-contained though so here is a short recap of the eulerian fluid simulation method we use a grid with two types of cells fluid cells and solid cells the fluid itself is represented by a velocity field we use a staggered Grid in which the two components of the Velocity vectors are stored in different locations the horizontal components are stored in the centers of the vertical cell phases and the vertical components in the centers of the horizontal cell faces in this way we can derive how much fluid flows from a cell to its neighbor in one simulation step in each simulation step we first add gravity to the vertical velocity components next we make the fluid incompressible by making sure that the amount of fluid that enters the cell is equal to the amount of fluid that leaves it finally we move the velocity field along itself in the attraction step this time instead of using two type of cells we use three types air cells water cells and solid cells the density of water is about a thousand times larger than the one of air therefore we simply treat air as nothing this approximation still lets us simulate the majority of interesting effects the two effects that we'll be missing are the wave Generation by winds on the surface and the simulation of persistent bubbles the fact can be added with additional techniques though this means that the velocities between air cells are undefined undefined is not the same as zero because zero air velocity would stop the water from moving now handling two types of fluid cells is extremely simple first we simply do not process air cells the simulator just skips them second we have to make sure that we never access velocities between air cells when we compute interpolations now comes the key question how do we know which fluid cells are water cells and which are air cells the main idea behind the flip method is to use particles the particles are simulated and have a position as well as a velocity now the water cells are simply the fluid cells that contain particles this basic method is called pick or particle in cell method here you see an overview we first simulate the particles as simple moving Mass points then we transfer their velocities to the grid next we make the grid velocities incompressible as in the eulerian fluid simulation method finally we transfer the velocities back to the particles since particles carry velocities we can skip the adduction step of the eulerian method unfortunately the pick method introduces quite a bit of numerical viscosity here we see the situation in a Cell before transferring the velocities stored in the grid back to the particles each particle has its own independent velocity however after the transfer the particle velocities are smoothed because the velocity field stored in the grid has four less degrees of freedom than the velocities stored on the particles so after the transfer most of the individual particle motion is lost the flip method reduces this problem flip stands for fluid implicit particle as in the pick method we first simulate the particles we also transfer the velocities of the particles to the grid before the solver modifies the grid velocities we store a copy of them next we make the velocity field incompressible as before however instead of transferring the velocities of the grid to the particles we add the velocity changes to the particle velocities this technique reduces the smoothing of the particle velocity substantially however the velocity field stored on the particle builds up a substantial amount of noise the best results are generated by a mixture of the two methods here you see the noise emotion of the particles with the pure flip method here you see the smooth fit motion generated by the peak method I use 0.1 times Peak Plus 0.9 times flip for the demo let me now explain all the steps in more detail the particle simulation step is very simple particle store position X as well as a velocity V in a two-dimensional simulation both have two components x y and UV respectively as usual I use bold phase four vectors to simulate the particles we iterate through all of them first we add gravity times the time step size to the velocities then we add the velocity times the time step size to the positions this method is called semi-implicit Euler integration it produces the ballistic motion of unconstrained particles at the end of this step we also need to push particles out of obstacles if necessary transferring the velocities between the grid and the particles is a little bit technical it's pretty simple to implement though as you can see in the code in this example we have a particle at the position x with coordinates XP and YP first we need to find the cell that contains p the cells are labeled with two integer values Excel and Y cell we find the cell coordinates by dividing the particle coordinates by the spacing H and round down in our example if we divide XP by H and round down we get 2. if we divide y p by H and round down we get a 1 2 and 1 are the coordinates of the cell that contains P we call the remainders of the division Delta X and Delta y let me first explain how to transfer a general quantity Q from the grid Corners to a particle in this example Q is closer to the coordinate number two so we want QP to be closer to Q2 then to q1 Q3 or Q4 for this we compute four weights W1 W2 W3 and W4 using bilinear interpolation we get these definitions of the weights using the offsets Delta X and Delta y these weights are used to compute QP as a so-called weighted sum of the corner values we need to be careful if one or more of the values are undefined if Q2 is undefined for example we simply drop it from the numerator as well as the denominator in a staggered grid we have to consider the specific locations of the velocities for instance the U components are stored on a grid that is shifted down by half the grid spacing we can simply handle this by using Y minus H over 2 as the y coordinate of the particle in equations before to transfer the quantity from the particle back to the grid we compute weighted sums on the grid corners for this we need a sum of weights or on each corner first we clear the Q and the r Fields then each particle adds its weighted quantity q and the corresponding weight R finally we divide all weighted sums by the sum of Weights in each Corner once the velocities are transferred from the particles to the grid we want to make the velocity field on the grid incompressible this step is called projection and is identical to the projection step of the eulerian simulation method to make this tutorial self-contained I briefly explain it again for a given cell we first compute the Divergence which is the total outflow if u i plus 1 on the right is positive fluid flows out of the cell so we use a positive sign on the other hand if UI on the left is positive fluid flows into the cell so we use a negative sign if T is positive we have too much outflow if D is negative we have too much inflow only if D is zero we have an incompressible fluid to make the Divergence zero we need to modify all the velocities by the same amount here one-fourth of the Divergence to handle obstacles or walls we assign a value s to each cell we set the value to zero for solid cells and to one for water or air cells then we add the yellow modification to the correction step to solve the entire grid we use multiple iterations in each iteration we run through all the water cells for each water cell we perform the projection step as discussed before this method is called the gaussado method it's probably the simplest method to solve systems of equations we have to be careful on the boundary we access cells outside of the grid one solution to this problem is to add boundary cells that we do not change we either set them to walls or copy the values of neighboring cells that are inside the grid as we saw the calcium method is very simple to implement however it needs more iterations to converge than Global methods here is a simple trick to speed up convergence dramatically it's called over relaxation after implementing all of this we get the following result the problem is partly caused by the low iteration count and the large time step size I use we could reduce this problem by increasing the number of iterations or decreasing the time step size which is typically done in offline simulations however we wanted the simulation to be as fast as possible to run inside a browser and using JavaScript the main problem we have is drift all purely velocity-based methods have this problem the solver sees that velocities tend to make particles Collide however it does not see if particles are already colliding two fixes are necessary to fix this problem first we need to push the particles apart we could simply check all pairs unfortunately this would be very slow I use a grid to speed up these checks in tutorial 11 I explained in detail how this can be done alternatively you can just check the code even after pushing the particles apart the solver still doesn't notice if too many particles are located in one cell to fix this we compute particle densities at the center of each cell to compute it we first set all density values to zero then we run through all the particles each particle adds its interpolation weights to the Four Corners since the four weights adds to one we get a smooth estimate of the number of particles in each cell now we use the particle densities to modify the Divergence we reduce it in dense regions this has the effect that the solver creates more outward push in dense regions the rest density row 0 is the average density of water cells before the simulation starts the parameter K is a stiffness coefficient which I set to 1 in my code this concludes the tutorial thank you for watching I hope you had fun and I see you in the next one

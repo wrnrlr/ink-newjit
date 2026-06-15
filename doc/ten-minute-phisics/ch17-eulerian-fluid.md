@@ -4,6 +4,95 @@
 **Slides:** https://matthias-research.github.io/pages/tenMinutePhysics/17-fluidSim.pdf
 **Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/17-fluidSim.html
 
+## Lecture Notes
+
+### Eulerian vs. Lagrangian
+
+- **Eulerian** (Leonhard Euler): grid-based — fluid stored on a fixed grid
+- **Lagrangian** (Lagrange): grid-free — particles move with the fluid
+
+This tutorial: Eulerian, incompressible, inviscid, 2D (3D is a straightforward extension).
+
+---
+
+### Grid Representation
+
+Velocity is a 2D vector **v** = [u, v]^T stored on a **staggered MAC grid** (Marker-And-Cell):
+
+- u components at left/right cell faces
+- v components at top/bottom cell faces
+- Cell size h
+
+---
+
+### Simulation Loop
+
+```
+while simulating:
+    1. Modify velocity (add gravity)
+    2. Make incompressible (projection)
+    3. Move velocity field (advection)
+```
+
+---
+
+### 1. Update Velocity (Gravity)
+
+```
+for all i, j:
+    v[i,j] ← v[i,j] + Δt · g      (g = −9.81 m/s²)
+```
+
+---
+
+### 2. Projection (Force Incompressibility)
+
+**Divergence** (total outflow from cell i,j):
+
+d ← u[i+1,j] − u[i,j] + v[i,j+1] − v[i,j]
+
+- d > 0: too much outflow
+- d < 0: too much inflow
+- d = 0: incompressible ✓
+
+**Fix** — push all 4 velocities outward equally:
+
+```
+d ← o · (u[i+1,j] − u[i,j] + v[i,j+1] − v[i,j])
+s ← s[i+1,j] + s[i-1,j] + s[i,j+1] + s[i,j-1]   (obstacle flags)
+u[i,j]   ← u[i,j]   + d·s[i-1,j]/s
+u[i+1,j] ← u[i+1,j] − d·s[i+1,j]/s
+v[i,j]   ← v[i,j]   + d·s[i,j-1]/s
+v[i,j+1] ← v[i,j+1] − d·s[i,j+1]/s
+```
+
+s[i,j] = 0 for solid/wall cells. Iterate n times (Gauss-Seidel).
+
+**Overrelaxation**: multiply d by o ∈ (1, 2) — use o = 1.9. Dramatically speeds convergence without changing the final pressure.
+
+**Physical pressure:**
+
+p[i,j] ← p[i,j] + (d/s) · (ρ·h/Δt)
+
+---
+
+### 3. Advection (Semi-Lagrangian)
+
+For each velocity sample at position **x**:
+1. Compute full 2D velocity **v**(**x**) (average surrounding components on staggered grid)
+2. Previous position: **x** − Δt · **v**(**x**)
+3. Bilinear interpolate velocity at previous position → new velocity at **x**
+
+Bilinear weights for point at (Δx, Δy) inside a cell of size h:
+
+w₀₀ = (1−Δx/h)(1−Δy/h),  w₀₁ = (Δx/h)(1−Δy/h)
+w₁₀ = (1−Δx/h)(Δy/h),    w₁₁ = (Δx/h)(Δy/h)
+
+Note: straight-path approximation introduces numerical viscosity; reduce with vorticity confinement.
+
+**Smoke:** store a density scalar at cell centres, advect it the same way.
+
+
 ## Video Transcript
 
 hi not just from 10 minute physics here Welcome To tutorial number 17. today I'm going to show you how to write a scientific eulerian fluid simulator with just 200 lines of JavaScript code let's start here you see my JavaScript eulerian fluid simulator in action the demo you see runs in a browser I simulate how air is pushed into a wind tunnel from the left to visualize the airflow I also added smoke there's an obstacle which creates this beautiful Effect called Vortex shedding I can also move the obstacle with the mouse or by touch on a mobile device I can visualize the streamlines and the pressure field here I subtract the smoke field from the pressure field which yields this artistic effect this demo shows the hydrostatic pressure field in a water tank of a height of one meter simulator creates the expected linear pressure created with the correct pressure at the bottom no matter where I place the obstacle in this demo the obstacle creates smoke which I visualized using the scientific color scheme let me start with a few remarks fluid can actually be a liquid or a gas both have similar physical structures so we can use the same method to simulate them the name of eulerian comes from the famous Swiss mathematician Leonard Euler methods that use a grid for simulation are associated with him he's most famous for the mathematical constant e which is named after him methods that do not use a grid for simulation are associated with the Italian mathematician Joseph Louis lacrosse we will look at a 2d simulation however going from 2D to 3D is straightforward and I'll leave this as an exercise for our simulations we assume that the fluid is incompressible water is very close to being incompressible if you apply a pressure of 10 000 kilos or the weight of a big truck on one centimeter squared water will be compressed by only three percent incompressibility is also a reasonable assumption for the simulation of free gas I might talk about compressible simulation in an upcoming tutorial a second assumption we make is that the fluid is invisit which means there is zero viscosity this is a good approximation for water and gases as well adding viscosity is quite simple though and we'll talk about it in an upcoming tutorial now let us dive into the method as mentioned we will use a grid for simulation in the grid we store a velocity field velocity is a two-dimensional Vector we write in both face V which has two components italic phase u and v here you see how a velocity field can be represented in a co-located grid with spacing H we store the velocity vectors at the center of each cell for fluid simulations there is actually a better grid the staggerate grid here we store the velocity components in different locations the horizontal components are stored at the center of the vertical cell faces the vertical components are stored at the center of the horizontal cell phases the nice thing about this Arrangement is that we can now see how much fluid flows from one cell to its neighbor here you see an ovary of the complete simulation algorithm there are three steps in the first step we modify the velocity values based on external forces we will only use gravity in the second step we make the fluid incompressible this step is called projection in the third step we move the velocity field in the grid this step is called advection the first step is very simple here we go through all the grid cells i j and add delta T times G to the vertical component G is the gravitational acceleration and DT is the time step size for instance 1 30th of a second now let's have a look at the Second Step namely making the fluid incompressible for this we need the concept of Divergence Divergence D is proportional to the total amount of fluid that leaves the cell in a Time step in a stackered crate we simply sum up the velocities adjacent to one cell we need to be careful though if you I plus 1 J on the right is positive fluid leaves the cell however if u i j on the left side is positive fluid flows into the cell so we need a negative sign there now if the Divergence is positive we have too much outflow if it is negative we have too much inflow for an incompressible fluid that Divergence must be zero now let's see how we can force incompressibility in this case we have too much inflow to fix this we could simply change one velocity however a fluid cannot do this a fluid can only push the velocities outward or pull them inward by the same amount we use the simplest possible way to implement this first we compute the Divergence then we subtract 1 4 of it from the four velocities again we have to be careful with the signs though if you plot the updated velocities into the equation for the Divergence you see that it becomes zero handling obstacles and walls is very simple too let's assume there's an obstacle or wall on the left of cell i j now the velocity uij is fixed so we can only modify the remaining three velocities to make the Divergence zero this time we use one third of the Divergence as a correction typically for a wall uij is zero it can also be non-zero for instance if an object is moving the method can also be used to simulate a turbine that pushes air into a wind's tunnel as I showed you in the beginning for the general case we store scalar value s in each cell and set it to zero for obstacles and to one for fluid cells here you see the general updates of course we don't want to simulate one single cell we want to simulate the entire grid to do this we iterate n times in each iteration we run through all the grid cells for each cell we perform the projection as discussed before this method is called Gauss idle it is probably the simplest method to solve systems of equations we have to be careful though on the boundary we access cells outside of the grid one solution to this problem is to add border cells that we do not change we either set them to walls or copy the values of neighbor cells that are inside the grid when running a fluid simulation we are typically interested in the pressure distribution inside the domain to compute the pressure we store a scalar pressure value inside each cell before starting the iterations we set it to zero then after projection of each cell we updated pressure value with this equation here rho is the density of the fluid H the grid spacing and delta T the time step size Computing the pressure just provides additional information and is not necessary to run the simulation as we just saw outside is very simple to implement however it needs more iterations to converge than Global methods fortunately there is a very simple trick to speed up convergence dramatically it is called over relaxation and works like magic all you have to do is multiply the Divergence by constant o between 1 and 2 the bigger the better I use 1.9 in the code in the demo I have a checkbox to turn it on and off let me go back to the tank demo as we saw we get the pressure graded immediately now let me turn off over relaxation and as you can see the simulation completely collapses let's turn it on again and we get the correct pressure field again the nice thing about overall relaxation is that the pressure values are still correct the last step of our simulation is advection in a fluid the velocity state is carried by particles the atoms however while particles move our velocity vectors are attached to a static grid therefore we need to move the velocities inside to the grid simple and stable method to do this is semilocracial advection to update the horizontal velocity component U of A Cell for instance we ask which fluid particle moved to the location where U is stored then we set the new velocity u t plus delta T to the velocity u t at the previous location we do not actually work with particles the moving particle is just an illustration of the idea this is why the method is called semi lagration but how can we compute this previous location for this we first computed the full two-dimensional vector v at the location of the U component then the previous location can be approximated by x minus delta T times V here we assume a straight path this simplification introduces viscosity though there are a variety of methods to reduce this effect for instance vorticity confinement to compute the full two-dimensional vector v at the location of U we need to compute the vertical component V bar in addition to the horizontal component U this can be done by simply averaging the V values in the neighborhood after going back we need the velocity at an arbitrary location in the grid this time we compute a weighted average of the surrounding values these equations look a little bit more involved but are very simple to implement just have a look at the code as you saw in the demo I simulate smoke to visualize the flow fortunately we don't need a simulation for this at all all we need is already stored in the velocity field I simply store a density value between 0 and 1 in each cell then I add vect it just as I did for the velocity components in particular to compute the new density value in a Cell I use the velocity at the center of the cell then I walk back along the straight line and interpolates the density field at the previous location visualizing streamlines is simple too here I set the position variable X to an initial location and choose a step size s then for end steps I first sample the velocity field at X and update X by adding s times V to it now let's have a look at the code the simulator is implemented in the class fluid it starts at line 90 and ends at line 290 so 200 lines as I promised Advanced smoke is not even a part of the simulator in the Constructor I initialize all the necessary Fields like the u and v Fields the pressure field and the smoke field in the integration step I simply add gravity times DT to the V components of all cells here is the projection method I run multiple iterations and in each iteration I run through all the cells I sum up all the s values then I compute the Divergence and multiplied by the over relaxation Factor finally I correct the velocity components this is the attraction method here I run through all the cells and update the U and the V component of the Velocity field to do this I first compute the velocity at the location where U is stored then I perform the backward step and Sample the field at this new location the same for the V component I hope you enjoyed this tutorial thanks for watching and I see you in the next one

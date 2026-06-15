@@ -4,6 +4,57 @@
 **Slides:** https://matthias-research.github.io/pages/tenMinutePhysics/14-cloth.pdf
 **Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/14-cloth.html
 
+## Lecture Notes
+
+### The Secret: Cloth Only Bends
+
+Real cloth barely stretches (0–5% elongation under gravity). The force-vs-elongation curve is nearly flat. Too much stretch is a visible artifact; too little is never noticeable.
+
+**Conclusion:** model cloth as an **infinitely stiff** material in the stretch direction.
+
+- Force-based infinite stiffness → numerical explosion
+- **Solution:** zero-compliance distance constraints with XPBD
+
+No spring stiffness parameter needed. Sub-steps converge fast.
+
+---
+
+### Cloth Simulation Setup
+
+1. Triangulate the cloth surface
+2. One particle per vertex
+3. Zero-compliance distance constraint per edge (stretch resistance)
+4. Optional: bending constraint per pair of adjacent triangles
+
+---
+
+### Bending Resistance
+
+Two adjacent triangles share edge **p**1–**p**2; opposing vertices are **p**3 and **p**4.
+
+**Option A — Diagonal distance constraint** (simple):
+- Add a compliant distance constraint between **p**3 and **p**4
+- Weak when the cloth is flat (diagonal is short)
+
+**Option B — Dihedral angle constraint** (strong in flat state, more expensive):
+- Constrains the angle between the two triangle normals
+
+One tunable parameter: bending compliance α.
+
+---
+
+### Finding Triangle Neighbors
+
+To build the bending constraint list:
+
+1. Define `globalEdgeNr = 3 * triNr + localEdgeNr`
+2. Build edge list of `{min(id0, id1), max(id0, id1), globalEdgeNr}` tuples
+3. Sort by vertex IDs
+4. Find adjacent pairs (matching vertex IDs) → they are the bending constraint particles
+
+Result: an `edgeNeighborList` array parallel to the edge list.
+
+
 ## Video Transcript
 
 hi maltese from telugu physics here welcome to tutorial number 14. today i'm gonna reveal the secret of class simulation we will use it to write a very fast demo that simulates 6 000 triangles at 30 frames per second on my three-year-old cell phone let's start this is my galaxy s10 as you can see simulating this piece of cloth with over 6 000 triangles takes about 20 milliseconds per frame this is the same demo on my desktop as you can see it only takes about 13 milliseconds per frame it's also unconditionally stable the reason is that i use xpbd or extended position based dynamics this is the method i advocate on this channel have a look at tutorial number nine where i explain it in detail as usual for the slides and demos have a look at my web page at www.martiasmiller.info 10 minute physics so let me reveal the secret of class simulation it's very simple cloth only bends of course as rigid bodies are not perfectly rigid cloth is stretchable however typically only between zero and five percent and has a very strong stretch limit when you apply a force it stretches a little bit but then keeps its length as you increase the force try it at home try it with shirts jeans skirts leather jackets rain jackets towels curtains tents tarpaulin flags and carpets gravity is rarely strong enough to cause noticeable stretching i have never noticed too little stretching in a cloth simulation however too much stretching is a bad visual artifact what about latex or other stretchable material well there you don't have dynamics it's just quasi-static motion so you can use skeletal skinning to animate this so what's the conclusion forget about all sophisticated cloth models they simulate this very small part of the force elongation curve what we want is to simulate an infinitely stiff material but how force-based methods explode the solution is the xpbd or extended position based dynamics method we simply use zero compliance distance constraints on the cloth mesh edges the cool thing is there are no parameters to tune the only remaining effect is bending resistance and we only have one parameter for this we can handle this as a constraint between two neighboring triangles there are two popular approaches here in the first one we add an additional distance constraint between the opposing particles it's simple but weak in the flat state the other solution is to use the angle between the two triangles such a constraint is strongly the flat state but more expensive to simulate i will talk about it in a future tutorial since we need triangle neighbors to create bending constraints i'll show you how to find these neighbors fast first we define a global etch number which is three times the triangle number plus the local etch number in this example we have edges 0 1 2 of triangle 0 and 3 4 5 of triangle 1. first we create a list for each edge the first entry is the minimum of the indices the second one the maximum of the indices and the third one the global edge number it's important that the indices are sorted now we sort the entire list as you can see adjacent edges appear next to each other from this information we can compute an edge neighbor list a -1 means the edge is open now if you want to know what the neighbor of triangle 0 across local h2 is we first compute the global edge number in this case it's two we check the neighbor list and read a four four means it's triangle one with local edge number one as you can see this is the correct result now let's have a look at the code i took the code mostly from the softbody example these are the fast vector functions that operates directly on float32 arrays the function finds triangle neighbors is the implementation of the method that i just explained first i run through all the triangles and all their edges and creates the edge list next the edge list is sorted then i run through all the entries of the sorted list if the indices of two consecutive entries in the list are equal then i fill in the neighbor list accordingly the cloth class is very similar to the soft body class an important difference is how to create the constraints here i first compute the neighbors then i run through all the triangles and all their edges for each edge i create a distance constraint for each triangle pair i create a bending constraint i store all the four indices of the triangle neighbors for a simple bending constraint we only need id2 and id3 however for a future implementation in which i will use the angles between the triangles i will use all four indices here i create the visual meshes the edge mesh and the triangle mesh this is the implementation of xpbd the first loop updates all the velocities and all the positions of the particles here we solve the constraints we have two types the stretching and the bending constraints after this we update the velocities this is the code to solve a distance constraint that i showed many times before since we use distance constraint for bending resistance the code is identical the difference is that we now use the bending ids this concludes the tutorial i hope you enjoyed it thanks for watching and i'll see you in the next one

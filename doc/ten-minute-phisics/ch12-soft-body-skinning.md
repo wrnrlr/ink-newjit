@@ -4,6 +4,65 @@
 **Slides:** https://matthias-research.github.io/pages/tenMinutePhysics/12-softBodySkinning.pdf
 **Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/12-softBodySkinning.html
 
+## Lecture Notes
+
+### Key Idea: Surface Embedding
+
+A high-resolution visual mesh (60,000 triangles → 300,000 tetrahedra) can be driven by a coarse simulation mesh (3,000 tetrahedra) — the essential motions are the same.
+
+**Two approaches:**
+- *Model reduction*: eigenmode decomposition of system matrix — mathematically complex, non-trivial
+- **Surface embedding** (this tutorial): tetrahedralize a decimated surface, embed the visual mesh — very simple
+
+---
+
+### Tetrahedral Skinning
+
+Express visual vertex **v** as a weighted sum of the four tet vertices **p**1…**p**4:
+
+**v** = b1·**p**1 + b2·**p**2 + b3·**p**3 + b4·**p**4
+
+The scalars b1…b4 are the **barycentric coordinates** of **v**. They are unique for a non-degenerate tetrahedron.
+
+---
+
+### Computing Barycentric Coordinates
+
+Using the 4th vertex as origin:
+
+**v** − **p**4 = b1(**p**1−**p**4) + b2(**p**2−**p**4) + b3(**p**3−**p**4)
+
+Form the matrix P = [**p**1−**p**4,  **p**2−**p**4,  **p**3−**p**4]:
+
+**b** = P⁻¹ (**v** − **p**4)      where **b** = [b1, b2, b3]^T
+
+Then b4 = 1 − b1 − b2 − b3.
+
+---
+
+### Properties of Barycentric Coordinates
+
+- b1 + b2 + b3 + b4 = 1 always
+- All bᵢ ≥ 0 iff **v** is inside the tetrahedron
+- **Barycentric distance** (how far outside): d = max(−b1, −b2, −b3, −b4)
+- Attach **v** to the tetrahedron with the smallest d (closest)
+
+---
+
+### Attachment Computation
+
+```
+for each visual vertex v:
+    d_min = ∞
+    for each tetrahedron (via spatial hash, inflated bbox):
+        if d_min ≤ 0: skip (already inside a tet)
+        compute b = P⁻¹(v − p4), d = max(−b1,−b2,−b3,−b4)
+        if d < d_min: store attachment (tet, b1,b2,b3,b4), d_min = d
+```
+
+Fast enough to run at startup. During simulation: **v** = b1**p**1 + b2**p**2 + b3**p**3 + b4**p**4.
+
+
 ## Video Transcript
 
 hi marcus from 10 minute physics here welcome to tutorial number 12. today i'm going to show you how to speed up soft body simulations by 100x given high resolution visual mesh the idea is to create a lower resolution tetrahedral simulation mesh that still captures all the desired motions and then embeds the visual mesh in the simulation mesh let's start as usual for the slides and demos have a look at my webpage at www.matesmiller.info slash 10 minute physics so here we have a surface mesh of 60 000 triangles and let's say we want to simulate this as a soft body what we can do is tetrahedralize the volume surrounded by this surface mesh however with sixty thousand triangles we probably get something like three hundred thousand tetrahedra which of course yields a very slow simulation now there's a key observation to speed up the simulation the essential motion of this dragon can be captured with a very low resolution simulation mesh so here i use only 3 000 tetrahedra you could probably go even lower there are two main solutions to reduce the complexity of a simulation the first one is model reduction here we start with the high resolution tetrahedral mesh then we decompose the system matrix into eigenmodes which are basically deformation patterns then we select the k most important deformation patterns only the model is mathematically involved especially for non-linear deformations and for collision handling it is also highly non-trivial to implement i will explain to you the method of surface embedding we first create a feature aware decimated surface of the input mesh for instance with blender then we tetrahedralize the simplified surface i will show how to do this in a later tutorial this yields a lower solution tetrahedral mesh then we embed the visual mesh in the volumetric mesh and i will show you how to do this in this tutorial this method is very simple to implement as you will see the idea is as follows let's say we have a vertex of the visual mesh and a tetrahedron that encloses it we want the vertex v to move with the surrounding tetrahedron we can do this by expressing v as a weighted sum of p1 p2 p3 and p4 the particles adjacent to the tetrahedron these scalar values are called the varicentic coordinates of v they're unique for four points not contained in a plane now the question is given the tetrahedron with adjacent particles p1 p2 p3 and p4 and the vertex coordinate v how do we compute the paracentric coordinates first we observe that we can move all the points v p1 p2 p3 and p4 by the same amount without changing the result so here i subtract p4 from all these points the result is that the last term drops out because we have p4 minus p4 which is zero this means that we are left with only three unknowns we can put these three scalar values into one three-dimensional vector b we can also define a matrix p with the columns p1 minus p4 p2 minus p4 and p3 minus p4 now we can write this equation here in a more compact way it's now also possible to solve for the vector b what we have to do is invert the matrix p and multiply it by v minus p4 now we only have the first three bar centric coordinates to derive b4 we use the translated equation here if we move p4 to the other side and multiply out these terms we get this form here as you can see the scalar in front of p4 is 1 minus p1 minus b2 minus b3 which is b4 barycentric coordinates have some interesting properties for instance they sum to 1. we can easily see this from this equation here by moving b4 to the other side also for all the points in the tetrahedron and only for them all the four barycentric coordinates are greater or equal to zero for points outside the tetrahedron the interpolation still works but it might introduce potential artifacts i will show how to solve this problem in an upcoming tutorial we can also define a barycentric distance of a point to a tetrahedron i define it as the maximum value of the negative barycentric coordinates as you can see the distance is negative if the point is inside the tetrahedron and positive if it's outside if a vertex is not contained in any tetrahedron we attach it to the tetrahedron with the smallest distance before the simulation starts we have to compute all the barycentric coordinates of all the vertices of the visual mesh to do this we store a value d min with each vertex and initialize it with infinity then we store all the vertices in a hash grid for each tetrahedron we compute an inflated bounding box we use this to query the vertex hash for each vertex returned by the query we check whether the corresponding value d min is smaller than zero if so we already found the containing tetrahedron if not we compute the barycentric coordinates of the returned vertex with respect to the current tetrahedron d if d is smaller than the d min value of the vertex we overwrite the min and replace the attachment this process is fast enough so we can do it on the fly before each simulation so let's implement this this demo is an extension of the demo we wrote in tutorial number 10 about soft body simulation i also added the hash class we wrote in tutorial number 11. at the very bottom of the file we have the meshes first the tetrahedral mesh with its vertices here you see the indices of the tetrahedra four consecutive numbers define one tetrahedron we also have the edge indices of the tetrahedra for visualization here is the definition of the visual mesh first we have the vertices and finally the indices of the triangles i compute the barycentric coordinates of all vertices in a method of the class softbody here i first create a hash for all the visual vertices then i define the mint list array and fill it with number.maximum value next i run through all the tetrahedra instead of computing a bounding box as mentioned in the slides i actually compute a bounding sphere i use it to query the hash before iterating through all the vertices returned by the hash i compute the inverse of the matrix p if mean distance of the current vertex is smaller or equal to 0 we know that we already found the surrounding tetrahedron otherwise we computed the barycentric coordinates and the new distance if the new distance is smaller than the min distance we update the min distance and overrides the scanning information after each time step we call update visual mesh which does the skinning we iterate through all the visual vertices first we get the tetrahedral number the vertex is attached to then we reach the barycentric coordinates next we get the indices of all the particles adjacent to the tetrahedron and compute the weighted sum using the positions of the particles adjacent to the tetrahedron so here is our final demo as you can see the mesh with almost 60 000 triangles simulates very fast we also have all the necessary deformation modes i can show the tetrahedral mesh here since we're using the method i presented in tutorial number 10 the simulation is also unbreakable this concludes this tutorial i hope you enjoyed it thanks for watching and i'll see you in the next one

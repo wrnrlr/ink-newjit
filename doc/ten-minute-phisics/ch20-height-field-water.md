@@ -4,6 +4,69 @@
 **Slides:** https://matthias-research.github.io/pages/tenMinutePhysics/20-heightFieldWater.pdf
 **Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/20-heightFieldWater.html
 
+## Lecture Notes
+
+### Representation
+
+Water is stored as a 2.5D array of columns, each with:
+- h_{i,j}: total height of the column
+- v_{i,j}: vertical velocity
+
+Column width s is uniform. In 2D this is "1.5d"; in 3D "2.5d".
+
+**Pros:** simple, fast, easy surface extraction.
+**Cons:** no overturning waves; splashes must be added with particles.
+
+---
+
+### Simulation — Wave Equation
+
+From Archimedes' principle and Newton's second law, the acceleration of each column is proportional to the height difference from its neighbors:
+
+**1.5d (two neighbors):**
+
+a_i = (c²/s²)(h_{i−1} + h_{i+1} − 2h_i)
+
+**2.5d (four neighbors):**
+
+a_{i,j} = (c²/s²)(h_{i−1,j} + h_{i+1,j} + h_{i,j−1} + h_{i,j+1} − 4h_{i,j})
+
+c = wave speed; s = column width.
+
+**Boundary condition:** replace out-of-domain neighbors with h_{i,j} (reflecting walls).
+
+**Time step (semi-implicit Euler):**
+
+```
+for all i,j:   v_{i,j} ← v_{i,j} + Δt · a_{i,j}
+for all i,j:   h_{i,j} ← h_{i,j} + Δt · v_{i,j}
+```
+
+**Stability:** Δt · c < s (CFL condition).
+
+---
+
+### Object ↔ Water Interaction
+
+**Object to water:** maintain an extra field b_{i,j} (height covered by objects). Each step:
+
+h_{i,j} ← h_{i,j} + α(b_{i,j} − b^prev_{i,j})
+
+α ∈ [0,1] controls effect intensity. Smooth b to avoid spikes. This conserves volume and handles submerged bodies.
+
+**Water to object (Archimedes):** for each overlap o between object and column:
+
+f = ρ_water · o · s² · g (upward buoyancy force)
+
+Apply this force to the object at the column center.
+
+---
+
+### Rendering
+
+Render the scene behind the water plane to a texture, then for each fragment look up the texture at screen coordinates + a normal-dependent offset → **refraction effect**. Offset magnitude scales with distance to camera.
+
+
 ## Video Transcript
 
 hi not just from 10 minute physics here Welcome To tutorial number 20. today I'm going to show you how to write a 3d water simulator and the interaction of water with objects in under 100 lines of code here is my water simulation as you can see we have a tank and three balls interacting with the water the density of the yellow ball is larger than the density of water so it sinks to the ground the densities of the orange ball and the red ball are lower than the density of water so they float on the surface since the density of the orange ball is larger than the density of the red ball it is more immersed in the water I also implemented a refraction effect of the water surface as usual I wrote this demo in JavaScript so it runs in any browser I put the direct link to the demo into the description so you can immediately play with it for the demos and the slides of all my tutorials have a look at my web page let me now explain the method that I used to implement the simulation I represent water as an array of columns we can do this on a line or in the plane if we use a line we call this a one and a half dimensional simulation this is because we have a one-dimensional line but the columns poke out of this line if we use a plane then we call this a two and a half dimensional simulation this is because we work on a two-dimensional plane but the columns poke out of this plane there is a variety of advantages when representing water as columns first it's very simple to simulate second we get a fast simulation and third it's easy to extract the water surface there are also a few disadvantages we cannot simulate overturning waves and we don't get splashes we can however add this effect by using an additional particle simulator the grid setup is very simple each column stores a height and a velocity both the height and the velocity are needed to get the dynamic simulation we use the same width as for all the columns to derive the simulation method when using water columns we need Archimedes principle the principle says that any object totally or partially immersed in fluid or liquid is buoyed up by a force equal to the weight of the fluid displaced by the object if we have two water columns next to each other with the same height and velocity zero then we expect nothing to happen so let's assume we have two adjacent water columns with different heights H1 and H2 in this situation we can think of having a balloon here now the question is what's the force acting on the balloon from Archimedes principle we know that the force is proportional to the volume of the balloon the volume of the balloon is proportional to H2 minus H1 this means the force acting on the balloon is proportional to H2 minus H1 from Newton's Second Law we know that the acceleration is proportional to the force from the conservation of volume we know that if the column 1 is accelerated upwards then the column 2 must be accelerated downwards by the same amount to the acceleration of the second column H2 is minus H1 now let's have a look at what happens when you have a column I surrounded by two columns I minus 1 and I Plus 1. now to compute a I we need to consider both Neighbors in the pair I and I plus 1 the column I place the role of the left column as in the slide before therefore AI is proportional to h i plus 1 minus h i in the pair I minus 1i the column I plays the role of the right neighbor therefore we have a minus sign here removing the brackets gives AI is proportional to h i minus 1 plus h i plus 1 minus 2 h i saying a quantity is proportional to another quantity means that the quantity is equal to K the constant of proportionality times the other quantity in our case AI is equal to K times h i minus 1 plus h i plus 1 minus 2 h i where K is a constant from the discretization of the wave equation we can actually derive what the meaning of this constant K is K depends on two other constants C and S the constant C is the wave speed and S is the column width here is the situation of a two and a half dimensional simulation now a column i j is surrounded by four neighbors the equation to compute the acceleration of the column i j is very similar to the formula we got for the one and a half dimensional simulation the acceleration of column i j is proportional to the sum of the height of all the surrounding columns minus four times the height of the column itself the constant of proportionality turns out to be exactly the same as in the one and a half dimensional simulation c squared over s squared where C is the wave speed and S is the column width there's one last problem we have to solve before writing our simulator the problem is that when column i j is on the boundary of the domain then we access a column outside of the boundary there's a very simple solution to this if you want the simulate reflecting boundary conditions then when accessing a column outside of the domain we just use the height of the column i j itself now we are ready to write down the algorithm to simulate the 3D water surface it's extremely simple it consists of two Loops over all the columns in the domain in the first Loop we first compute the acceleration of each column we use the formula we just derived before then given the timestep delta T we can update the velocity of each column by adding delta T times the acceleration then we loop again over all the columns and update the heights we update them by adding delta T times the velocity in this case we use the semi-implicit Euler integration with timestamp delta T to get a stable simulation we have to make sure that waves do not travel further than one grid cell in one time step now let's see how we can simulate the interaction of objects with the water surface we want to have two-way coupling this means we want to know how objects influence the water surface and how the water influences the objects let's first have a look at how the objects influence the water surface here's a very simple way to do this we simply push down all the water columns such that they don't intersect with objects the first problem is volume loss the second problem with this approach is that it doesn't work for fully submerged bodies because we get this void here is my own solution I use an additional field B as before H stores the height of each column the value B stores the height covered by objects now I add a third Loop over all the columns in the simulation algorithm first I compute the change of the values of B between the current timestamp and the previous time step I then add the change of B to the heights of the water columns this change can be positive or negative without bias so volume is conserved the constant Alpha is a number between 0 and 1 and defines the intensity of this effect it's important to smooth the B field to prevent spikes and instabilities now we need the opposite direction as well how the water surface influences objects for this we use Archimedes principle again the force acting on the object is the same as the weight of the water replaced by the object we can compute the weight that's M times G where G is the gravitational acceleration the mass is the density of water times the volume the volume is O times s squared where s is the width of the column this means that for each overlap of an object with a water column we add this Force to the object at the position of the water column I use a very simple method to render the refraction effect on the water surface let me first show you how to render fully transparent plane of course the simplest way to do this would be to just not render anything but there's another method to do this we first render the scene behind the plane to a texture using the current camera then to render fragment of the plane we use the screen coordinates of this fragment to look up the color in the texture now there's a very simple way to get the refraction effect now we use the screen coordinates of the fragment plus an offset to look up the texture color we make this direction dependent on the surface normal the length of this offset is dependent on the distance of the camera to the water surface now let's have a quick look at the code I implemented a class called water surface here is the Constructor the actual simulation starts at line 170 with the simulation of the coupling between bodies and the water surface here you see the method to simulate the surface itself and this is the simulation Loop it ends at Line 270 so we have exactly 100 lines of code as promised as you can see the method to simulate the surface itself is really very simple I run through all the water columns compute the sum of the heights of all the neighbors and subtract the height of the central column itself I multiply this quantity by the time step DT and add this to the velocity in the second loop I add the velocity times DT to the height this is a fragment Shader for the water surface and this is the most important line here UV are the texture coordinates to look up the color in the background texture I use this green position of the fragment but now add R times the normal of the water surface for R I should actually use the distance to the camera however in my very simple implementation I just used a constant for Simplicity I also rendered the entire scene and not just the scene behind the plane so the challenge for you is to fix these two problems if somebody finds a very nice Solution please send me a pull request on GitHub this concludes the tutorial I hope you enjoyed it thanks for watching and I see you in the next one

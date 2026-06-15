@@ -4,6 +4,62 @@
 **Slides:** https://matthias-research.github.io/pages/tenMinutePhysics/15-selfCollision.pdf
 **Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/15-selfCollision.html
 
+## Lecture Notes
+
+### Why Self-Collision is Hard
+
+Self-collision has no global "inside/outside" — after cloth passes through itself, the problem is ill-posed. The key principle: **start in a valid state and prevent entanglement from ever happening**.
+
+---
+
+### Five Tricks
+
+**1. Use particles and a particle hash**
+
+Represent cloth thickness as particle spheres of radius r. Use many small primitives rather than few complex ones. The spatial hash from tutorial 11 gives O(1) neighbor queries.
+
+**2. Use rest distance to avoid jittering**
+
+If rest distance d_rest < 2r, distance constraints and collision constraints fight each other. Fix:
+
+d_coll = min(2r, d_rest)
+
+Compute d_rest on the fly from the rest-pose particle positions.
+
+**3. Use sub-stepping, not CCD**
+
+Sub-stepping (XPBD) instead of continuous collision detection. Create the spatial hash once per frame, then run n sub-steps:
+
+```
+createHash()
+for n sub-steps:
+    integrate all particles
+    solve all constraints
+    update velocities
+```
+
+**4. Enforce maximal velocity**
+
+The maximum safe velocity per sub-step:
+
+v_max = r / Δt_substep = r · n_substeps / Δt
+
+Example: r = 1 cm, 20 substeps, Δt = 1/30 s → v_max = 6 m/s (fast running speed).
+Cap all particle velocities to v_max.
+
+**5. Stable cloth-cloth friction**
+
+```
+v1 ← (x1 − p1) / h
+v2 ← (x2 − p2) / h
+v_avg ← (v1 + v2) / 2
+x1 ← x1 + d·(v_avg − v1)·h
+x2 ← x2 + d·(v_avg − v2)·h
+```
+
+Damping coefficient d ∈ [0,1], unconditionally stable. h cancels → can be omitted. Make physical: d = clamp(h · d_physical, 0, 1).
+
+
 ## Video Transcript
 
 hi malthus from 10 minute physics here welcome to tutorial number 15. today i'm going to show you how to handle cloth self collision which is one of the toughest problems in animation or you could say it's the holy grail of animation so let's start let me make a few announcements first i now created a twitter account i also have a gmail address now if you have cool demos that run in a single html file and that use ideas for my tutorials please send them to me and i will publish them now let's dive right into our subject cloth self-collision handling as usual for the slides and demos have a look at my web page at www.matiasmirror.info 10 minute physics let me first explain to you why cloth self-collision is such a tricky problem so let's assume we have a soft body for a soft body we know exactly what's inside and what's outside so if we have a vertex inside the body we know exactly how to resolve the collision and where this vertex has to go now for cloth the situation is different there is no inside and no outside resolving collisions is a global problem because there are multiple solutions we can for instance move this piece of cloth completely down or completely up to resolve the collision one solution is to start in a valid state and make sure that no entanglements ever happen sometimes however this is not avoidable even though i don't have the perfect solution for class self-collision handling i will give you five tricks that make it work very well the first is to use particles in the particle hash for collision detection the second is to use the rest distance between the particles to avoid jittering use substepping instead of continuous collision detection and force a maximal velocity and use an unconditionally stable cloth cloth friction method the first trick is to use simple particles and particle hash for collision detection my general advice is to use as many simple primitives as possible instead of just a few complicated ones this makes the simulation much simpler you get more degrees of freedom in the simulation and higher fidelity since we use simple particles we can use the simple hash for unifor particles for collision detection i introduced it in tutorial number 11. typically we want the particles to be twice their radius apart from each other however sometimes the rest distance is smaller than 2r in this case the distance constraints and the collision constraints fight each other which results in jittering the solution to this problem is to set the collision distance to the minimum of 2r and the rest distance it would require a lot of memory to store the rest distance from a particle to all its close neighbors instead we compute the rest distance on the fly from the rest positions of the particles my third trick is to use substepping instead of continuous collision detection let's assume you have two particles and they do not collide at the beginning of the time step they do not collide at the end of the time step either but they have collided during the time step in order to detect that one typically uses continuous collision detection or ccd here we test the overlap of the swept volumes of the two objects a swept volume is the volume that is touched by an object that rotates and moves in a curved way potentially of course this is a complicated geometric object once we have detected the collision we have to roll back the simulation somehow if we use sub stepping instead the chances that we miss the collision are much smaller i explain in tutorial number nine how sub-stepping works basically instead of performing and solver iterations per time step we perform n sub steps what's important here is that we create the hash only once otherwise the simulation would be much too slow however even with substepping we might miss collisions to avoid this problem we enforce a maximal velocity we want that the particles do not move further than r during a sub step the size of a sub step is the size of a simulation step divided by the number of sub steps so what you can see is the maximal velocity is proportional to the number of sub steps this means the larger the number of sub steps the larger the limiting velocity let's do an example here let's say the radius of a particle is one centimeter we have 20 sub steps and the simulation time step is a 30th of a second in this case we get a maximal velocity of 20 kilometers per hour or about 13 miles per hour this is the speed of a fast running character so it's not a severe restriction the last trick is to use stable cloth cloth friction let's assume we have two particles with current position x1 and previous position p1 we can use the size of a substep and compute their current velocity as current position minus previous position divided by h next we compute their average velocity then we push the current velocity towards the average velocity as you can see the time step size cancels and can be omitted d is a damping coefficient between zero and one as you can see these two statements never overshoot which means we have an unconditionally stable simulation this is the final demo as you can see we have 12 000 triangles and the simulation runs at about 60 milliseconds per frame i can pull the cloth and it never self intersects in this demo i can also disable collision handling as you can see things look very bad in this case the code is based on the code of the last tutorial about cloth simulation therefore i will only show you what i added this is the hash that i introduced in tutorial number 11. i added one new method it's the method query all this method computes the enable list of all the particles in the simulation loop i first compute the maximal velocity then i create the hash next i create all the neighbor lists using a maximal travel distance the maximal travel distance is the maximum velocity times the size of the time step of the simulation next we integrate all the particles in the solved part we solve all the constraints if we want to handle collisions we also call the solve collision method then we update the velocities in the solve collision method we run through all the particles for each particle we retrieve the neighbor list from the hash next we run through all the neighbors here we compute the distance between the two particles then we compute the rest distance then we check whether the current distance is smaller than the minimum of the rest distance and the cloth thickness if this is the case we push the particles apart here you can see the friction method we first compute the velocities of the two particles then we compute the average velocity next we modify the velocities as i explained in the slides this concludes the tutorial thanks for watching i hope you enjoyed it and i see you in the next one you
@@ -13,18 +69,6 @@ hi malthus from 10 minute physics here welcome to tutorial number 15. today i'm 
 ### 15-selfCollision.html
 
 ```html
-<!--
-Copyright 2022 Matthias Müller - Ten Minute Physics, 
-https://www.youtube.com/c/TenMinutePhysics
-www.matthiasMueller.info/tenMinutePhysics
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
--->
-
 <!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <html lang="en">

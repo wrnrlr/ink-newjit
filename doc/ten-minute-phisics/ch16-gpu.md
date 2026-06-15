@@ -4,6 +4,75 @@
 **Slides:** https://matthias-research.github.io/pages/tenMinutePhysics/16-GPUSimulation.pdf
 **Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/16-GPUCloth.py
 
+## Lecture Notes
+
+### Why GPUs are Perfect for Simulation
+
+GPUs run one program (a **kernel**) over thousands of elements in parallel — the same pattern as simulation:
+
+- Graphics: one shader → many pixels
+- Simulation: one kernel → many particles / constraints
+
+---
+
+### Implementation: NVIDIA Warp
+
+```python
+import warp as wp
+
+# Allocate GPU arrays
+self.pos     = wp.array(pos, dtype=wp.vec3, device="cuda")
+self.prevPos = wp.array(pos, dtype=wp.vec3, device="cuda")
+self.vel     = wp.array(vel, dtype=wp.vec3, device="cuda")
+self.hostPos = wp.array(pos, dtype=wp.vec3, device="cpu")
+
+# Kernel definition
+@wp.kernel
+def updateVel(dt: float,
+              prevPos: wp.array(dtype=wp.vec3),
+              pos:     wp.array(dtype=wp.vec3),
+              vel:     wp.array(dtype=wp.vec3)):
+    pNr = wp.tid()           # thread id = particle index
+    vel[pNr] = (pos[pNr] - prevPos[pNr]) / dt
+
+# Launch
+wp.launch(kernel=updateVel,
+          inputs=[dt, self.prevPos, self.pos, self.vel],
+          dim=self.numParticles, device="cuda")
+
+wp.copy(self.hostPos, self.pos)   # copy back for rendering
+```
+
+---
+
+### Challenge 1: Simultaneous Adds
+
+Per-particle kernels: each thread writes to a unique slot — safe.
+Constraint kernels: multiple threads write Δx to the **same** particle — unsafe race condition.
+
+**Fix:** use atomic operations: `wp.atomic_add(pos, pNr, deltaPos)`
+
+---
+
+### Challenge 2: Simultaneous Read and Add
+
+Even with atomics, reading x_i while another thread is updating it gives non-deterministic, jittery results.
+
+**Two solutions:**
+
+**Jacobi solver:** instead of `x_i ← x_i + Δx_i`, accumulate into `d_i ← d_i + Δx_i`, then apply `x_i ← x_i + s·d_i` after all threads finish.
+- Easy to implement
+- Slower convergence; multiply by s ≈ 1/4 to avoid overshooting
+- Momentum not conserved; strength depends on valence
+
+**Graph coloring:** partition constraints into sets where no two constraints in a set share a particle. Process one color per GPU pass — deterministic, stable, no magic s.
+- Finding the optimal coloring is NP-hard; greedy algorithm works well in practice
+- Regular cloth: 4 colors
+- General meshes: more passes needed
+
+**Hybrid:** use graph coloring for large sets, Jacobi for the small tail.
+
+
 ## Video Transcript
 
 hi not just from 10 minute physics here welcome to tutorial number 16. today i will show you how to run simulations on the gpu and as we will see writing codes for the gpu is easy and fun and you will get huge speed ups so let's start as usual for the slides and demos have a look at my web page at www.matiasmiller.info 10-minute physics here's a teaser simulation this piece of cloth contains 250 000 particles 500 000 triangles and 1.5 million distance constraints the simulation runs at about 30 frames per second with 30 sub steps this means that the gpu solves 1.35 billion distance constraints per second i will put the code for this demo on my page it's a python script at the end of the tutorial i will explain how to run it now let me give you some background on how to simulate on the gpu gpus are perfect for simulations they are designed to apply a single program to multiple objects in graphics a rendering program also called a shader is applied to calculate the color of each pixel on the screen for simulations we run a single program also called a kernel for many particles or for many constraints let us have a look at a very simple example the velocity update of position-based dynamics i discussed this in tutorial number nine at each simulation step we run through all the particles we update the velocities store the positions in the previous positions and update the positions by adding delta t times the velocity next we solve all the constraints individually finally we update the velocities as the positions after the solve minus the positions before the solve divided by delta t it is the for all statements that lends themselves to be parallelized now how can we put the velocity update on the gpu from a hardware point of view we have the motherboard with the cpu also called the host and the graphics card with the gpu also called the device the gpu contains a large number of individual compute units or cores the rtx 3090 for instance has over 10 thousand of them a threat is the execution of the kernel on one core each thread has a unique id there can be more threats than cores in that case each core executes more than one thread sequentially the graphics card has its own memory therefore we have to store the velocities the previous positions and the positions on the graphics card we use the thread id as the particle number such that each thread computes the velocity for exactly one particle we don't need all the buffers in the main memory as well for rendering for instance we only need the positions of the particles in this case we use a dma to copy the positions from the gpu to the cpu memory how can we implement this one way is to use the cuda library and write c plus plus programs now there is a much easier way you can write gpu simulations with python and our new python extension called warp you can create standalone projects or a plugin for nvidia omniverse omniverse offers all you need in terms of visualization and interaction i will talk about omniverse plugins in an upcoming tutorial have a look at nvidia's developer site for the warp documentation warp is also available on github now let's see how we can implement the pbd velocity update with warp first we include the warp library then we define the buffers we need the position previous position and velocity buffers on the gpu we also allocate the position buffer on the cpu next we write the kernel as a python function and declare it to be a warp kernel the kernel takes as input at the buffer's previous position position and velocity we interpret the thread id at the particle number next we simply implement the position based dynamics velocity update that's it there's a special warp function to launch the kernel first we specify the name of the kernel then the inputs the number of threads and finally whether it should be executed on the gpu or on the cpu after the execution we read back the particle positions there are two main challenges when writing gpu code the first one are threads that write to the same locations in per-particle loops each thread writes to a separate entry in the array however in the case where we execute one thread per constraint multiple threads typically write to the same location in an array in this example here we have four particles and five distance constraints here threads two three and five all update the position of particle 2. the problem that arises here is that if one thread starts adding its computed correction before the addition operation of other threads is finished the previous addition is lost the solution to this problem is simple we can use the work command atomic add which makes sure that threats have to wait with executing their add until other threats writing to the same location are done this can slow down execution slightly the second problem are simultaneous reads and adds we take the same setup as an example the xbbd position corrections computed by thread number 3 depend on the locations of particles 2 and 3. therefore we get a different result before or after threads 2 and 5 have added their corrections since threads are not executed in a predefined order the result is non-deterministic which can yield there are two popular solutions here the first is to use a jacobi solver and the second is to use graph coloring the cpu solver of xpbt runs through all the constraints and immediately adds corrections to the particles this algorithm is also called gauss-seidel for jacobi solve we use an additional buffer which stores corrections for each particle here called d at the beginning of the solve we set all entries to zero then in the constraint solve kernels we do not apply corrections to the particles but sum them up in the correction buffer we do this using atomic operations only after the solve we apply these corrections to the particles the advantage of this method is that particle positions are not changed during the solve therefore all threads work with the same particle positions the method is also quite easy to implement the disadvantages are jacobi converges more slowly than gauss-seidel due to the slower error propagation also we get possible overshootings this is why we scale the corrections by a scalar s smaller than one one idea is to simply average all corrections this does not work very well unfortunately because momentum conservation is violated also the strength of a constraint depends on the number of adjacent constraints which yields artifacts so what we typically do is to use a global magic value of s typically about one-fourth it has to be adjusted to the current simulation setup the second method is to use graph coloring here the idea is to use multiple constraint solved passes each pass process is a subset of independent constraints this method is stable and we don't have to choose a magic s let's take as an example a regular cloth mesh without shear resistance in this case we can split the constraints into four subsets blue yellow green and red in each pass a particle position is only touched by at most one constraint this case is easy but what about the general case now we are faced with a mathematical problem given a graph color all the edges with as few colors as possible such that no pair of edges with the same color touches the same note finding the optimal solution is np hard this means that it is very likely that there is no better way to do this than to test all the possible colorings of course this is not feasible because the number of colorings increases exponentially with number of constraints fortunately there is a quite simple algorithm the greedy algorithm it does not find the optimal solution but typically a good one it is also more general and can handle constraints with more than two adjacent particles it works as follows while there exists unmarked constraints create a new set clear all the particle marks then for all unmarked constraints c if no adjacent particle is marked add c to s mark c and mark all the adjacent particles even with the best solution many passes are typically required we need at least as many passes as the largest number of constraints touching one particle here is a typical set size distribution we have a few large sets in the beginning followed by a long tail of smaller ones a simple way to reduce the number of passes is to solve the entire tail with one jacobi iteration for cloth for instance it makes sense to only solve the stretching constraints with coloring handling the bending and the shear constraints with jacobi is fine because they don't need to be as stiff now let's have a look at the demo in order to be able to use warp you need to set up a python environment once there's a nice website that explains how to install python and connect it with visual studio code after this we are able to step through python code inside visual studio code warp has a strong connection with numpy installing numpy is super easy just type pip install numpy in the console the same is true for warp simply type pip install warp lang my demo uses pi opengl people on the internet suggest to visit this page it has links to a lot of python libraries stored as wheel files download pi opengl accelerate and pi open shell from there make sure you pick the right versions once downloaded you can install the files using the pip install command as mentioned before you can download my demo at my 10 minute physics web page i will put all these links in the description below i will also update them in case things change in the future let me finally give you a very short overview of the code at the start i have a documentation of how to interact with the demo then we have some general settings like the dimension of the cloth now follows the cloth object in the init method i set up the cloth and all the constraints here you see the integration kernel that integrates the particles and handles the simple collisions this is the kernel that solves distance constraints then we have to add corrections kernel that is only used in the jacobi case here then is the update velocity kernel that i showed in the slides in the simulation method i run n sub steps first i call the integration kernel then dependent on the type of the solver i only do jacobi solves or i go through multiple passes and check whether a path is independent or not if the path contains independent constraints i just solve them on the particle positions otherwise i solve them jacobi style finally i launch the update velocity kernel and copy the positions on the graphics card back to the host then i define a raycast kernel to support dragging of the cloth this is the method that renders the cloth using opengl from the middle of the code down you see the implementation of the viewer it has a camera controller finally it handles all the glute callbacks and sets up opengl at the very end it calls the glute main loop this concludes the tutorial thanks for watching i hope you enjoyed it and i see you in the next tutorial
@@ -13,25 +82,6 @@ hi not just from 10 minute physics here welcome to tutorial number 16. today i w
 ### 16-GPUCloth.py
 
 ```python
-# The MIT License (MIT)
-# Copyright (c) 2022 NVIDIA
-# www.youtube.com/c/TenMinutePhysics
-# www.matthiasMueller.info/tenMinutePhysics
-
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 # control:
 

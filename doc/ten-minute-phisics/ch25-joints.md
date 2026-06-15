@@ -4,6 +4,71 @@
 **Slides:** https://matthias-research.github.io/pages/tenMinutePhysics/25-joints.pdf
 **Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/25-joints.html
 
+## Lecture Notes
+
+### Overview
+
+Joint simulation using **XPBD** (ch09, ch22). XPBD replaces large complementarity-problem solvers with simple forward formulas. Requires rigid-body simulation from ch22.
+
+**Key advantage:** unconditionally stable, simple forward execution, physically derived.
+
+---
+
+### Two Primitive Operations
+
+**ApplyLinearCorrection(p₁, p₂, Δp, α)**
+- C ← |Δp|, **n** ← Δp/|Δp|
+- wᵢ ← mᵢ⁻¹ + (**rᵢ** × **n**)ᵀ **I**ᵢ⁻¹ (**rᵢ** × **n**)
+- λ ← −C · (w₁ + w₂ + α/Δt²)⁻¹
+- **xᵢ** ← **xᵢ** ± λ**n** mᵢ⁻¹
+- **qᵢ** ← **qᵢ** ± ½λ [**I**ᵢ⁻¹(**rᵢ** × **n**), 0] **qᵢ**
+
+**ApplyAngularCorrection(Δφ, α)**
+- C ← |Δφ|, **n** ← Δφ/|Δφ|
+- wᵢ ← **n**ᵀ **I**ᵢ⁻¹ **n**
+- λ ← −C · (w₁ + w₂ + α/Δt²)⁻¹
+- **qᵢ** ← **qᵢ** ± ½λ [**I**ᵢ⁻¹**n**, 0] **qᵢ**
+
+α = 0: infinitely stiff. Compliance α = 1/stiffness for soft constraints.
+
+---
+
+### Three Building Blocks
+
+**Attach(p₁, p₂, d_rest, α):** pull two world-space points to distance d_rest.
+
+**RestrictToAxis(a, p₁, p₂, p_min, p_max, α):** remove components of (p₂ − p₁) perpendicular to axis **a**; clamp the projection to [p_min, p_max].
+
+**AlignAxes(a₁, a₂, α):** apply ApplyAngularCorrection(−**a₁** × **a₂**, α).
+
+**LimitAngle(n, a₁, a₂, φ_min, φ_max, α):** compute signed angle φ between a₁ and a₂ around **n**; if outside limits, clamp and drive a₂ to the clamped target.
+
+---
+
+### Joint Types (all built from blocks above)
+
+| Joint | Calls |
+|-------|-------|
+| **Hinge** (1 rot DOF) | Attach + AlignAxes + LimitAngle |
+| **Servo** | Hinge with φ_min = φ_max = φ_target |
+| **Velocity motor** | Servo with φ_target advancing by ω·Δt each step |
+| **Ball & socket** (3 rot DOF) | Attach + LimitAngle(swing) + LimitAngle(twist) |
+| **Prismatic** (1 trans DOF) | RestrictToAxis + AlignAxes + LimitAngle |
+| **Cylinder** | RestrictToAxis(position) + AlignAxes + LimitAngle(rotation) |
+
+---
+
+### Velocity-Level Corrections (forces, torques, damping)
+
+After the position step, apply velocity corrections:
+
+**ApplyTorque(τ):** call ApplyAngularVelocityCorrection(τ/Δt · **a**)
+
+**ApplyForce(f):** call ApplyLinearVelocityCorrection(p₁, p₂, f/Δt · **a**)
+
+**DampLinear / DampAngular:** compute relative velocity at contact point, scale by min(Δt·c, 1), apply velocity correction to remove it.
+
+
 ## Video Transcript
 
 Hi, Mus from 10-minute physics here. Today, I will talk about the core subject in VGO simulation, the simulation of joints. With this knowledge, you will be able to simulate almost any mechanical system you can think of, such as cars or robots. Many existing techniques are complex and hard to understand. I will show you a simple method that is also more robust than many existing techniques.

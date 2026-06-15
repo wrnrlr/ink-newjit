@@ -4,6 +4,66 @@
 **Slides:** https://matthias-research.github.io/pages/tenMinutePhysics/21-fire.pdf
 **Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/21-fire.html
 
+## Lecture Notes
+
+### Approach
+
+Build on the Eulerian fluid simulator (ch17). Fluid = gas (air + fire + smoke). Extends the base simulation with:
+- A temperature field T ∈ [0,1] (replaces separate fuel/smoke fields)
+- Lift forces instead of gravity
+- Swirl particles for turbulence
+
+**Temperature encoding:**
+- T ∈ [0.5, 1.0]: burning (yellow → red)
+- T ∈ [0.3, 0.5]: glowing embers / dark red
+- T ∈ [0.0, 0.3]: smoke (grey → black)
+
+---
+
+### Simulation Loop
+
+```
+1. Modify velocities (lift + swirls)
+2. Make fluid incompressible (projection)
+3. Advect velocity and temperature fields
+4. Modify temperatures (burning + cooling)
+```
+
+---
+
+### Temperature Update (each sub-step)
+
+1. Initialize T ← 1 at fire source cells
+2. Cool T: T ← max(T − r·Δt, 0) — two different cooling rates for fire and smoke
+3. Advect T with the fluid velocity field
+
+**Lift force** (hot air rises):
+
+v_target = v_lift · T
+v ← v + a · (v_target − v) · Δt
+
+Tune v_lift and acceleration a.
+
+---
+
+### Turbulence via Swirls
+
+Without perturbation, a uniform floor fire produces flat horizontal bands. Add **swirl particles** to inject turbulence:
+
+- Each swirl has position **x**, radius r, angular velocity ω, and an age
+- Spawned with some probability at fire source cells
+- Advected with the velocity field; deleted when age exceeds max
+
+**Velocity update for grid nodes near a swirl:**
+
+Let **d** = **x_grid** − **x_swirl**, d = |**d**|.
+
+u_grid ← u_grid + (u_swirl − d_y·ω − u_grid) · k(d)
+v_grid ← v_grid + (v_swirl + d_x·ω − v_grid) · k(d)
+
+Kernel k(d) = 1 for d < 0.8·r, linear to 0 at d = r.
+
+
 ## Video Transcript
 
 hi Matas from 10minute physics here Welcome To tutorial number 21 today I'm going to show you how to write a fire simulator I've never done this in my entire career so I thought let's give it a try this is my result it's not perfect but I'm quite happy with it as usually I wrote it in JavaScript so you can immediately play with it in your browser the direct link is in the description the fire simulator I will show you here is based on an oian fluid simulator it's the one that I discussed in tutorial number 17 so I highly recommend that you watch this tutorial first how to write an oian fluid simulator however I will give you a very brief recap of that method a fluid is a liquid or a gas in tutorial 17 we looked at passive fluids that are just pushed around today we look at active fluids gas that is burning in the orian fluid simulation method a fluid is represented by a velocity field stored on a grid in two Dimensions the velocity has two components u and v we're going to use a staggered Grid in this grid the two velocity components are not stored in the same location the horizontal component U is stored at the center of the vertical faces the vertical component V is stored at the center of the horizontal faces here is an overview of the oian fluid simulation method there are three steps the first step is to modify the velocity field for instance to add gravity or external forces the second step is called projection here we make sure that the fluid is incompressible the last step is the advection step here we move the velocity field as well as a smoke density field along the velocity field in the grid so the first step is a simple one for instance if we want to add the gravitational acceleration we simply go through all the cells then we add delta T * G to the vertical components V stored in the cells here delta T is the time step size and G is the gravitational acceleration which is about 9.81 m/s squared the second step is projection here we make the fluid incompressible for this we run through all the cells in the grid for each cell we compute the total outflow which is also called the Divergence this is a formula to compute this quantity in this example here the total outflow or Divergence is positive there is more fluid flowing out of the cell than into the cell so we have too much outflow in this example here the Divergence or the total outflow is negative there's too much fluid flowing into the cell only if the Divergence or the total out flow is zero then the fluid is incompressible now how can we force incompressibility in the grid here we have a grid cell with too much inflow what we could do is just modify one velocity component to make the inflow zero however a fluid cannot do that we need to push all the velocity at the same time by the same amount to get a global solution we have to iterate through all the cells multiple times we also have to consider boundary conditions for this have a look at tutorial number 17 the last step is the dection step here we want to move quantities such as the density of the Velocity components along the velocity field stored in the grid so let's assume we have a quantity Q This Could Be the density value or a velocity component if it's a density then it is stored at the center of the cells if it's a velocity component then it is stored at the center of the faing of the cells in order to compute the value of Q at the current time step T we need to know what the value was at the previous time step T minus one for this we Trace Q backwards in time we can compute the position of Q at the previous time step XT minus one by subtracting the velocity times the time step size from the current position here we assume that Q traveled in a straight line which is an approximation the location XT minus VT * delta T is not necessarily located at the center of the cell or at the center of a phase therefore to compute this value we need to compute a weighted average of the values around it here is an overview of the fire simulation method we modify the first step and add a fourth step in the first step we modify the velocity field as before but this time instead of gravity we add lift forces and turbulence in the second step we make the velocity field incompressible as before in the third step we adva the velocity and temperature Fields so instead of having a smoke density field we have a temperature field in the fourth step we modify the temperature field due to burning and cooling I simplified physics a bit in reality there are multiple Fields such as fuel temperature and a smoke field we use only one field which is a normalized temperature field it has values between one and zero for values between 1 and3 we consider the field to represent a burning gas between 3 and Zer it represents smoke the value decreases over time we use three color gradients to render it one between yellow and red one between red and gray and one between gray and black at every time step we initialize T to be one at fire sources we decrease T over time by subtracting a cooling rate times delta T and have to make sure that the temperature doesn't go below zero I use two different cooling rates for fire and smoke then we ADV T along the fluid velocity the temperature field has an influence on the velocities integrate we first compute an upwards Target velocity V Target this is V lift time t v lift is a parameter as you can see the target velocity increases with t once you have the target velocity V Target we drive the current velocity V towards this target velocity here we using acceleration a so we have two parameters to tune the lift and the acceleration a so let's assume we have a burning floor which means all the values at the bottom r one when we run the simulation we get this pattern of course this is not very interesting what we need are external influences and we need to enhance turbulence we do this by introducing swirls a swirl has a position x a radius R an angular velocity Omega and an H swirls are created with a given probability at fire Source cells then they are aded using the velocity field in the R when they reach their maximum age they are deleted let me now show you how swirls influence the velocity field integ grd let's assume that we have a swirl at position X swirl and it influences a GD velocity component at position X grid let bolt D be the vector between X swirl and X grid and D its length we can now use these two statements to update the grid velocity components at X grid the equations pull the current grid velocity components towards the swirl velocity at their locations the strength of this effect is defined by a kernel function k k depends on the distance D between the swirl Center and X grid the function yields a value between zero and one it is zero when D is larger than the SR radius I use a very simple current function it is one up to a dist of8 times the swirl radius then it decreases linearly to zero this concludes the tutorial I hope you had fun thanks for watching and I see you in the next one

@@ -4,6 +4,58 @@
 **Slides:** https://matthias-research.github.io/pages/tenMinutePhysics/11-hashing.pdf
 **Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/11-hashing.html
 
+## Lecture Notes
+
+### Problem
+
+Given n points, for each **p**ᵢ find all neighbors **p**ⱼ with |**p**ⱼ − **p**ᵢ| ≤ d.
+Special case d = 2r: find all overlapping particles of radius r.
+
+Naïve O(n²) nested loop is not viable — for 100,000 points: 10 billion tests.
+
+Algorithm complexity targets:
+- O(n): good
+- O(n log n): OK (log 100,000 ≈ 17)
+- O(n²): not an option
+
+---
+
+### Grid-Based Acceleration
+
+Store particles in a regular grid of cell size h. Choose h = 2r → only check the 9 surrounding cells (2D) or 27 (3D).
+
+**Cell index:**
+```
+xi = Math.floor(px / spacing)
+yi = Math.floor(py / spacing)
+i  = xi * numY + yi          // 2D
+i  = (xi * numY + yi) * numZ + zi   // 3D
+```
+
+**Dense grid storage** (3 steps):
+1. Count particles per cell
+2. Compute partial sums → array of start indices
+3. Fill particle ID array
+
+---
+
+### Spatial Hashing (unbounded grid)
+
+For infinite/large worlds, hash the cell coords to a fixed-size table:
+
+```javascript
+hashCoords(xi, yi, zi) {
+    var h = (xi * 92837111) ^ (yi * 689287499) ^ (zi * 283923481);
+    return Math.abs(h) % this.numCells;
+}
+```
+
+Table index: `i = hash(xi, yi, zi) % tableSize`
+
+Hash collisions are OK — they just cause a few extra distance tests.
+Best practice: `tableSize = numParticles`.
+
+
 ## Video Transcript
 
 hi malchus from 10 minute physics here welcome to tutorial number 11. today i will show you how to find neighbors among thousands of particles in a blazing fast way for this we will use spatial hashing and i will show you how to implement this very efficiently neighbor search is an essential part in the simulation of liquid gas sand or snow particles we will also use it for embedding visual meshes into volumetric meshes let's start as usual for the slides and demos have a look at my webpage at www.matiasmiller.info 10-minute physics here is the problem we're looking at given n points or particles or objects for all points p i find neighbors p j such that the distance between p i and p j is smaller or equal than d for the special case you already set d equals two r we find overlaps of particles with radius r as i mentioned before there are several use cases for instance simulating fluid sand or snow with particles of course there's a very simple solution to this we simply iterate through all the points and then for each point we again iterate through all the points in a nested loop and then we check whether the distance between the two points is smaller or equal to d if so we handle the overlap between the two particles the problem with this idea is that the complexity of this algorithm is o of n squared n being the number of points this means if we have a hundred thousand points which is common we have to perform a hundred billion tests this is of course very expensive in general for simulation an algorithm is good if it has complexity o of n this is because we have to touch every particle at every time step anyway a complexity of n log n is also okay this is the complexity of sorting for instance instead of 100 billion we only have to do 1.7 million tests however an algorithm with complexity n squared is not an option various data structures and algorithms have been proposed to reduce a complexity of n squared for instance bounding volume hierarchies or regular grids we are going to look at the solution with regular grids the idea is pretty simple we store all the particles in a regular grid and then for each particle we only have to look at closed cells to check whether some particles are overlapping particles may overlap multiple cells we store particles only where the center is located if we choose the spacing of the grid h to be 2r then we only have to check the cell of the particle itself and all direct neighbor cells in 2d we have to check 9 cells in 3d we have to check 27 cells now we have to think about how to store the greeting memory let's assume we have a grid of num x times num y cells with a given spacing the spacing is a floating point number if we have the coordinates of a point p x and p y which are floaty point numbers we can compute the integer numbers x i and y i of the cell that contains it these are the equations to do this first we flatten the grid and store one column after the other in a one-dimensional array the array has numx times non-y entries we can compute the position of a cell in the flattened array with this formula here in 3d we have three coordinates for each cell x i y i and zi to store the particles themselves we store a pointer to a linked list in each entry of the array however the memory layout of this data structure is not guaranteed to be dense we can create a dense representation which is much more efficient in terms of creation and traversal this time we store the particle indices in a separate dense array the size of this array is equal to the number of particles the particles are sorted such that the particles contained in one cell are next to each other an entry in the grid array now tells us where the first particle of this cell is located in the particle array we can compute the number of particles in the cell by looking where the next cell starts to make this work for the last cell we need an additional entry called a guard therefore the size of the grid array is num x times num y plus one what if our simulation is not contained in a bounded grid in this case we don't have the numbers num x num y and num z spatial hashing helps in this case the idea is very simple we use an array of any size to compute the position of a cell in the array we use a random function that takes as input x i and y i the coordinates of the cell and output the position in the array i using the modular operator we make sure that i lies between 0 and table size -1 however this way it can happen that different cells map to the same entry in the array like the green and the yellow cell here this is called a hash collision however in our case this is not a problem we simply get false positives meaning we will see particles that are further away they will be filtered when checking the distances however hash collisions slow down the computation due to additional checks therefore the hash function should return a value that distributes the cells evenly here is a function that i usually use obviously large hash tables produce fewer collisions and therefore fewer tests and faster running times choosing the hash table size to be equal to the number of particles works well the final question is how do we create the data structure efficiently first we initialize the table array with all zeros then we iterate through all the particles compute the hash value of the cell and increase the corresponding value in the array in this case we have two particles in the blue cell two in the yellow cell and one in the green cell next we run through this array and compute partial sums now the hash table almost has the correct values the difference is that each number points to the last cell entry plus one instead of to the first entry which is what we need for the next steps finally we run through all the particles again and fill them into the particle array the pointer to the cell of particle 1 is stored in the blue entry we first decrease it then we use the entry to put the particle index in the right position in the particle array the cell of particle 2 is stored in the yellow entry again we decrease it by 1 and use it to fill in particle 2 in the right location particle 3 lies in the green cell we first decrease the corresponding pointer and use it to fill in particle 3. particle 4 lies in the yellow cell so we first decrease the corresponding number and put particle 4 in the right location in the particles array finally particle 5 lies in the blue cell so we decrease the pointer here and put 5 in location 0. here is the final result as you can see we have over 13 000 particles in this scene when i hit run they start to move and collide against an invisible cube but they also collide against each other i can visualize these collisions here i turn the color of every particle that collides to yellow and as you can see this demo runs at about 80 milliseconds per frame on my laptop i took most of the code from previous tutorials the core of the implementation is of course the class hash in the constructor we provide the spacing of the grid and the maximal number of objects we store these values in member variables i set the table size to 2 times the maximal number of objects you can play with this number here and see the effect on the performance i call the hash array cell start and the object array cell entries this is because cell start tells us where in the cell entries array the objects of the cell are stored the method hash quartz is the hash function i showed in the slides int chord computes the coordinate of a cell that contains the object with a given coordinate chord these methods are used in the method hash pass it takes as inputs the position of an object and returns the index of the containing cell in the hash table the create method creates the hash given the positions of all the objects first we set the entries of cell start and cell entries to zero then we run through all the objects compute the index of the surrounding cell using the hash function and increase the corresponding entry by one next we compute the partial sums finally we fill in the objects as i explained in the slides the query function shows how to retrieve objects from the hash we provide the position of an object and the maximal distance the query function is general because we can choose a max distance that is larger than degree spacing this is why we have to query a block of cells we iterate through all the cells in the block here the cell start array tells us where in the cell entries array the objects are that are contained in the current cell we then store all the objects in the current cell in the query ids array the balls class stores and simulates a set of balls it's pretty easy to understand if you have watched my previous tutorials here is the simulation method note that we can recreate the hash at every time step because the creation method is so fast therefore we don't need any complicated update operations in the interval collision section we query the hash for every particle as you can see my query distance is 2 times the ball's radius when running through the query array returned by the hash function i have to check whether the balls are actually overlapping this concludes this tutorial thanks for watching and i'll see you in the next one

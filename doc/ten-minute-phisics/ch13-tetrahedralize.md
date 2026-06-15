@@ -4,6 +4,63 @@
 **Slides:** https://matthias-research.github.io/pages/tenMinutePhysics/13-Tetrahedralize.pdf
 **Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/BlenderTetPlugin.py
 
+## Lecture Notes
+
+### Goal
+
+Convert a triangle surface mesh into a tetrahedral volume mesh for soft-body simulation using the **Incremental Delaunay** method.
+
+---
+
+### Delaunay Condition
+
+A mesh is a **Delaunay mesh** if the circumsphere (3D) / circumcircle (2D) of every tetrahedron contains only its four corner points — no other points lie inside.
+
+- Good meshes: each circumcircle fits tight around its triangle
+- Bad meshes: another point falls inside a circumcircle
+
+---
+
+### Incremental Tetrahedralization Algorithm
+
+1. Start with 4 temporary points forming a big bounding tetrahedron
+2. For each input vertex:
+   - Find the containing tetrahedron (ray-walk from last result)
+   - Flood-fill neighbors to find all tetrahedra whose circumsphere contains the new point (**Delaunay condition violated**)
+   - Remove those tetrahedra
+   - Fill the void with a tetrahedral fan centred at the new point
+
+---
+
+### Finding the Containing Tetrahedron (fast)
+
+- Start from any tetrahedron (or the result for the previous point)
+- Create a ray from the tet's centre to the new point
+- Find which face the ray crosses → jump to the adjacent tet
+- Repeat until the new point is inside
+
+Then flood-fill outward checking the Delaunay condition.
+
+---
+
+### Two Problems with the Raw Result
+
+1. **Too many tetrahedra** — the Delaunay mesh fills the bounding box, not the object
+   - Fix: remove tets whose centroid lies **outside** the input mesh
+
+2. **Non-conforming surface** — tet faces don't match the input triangles
+   - This is a hard problem (large body of work); skip for now
+   - Workaround: keep original triangle indices for collision handling; visual mesh embedding (ch12) still works correctly
+
+---
+
+### Inside Test
+
+For each tet centroid **p**, cast a ray **r** in a canonical direction, find the closest intersection with the triangle surface (via BVH), check **r** · **n** > 0 (ray and surface normal point the same way → inside).
+
+For robustness: test all 6 canonical directions (±x, ±y, ±z) and take the majority vote.
+
+
 ## Video Transcript
 
 hi not just from 10 minute physics here welcome to tutorial number 13. many of you have asked how i create my tetrahedral meshes so today i'm going to show you how to write a tetrahedralizer we will do it as a blender plugin and as far as i know there are no tetrahedralizers for blend react so i hope it will be useful let's start as usual for the slides and demos have a look at my web page at www dot multismoother.infoslash 10 minute physics since the attention span on youtube is only about two minutes let me first show the result so here we are in blender i first delete the default cube and then add the blender monkey here it is let me move it a little bit to the side first now in order to use the plugin go to edit preferences add-ons click install and select the python implementation of the tetrahedralizer the plugin adds a new entry to add mesh add tetrahydrolyzation when you click it you immediately get the tetrahedral mesh for the surface mesh it looks a little bit strange the reason is that i create one non-planar quad phase for each tetrahedron this doesn't look very natural but it's perfect for exporting you can simply interpret every quad phase as a tetrahedron there are a bunch of parameters here that you can choose from one is to use more than one phase per tetrahedron this is not well suited for exporting but it gives you a very good impression of how the tetrahedral mesh looks like there are a few other parameters that you can tweak for instance you can create interior vertices on a regular grid here you can choose the resolution of this grid you can also specify a mint ted quality all tetrahedra below this quality are simply deleted now i will show you how the algorithm that i used in the plugin works we will use the incremental delivery method it works for triangulation as well as for tetrisation since it is easier to visualize triangles i will show triangles in the slides but i will talk about tetrahedra first i have to show you what the dilunade mesh is in the dillon mesh the circumsphere of any tetrahedron only contains the four adjacent points this mesh is the lunae this mesh is not because the circumsphere of this tetrahedron contains these two additional points let's now have a look at incremental tetrahedralization algorithm the input are the vertices of the surface mesh first we start with four temporary points forming one big tetrahedron containing all input points then we add the first point next we delete all the tetrahedra that violates the dna condition in our case we only have one tetrahedron and it contains the new point therefore we delete it next we fill the voids that we just created with a tetrahedral fan centered at the new point later in the process our mesh might look like this we delete all the tetrahedra that violates the delaney condition then we fill the void with a tetrahedral fan centered at the new point this is the mesh we get when we start with the surface of a dock there are two main problems here the first one is that we have too many tetrahedra this is easy to solve we simply remove the tetrahedra whose centralized outside of the input mesh the second problem is a little bit trickier there might be tetrahedra that do not match the input surface we also say that the tetrahedral mesh is non-conforming this is a very difficult problem and there's a large body of work about it for our purposes we use a very simple solution along with the tetrahedral indices we also keep the indices of the input mesh then we can use the input mesh for collision handling as we saw in the last tutorial visual mesh embedding still works even if some vertices of the high resolution visual mesh are not contained in any tetrahedron now i'll show you a fast implementation of this method an important part of the algorithm is to find all violating tetrahedra after inserting a new point of course we could just check all the tetrahedra but this will deal an algorithm with complexity of n squared fortunately there is a much faster way to do this we start at the blue tetrahedron in the first step we choose it randomly later we use the tetrahedron we found for the previous point then we create array from the tetrahedral center to the new point we find the intersecting phase and we move across this phase to the adjacent tetrahedron if we repeat this process we end up at the containing tetrahedron often consecutive points are close to each other so we typically only have to check one or two tetrahedra now we have to find all the tetrahedra that violates the stellar condition it can be shown that they are all connected directly or indirectly to the tetrahedron that contains the new point therefore we can use a flot fill to find them at the end of the algorithm we want to delete all the tetrahedra whose center is outside of the surface mesh for this we need a fast inside outside test for points to check whether a point p is inside the surface we create a ray originating at p with a random direction r we then find the closest intersection point and normal of the ray with the surface mesh and to speed this up we use a bounding volume hierarchy of the input triangles if the ray intersects the surface and the surface normal at the intersection point points into the direction of r we know that the point p is inside the surface we can make this algorithm more robust by checking more rays and use a majority vote now let's have a look at the python implementation here you see the implementation of the plugin in python it's about 600 lines of code so i won't go into the details i will just scroll quickly through it this is the procedure to check whether a point is inside a mesh as input we have the bounding volume hierarchy of the triangles of the surface mesh we then shoot six rays in all canonical directions the raycast method of blender tells us whether our a intersects any of the surface triangles if the ray hits any triangle we check the surface normal at the intersection point and see whether it points in the same direction as the ray if so we increment the number of votes if more than three of the six rays say the point is inside then we return true here is a function to compute at the center of the circumsphere of a tetrahedron this function measures the quality of a tetrahedron the quality is a value between 0 and 1 where 1 is the value for a perfect tetrahedron here we created actual tetrahedral indices we start with the first big tetrahedron and then we run through all the input points we first search for the containing tetrahedron then we run a flood fill from that tetrahedron outwards to find all the biology tetrahedra then we remove them and finally we add a tetrahedral fan centered at the new point finally we remove all the tetrahedra that we don't want in the result here we check for the quality of the tetrahedron and here we compute the center and check whether the center is inside of the surface mesh if not we don't copy the tetrahedron i hope you enjoyed the tutorial thanks for watching and i will see you in the next one

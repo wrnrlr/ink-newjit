@@ -4,6 +4,87 @@
 **Slides:** https://matthias-research.github.io/pages/tenMinutePhysics/19-ODE.pdf
 **Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/19-julia.html
 
+## Lecture Notes
+
+### Core Idea
+
+Physics is about *change*. Forces change velocities; velocities describe the change of positions. **Differential equations** — equations with functions and their derivatives as unknowns — are required to describe this mathematically. They are the foundation of all physics simulation.
+
+---
+
+### Notation
+
+| Symbol | Meaning |
+|--------|---------|
+| s(t) | position at time t |
+| ṡ(t) = s'(t) | first derivative — velocity |
+| s̈(t) = s''(t) | second derivative — acceleration |
+| Δx = x_after − x_before | difference |
+
+Rate of change: Δs/Δt (slope of the s-t graph). For non-constant rates:
+
+f'(x) = lim_{Δx→0} [f(x + Δx) − f(x)] / Δx   (the derivative)
+
+---
+
+### Four Canonical ODEs
+
+**Rabbit equation** (exponential growth): Ṅ(t) = k · N(t)
+
+Solution: N(t) = N₀ · e^{k(t−t₀)}
+
+**Coffee equation** (exponential decay): Ṫ(t) = −k · T(t)
+
+Solution: T(t) = T₀ · e^{−k(t−t₀)}
+
+**Soccer ball** (constant acceleration): ḧ(t) = −g
+
+Solution: h(t) = h₀ + v₀t − ½gt²
+
+**Spring equation**: ẍ(t) = −(k/m) · x(t)
+
+Solution: x(t) = a · sin(√(k/m)·t) + b · cos(√(k/m)·t)
+
+---
+
+### Calculus Rules (derived from the limit definition)
+
+- Constant: f(x) = a → f'(x) = 0
+- Identity: f(x) = x → f'(x) = 1
+- **Power rule**: f(x) = xⁿ → f'(x) = n · xⁿ⁻¹
+- **Constant multiple**: (a·g)' = a·g'
+- **Sum rule**: (f₁ + f₂)' = f₁' + f₂'
+- **Polynomial**: (a₀ + a₁x + a₂x² + …)' = a₁ + 2a₂x + 3a₃x² + …
+
+---
+
+### The Exponential e and Euler's Formula
+
+e is defined so that (eˣ)' = eˣ:
+
+e = lim_{n→∞} (1 + 1/n)ⁿ ≈ 2.71828…
+
+Maclaurin series: eˣ = Σ_{n=0}^∞ xⁿ/n!
+
+Generalization: (e^{ax})' = a · e^{ax}
+
+For the spring equation, plugging x(t) = e^{it} reveals that we need the imaginary number **i = √(−1)**. Expanding e^{ix} via the Maclaurin series and using i² = −1, i³ = −i, i⁴ = 1, … gives:
+
+**Euler's formula**: e^{ix} = cos(x) + i · sin(x)
+
+This explains why the spring equation has sinusoidal solutions.
+
+---
+
+### Taylor / Maclaurin Series
+
+Any analytic function can be recovered from its derivatives at zero:
+
+a_n = f^{(n)}(0) / n!    →    f(x) = Σ_{n=0}^∞ [f^{(n)}(0)/n!] · xⁿ
+
+**Bonus — Julia and Mandelbrot sets**: iterating z_{i+1} = z_i² + c in the complex plane produces fractal boundaries. The filled set (bounded orbits) is the Julia set for fixed c; varying c gives the Mandelbrot set.
+
+
 ## Video Transcript
 
 Hi, Marcus from 10 Minute Physics here. Welcome to this new tutorial. I'm very excited about this tutorial because it gives me the opportunity to show you the beauty and elegance of math. I had the idea for this tutorial many years ago, but now finally created it. The idea is to start with basic algebra and then derive in one train of thought, not just calculus, but also differential equations and the mathematical constants e, i, and pi.
