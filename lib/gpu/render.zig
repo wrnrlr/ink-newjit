@@ -8,6 +8,17 @@ pub const Vertex = extern struct {
   x: f32, y: f32, u: f32, v: f32,
 };
 
+pub const MeshVertex = extern struct {
+  x: f32, y: f32, z: f32,
+  nx: f32, ny: f32, nz: f32,
+};
+
+pub const MeshCall = struct {
+  offset: usize,
+  count: usize,
+  pipeline_idx: usize,
+};
+
 pub const ViewUniforms = extern struct {
   viewSize: [2]f32,
   _pad: [2]f32 = .{ 0, 0 },
@@ -66,6 +77,11 @@ pub const Renderer = struct {
   draw_calls: ArrayList(DrawCall),
   custom_pipelines: ArrayList(wgpu.RenderPipeline),
   spirv_pipelines: ArrayList(wgpu.RenderPipeline),
+  // 3-D mesh rendering
+  mesh_vertex_buffer: wgpu.Buffer,
+  mesh_verts: ArrayList(MeshVertex),
+  mesh_calls: ArrayList(MeshCall),
+  mesh_pipelines: ArrayList(wgpu.RenderPipeline),
 
   pub fn init(
     allocator: Alloc,
@@ -86,6 +102,15 @@ pub const Renderer = struct {
       .draw_calls = try ArrayList(DrawCall).initCapacity(allocator, 64),
       .custom_pipelines = try ArrayList(wgpu.RenderPipeline).initCapacity(allocator, 4),
       .spirv_pipelines = try ArrayList(wgpu.RenderPipeline).initCapacity(allocator, 4),
+      .mesh_verts = try ArrayList(MeshVertex).initCapacity(allocator, 4096),
+      .mesh_calls = try ArrayList(MeshCall).initCapacity(allocator, 16),
+      .mesh_pipelines = try ArrayList(wgpu.RenderPipeline).initCapacity(allocator, 4),
+      .mesh_vertex_buffer = device.createBuffer(.{
+        .label = "mesh vertex buffer",
+        .usage = .{ .vertex = true, .copy_dst = true },
+        .size = 500_000 * @sizeOf(MeshVertex),
+        .mapped_at_creation = .false,
+      }),
       .view_buffer = device.createBuffer(.{
         .label = "view uniform buffer",
         .usage = .{ .uniform = true, .copy_dst = true },
@@ -131,6 +156,11 @@ pub const Renderer = struct {
     self.custom_pipelines.deinit(self.allocator);
     for (self.spirv_pipelines.items) |p| p.release();
     self.spirv_pipelines.deinit(self.allocator);
+    for (self.mesh_pipelines.items) |p| p.release();
+    self.mesh_pipelines.deinit(self.allocator);
+    self.mesh_vertex_buffer.release();
+    self.mesh_calls.deinit(self.allocator);
+    self.mesh_verts.deinit(self.allocator);
     self.draw_calls.deinit(self.allocator);
     self.verts.deinit(self.allocator);
     self.allocator.destroy(self);
@@ -208,6 +238,61 @@ pub const Renderer = struct {
       }
       pass.setBindGroup(0, bind_group, null);
       pass.draw(@intCast(dc.count), 1, @intCast(dc.offset), 0);
+    }
+  }
+
+  // Queue a 3-D mesh draw call (stride-6 vertices [x y z nx ny nz]).
+  pub fn drawMesh(self: *Renderer, verts: []const MeshVertex, pipeline_idx: usize) !void {
+    const offset = self.mesh_verts.items.len;
+    try self.mesh_verts.appendSlice(self.allocator, verts);
+    try self.mesh_calls.append(self.allocator, .{
+      .offset = offset, .count = verts.len, .pipeline_idx = pipeline_idx,
+    });
+  }
+
+  // Submit all mesh draw calls in a new render pass that loads the existing colour
+  // layer and adds depth-tested geometry on top.
+  pub fn flushMeshes(
+    self: *Renderer,
+    encoder: wgpu.CommandEncoder,
+    color_view: wgpu.TextureView,
+    depth_view: wgpu.TextureView,
+  ) !void {
+    defer {
+      self.mesh_calls.clearRetainingCapacity();
+      self.mesh_verts.clearRetainingCapacity();
+    }
+    if (self.mesh_verts.items.len == 0) return;
+
+    const verts = self.mesh_verts.items;
+    const write_count = @min(verts.len, 500_000);
+    self.queue.writeBuffer(self.mesh_vertex_buffer, 0, MeshVertex, verts[0..write_count]);
+
+    const depth_att = wgpu.RenderPassDepthStencilAttachment{
+      .view             = depth_view,
+      .depth_load_op    = .clear,
+      .depth_store_op   = .store,
+      .depth_clear_value = 1.0,
+      .depth_read_only  = .false,
+      .stencil_read_only = .true,
+    };
+    const pass = encoder.beginRenderPass(.{
+      .color_attachment_count = 1,
+      .color_attachments = &[_]wgpu.RenderPassColorAttachment{.{
+        .view     = color_view,
+        .load_op  = .load,
+        .store_op = .store,
+      }},
+      .depth_stencil_attachment = &depth_att,
+    });
+    defer pass.end();
+    defer pass.release();
+
+    pass.setVertexBuffer(0, self.mesh_vertex_buffer, 0, write_count * @sizeOf(MeshVertex));
+    for (self.mesh_calls.items) |mc| {
+      if (mc.pipeline_idx >= self.mesh_pipelines.items.len) continue;
+      pass.setPipeline(self.mesh_pipelines.items[mc.pipeline_idx]);
+      pass.draw(@intCast(mc.count), 1, @intCast(mc.offset), 0);
     }
   }
 

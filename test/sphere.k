@@ -52,10 +52,15 @@ phongFrag: FragmentShader[`nor`out!`v3`v4; {[nor]
   col: (base[0]*(amb+diff)+hi; base[1]*(amb+diff)+hi; base[2]*(amb+diff)+hi; 1.0)
   col}]
 
-/ Vertex shader: pass-through (no MVP yet — icosahedron is already in NDC range).
+/ Vertex shader: remap z from [-1,1] to WebGPU depth range [0,1].
 phongVtx: VertexShader[`pos`nor!`v3`v3; (,`vNor)!(,`v3); {[pos;nor]
-  clipPos: (pos[0]; pos[1]; pos[2]; 1.0)
+  clipPos: (pos[0]; pos[1]; pos[2]*0.5+0.5; 1.0)
   (clipPos; nor)}]
 
-`0 0: $#phongVtx
-`0 0: $#phongFrag
+/ Render loop
+meshHandle:: 0
+loop: {[props]
+  $[meshHandle=0; meshHandle:: CompileMesh[phongVtx; phongFrag]; 0]
+  DrawMesh[icoMesh; meshHandle]}
+
+RunWindow[loop; 0]

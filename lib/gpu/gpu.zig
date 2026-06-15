@@ -248,6 +248,15 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   const renderer = Renderer.init(alloc, gctx.device, gctx.queue, pipeline, bgl, 2_000_000) catch return ki(-1);
   defer renderer.deinit();
 
+  // Depth texture: created/resized lazily each time the framebuffer size changes.
+  var depth_tex_opt: ?wgpu.Texture = null;
+  var depth_view_opt: ?wgpu.TextureView = null;
+  var depth_fb: [2]u32 = .{ 0, 0 };
+  defer {
+    if (depth_view_opt) |dv| dv.release();
+    if (depth_tex_opt) |dt| dt.release();
+  }
+
   const start_time = zglfw.getTime();
 
   while (!zglfw.windowShouldClose(window)) {
@@ -255,6 +264,21 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
 
     const fb = getFramebufferSize(window);
     if (fb[0] == 0 or fb[1] == 0) { zgpu.wgpuDeviceTick(); continue; }
+
+    // Recreate depth texture whenever framebuffer size changes.
+    if (fb[0] != depth_fb[0] or fb[1] != depth_fb[1]) {
+      if (depth_view_opt) |dv| dv.release();
+      if (depth_tex_opt) |dt| dt.release();
+      const dt = gctx.device.createTexture(.{
+        .label = "depth",
+        .usage = .{ .render_attachment = true },
+        .size  = .{ .width = fb[0], .height = fb[1], .depth_or_array_layers = 1 },
+        .format = .depth24_plus,
+      });
+      depth_tex_opt = dt;
+      depth_view_opt = dt.createView(.{});
+      depth_fb = fb;
+    }
 
     const fw: f32 = @floatFromInt(fb[0]);
     const fh: f32 = @floatFromInt(fb[1]);
@@ -302,6 +326,11 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
 
     renderer.flush(pass, fw, fh, t) catch {};
     pass.release();
+
+    // 3-D mesh pass — runs after the 2-D layer, loads colour, adds depth.
+    if (depth_view_opt) |depth_view| {
+      renderer.flushMeshes(encoder, swapchain_view, depth_view) catch {};
+    }
 
     const cmd = encoder.finish(.{});
     defer cmd.release();
@@ -541,6 +570,100 @@ export fn gpuCompute(words_k: ?K, input_k: ?K) callconv(.c) ?K {
     staging_buf.unmap();
 
     return result_k;
+}
+
+// ── gpuMesh ───────────────────────────────────────────────────────────────────
+//
+// vtx_k: int list — SPIR-V vertex shader binary (output of VertexShader in spirv.k)
+// frg_k: int list — SPIR-V fragment shader binary (output of FragmentShader in spirv.k)
+// Returns a non-negative handle for use with gpuDrawMesh.
+// Must be called inside the gpuRun frame callback.
+
+export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
+    const r = g_renderer orelse return ki(0);
+    const vp = kip(vtx_k) orelse return ki(0);
+    const vn = kn(vtx_k);
+    if (vn < 5) return ki(0);
+    const fp = kip(frg_k) orelse return ki(0);
+    const fn_ = kn(frg_k);
+    if (fn_ < 5) return ki(0);
+
+    const vtx_words: [*]const u32 = @ptrCast(@alignCast(vp));
+    const frg_words: [*]const u32 = @ptrCast(@alignCast(fp));
+
+    const spirv_v = ShaderModuleSPIRVDescriptor{
+        .chain = .{ .next = null, .struct_type = .shader_module_spirv_descriptor },
+        .code_size = @intCast(vn), .code = vtx_words,
+    };
+    const vtx_mod = r.device.createShaderModule(.{ .next_in_chain = @ptrCast(&spirv_v) });
+    defer vtx_mod.release();
+
+    const spirv_f = ShaderModuleSPIRVDescriptor{
+        .chain = .{ .next = null, .struct_type = .shader_module_spirv_descriptor },
+        .code_size = @intCast(fn_), .code = frg_words,
+    };
+    const frg_mod = r.device.createShaderModule(.{ .next_in_chain = @ptrCast(&spirv_f) });
+    defer frg_mod.release();
+
+    const vtx_attrs = [_]wgpu.VertexAttribute{
+        .{ .format = .float32x3, .offset = 0,  .shader_location = 0 },
+        .{ .format = .float32x3, .offset = 12, .shader_location = 1 },
+    };
+    const vtx_bufs = [_]wgpu.VertexBufferLayout{.{
+        .array_stride = @sizeOf(render.MeshVertex),
+        .attribute_count = vtx_attrs.len, .attributes = &vtx_attrs,
+    }};
+    const color_targets = [_]wgpu.ColorTargetState{.{
+        .format     = zgpu.GraphicsContext.swapchain_format,
+        .write_mask = wgpu.ColorWriteMask.all,
+        .blend = &wgpu.BlendState{
+            .color = .{ .operation = .add, .src_factor = .src_alpha, .dst_factor = .one_minus_src_alpha },
+            .alpha = .{ .operation = .add, .src_factor = .one,       .dst_factor = .one_minus_src_alpha },
+        },
+    }};
+    const depth_state = wgpu.DepthStencilState{
+        .format              = .depth24_plus,
+        .depth_write_enabled = true,
+        .depth_compare       = .less,
+    };
+    // No uniforms in the mesh shaders — empty pipeline layout.
+    const layout = r.device.createPipelineLayout(.{
+        .bind_group_layout_count = 0,
+        .bind_group_layouts = &[_]wgpu.BindGroupLayout{},
+    });
+    defer layout.release();
+
+    const pipeline = r.device.createRenderPipeline(.{
+        .layout  = layout,
+        .vertex  = .{ .module = vtx_mod, .entry_point = "main",
+                      .buffer_count = vtx_bufs.len, .buffers = &vtx_bufs },
+        .primitive    = .{ .topology = .triangle_list, .cull_mode = .none },
+        .depth_stencil = &depth_state,
+        .fragment = &wgpu.FragmentState{
+            .module = frg_mod, .entry_point = "main",
+            .target_count = color_targets.len, .targets = &color_targets,
+        },
+    });
+    r.mesh_pipelines.append(r.allocator, pipeline) catch return ki(0);
+    return ki(@intCast(r.mesh_pipelines.items.len - 1));
+}
+
+// ── gpuDrawMesh ───────────────────────────────────────────────────────────────
+//
+// verts_k: flat f32 array [x,y,z,nx,ny,nz,...] — stride 6, multiple of 6
+// handle_k: int scalar — handle returned by gpuMesh
+
+export fn gpuDrawMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
+    const r = g_renderer orelse return ki(0);
+    const vf = kfp(verts_k) orelse return ki(0);
+    const vn = kn(verts_k);
+    const handle = ki_val(handle_k);
+    if (handle < 0 or vn < 6) return ki(0);
+
+    const n_verts: usize = @intCast(@divTrunc(vn, 6));
+    const verts_slice = @as([*]const render.MeshVertex, @ptrCast(@alignCast(vf)))[0..n_verts];
+    r.drawMesh(verts_slice, @intCast(handle)) catch {};
+    return ki(0);
 }
 
 // ── gpuWgsl ───────────────────────────────────────────────────────────────────
