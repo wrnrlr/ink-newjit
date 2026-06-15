@@ -59,7 +59,7 @@ pub fn build(b: *std.Build) !void {
   });
 
   const gpu_ext_mod = b.createModule(.{
-    .root_source_file = b.path("lib/gpu/src/main.zig"),
+    .root_source_file = b.path("lib/gpu/gpu.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
   gpu_ext_mod.addImport("zgpu",       zgpu_dep.module("root"));

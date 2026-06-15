@@ -37,4 +37,4 @@ phongFrag: FragmentShader[`nor`out!`v3`v4; {[nor]
 
 / TODO: VertexShader and DrawMesh once vertex stage is supported.
 / For now, print the compiled fragment SPIR-V word count as a sanity check.
-`0: #phongFrag
+`0 0: $#phongFrag

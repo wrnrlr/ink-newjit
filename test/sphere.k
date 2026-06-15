@@ -38,7 +38,8 @@ icoFaces: (
   7 11  1; 11  5  9;  5  1  4;  9  4  8;  2  7  5)
 
 / Build flat [x y z nx ny nz ...] vertex array (position = normal for unit sphere).
-icoMesh: {[] ,/ {[f] r: icoVerts[f[0]],icoVerts[f[1]],icoVerts[f[2]]; ,/(r[0],r[0];r[1],r[1];r[2],r[2])}' icoFaces}[]
+/ icoVerts is flat [x0 y0 z0 x1 y1 z1 ...] — extract 3 floats per vertex with (3*i)+!3.
+icoMesh: ,/ {[f] v0:icoVerts[(3*f[0])+!3]; v1:icoVerts[(3*f[1])+!3]; v2:icoVerts[(3*f[2])+!3]; (v0,v0),(v1,v1),(v2,v2)}' icoFaces
 
 / Phong fragment shader — same as planes.k, normals from vertex stage.
 phongFrag: FragmentShader[`nor`out!`v3`v4; {[nor]
@@ -52,4 +53,4 @@ phongFrag: FragmentShader[`nor`out!`v3`v4; {[nor]
   col}]
 
 / TODO: VertexShader + DrawMesh once vertex stage is supported.
-`0: #phongFrag
+`0 0: $#phongFrag
