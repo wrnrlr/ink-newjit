@@ -31,11 +31,7 @@ phongFrag: FragmentShader[`nor`out!`v3`v4; {[nor]
 / pass world-space normal through unchanged for lighting.
 / WebGPU depth: z=0 is near, z=1 is far; negate z so front face wins depth test.
 phongVtx: VertexShader[`pos`nor!`v3`v3; (,`vNor)!(,`v3); {[pos;nor]
-  c45: 0.7071
-  s45: 0.7071
-  c30: 0.8660
-  s30: 0.5
-  sc: 0.5
+  c45: 0.7071; s45: 0.7071; c30: 0.8165; s30: 0.5774; sc: 0.5;
   py0: (c45*pos[0])+(s45*pos[2])
   py1: pos[1]
   py2: (0.0-s45*pos[0])+(c45*pos[2])
