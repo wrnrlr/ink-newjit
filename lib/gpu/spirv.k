@@ -414,6 +414,21 @@ compCompute: {[fn]
 
   ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
 
+/ ── Vertex shader stencils ────────────────────────────────────────────────────
+opAccChain1: {[t;r;base;i] (0x00050041;t;r;base;i)}  / OpAccessChain single index
+varOutOne:   {[ptr;vid]    (0x0004003B;ptr;vid;3)}    / OpVariable Output storage class
+
+/ Helper: run stmts as binds building up env; return extended env (not last value).
+/ Mirrors compSeqTail but returns env instead of the last compiled result.
+compSeqEnvTail: {[stmts; env]
+  s:   stmts[0]
+  isb: (s[0]~`bind) & (3=#s)
+  e2:  $[isb; ((!env),s[1][2])!(env[!env],(,compNode[s[2];env;`v4])); env]
+  compSeqEnv[1_stmts; e2]}
+
+compSeqEnv: {[stmts; env]
+  $[0=#stmts; env; compSeqEnvTail[stmts; env]]}
+
 / ── Layer 1+2: public shader compiler ───────────────────────────────────────
 / FragmentShader[ioTypes; fn] → SPIR-V word list (int list)
 / ioTypes: dict of arg_name→type_sym, plus `out for the output type
@@ -450,3 +465,93 @@ FragmentShader: {[ioTypes; fn]
 
   locs: !#argNames
   buildMod[outId; inVarIds; inTys; inPtrs; outPtr; locs]}
+
+/ ── VertexShader[inTypes; varyTypes; fn] → SPIR-V word list ─────────────────
+/ inTypes:   dict argName→typeSym  (vertex attribute inputs, e.g. `pos`nor!`v3`v3)
+/ varyTypes: dict name→typeSym     (interpolated varyings; use ()!() for none)
+/ fn:        lambda returning (glPos_v4; vary0; ...) or just glPos_v4 if no varyings
+/
+/ gl_Position is always the first return element; emitted via the gl_PerVertex
+/ Block struct (required by Vulkan/SPIR-V spec).  Varyings get Location 0,1,...
+/ and must match the FragmentShader's input Location assignments.
+VertexShader: {[inTypes; varyTypes; fn]
+  Nid::Nfixed; Buf::(); Con::()
+
+  lam:      last parse $fn
+  argsNode: lam[1]
+  argNames: argsNode@&~argsNode in `args`div
+
+  inTySyms: inTypes' argNames
+  inPtrs:   PtrIn'   inTySyms
+  inVarIds: {[x] newId[]}' argNames
+
+  loadedPairs: inVarIds loadOnePair' inTySyms
+  env:         argNames!loadedPairs
+
+  / gl_PerVertex block types and variable (Position must live in a Block struct)
+  TperVtx:   newId[]   / OpTypeStruct { vec4 }
+  PperVtx:   newId[]   / OpTypePointer Output TperVtx
+  perVtxVar: newId[]   / the output block variable
+  Kzero:     newId[]   / i32 constant 0 for struct member access
+  emitCon opConst[Ti32; Kzero; 0]
+
+  / Varying outputs
+  varyNames:  !varyTypes
+  varyTySyms: varyTypes' varyNames
+  varyPtrs:   PtrOut' varyTySyms
+  varyVarIds: {[x] newId[]}' varyNames
+  nVary:      #varyVarIds
+
+  / Compile body stmts (all but last) to build env, then handle return tuple
+  bodySeq:  lam[2]
+  stmts:    bodySeq@&~bodySeq in `seq`div
+  env2:     compSeqEnv[-1_stmts; env]
+  lastStmt: last stmts
+
+  / If varyings exist the last stmt is a list node; else it's the glPos expression
+  outElems: $[(nVary>0) & (lastStmt[0]~`list); lastStmt[1]@&~lastStmt[1] in `seq`div; ,lastStmt]
+
+  / Compile and store gl_Position through the Block struct member pointer
+  glPosVal:       compNode[outElems[0]; env2; `v4]
+  glPosMemberPtr: newId[]
+  emitBuf opAccChain1[PoutV4; glPosMemberPtr; perVtxVar; Kzero]
+  emitBuf opStore[glPosMemberPtr; glPosVal[0]]
+
+  / Compile and store varyings (up to 3)
+  rp0: $[nVary>0; compNode[outElems[1]; env2; varyTySyms[0]]; (0;`f32)]
+  $[nVary>0; emitBuf opStore[varyVarIds[0]; rp0[0]]; 0]
+  rp1: $[nVary>1; compNode[outElems[2]; env2; varyTySyms[1]]; (0;`f32)]
+  $[nVary>1; emitBuf opStore[varyVarIds[1]; rp1[0]]; 0]
+  rp2: $[nVary>2; compNode[outElems[3]; env2; varyTySyms[2]]; (0;`f32)]
+  $[nVary>2; emitBuf opStore[varyVarIds[2]; rp2[0]]; 0]
+
+  / Assemble SPIR-V module
+  bnd:   Nid+1
+  iface: inVarIds,(,perVtxVar),varyVarIds
+
+  hdr: (0x07230203; 0x00010300; 0; bnd; 0)
+  cap: (0x00020011; 1)
+  ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
+  mem: (0x0003000E; 0; 1)
+  ep:  (0x000F+(0x10000*(5+#iface)); 0; Fmain; 0x6E69616D; 0), iface
+
+  decIn:   ,/ inVarIds decInOne' !#inVarIds
+  decBlk:  (0x00030047; TperVtx; 2)
+  decPos:  (0x00050048; TperVtx; 0; 11; 0)
+  decVary: $[nVary>0; ,/ varyVarIds decInOne' !nVary; !0]
+
+  types:    (0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid;0x00040020;PinF32;1;Tf32;0x00040020;PoutF32;3;Tf32;0x00040020;PinV4;1;Tv4;0x00040020;PoutV4;3;Tv4;0x00040020;PinV2;1;Tv2;0x00040020;PoutV2;3;Tv2;0x00040020;PinV3;1;Tv3;0x00040020;PoutV3;3;Tv3)
+  vtxTypes: (0x0003001E;TperVtx;Tv4;0x00040020;PperVtx;3;TperVtx)
+
+  varIn:     ,/ inPtrs varInOne' inVarIds
+  varPerVtx: (0x0004003B; PperVtx; perVtxVar; 3)
+  varVary:   $[nVary>0; ,/ varyPtrs varOutOne' varyVarIds; !0]
+
+  label: newId[]
+  fn:  (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
+  ret: (0x000100FD; 0x00010038)
+
+  conWds: $[#Con; ,/Con; !0]
+  bodWds: $[#Buf; ,/Buf; !0]
+
+  ,/(hdr;cap;ext;mem;ep;decIn;decBlk;decPos;decVary;types;vtxTypes;varIn;varPerVtx;varVary;conWds;fn;bodWds;ret)}

@@ -35,6 +35,10 @@ phongFrag: FragmentShader[`nor`out!`v3`v4; {[nor]
   diff: smoothstep[0.0; 0.1; dot[nor; ld]]
   (amb+diff; amb+diff; amb+diff; 1.0)}]
 
-/ TODO: VertexShader and DrawMesh once vertex stage is supported.
-/ For now, print the compiled fragment SPIR-V word count as a sanity check.
+/ Vertex shader: pass-through (no MVP yet — geometry is in NDC range).
+phongVtx: VertexShader[`pos`nor!`v3`v3; (,`vNor)!(,`v3); {[pos;nor]
+  clipPos: (pos[0]; pos[1]; pos[2]; 1.0)
+  (clipPos; nor)}]
+
+`0 0: $#phongVtx
 `0 0: $#phongFrag
