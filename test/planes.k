@@ -16,14 +16,15 @@
 / Corners are ±t1 ± t2, each vertex = [px py pz nx ny nz].
 / Returns 36-element float list (6 vertices × 6 floats, two triangles).
 mkPlane: {[n]
-  t1x:n[1]; t1y:n[2]; t1z:n[0]
-  t2x:n[2]; t2y:n[0]; t2z:n[1]
+  t1x:n 1; t1y:n 2; t1z:n 0
+  t2x:n 2; t2y:n 0; t2z:n 1
   p0: (t1x+t2x; t1y+t2y; t1z+t2z)
-  p1: ((0.0-t1x)+t2x; (0.0-t1y)+t2y; (0.0-t1z)+t2z)
-  p2: ((0.0-t1x)+(0.0-t2x); (0.0-t1y)+(0.0-t2y); (0.0-t1z)+(0.0-t2z))
-  p3: (t1x+(0.0-t2x); t1y+(0.0-t2y); t1z+(0.0-t2z))
-  v0:p0,n; v1:p1,n; v2:p2,n; v3:p3,n
-  (v0,v1,v2),(v0,v2,v3)}
+  p1: (t2x-t1x; t2y-t1y; t2z-t1z)
+  p2: ((-t1x)-t2x; (-t1y)-t2y; (-t1z)-t2z)
+  p3: (t1x-t2x; t1y-t2y; t1z-t2z)
+  v0: p0,n; v1: p1,n; v2: p2,n; v3: p3,n
+  (v0,v1,v2),(v0,v2,v3)
+}
 
 verts: ,/ mkPlane' ((1.0;0.0;0.0); (0.0;1.0;0.0); (0.0;0.0;1.0))
 
@@ -39,9 +40,9 @@ phongFrag: FragmentShader[`nor`out!`v3`v4; {[nor]
 / c30=cos(35.26°)=√(2/3), s30=sin(35.26°)=1/√3 — equal rhombuses for all planes.
 phongVtx: VertexShader[`pos`nor!`v3`v3; (,`vNor)!(,`v3); {[pos;nor]
   c45: 0.7071; s45: 0.7071; c30: 0.8165; s30: 0.5774; sc: 0.5
-  py0: (c45*pos[0])+(s45*pos[2])
+  py0: (c45*pos[0])+s45*pos[2]
   py1: pos[1]
-  py2: (0.0-s45*pos[0])+(c45*pos[2])
+  py2: (0.0-s45*pos[0])+c45*pos[2]
   px0: py0
   px1: (c30*py1)+(0.0-s30*py2)
   px2: (s30*py1)+(c30*py2)

@@ -14,7 +14,10 @@ F: 1.618034
 
 / 12 base icosahedron vertices (unnormalized) — ONE LINE (newlines inside parens
 / act as extra list separators in ink, so all vertices must fit on one line)
-icoBase: ((0.0-1.0;F;0.0);(1.0;F;0.0);(0.0-1.0;0.0-F;0.0);(1.0;0.0-F;0.0);(0.0;0.0-1.0;F);(0.0;1.0;F);(0.0;0.0-1.0;0.0-F);(0.0;1.0;0.0-F);(F;0.0;0.0-1.0);(F;0.0;1.0);(0.0-F;0.0;0.0-1.0);(0.0-F;0.0;1.0))
+icoBase: ((-1.0;F;0.0);(1.0;F;0.0);(-1.0;-F;0.0)
+          (1.0;-F;0.0);(0.0;-1.0;F);(0.0;1.0;F)
+          (0.0;-1.0;-F);(0.0;1.0;-F);(F;0.0;-1.0)
+          (F;0.0;1.0);(-F;0.0;-1.0);(-F;0.0;1.0))
 
 / 20 base faces — ONE LINE for same reason
 icoBaseF: (0 11 5;0 5 1;0 1 7;0 7 10;0 10 11;11 10 2;5 11 4;1 5 9;7 1 8;10 7 6;3 9 4;3 4 2;3 2 6;3 6 8;3 8 9;9 8 1;4 9 5;2 4 11;6 2 10;8 6 7)
@@ -44,14 +47,18 @@ icoTris: sphSubAll[icoTris]
 sphVert: {[t] v0:t[0]; v1:t[1]; v2:t[2]; (v0,v0),(v1,v1),(v2,v2)}
 icoMesh: ,/ sphVert' icoTris
 
-/ Phong fragment shader — diffuse + ambient, no specular
+/ Blinn-Phong fragment shader.
+/ Light direction ld and half-vector h are constants (safe, no NaN risk).
+/ h = normalize(ld + viewDir) where viewDir=(0,0,1) in rotated screen space.
 phongFrag: FragmentShader[`nor`out!`v3`v4; {[nor]
-  amb: 0.1
   ld: normalize[(0.5;1.0;0.3)]
-  diff: smoothstep[0.0;0.05;dot[nor;ld]]
-  base: (0.2;0.5;0.9)
-  col: (base[0]*(amb+diff);base[1]*(amb+diff);base[2]*(amb+diff);1.0)
-  col}]
+  h: normalize[(0.5;1.0;1.3)]
+  amb: 0.08
+  diff: max[0.0;dot[nor;ld]]
+  spec: pow[max[0.0;dot[nor;h]];64.0]
+  base: (0.25;0.55;0.9)
+  lit: amb+diff
+  (base[0]*lit+spec;base[1]*lit+spec;base[2]*lit+spec;1.0)}]
 
 / Vertex shader: 45° Y + isometric X tilt; rotate normals by the same matrix
 phongVtx: VertexShader[`pos`nor!`v3`v3;(,`vNor)!(,`v3);{[pos;nor]

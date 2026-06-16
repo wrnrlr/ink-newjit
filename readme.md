@@ -17,3 +17,8 @@ Functional programming with APL2
  g:(::; |:; +:; |+:; +|:; +|+:; |+|:; +|+|:)
  g@\:M
 ```
+
+## Dev Enviroment
+```
+watchexec -r -e k -- ./zig-out/bin/ink test/planes.k
+```
