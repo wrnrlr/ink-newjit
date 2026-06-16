@@ -1,627 +1,286 @@
-# Chapter 02 — Introduction to 3D and VR Web Browser Physics
+# Chapter 2 — From 2D to 3D: Building Your First 3D Physics Scene
 
-**Video:** https://youtu.be/j84zJ06wnVA
-**Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/02-cannonball3d.html
-**Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/02-cannonballVR.html
+The cannonball simulation from Chapter 1 captured the essential mechanics of physics programming — an integration loop, Newtonian kinematics, and boundary collisions — but it lived on a flat canvas. This chapter lifts that simulation into three dimensions. Along the way we introduce Three.js as a rendering layer, build out a pair of UI controls for run/pause and restart, organize the code into a reusable class structure, and end with something genuinely surprising: turning the whole demo into a VR experience with only three extra lines.
 
-## Video Transcript
+---
 
-hi not just from 10 minute physics here welcome to tutorial number two this time i'm going to show you how to write 3d simulations in a web browser and for this we're going to turn our 2d bulb simulation into a 3d simulation let's start here we are in visual studio code again we use the html skeleton that we wrote in the first tutorial so we have the html section and then we have the head section inside we defined a title that will appear in the tab of the browser and this time we also define a nicer font and the font size in the body section we have the title that will appear in the body of the page and then instead of a canvas we use a general div element and give it also an id to access it later in the script part we also have a simulation function as before and an update function that calls simulate and make sure that the update function is called again and again and the only command that we actually have is to call update for a first time writing a 3d simulation is almost as simple as writing a 2d simulation the reason is that there's a very cool 3d library called 3.js have a look at their webpage at 3js.org it runs in any browser because it's based on javascript have a look at their examples for instance this little city as you can see it can draw any 3d model we can change the camera view and can also animate models like this little tram exactly what we need to create our 3d simulations adding 3.js into our project is super simple we simply add these two lines here the first includes the 3.js library itself and the second adds a control to move the camera then we need four additional variables the three scene a renderer a camera and a camera control now we need a function that initializes the three library we first create the three scene object then we add various elements to this scene i copied the code below from various examples first i add a few lights and then i create a ground plane then i create the renderer this code is also taken from their examples a camera again part of their examples and finally an object and this is the only tutorial specific code first i create a sphere geometry with a radius of 20 centimeters and a certain resolution for the visual mesh then i create a material with color red and with the sphere geometry and the material i can create the sphere object i place it at a certain location in 3d space and add it to the 3 scene in the callback function on window resize we have to update the camera as well as the renderer with the new window width and height in the update function we still call the simulate function but we also call the render function of the renderer and we update the camera control finally before we call update we call init 3 scene here you can see how this looks like in the browser we have our canon ball the red sphere here in the center and we can move the camera using the mouse before we look into the simulation code we're going to add two buttons to our page a run button and a restart button we can specify which function is called when we click the button by the on click property for the run button we call the function run and for the restart button the function restart we also specify an id for the run button to be able to access it below here you see the two function for the restart function we simply call location reload which just reloads the page in the browser for the run function we want a specific behavior we want to be able to stop and start the simulation so for this we define a boolean variable pause to specify whether our simulation is passed or not in the run function we first get the object of the button via the id then we check whether a simulation is passed if the simulation is passed and the user clicks the button we switch the text to stop otherwise we switch it to run and then we change the state of our simulation so now let's look how this looks in the browser here you can see our two buttons the run button and the restart button when we click the restart button the page is reloaded when you click the run button the text switches to stop and back to run again we are finally ready to do some physics for this i define a variable called physics scene which is a structure that contains information about our simulation the first one is gravity as you can see i use the class vector3 provided by three it has three components x y and z and is very useful to store 3d information like a position a velocity or force then i defined dt which is our time step size a world size the variable pause that tells us whether our simulation is paused or not and then a variable that will contain our simulation objects next we define a class for the ball in the constructor we provide the position the radius the velocity and the scene first we store the position the radius and the velocity in member variables now we create a visual mesh for three as we did before we create a geometry a material and then create the visual mesh we set its position to pause and then we add it to the three scene the core method of the ball class is the simulation method in the constructor we created two member variables for the position and for the velocity in the simulation method we want to update these two variables based on newton's second law and you can see this in these two statements what we do is we add to the velocity gravity times dt and to the position the velocity times tt exactly as in the 2d case then we make sure that the ball doesn't leave a certain area and finally we update the position of the visual mesh that's all next we add two additional functions the init physics function and the simulate function in the init physics function we set up our scene first we choose a radius a position and a velocity for a ball then we create a new ball object and add it to the objects of the physics scene in the simulate function we first check whether our simulation is paused if so we return otherwise we iterate through all the objects in the physics scene and call simulate now we have to call these two functions in the right places we call init physics right after any three scene and in the update function we call simulate that's it now let's have a look at how this looks in the web browser so here's our final result as before we can change the camera view we can zoom in and out but now we can also run the simulation so as in the 2d case we have a cannonball that jumps up and down and is kept within a certain boundary now comes the really cool part we can turn our demo into a vr demo with 3.js all we need is this class vr button i wasn't able to link it as i linked the camera control so i copied pasted their code into our html file in order to be standalone now we have to change three simple things in the init3 scene at the bottom we add these three lines the first one adds a vr button then we have to enable vr and then we change our update logic we tell the renderer what our update function is and so we can remove the request animation frame update and also the camera is now controlled by the vr of course it's not possible to show you the result in this video here is just a recording of my cell phone in vr mode now that you know everything about 3d simulations we will turn back to 2d for the next few tutorials because it is easier to explain simulation concepts in 2d
+## Why Three.js?
 
-## Source Code
+Writing a 3D renderer from scratch is a months-long project. Fortunately, the web platform ships with WebGL — a low-level GPU API — and Three.js is a mature JavaScript library that wraps WebGL in a sensible, high-level scene graph. It runs in any modern browser, requires no installation, and has a large library of examples to borrow from. For physics simulations, this is the right tradeoff: we want to spend our time on the physics, not on matrix math and shader programs.
 
-### 02-cannonball3d.html
+Adding Three.js to a standalone HTML file takes two `<script>` tags: one for the core library and one for `OrbitControls`, a helper that lets the user drag and zoom the camera with the mouse.
 
 ```html
-<!--
-Copyright 2021 Matthias Müller - Ten Minute Physics
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
--->
-
-<!DOCTYPE html>
-<html lang="en">
-	<head>
-		<title>Cannonball 3d</title>
-		<style>
-		body {
-			font-family: verdana; 
-			font-size: 15px;
-		}
-		</style>
-	</head>
-	
-	<body>
-
-        <h1>Cannonball 3d</h1> 
-		<button id = "buttonRun" onclick="run()" class="button">Run</button>
-		<button onclick="restart()" class="button">Restart</button>
-
-		<br><br>		
-        <div id="container"></div>
-        
-        <script src="https://unpkg.com/three@0.139.2/build/three.min.js"></script>
-        <script src="https://unpkg.com/three@0.139.2/examples/js/controls/OrbitControls.js"></script>
-		<script>
-			
-			var threeScene;
-			var renderer;
-			var camera;
-			var cameraControl;
-
-            // ------------------------------------------------------------------
-
-			// physics scene
-
-			var physicsScene = 
-			{
-				gravity : new THREE.Vector3(0.0, -10.0, 0.0),
-				dt : 1.0 / 60.0,
-				worldSize : { x: 1.5, z : 2.5 },
-				paused: true,
-				objects: [],				
-			};
-						
-			// ------------------------------------------------------------------
-			class Ball {
-				constructor(pos, radius, vel, scene)
-				{
-					// physics data 
-
-                    this.pos = pos;
-                    this.radius = radius;
-                    this.vel = vel;
-
-					// visual mesh
-
-                    var geometry = new THREE.SphereGeometry( radius, 32, 32 );
-                    var material = new THREE.MeshPhongMaterial({color: 0xff0000});
-                    this.visMesh = new THREE.Mesh( geometry, material );
-					this.visMesh.position.copy(pos);
-                    threeScene.add(this.visMesh);
-				}
-			
-				simulate()
-				{
-					this.vel.addScaledVector(physicsScene.gravity, physicsScene.dt);
-					this.pos.addScaledVector(this.vel, physicsScene.dt);
-
-					if (this.pos.x < -physicsScene.worldSize.x) {
-						this.pos.x = -physicsScene.worldSize.x; this.vel.x = -this.vel.x;
-					}
-					if (this.pos.x >  physicsScene.worldSize.x) {
-						this.pos.x =  physicsScene.worldSize.x; this.vel.x = -this.vel.x;
-					}
-					if (this.pos.z < -physicsScene.worldSize.z) {
-						this.pos.z = -physicsScene.worldSize.z; this.vel.z = -this.vel.z;
-					}
-					if (this.pos.z >  physicsScene.worldSize.z) {
-						this.pos.z =  physicsScene.worldSize.z; this.vel.z = -this.vel.z;
-					}
-					if (this.pos.y < this.radius) {
-						this.pos.y = this.radius; this.vel.y = -this.vel.y;
-					}
-
-					this.visMesh.position.copy(this.pos);
-				}
-			}
-
-			// ------------------------------------------------------------------
-			function initPhysics(scene) 
-			{
-				var radius = 0.2;
-				var pos = new THREE.Vector3(radius, radius, radius);
-				var vel = new THREE.Vector3(2.0, 5.0, 3.0);
-				
-				physicsScene.objects.push(new Ball(pos, radius, vel, scene)); 
-			}
-
-			// ------------------------------------------------------------------
-			function simulate() 
-			{
-				if (physicsScene.paused)
-					return;
-				for (var i = 0; i < physicsScene.objects.length; i++)
-					physicsScene.objects[i].simulate();
-			}
-
-			// ------------------------------------------
-					
-			function initThreeScene() 
-			{
-				threeScene = new THREE.Scene();
-				
-				// Lights
-				
-				threeScene.add( new THREE.AmbientLight( 0x505050 ) );	
-				threeScene.fog = new THREE.Fog( 0x000000, 0, 15 );				
-
-				var spotLight = new THREE.SpotLight( 0xffffff );
-				spotLight.angle = Math.PI / 5;
-				spotLight.penumbra = 0.2;
-				spotLight.position.set( 2, 3, 3 );
-				spotLight.castShadow = true;
-				spotLight.shadow.camera.near = 3;
-				spotLight.shadow.camera.far = 10;
-				spotLight.shadow.mapSize.width = 1024;
-				spotLight.shadow.mapSize.height = 1024;
-				threeScene.add( spotLight );
-
-				var dirLight = new THREE.DirectionalLight( 0x55505a, 1 );
-				dirLight.position.set( 0, 3, 0 );
-				dirLight.castShadow = true;
-				dirLight.shadow.camera.near = 1;
-				dirLight.shadow.camera.far = 10;
-
-				dirLight.shadow.camera.right = 1;
-				dirLight.shadow.camera.left = - 1;
-				dirLight.shadow.camera.top	= 1;
-				dirLight.shadow.camera.bottom = - 1;
-
-				dirLight.shadow.mapSize.width = 1024;
-				dirLight.shadow.mapSize.height = 1024;
-				threeScene.add( dirLight );
-				
-				// Geometry
-
-				var ground = new THREE.Mesh(
-					new THREE.PlaneBufferGeometry( 20, 20, 1, 1 ),
-					new THREE.MeshPhongMaterial( { color: 0xa0adaf, shininess: 150 } )
-				);				
-
-				ground.rotation.x = - Math.PI / 2; // rotates X/Y to X/Z
-				ground.receiveShadow = true;
-				threeScene.add( ground );
-				
-				var helper = new THREE.GridHelper( 20, 20 );
-				helper.material.opacity = 1.0;
-				helper.material.transparent = true;
-				helper.position.set(0, 0.002, 0);
-				threeScene.add( helper );				
-				
-				// Renderer
-
-				renderer = new THREE.WebGLRenderer();
-				renderer.shadowMap.enabled = true;
-				renderer.setPixelRatio( window.devicePixelRatio );
-				renderer.setSize( 0.8 * window.innerWidth, 0.8 * window.innerHeight );
-				window.addEventListener( 'resize', onWindowResize, false );
-				container.appendChild( renderer.domElement );
-				
-				// Camera
-						
-				camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.01, 100);
-			    camera.position.set(0, 1, 4);
-				camera.updateMatrixWorld();	
-
-				threeScene.add( camera );
-
-				cameraControl = new THREE.OrbitControls(camera, renderer.domElement);
-    			cameraControl.zoomSpeed = 2.0;
-    			cameraControl.panSpeed = 0.4;
-			}
-
-			function onWindowResize() {
-
-				camera.aspect = window.innerWidth / window.innerHeight;
-				camera.updateProjectionMatrix();
-				renderer.setSize( window.innerWidth, window.innerHeight );
-			}
-
-			function run() {
-				var button = document.getElementById('buttonRun');
-				if (physicsScene.paused)
-					button.innerHTML = "Stop";
-				else
-					button.innerHTML = "Run";
-				physicsScene.paused = !physicsScene.paused;
-			}
-
-			function restart() {
-				location.reload();
-			}
-			
-			// make browser to call us repeatedly -----------------------------------
-
-			function update() {
-				simulate();
-				renderer.render(threeScene, camera);
-				cameraControl.update();				
-				
-				requestAnimationFrame(update);
-			}
-			
-			initThreeScene();
-			initPhysics();
-			update();
-			
-		</script>
-	</body>
-</html>
-
+<script src="https://unpkg.com/three@0.139.2/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.139.2/examples/js/controls/OrbitControls.js"></script>
 ```
 
-### 02-cannonballVR.html
+That is literally everything needed to have access to a full 3D renderer. The rest is our own code.
+
+---
+
+## Setting Up the 3D Scene
+
+Before the physics runs, we need a scene to render into. The `initThreeScene` function creates the visual world: lights, a ground plane, a renderer, and a camera. This is mostly boilerplate assembled from Three.js examples, but a few decisions are worth understanding.
+
+### The Scene Graph
+
+Three.js organizes everything in a scene graph — a hierarchy of objects. You create a root `THREE.Scene`, then `.add()` things to it: lights, meshes, the camera itself. The renderer walks this graph each frame and draws everything it finds.
+
+```js
+threeScene = new THREE.Scene();
+```
+
+### Lighting
+
+Without lights, Phong-shaded meshes appear completely black. The scene uses two light sources: an ambient light that brightens everything uniformly (so nothing is ever pure black), and a spot light plus a directional light to cast shadows and give the scene depth.
+
+```js
+threeScene.add(new THREE.AmbientLight(0x505050));
+
+var spotLight = new THREE.SpotLight(0xffffff);
+spotLight.position.set(2, 3, 3);
+spotLight.castShadow = true;
+threeScene.add(spotLight);
+```
+
+The hex values are RGB colors — `0x505050` is a dim gray, `0xffffff` is white. Shadow maps are configured on the light objects, and `renderer.shadowMap.enabled = true` turns on shadow rendering globally.
+
+### The Ground Plane
+
+A `PlaneBufferGeometry` is a flat rectangle. By default it lies in the X/Y plane (facing up the Z axis), which is not where we want a floor. Rotating it by -90 degrees around X tips it flat into the X/Z plane, making Y the vertical axis — the standard convention in Three.js.
+
+```js
+var ground = new THREE.Mesh(
+    new THREE.PlaneBufferGeometry(20, 20, 1, 1),
+    new THREE.MeshPhongMaterial({ color: 0xa0adaf, shininess: 150 })
+);
+ground.rotation.x = -Math.PI / 2;  // rotate X/Y plane into X/Z
+ground.receiveShadow = true;
+threeScene.add(ground);
+```
+
+This rotation is easy to forget the first time. Remember it: Y is up, and a default plane needs a 90-degree X rotation to become a floor.
+
+### The Renderer and Camera
+
+The `WebGLRenderer` owns the `<canvas>` element. It is appended to the DOM container div, and its size is set to 80% of the window so there is room for the buttons above it.
+
+```js
+renderer = new THREE.WebGLRenderer();
+renderer.setSize(0.8 * window.innerWidth, 0.8 * window.innerHeight);
+container.appendChild(renderer.domElement);
+```
+
+The camera is a `PerspectiveCamera`. Its first argument is the vertical field of view in degrees, then the aspect ratio, then the near and far clipping planes. Anything closer than the near plane or farther than the far plane is invisible — set these reasonably to avoid floating-point precision artifacts.
+
+```js
+camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
+camera.position.set(0, 1, 4);
+threeScene.add(camera);
+```
+
+Note that the camera is added to the scene graph just like any other object. The `OrbitControls` object is then wired to the camera so the user can navigate:
+
+```js
+cameraControl = new THREE.OrbitControls(camera, renderer.domElement);
+```
+
+When the window is resized, the camera aspect ratio and renderer dimensions both need to be updated — a detail that is easy to overlook and causes a stretched image if missed.
+
+---
+
+## Run/Pause and Restart Controls
+
+Before looking at the physics, it is worth covering two buttons that make interactive development much easier: Run and Restart.
+
+The HTML buttons are wired to JavaScript functions via the `onclick` attribute. The Run button is given an `id` so the JavaScript can update its label.
 
 ```html
-<!--
-Copyright 2021 Matthias Müller - Ten Minute Physics
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
--->
-
-<!DOCTYPE html>
-<html lang="en">
-	<head>
-		<title>Cannonball VR</title>
-		<style>
-		body {
-			font-family: verdana; 
-			font-size: 15px;
-		}
-		</style>
-	</head>
-	
-	<body>
-
-        <h1>Cannonball VR</h1> 
-
-		<br><br>		
-        <div id="container"></div>
-        
-		<script src="https://threejs.org/build/three.js"></script>
-		<script>
-			
-            // ------------------------------------------------------------------
-
-			// physics scene
-
-			var physicsScene = 
-			{
-				gravity : new THREE.Vector3(0.0, -10.0, 0.0),
-				dt : 1.0 / 60.0,
-				worldSize : { x: 1.5, z : 2.5 },
-				objects: [],				
-			};
-			
-			var threeScene;
-			var renderer;
-			var camera;
-
-			// ------------------------------------------------------------------
-			class Ball {
-				constructor(pos, radius, vel, scene)
-				{
-					// physics data 
-
-                    this.pos = pos;
-                    this.radius = radius;
-                    this.vel = vel;
-
-					// visual mesh
-
-                    var geometry = new THREE.SphereGeometry( radius, 32, 32 );
-                    var material = new THREE.MeshPhongMaterial({color: 0xff0000});
-                    this.visMesh = new THREE.Mesh( geometry, material );
-					this.visMesh.position.copy(pos);
-                    threeScene.add(this.visMesh);
-				}
-			
-				simulate()
-				{
-					this.vel.addScaledVector(physicsScene.gravity, physicsScene.dt);
-					this.pos.addScaledVector(this.vel, physicsScene.dt);
-
-					if (this.pos.x < -physicsScene.worldSize.x) {
-						this.pos.x = -physicsScene.worldSize.x; this.vel.x = -this.vel.x;
-					}
-					if (this.pos.x >  physicsScene.worldSize.x) {
-						this.pos.x =  physicsScene.worldSize.x; this.vel.x = -this.vel.x;
-					}
-					if (this.pos.z < -physicsScene.worldSize.z) {
-						this.pos.z = -physicsScene.worldSize.z; this.vel.z = -this.vel.z;
-					}
-					if (this.pos.z >  physicsScene.worldSize.z) {
-						this.pos.z =  physicsScene.worldSize.z; this.vel.z = -this.vel.z;
-					}
-					if (this.pos.y < this.radius) {
-						this.pos.y = this.radius; this.vel.y = -this.vel.y;
-					}
-
-					this.visMesh.position.copy(this.pos);
-				}
-			}
-
-			// ------------------------------------------------------------------
-			function initPhysics(scene) 
-			{
-				var radius = 0.2;
-				var pos = new THREE.Vector3(radius, radius, radius);
-				var vel = new THREE.Vector3(2.0, 5.0, 3.0);
-				
-				physicsScene.objects.push(new Ball(pos, radius, vel, scene)); 
-			}
-
-			// ------------------------------------------------------------------
-			function simulate() 
-			{
-				for (var i = 0; i < physicsScene.objects.length; i++)
-					physicsScene.objects[i].simulate();
-			}
-
-			// ------------------------------------------------------------------
-			function initThreeScene() 
-			{
-				threeScene = new THREE.Scene();
-				
-				// Lights
-				
-				threeScene.add( new THREE.AmbientLight( 0x505050 ) );	
-				threeScene.fog = new THREE.Fog( 0x000000, 0, 15 );				
-
-				var spotLight = new THREE.SpotLight( 0xffffff );
-				spotLight.angle = Math.PI / 5;
-				spotLight.penumbra = 0.2;
-				spotLight.position.set( 2, 3, 3 );
-				spotLight.castShadow = true;
-				spotLight.shadow.camera.near = 3;
-				spotLight.shadow.camera.far = 10;
-				spotLight.shadow.mapSize.width = 1024;
-				spotLight.shadow.mapSize.height = 1024;
-				threeScene.add( spotLight );
-
-				var dirLight = new THREE.DirectionalLight( 0x55505a, 1 );
-				dirLight.position.set( 0, 3, 0 );
-				dirLight.castShadow = true;
-				dirLight.shadow.camera.near = 1;
-				dirLight.shadow.camera.far = 10;
-
-				dirLight.shadow.camera.right = 1;
-				dirLight.shadow.camera.left = - 1;
-				dirLight.shadow.camera.top	= 1;
-				dirLight.shadow.camera.bottom = - 1;
-
-				dirLight.shadow.mapSize.width = 1024;
-				dirLight.shadow.mapSize.height = 1024;
-				threeScene.add( dirLight );
-				
-				// Geometry
-
-				var ground = new THREE.Mesh(
-					new THREE.PlaneBufferGeometry( 20, 20, 1, 1 ),
-					new THREE.MeshPhongMaterial( { color: 0xa0adaf, shininess: 150 } )
-				);				
-
-				ground.rotation.x = - Math.PI / 2; // rotates X/Y to X/Z
-				ground.receiveShadow = true;
-				threeScene.add( ground );
-				
-				var helper = new THREE.GridHelper( 20, 20 );
-				helper.material.opacity = 1.0;
-				helper.material.transparent = true;
-				helper.position.set(0, 0.002, 0);
-				threeScene.add( helper );				
-				
-				// Renderer
-
-				renderer = new THREE.WebGLRenderer();
-				renderer.shadowMap.enabled = true;
-				renderer.setPixelRatio( window.devicePixelRatio );
-				renderer.setSize( 0.8 * window.innerWidth, 0.8 * window.innerHeight );
-				window.addEventListener( 'resize', onWindowResize, false );
-				container.appendChild( renderer.domElement );
-				
-				// Camera
-						
-				camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.01, 100);
-			    camera.position.set(0, 1, 4);
-				camera.updateMatrixWorld();	
-
-				threeScene.add( camera );
-
-				// VR 
-				document.body.appendChild(VRButton.createButton(renderer));
-				renderer.xr.enabled = true;
-				renderer.setAnimationLoop(update);
-			}
-
-			function onWindowResize() {
-
-				camera.aspect = window.innerWidth / window.innerHeight;
-				camera.updateProjectionMatrix();
-				renderer.setSize( window.innerWidth, window.innerHeight );
-			}
-
-			function update() {
-				simulate();
-				renderer.render(threeScene, camera);
-			}
-
-			// ------------------------------------------
-			// start copied code from THREE.js
-					
-			class VRButton {
-
-				static createButton( renderer, options ) {
-
-					if ( options ) {
-
-						console.error( 'THREE.VRButton: The "options" parameter has been removed. Please set the reference space type via renderer.xr.setReferenceSpaceType() instead.' );
-
-					}
-
-					const button = document.createElement( 'button' );
-
-					function showEnterVR( /*device*/ ) {
-
-						let currentSession = null;
-
-						async function onSessionStarted( session ) {
-
-							session.addEventListener( 'end', onSessionEnded );
-
-							await renderer.xr.setSession( session );
-							button.textContent = 'EXIT VR';
-
-							currentSession = session;
-
-						}
-
-						function onSessionEnded( /*event*/ ) {
-
-							currentSession.removeEventListener( 'end', onSessionEnded );
-
-							button.textContent = 'ENTER VR';
-
-							currentSession = null;
-
-						}
-
-						//
-
-						button.style.display = '';
-
-						button.style.cursor = 'pointer';
-						button.style.left = 'calc(50% - 50px)';
-						button.style.width = '100px';
-
-						button.textContent = 'ENTER VR';
-
-						button.onmouseenter = function () {
-
-							button.style.opacity = '1.0';
-
-						};
-
-						button.onmouseleave = function () {
-
-							button.style.opacity = '0.5';
-
-						};
-
-						button.onclick = function () {
-
-							if ( currentSession === null ) {
-
-								// WebXR's requestReferenceSpace only works if the corresponding feature
-								// was requested at session creation time. For simplicity, just ask for
-								// the interesting ones as optional features, but be aware that the
-								// requestReferenceSpace call will fail if it turns out to be unavailable.
-								// ('local' is always available for immersive sessions and doesn't need to
-								// be requested separately.)
-
-								const sessionInit = { optionalFeatures: [ 'local-floor', 'bounded-floor', 'hand-tracking' ] };
-								navigator.xr.requestSession( 'immersive-vr', sessionInit ).then( onSessionStarted );
-
-							} else {
-
-								currentSession.end();
-
-							}
-
-						};
-
-					}
-
-					function disableButton() {
-
-						button.style.display = '';
-
-						button.style.cursor = 'auto';
-						button.style.left = 'calc(50% - 75px)';
-						button.style.width = '150px';
-
-						button.onmouseenter = null;
-						button.onmouseleave = null;
-
-						button.onclick = null;
-
-					}
-
-					function showWebXRNotFound() {
-
-						disableButton();
-
-						button.textContent = 'VR NOT SUPPORTED';
-
-					}
-
-					function stylizeElement( element ) {
-
-						element.style.position = 'absolute';
-						element.style.bottom = '20px';
-						element.style.padding = '12px 6px';
-						element.style.border = '1px solid #fff';
-						element.style.borderRadius = '4px';
-						element.style.background = 'rgba(0,0,0,0.1)';
-						element.style.color = '#fff';
-						element.style.font = 'normal 13px sans-serif';
-						element.style.textAlign = 'center';
-						element.style.opacity = '0.5';
-						element.style.outline = 'none';
-						element.style.zIndex = '999';
-
-					}
-
-					if ( 'xr' in navigator ) {
-
-						button.id = 'VRButton';
-						button.style.display = 'none';
-
-						stylizeElement( button );
-
-						navigator.xr.isSessionSupported( 'immersive-vr' ).then( function ( supported ) {
-
-							supported ? showEnterVR() : showWebXRNotFound();
-
-						} );
-
-						return button;
-
-					} else {
-
-						const message = document.createElement( 'a' );
-
-						if ( window.isSecureContext === false ) {
-
-							message.href = document.location.href.replace( /^http:/, 'https:' );
-							message.innerHTML = 'WEBXR NEEDS HTTPS'; // TODO Improve message
-
-						} else {
-
-							message.href = 'https://immersiveweb.dev/';
-							message.innerHTML = 'WEBXR NOT AVAILABLE';
-
-						}
-
-						message.style.left = 'calc(50% - 90px)';
-						message.style.width = '180px';
-						message.style.textDecoration = 'none';
-
-						stylizeElement( message );
-
-						return message;
-
-					}
-				}
-			};
-
-			// end copied code from THREE.js
-			// ------------------------------------------
-
-			initThreeScene();
-			initPhysics();
-			
-		</script>
-	</body>
-</html>
-
+<button id="buttonRun" onclick="run()">Run</button>
+<button onclick="restart()">Restart</button>
 ```
+
+The Restart function is intentionally trivial:
+
+```js
+function restart() {
+    location.reload();
+}
+```
+
+Reloading the page is the simplest possible reset — it re-runs all initialization code and brings everything back to its initial state. For more complex simulations you might want a true reset that avoids the page flicker, but for quick iteration this is perfectly fine.
+
+The Run function is slightly more interesting because it needs to toggle between two states and update the button label to reflect the current state:
+
+```js
+function run() {
+    var button = document.getElementById('buttonRun');
+    if (physicsScene.paused) {
+        button.innerHTML = "Stop";
+    } else {
+        button.innerHTML = "Run";
+    }
+    physicsScene.paused = !physicsScene.paused;
+}
+```
+
+The simulation starts paused (`paused: true` in the physics scene), so the user must explicitly press Run to begin. This gives time to inspect the initial configuration before anything moves.
+
+---
+
+## Organizing Physics: The Scene Object and Ball Class
+
+The code makes a clean separation between physics state and rendering. A plain JavaScript object called `physicsScene` holds the parameters that govern the simulation:
+
+```js
+var physicsScene = {
+    gravity: new THREE.Vector3(0.0, -10.0, 0.0),
+    dt: 1.0 / 60.0,
+    worldSize: { x: 1.5, z: 2.5 },
+    paused: true,
+    objects: [],
+};
+```
+
+`THREE.Vector3` is used here not because it is a rendering concept, but because it is a convenient 3D vector type that ships with Three.js and supports the arithmetic methods we need. Gravity points in the negative Y direction — down — at 10 m/s², a good approximation of Earth's surface gravity. The time step is a fixed 1/60th of a second, matching a typical 60 Hz display.
+
+### The Ball Class
+
+Each simulated object is an instance of the `Ball` class. The constructor takes a starting position, radius, initial velocity, and the Three.js scene. It stores the physics quantities as member variables and immediately creates the visual representation:
+
+```js
+constructor(pos, radius, vel, scene) {
+    this.pos = pos;
+    this.radius = radius;
+    this.vel = vel;
+
+    var geometry = new THREE.SphereGeometry(radius, 32, 32);
+    var material = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+    this.visMesh = new THREE.Mesh(geometry, material);
+    this.visMesh.position.copy(pos);
+    threeScene.add(this.visMesh);
+}
+```
+
+The `32, 32` arguments to `SphereGeometry` are the horizontal and vertical segment counts for the sphere mesh. More segments means a rounder-looking ball at the cost of more geometry to render. 32 is a reasonable default — smooth enough to read as a sphere, cheap enough to run in real time.
+
+The key insight here is the pairing: every physics object carries its own visual mesh. When the physics position updates, the mesh position follows. This keeps the connection between simulation and rendering local to the object rather than scattered across the code.
+
+### The Simulation Step
+
+The `simulate` method on `Ball` does the physics update for one time step. It is structurally identical to the 2D version from Chapter 1, now extended to three dimensions:
+
+```js
+simulate() {
+    this.vel.addScaledVector(physicsScene.gravity, physicsScene.dt);
+    this.pos.addScaledVector(this.vel, physicsScene.dt);
+
+    // Boundary collisions on X and Z
+    if (this.pos.x < -physicsScene.worldSize.x) {
+        this.pos.x = -physicsScene.worldSize.x; this.vel.x = -this.vel.x;
+    }
+    if (this.pos.x >  physicsScene.worldSize.x) {
+        this.pos.x =  physicsScene.worldSize.x; this.vel.x = -this.vel.x;
+    }
+    // ... same for Z axis ...
+    if (this.pos.y < this.radius) {
+        this.pos.y = this.radius; this.vel.y = -this.vel.y;
+    }
+
+    this.visMesh.position.copy(this.pos);
+}
+```
+
+`addScaledVector(v, s)` is equivalent to `this += v * s` — it adds a vector multiplied by a scalar in one call. The two lines that use it implement explicit Euler integration: first accumulate velocity from gravity, then move the position by velocity. Both of those steps are multiplied by `dt` to convert rates (m/s, m/s²) into per-frame increments.
+
+The boundary conditions are the same elastic reflection used in 2D: when the ball would leave a wall, clamp the position to the boundary and flip the velocity component perpendicular to that wall. The floor check uses `this.radius` rather than zero so the ball rests on its surface, not with its center at ground level.
+
+The last line syncs the Three.js mesh position with the physics position. Without this call, the ball would move in the physics simulation but the rendered sphere would never move.
+
+### Initialization and the Main Loop
+
+Two functions wire everything together:
+
+```js
+function initPhysics() {
+    var radius = 0.2;
+    var pos = new THREE.Vector3(radius, radius, radius);
+    var vel = new THREE.Vector3(2.0, 5.0, 3.0);
+    physicsScene.objects.push(new Ball(pos, radius, vel));
+}
+
+function simulate() {
+    if (physicsScene.paused) return;
+    for (var i = 0; i < physicsScene.objects.length; i++)
+        physicsScene.objects[i].simulate();
+}
+```
+
+The `simulate` function checks the paused flag and, if the simulation is running, calls `simulate()` on every object. This loop over `physicsScene.objects` is the pattern that will scale to dozens or hundreds of objects in later chapters.
+
+The render loop calls both simulate and the Three.js renderer each frame:
+
+```js
+function update() {
+    simulate();
+    renderer.render(threeScene, camera);
+    cameraControl.update();
+    requestAnimationFrame(update);
+}
+```
+
+`requestAnimationFrame` asks the browser to call `update` before the next display refresh — typically at 60 Hz. This is the standard animation loop pattern on the web. `cameraControl.update()` must be called each frame for the orbit controls to apply any inertia or smooth motion they accumulate.
+
+The startup sequence calls the three initialization functions in order, then kicks off the loop:
+
+```js
+initThreeScene();
+initPhysics();
+update();
+```
+
+---
+
+## Adding VR Support
+
+This is where the chapter earns its "cool part" label. Three.js has built-in support for WebXR, the browser API for VR and AR headsets. Converting the 3D demo to a VR demo requires exactly three changes inside `initThreeScene`:
+
+```js
+// 1. Add the VR button to the page
+document.body.appendChild(VRButton.createButton(renderer));
+
+// 2. Enable XR on the renderer
+renderer.xr.enabled = true;
+
+// 3. Hand animation control to the renderer
+renderer.setAnimationLoop(update);
+```
+
+The third change replaces `requestAnimationFrame` — because in VR mode, the browser (or headset runtime) controls the timing, not the page's animation frame scheduler. Calling `renderer.setAnimationLoop(update)` registers `update` as the callback, and Three.js will call it at the appropriate rate for both desktop and VR sessions.
+
+The `VRButton` class itself is a small utility that probes the browser for WebXR support and creates an "ENTER VR" button if a headset is available, or a "VR NOT SUPPORTED" message if not. When the user clicks the button, it initiates a WebXR immersive-vr session:
+
+```js
+navigator.xr.requestSession('immersive-vr', {
+    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+}).then(onSessionStarted);
+```
+
+The optional features request floor tracking and hand tracking if the headset supports them, without requiring them. In VR mode, the camera is driven entirely by the headset's head tracking rather than `OrbitControls`, so the camera control is simply removed. The physics and rendering code is otherwise unchanged — the same simulation that works on desktop drops directly into a headset.
+
+---
+
+## Key Takeaways
+
+- **Three.js as an accelerator.** Adding a full 3D renderer takes two script tags and roughly 50 lines of setup code. The investment is small and the payoff is large: shadows, camera controls, and an interactive viewport come for free.
+
+- **Y is up.** Three.js uses a Y-up coordinate system. Gravity points in the negative Y direction, the floor is the X/Z plane, and planes need a -90 degree X rotation to lie flat.
+
+- **Keep physics and rendering coupled at the object level.** Storing both `pos` (physics) and `visMesh` (rendering) on the same `Ball` instance — and syncing them at the end of each `simulate()` — keeps the code localized and easy to reason about.
+
+- **Explicit Euler integration extends naturally to 3D.** The integration step from Chapter 1 is identical in 3D; only the types change from scalar to `Vector3`.
+
+- **VR is three lines away.** If the physics runs in 3D with Three.js, WebXR support is almost free. The only real change is handing animation control to the renderer with `setAnimationLoop`.
+
+- **Start paused.** Initializing `paused: true` and requiring the user to press Run is a small UX choice that makes a big difference during development — you can inspect the initial state before anything moves.

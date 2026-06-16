@@ -1,120 +1,194 @@
-# Chapter 01 — Introduction to 2D Web Browser Physics
+# Chapter 1 — A Bouncing Ball: The Foundations of Real-Time Physics
 
-**Video:** https://youtu.be/oPuSvdBGrpE
-**Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/01-cannonball2d.html
+Physics simulation sounds intimidating until you realize that the physics of everyday objects — balls, cloth, water, rigid bodies — reduces to a surprisingly small set of ideas. This chapter introduces those ideas through the simplest possible program: a cannonball bouncing around a 2D box. Along the way, we will cover Newton's second law, the symplectic Euler integration method, and the technique of substepping. Every concept introduced here reappears throughout this book, so it is worth understanding them deeply before moving on.
 
-## Video Transcript
+---
 
-hi i'm maltese miller a physics researcher at nvidia i've been working as a researcher in the field of physics-based simulations in computer graphics for over 20 years now over the years my colleagues and i have come up with a variety of methods to simulate rigid bodies soft bodies cloth water and their interaction these methods have become popular both in the gaming and in the movie industry i have always had three main goals in mind simplicity robustness and speed simplicity means that the methods are easy to understand and to implement robustness means that the methods produce realistic simulations either under unphysical or crazy setups and speed means that the methods can be used in real-time applications such as computer games if you look for simulation methods in research articles or books you most likely find quite complicated formulations that only a small percentage of people interested in physical simulations understand fortunately physics is quite simple at its heart i'm talking about the physics of everyday objects everything around us is made of simple particles the atoms and the forces that hold them together the difference between a rigid body cloth and water is just how these particles are arranged and the strength of the forces that hold them together therefore it should be possible to simulate everyday objects with very simple methods and this is indeed the case in this channel i will show you how easy it is to write simulations of rigid bodies soft bodies cloth sand and their mutual interactions setting up development environments libraries and creating applications that work on multiple platforms used to be difficult fortunately this has become super simple too this is the fact for me to create this channel i will use javascript embedded in web pages to write and test simulations all we need is a text editor and a browser i will write the programs into one single html document drop it into a browser and we have fun and you can try out what we implemented on all platforms pcs tablets cell phones android windows mac os and linux devices i will use the free visual studio code editor for microsoft this great tool makes writing javascript very easy with code completion syntax highlighting and error checking as a browser i will use google chrome because i like its built-in debugger before we start i would actually like to thank nvidia i've been with nvidia for 13 years and i can't think of a better place to work they gave me a lot of freedom for my research and the opportunity to work with very smart and talented and creative people without that most of the research you're going to see wouldn't exist also if you want to do physics in games you don't have to port our javascript code into c plus have a look at our physics engine physx it's also included in our new environment omniverse which also provides real-time ray tracing now let's start with our project as i mentioned before we're going to put all our code into one single html document so that we can run our demos in any browser since an html document is a text document we need a text editor i use the free visual studio code editor for microsoft because it has code completion and syntax highlighting but you can use any other text editor i'm not going to type online because this way we would be restricted by my typing speed instead i'm going to use copy paste so we can concentrate on the content so here's a very basic html document html stands for hypertext markup language and what makes a text a hypertext are these tags here which are names surrounded by angle brackets as you can see there are start and end tags and certain tags have attributes as well as start and the end tag mark a certain block in the text file in a html file we can have commands and there is this tag that tells us that this is actually an html document and then we have the html section inside this section we have a head section and a body section in the head we can define a title which will show up in the tab of the browser and here is the actual content of the page we need a canvas element here we can draw our scene and then there's the script section and this is basically where the code javascript code will go into here you can see what happens when you load this html document into a browser we have the canvas with some random size and we have the title in the tab of the browser but nothing more the next step is to fill the script section with some code here i define three functions a draw function in which we're going to draw our scene a simulation function and an update function the update function called simulate then draw and then make sure that the update function is called again and again these are just three function definitions the only actual command is this one which makes sure that the update function is called the first time okay so let's write some actual content by the way javascript is quite similar to c plus plus the language that i mostly use and there are also a lot of tutorials and great web pages to learn it so first we want to resize the canvas that it fills the inner width and height of the document for this we need a variable that refers to the canvas and we do this by defining an id for the canvas element and then getting this canvas element by get element by id and store it in the variable canvas we also need a reference to the 2d context to draw to do the drawing later so to resize the canvas we simply set its width and height to the inner width and inner height of the window with some margin now we need to briefly talk about coordinate systems the coordinate system within the canvas has its origin at the top left and the width and the height are given by these two variables in physics we want the origin to be at the bottom left and we want to specify the same width and the same height therefore we need to be able to map from one coordinate system to the other so here is how i do this in code i first define a variable sim min width which defines a minimal distance that i want to see on the screen no matter how the screen is oriented then i compute a scaling factor to go from the simulation coordinates to the canvas coordinates with this variable i compute the actual sim width and sim height by simply scaling the sizes of the canvas now i define two functions for both coordinates to go from simulation to canvas coordinates for the x component i simply need to scale but for the y component i also need to flip vertically what we wrote so far is pretty boring but we can reuse it for any 2d simulation in the future now it gets a little bit more interesting our original goal was to simulate the canon ball so we first define a ball with a radius and a position the radius is 20 centimeters and the position is at the bottom left the next thing is that we want to draw our scene first we clear the canvas and then we define the fill style of the cannonball which is red in this case this is how you draw a filled circle in javascript it's a little bit clumsy but the essential part is that you have to define a center and a radius we use our transformation functions to map the ball's position from physical to canvas coordinates and to compute the radius we simply multiply the physical radius by the scaling factor now let's see how this looks in a web browser so now here we have it we have our canvas 20 meters across and our little cannonball with a radius of 20 centimeters at the bottom left corner now comes the essential part basically the simulation of the cannonball in order to be able to write this i need to give you a brief introduction to physics the most important equation that describes everyday physics is f equals m times a or force equals mass times acceleration also known as newton's second law it basically says that a force doesn't change the position of objects but their velocities the same force has a stronger effect on lighter objects and a weaker effect on heavier objects it also means that without a force objects keep a constant velocity and this means for simulation we have to store not just the position of objects but also their velocities for simulation there's a very important force its gravity is the force that pulls objects towards the surface of the earth gravity is equal to mass times g where g is a constant if we plug this force into newton's second law we find that all objects independent of their mass are accelerated by the same amount 10 meters per second per second this means for an object in free fall if it starts with zero velocity it has a velocity of 10 meters per second after one second 20 meters per second after two seconds and so on let's assume we have a one-dimensional simulation of one object so we can store its position in x its velocity in v gravitational acceleration in g and the time step size in dt and here is our simulation loop since an acceleration tells us how much the velocity changes over time we update the velocity as v equals v plus g times dt the velocity tells us how much the position changes over time so position equals position plus v times dt then we draw the scene and we loop a method to compute the velocity and position at the next time step given the quantities at the current time step is called the time integration method the simple way we do it here is called symplectic euler a pretty fancy name for a very simple idea it's important that we update the velocity before the position in order to get a stable simulation the problem with this idea is that we assume that both the force as well as the velocity or constant during the entire time step while this is true for the gravitational force it's not true for the velocity which means we introduce a small error every time step the question is how can we make this error small one way is to use calculus to compute an explicit formula that describes the trajectory of our objects unfortunately this only works for toy problems even for a double pendulum it doesn't work anymore as you will see in another episode another idea would be to use more sophisticated time integration methods however they're slower and no improvement when collisions occur the easiest way to reduce the error is to make dt small it's very simple and it works great one way to reduce the time step size is to use sub stepping first we define n to be the number of sub steps and then we compute the size of a substep to be dt divided by n in the simulation loop we now have a for loop over n sub steps as before we update the velocity and deposition but now using sdt then after the n sub steps we draw the scene and loop now i'll show you how easy it is to bring this cannonball to life with just a little knowledge about physics we first define gravity and the time step size as discussed before we also add a velocity component to the ball we initialize it such that it flies off in the beginning now in a simulation loop we add gravity times the time step size to the velocity and the velocity times the time step size to the position as discussed before to make sure that the ball doesn't leave the window we reflect it at the boundaries of the window for this we check the x component of the position every time step if it's smaller than 0 we set it to 0 and reflect the x component of the velocity the same on the other side of the window and also for the y component of the ball now let's see how this looks like in action nice exactly as we expected in the next tutorial i will show you how to write 3d simulations and how to simulate our canon ball in 3d in the description below i provide a link to the complete html code ok see you in the next tutorial
+## The Setup: One File, One Browser
 
-## Source Code
+The goal is to have something running with as little ceremony as possible. The entire simulation lives in a single HTML file — no build system, no dependencies, no installation. Drop it in a browser and it runs on any platform: desktop, tablet, or phone.
 
-### 01-cannonball2d.html
+The skeleton of that file is straightforward. An HTML document has a `<canvas>` element where the scene is drawn, and a `<script>` block where the JavaScript lives. Three functions carry the simulation forward:
 
-```html
-<!--
-Copyright 2021 Matthias Müller - Ten Minute Physics
+- `draw()` — clears the canvas and repaints the current state.
+- `simulate()` — advances the physics by one time step.
+- `update()` — calls `simulate()`, then `draw()`, then schedules itself to be called again via `requestAnimationFrame`.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+The loop is started with a single call to `update()`. After that, the browser drives everything.
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+```javascript
+function update() {
+    simulate();
+    draw();
+    requestAnimationFrame(update);
+}
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
--->
-
-<!DOCTYPE html>
-<html>
-
-<head>
-<title>Cannonball</title>
-</head>
-
-<body>
-
-<canvas id="myCanvas" style="border:2px solid"></canvas>
-
-<script>
-
-	// canvas setup -------------------------------------------------------
-
-	var canvas = document.getElementById("myCanvas");
-	var c = canvas.getContext("2d");
-
-	canvas.width = window.innerWidth - 20;
-	canvas.height = window.innerHeight - 100;
-
-	var simMinWidth = 20.0;
-	var cScale = Math.min(canvas.width, canvas.height) / simMinWidth;
-	var simWidth = canvas.width / cScale;
-	var simHeight = canvas.height / cScale;
-
-	function cX(pos) {
-		return pos.x * cScale;
-	}
-
-	function cY(pos) {
-		return canvas.height - pos.y * cScale;
-	}
-
-	// scene -------------------------------------------------------
-
-	var gravity = { x: 0.0, y: -10.0};
-	var timeStep = 1.0 / 60.0;
-
-	var ball = {
-		radius : 0.2,
-		pos : {x : 0.2, y : 0.2},
-		vel : {x : 10.0, y : 15.0}
-	};
-
-	// drawing -------------------------------------------------------
-
-	function draw() {
-		c.clearRect(0, 0, canvas.width, canvas.height);
-
-		c.fillStyle = "#FF0000";
-
-		c.beginPath();			
-		c.arc(
-			cX(ball.pos), cY(ball.pos), cScale * ball.radius, 0.0, 2.0 * Math.PI); 
-		c.closePath();
-		c.fill();			
-	}
-
-	// simulation ----------------------------------------------------
-
-	function simulate() {
-
-		ball.vel.x += gravity.x * timeStep;
-		ball.vel.y += gravity.y * timeStep;
-		ball.pos.x += ball.vel.x * timeStep;
-		ball.pos.y += ball.vel.y * timeStep;
-
-		if (ball.pos.x < 0.0) {
-			ball.pos.x = 0.0;
-			ball.vel.x = -ball.vel.x;
-		}
-		if (ball.pos.x > simWidth) {
-			ball.pos.x = simWidth;
-			ball.vel.x = -ball.vel.x;
-		}
-		if (ball.pos.y < 0.0) {
-			ball.pos.y = 0.0;
-			ball.vel.y = -ball.vel.y;
-		}
-	}
-
-	// make browser to call us repeatedly -----------------------------------
-
-	function update() {
-		simulate();
-		draw();
-		requestAnimationFrame(update);
-	}
-	
-	update();
-	
-</script> 
-</body>
-</html>
+update();
 ```
+
+`requestAnimationFrame` tells the browser to call `update` before the next repaint, typically sixty times per second. This is the heartbeat of every real-time simulation in this book.
+
+---
+
+## Two Coordinate Systems
+
+The canvas coordinate system has its origin at the top-left corner, with $y$ increasing downward. Physics, on the other hand, is most naturally expressed with the origin at the bottom-left and $y$ increasing upward. Mixing these up produces upside-down behavior, so we establish a clean mapping early.
+
+The key variable is `cScale`, a pixels-per-meter factor computed so that a minimum physical width of 20 meters always fits on screen regardless of the window size:
+
+```javascript
+var simMinWidth = 20.0;
+var cScale = Math.min(canvas.width, canvas.height) / simMinWidth;
+var simWidth  = canvas.width  / cScale;
+var simHeight = canvas.height / cScale;
+```
+
+Converting a position from simulation space to canvas space then requires only scaling for $x$ and scaling-plus-flipping for $y$:
+
+```javascript
+function cX(pos) { return pos.x * cScale; }
+function cY(pos) { return canvas.height - pos.y * cScale; }
+```
+
+Everything in the physics simulation uses meters. Everything passed to the canvas API uses pixels. These two functions are the only bridge between the two worlds.
+
+---
+
+## Newton's Second Law
+
+Before writing any physics code, we need one equation:
+
+$$\mathbf{F} = m\mathbf{a}$$
+
+Force equals mass times acceleration. This is Newton's second law, and it is the engine of classical mechanics. Rearranged, it says:
+
+$$\mathbf{a} = \frac{\mathbf{F}}{m}$$
+
+Acceleration is the rate of change of velocity. Velocity is the rate of change of position. A force does not move an object directly — it changes the object's velocity, and the velocity changes the position. This is why every simulated object must carry both a position and a velocity.
+
+For our cannonball, the only force is gravity. Near the Earth's surface, gravity accelerates every object downward at the same rate regardless of mass. If you substitute the gravitational force $\mathbf{F} = m\mathbf{g}$ into Newton's second law, the mass $m$ cancels:
+
+$$\mathbf{a} = \frac{m\mathbf{g}}{m} = \mathbf{g}$$
+
+The gravitational acceleration $\mathbf{g}$ points straight down with a magnitude of roughly $9.8\ \text{m/s}^2$, which we round to $10\ \text{m/s}^2$ for convenience. An object in free fall that starts from rest reaches $10\ \text{m/s}$ after one second, $20\ \text{m/s}$ after two seconds, and so on.
+
+---
+
+## Symplectic Euler Integration
+
+We know the acceleration. To get the velocity and position at the next moment in time, we need a *time integration method* — a recipe for stepping the simulation forward by a small interval $\Delta t$.
+
+The simplest possible recipe says: assume the acceleration is constant over $\Delta t$, update the velocity, then use that updated velocity to move the position.
+
+$$\mathbf{v}_{n+1} = \mathbf{v}_n + \mathbf{a}\,\Delta t$$
+$$\mathbf{x}_{n+1} = \mathbf{x}_n + \mathbf{v}_{n+1}\,\Delta t$$
+
+Notice that $\mathbf{x}_{n+1}$ uses the *new* velocity $\mathbf{v}_{n+1}$, not the old one $\mathbf{v}_n$. This is the defining feature of **symplectic Euler** integration, and it is what makes it more stable than naive (explicit) Euler, where you would use the old velocity to update the position. The difference looks small — just one line — but it determines whether energy in the simulation grows without bound or stays bounded. Symplectic Euler conserves a modified version of the total energy, which is why simulations using it do not explode.
+
+In code:
+
+```javascript
+var gravity  = { x: 0.0, y: -10.0 };
+var timeStep = 1.0 / 60.0;
+
+function simulate() {
+    ball.vel.x += gravity.x * timeStep;
+    ball.vel.y += gravity.y * timeStep;
+    ball.pos.x += ball.vel.x * timeStep;
+    ball.pos.y += ball.vel.y * timeStep;
+    // ...
+}
+```
+
+Velocity is updated first, then position. The order matters.
+
+---
+
+## The Cannonball
+
+The ball is a simple object with a radius, a position, and a velocity:
+
+```javascript
+var ball = {
+    radius: 0.2,
+    pos: { x: 0.2, y: 0.2 },
+    vel: { x: 10.0, y: 15.0 }
+};
+```
+
+The radius is 20 centimeters. The initial velocity launches it upward and to the right — hence the name "cannonball." Drawing it requires converting from simulation coordinates to canvas coordinates and scaling the radius by `cScale` to get the pixel radius:
+
+```javascript
+function draw() {
+    c.clearRect(0, 0, canvas.width, canvas.height);
+    c.fillStyle = "#FF0000";
+    c.beginPath();
+    c.arc(cX(ball.pos), cY(ball.pos), cScale * ball.radius, 0.0, 2.0 * Math.PI);
+    c.closePath();
+    c.fill();
+}
+```
+
+Keeping the ball inside the window requires boundary checks after each integration step. When the ball crosses a wall, we clamp its position back to the boundary and flip the corresponding velocity component:
+
+```javascript
+if (ball.pos.x < 0.0) {
+    ball.pos.x = 0.0;
+    ball.vel.x = -ball.vel.x;
+}
+if (ball.pos.x > simWidth) {
+    ball.pos.x = simWidth;
+    ball.vel.x = -ball.vel.x;
+}
+if (ball.pos.y < 0.0) {
+    ball.pos.y = 0.0;
+    ball.vel.y = -ball.vel.y;
+}
+```
+
+This is an elastic collision with an immovable wall: the velocity component perpendicular to the wall reverses sign, the parallel component is unchanged. There is no upper boundary check — the ball is free to fly as high as the physics allow and gravity will bring it back down.
+
+---
+
+## Substepping
+
+Symplectic Euler introduces an error at every step because it assumes that both the force and the velocity are constant over $\Delta t$. For a constant force like gravity this assumption is fine, but the velocity is never actually constant — gravity is continuously changing it. The error per step is proportional to $\Delta t$, so the total accumulated error over a fixed simulation time is also proportional to $\Delta t$.
+
+The straightforward remedy is to use a smaller time step. But the frame rate is fixed: the browser calls `update` 60 times per second, giving $\Delta t = 1/60 \approx 0.0167\ \text{s}$. We cannot slow down the clock.
+
+The solution is **substepping**: divide each frame into $n$ substeps, each of size $\Delta t / n$, and run the integration loop $n$ times per frame.
+
+```javascript
+var numSubSteps = 10;
+
+function simulate() {
+    var sdt = timeStep / numSubSteps;
+    for (var i = 0; i < numSubSteps; i++) {
+        ball.vel.x += gravity.x * sdt;
+        ball.vel.y += gravity.y * sdt;
+        ball.pos.x += ball.vel.x * sdt;
+        ball.pos.y += ball.vel.y * sdt;
+        // boundary checks ...
+    }
+}
+```
+
+The drawing still happens once per frame. Only the physics runs faster. This technique costs proportionally more CPU time, but it is simple, predictable, and — crucially — the only reliable strategy when collisions are involved. More sophisticated integrators gain nothing over symplectic Euler the moment you add discrete collision response, because collision events break any smoothness assumptions the fancier methods depend on.
+
+---
+
+## Why These Choices Last
+
+Throughout this book, more complex phenomena will be added: multiple bodies, constraints, joints, soft bodies, fluid. Yet the core loop — apply forces, integrate velocity, integrate position, resolve collisions, draw — will remain the same. Symplectic Euler with substepping is not a toy. It is the method underlying many production physics engines. Its virtues are exactly what a physics engine needs: it is simple to implement, hard to break, and fast enough that many substeps can be afforded even in real-time applications.
+
+The cannonball is the simplest system in which all of these ideas appear together. Everything more complicated is built on this foundation.
+
+---
+
+## Key Takeaways
+
+- **Newton's second law**, $\mathbf{F} = m\mathbf{a}$, is the starting point for all classical simulation. Forces change velocities; velocities change positions.
+- **Gravity** accelerates all objects equally at $g \approx 10\ \text{m/s}^2$ downward, because the mass in $F = mg$ cancels with the mass in $F = ma$.
+- **Symplectic Euler** updates velocity first, then uses the updated velocity to advance position. This subtle ordering makes the integrator energy-stable.
+- **Substepping** runs the integration loop $n$ times per rendered frame with a time step of $\Delta t / n$. It reduces integration error proportionally to $n$ with no algorithmic complexity, and it remains effective in the presence of collisions where higher-order integrators offer no benefit.
+- **Coordinate mapping** is a practical necessity: keep physics in meters with a bottom-left origin, and convert to canvas pixels only at draw time.

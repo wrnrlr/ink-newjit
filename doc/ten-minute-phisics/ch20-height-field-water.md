@@ -1,775 +1,222 @@
-# Chapter 20 — How to Write a Height-Field Water Simulation
+# Chapter 20 — Height-Field Water Simulation
 
-**Video:** https://youtu.be/hswBi5wcqAA
-**Slides:** https://matthias-research.github.io/pages/tenMinutePhysics/20-heightFieldWater.pdf
-**Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/20-heightFieldWater.html
-
-## Lecture Notes
-
-### Representation
-
-Water is stored as a 2.5D array of columns, each with:
-- h_{i,j}: total height of the column
-- v_{i,j}: vertical velocity
-
-Column width s is uniform. In 2D this is "1.5d"; in 3D "2.5d".
-
-**Pros:** simple, fast, easy surface extraction.
-**Cons:** no overturning waves; splashes must be added with particles.
+Simulating a believable ocean, lake, or tank of water is one of the most visually rewarding problems in real-time physics. Full volumetric fluid simulation is expensive enough that it is usually reserved for offline rendering. For interactive use, a much lighter approach exists: represent the water surface as a 2D grid of column heights and propagate disturbances across that grid using the wave equation. The result is fast enough to run in a browser, expressive enough to handle floating objects and splashing, and requires fewer than one hundred lines of code.
 
 ---
 
-### Simulation — Wave Equation
+## Representing Water as a Column Grid
 
-From Archimedes' principle and Newton's second law, the acceleration of each column is proportional to the height difference from its neighbors:
+Instead of tracking every particle of water, we divide the surface into a rectangular grid of vertical columns, each with a uniform width $s$. Each column $(i, j)$ stores two numbers:
 
-**1.5d (two neighbors):**
+- $h_{i,j}$ — the total height of the water column above the ground.
+- $v_{i,j}$ — the vertical velocity of that column.
 
-a_i = (c²/s²)(h_{i−1} + h_{i+1} − 2h_i)
+When the grid is laid out along a single line of columns this is called a **1.5D** simulation: the grid is one-dimensional but the columns reach up into a second dimension. Extending the grid to a full plane gives a **2.5D** simulation: a two-dimensional array of columns that poke up into three-dimensional space.
 
-**2.5d (four neighbors):**
-
-a_{i,j} = (c²/s²)(h_{i−1,j} + h_{i+1,j} + h_{i,j−1} + h_{i,j+1} − 4h_{i,j})
-
-c = wave speed; s = column width.
-
-**Boundary condition:** replace out-of-domain neighbors with h_{i,j} (reflecting walls).
-
-**Time step (semi-implicit Euler):**
-
-```
-for all i,j:   v_{i,j} ← v_{i,j} + Δt · a_{i,j}
-for all i,j:   h_{i,j} ← h_{i,j} + Δt · v_{i,j}
-```
-
-**Stability:** Δt · c < s (CFL condition).
+The column representation has important practical consequences. Extracting the visible surface mesh is trivial — just read off the heights and build triangles between neighboring grid points. Simulation cost scales as $O(N)$ in the number of columns rather than $O(N^2)$ or worse. The price paid for this efficiency is that the method cannot represent overturning waves or spray. Those effects require a separate particle layer added on top, but for tanks, rivers, and gentle ocean surfaces the column model is entirely convincing.
 
 ---
 
-### Object ↔ Water Interaction
+## Deriving the Wave Equation
 
-**Object to water:** maintain an extra field b_{i,j} (height covered by objects). Each step:
+The dynamics of each column follow directly from two principles: Archimedes' buoyancy and Newton's second law.
 
-h_{i,j} ← h_{i,j} + α(b_{i,j} − b^prev_{i,j})
+Imagine two adjacent columns of water with heights $h_1$ and $h_2$. Because $h_2 > h_1$, the taller column pushes down harder on the interface between them. By Archimedes' principle the resulting net force is proportional to the height difference $h_2 - h_1$. Newton's second law then says the acceleration of the shorter column is proportional to that force. By conservation of volume, if column 1 is accelerated upward then column 2 must be accelerated downward by the same amount.
 
-α ∈ [0,1] controls effect intensity. Smooth b to avoid spikes. This conserves volume and handles submerged bodies.
+Extending this reasoning to an interior column $i$ surrounded by neighbors $i-1$ and $i+1$, each neighbor pair contributes its own push. The total acceleration is the sum of both contributions:
 
-**Water to object (Archimedes):** for each overlap o between object and column:
+$$a_i = \frac{c^2}{s^2}\left(h_{i-1} + h_{i+1} - 2h_i\right)$$
 
-f = ρ_water · o · s² · g (upward buoyancy force)
+This is precisely the discrete Laplacian scaled by $c^2/s^2$, where $c$ is the wave propagation speed and $s$ is the column width. In the 2.5D case a column $(i,j)$ has four neighbors, and the formula extends naturally:
 
-Apply this force to the object at the column center.
+$$a_{i,j} = \frac{c^2}{s^2}\left(h_{i-1,j} + h_{i+1,j} + h_{i,j-1} + h_{i,j+1} - 4h_{i,j}\right)$$
+
+This is the discrete wave equation in two spatial dimensions. Disturbances propagate outward at speed $c$, producing the characteristic circular ripple patterns seen on still water.
 
 ---
 
-### Rendering
-
-Render the scene behind the water plane to a texture, then for each fragment look up the texture at screen coordinates + a normal-dependent offset → **refraction effect**. Offset magnitude scales with distance to camera.
-
-
-## Video Transcript
-
-hi not just from 10 minute physics here Welcome To tutorial number 20. today I'm going to show you how to write a 3d water simulator and the interaction of water with objects in under 100 lines of code here is my water simulation as you can see we have a tank and three balls interacting with the water the density of the yellow ball is larger than the density of water so it sinks to the ground the densities of the orange ball and the red ball are lower than the density of water so they float on the surface since the density of the orange ball is larger than the density of the red ball it is more immersed in the water I also implemented a refraction effect of the water surface as usual I wrote this demo in JavaScript so it runs in any browser I put the direct link to the demo into the description so you can immediately play with it for the demos and the slides of all my tutorials have a look at my web page let me now explain the method that I used to implement the simulation I represent water as an array of columns we can do this on a line or in the plane if we use a line we call this a one and a half dimensional simulation this is because we have a one-dimensional line but the columns poke out of this line if we use a plane then we call this a two and a half dimensional simulation this is because we work on a two-dimensional plane but the columns poke out of this plane there is a variety of advantages when representing water as columns first it's very simple to simulate second we get a fast simulation and third it's easy to extract the water surface there are also a few disadvantages we cannot simulate overturning waves and we don't get splashes we can however add this effect by using an additional particle simulator the grid setup is very simple each column stores a height and a velocity both the height and the velocity are needed to get the dynamic simulation we use the same width as for all the columns to derive the simulation method when using water columns we need Archimedes principle the principle says that any object totally or partially immersed in fluid or liquid is buoyed up by a force equal to the weight of the fluid displaced by the object if we have two water columns next to each other with the same height and velocity zero then we expect nothing to happen so let's assume we have two adjacent water columns with different heights H1 and H2 in this situation we can think of having a balloon here now the question is what's the force acting on the balloon from Archimedes principle we know that the force is proportional to the volume of the balloon the volume of the balloon is proportional to H2 minus H1 this means the force acting on the balloon is proportional to H2 minus H1 from Newton's Second Law we know that the acceleration is proportional to the force from the conservation of volume we know that if the column 1 is accelerated upwards then the column 2 must be accelerated downwards by the same amount to the acceleration of the second column H2 is minus H1 now let's have a look at what happens when you have a column I surrounded by two columns I minus 1 and I Plus 1. now to compute a I we need to consider both Neighbors in the pair I and I plus 1 the column I place the role of the left column as in the slide before therefore AI is proportional to h i plus 1 minus h i in the pair I minus 1i the column I plays the role of the right neighbor therefore we have a minus sign here removing the brackets gives AI is proportional to h i minus 1 plus h i plus 1 minus 2 h i saying a quantity is proportional to another quantity means that the quantity is equal to K the constant of proportionality times the other quantity in our case AI is equal to K times h i minus 1 plus h i plus 1 minus 2 h i where K is a constant from the discretization of the wave equation we can actually derive what the meaning of this constant K is K depends on two other constants C and S the constant C is the wave speed and S is the column width here is the situation of a two and a half dimensional simulation now a column i j is surrounded by four neighbors the equation to compute the acceleration of the column i j is very similar to the formula we got for the one and a half dimensional simulation the acceleration of column i j is proportional to the sum of the height of all the surrounding columns minus four times the height of the column itself the constant of proportionality turns out to be exactly the same as in the one and a half dimensional simulation c squared over s squared where C is the wave speed and S is the column width there's one last problem we have to solve before writing our simulator the problem is that when column i j is on the boundary of the domain then we access a column outside of the boundary there's a very simple solution to this if you want the simulate reflecting boundary conditions then when accessing a column outside of the domain we just use the height of the column i j itself now we are ready to write down the algorithm to simulate the 3D water surface it's extremely simple it consists of two Loops over all the columns in the domain in the first Loop we first compute the acceleration of each column we use the formula we just derived before then given the timestep delta T we can update the velocity of each column by adding delta T times the acceleration then we loop again over all the columns and update the heights we update them by adding delta T times the velocity in this case we use the semi-implicit Euler integration with timestamp delta T to get a stable simulation we have to make sure that waves do not travel further than one grid cell in one time step now let's see how we can simulate the interaction of objects with the water surface we want to have two-way coupling this means we want to know how objects influence the water surface and how the water influences the objects let's first have a look at how the objects influence the water surface here's a very simple way to do this we simply push down all the water columns such that they don't intersect with objects the first problem is volume loss the second problem with this approach is that it doesn't work for fully submerged bodies because we get this void here is my own solution I use an additional field B as before H stores the height of each column the value B stores the height covered by objects now I add a third Loop over all the columns in the simulation algorithm first I compute the change of the values of B between the current timestamp and the previous time step I then add the change of B to the heights of the water columns this change can be positive or negative without bias so volume is conserved the constant Alpha is a number between 0 and 1 and defines the intensity of this effect it's important to smooth the B field to prevent spikes and instabilities now we need the opposite direction as well how the water surface influences objects for this we use Archimedes principle again the force acting on the object is the same as the weight of the water replaced by the object we can compute the weight that's M times G where G is the gravitational acceleration the mass is the density of water times the volume the volume is O times s squared where s is the width of the column this means that for each overlap of an object with a water column we add this Force to the object at the position of the water column I use a very simple method to render the refraction effect on the water surface let me first show you how to render fully transparent plane of course the simplest way to do this would be to just not render anything but there's another method to do this we first render the scene behind the plane to a texture using the current camera then to render fragment of the plane we use the screen coordinates of this fragment to look up the color in the texture now there's a very simple way to get the refraction effect now we use the screen coordinates of the fragment plus an offset to look up the texture color we make this direction dependent on the surface normal the length of this offset is dependent on the distance of the camera to the water surface now let's have a quick look at the code I implemented a class called water surface here is the Constructor the actual simulation starts at line 170 with the simulation of the coupling between bodies and the water surface here you see the method to simulate the surface itself and this is the simulation Loop it ends at Line 270 so we have exactly 100 lines of code as promised as you can see the method to simulate the surface itself is really very simple I run through all the water columns compute the sum of the heights of all the neighbors and subtract the height of the central column itself I multiply this quantity by the time step DT and add this to the velocity in the second loop I add the velocity times DT to the height this is a fragment Shader for the water surface and this is the most important line here UV are the texture coordinates to look up the color in the background texture I use this green position of the fragment but now add R times the normal of the water surface for R I should actually use the distance to the camera however in my very simple implementation I just used a constant for Simplicity I also rendered the entire scene and not just the scene behind the plane so the challenge for you is to fix these two problems if somebody finds a very nice Solution please send me a pull request on GitHub this concludes the tutorial I hope you enjoyed it thanks for watching and I see you in the next one
-
-## Source Code
-
-### 20-heightFieldWater.html
-
-```html
-<!DOCTYPE html>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<html lang="en">
-	<head>
-		<title>Water 3d</title>
-		<style>
-		body {
-			font-family: verdana; 
-			font-size: 15px;
-		}
-		.button {
-			background-color: #606060;
-			border: none;
-			color: white;
-			padding: 15px 32px;
-			font-size: 16px;
-			margin: 4px 2px;
-			cursor: pointer;
-		</style>
-	</head>
-	
-	<body>
-		<button id = "buttonRun" onclick="run()" class="button">Run</button>
-		<button onclick="restart()" class="button">Restart</button>
-
-		<br><br>		
-        <div id="container"></div>
-        
-		<script src="https://unpkg.com/three@0.139.2/build/three.min.js"></script>
-		<script src="https://unpkg.com/three@0.139.2/examples/js/controls/OrbitControls.js"></script>
-			 
-		<script id="waterVertexShader" type="x-shader/x-vertex">
-			varying vec3 varNormal;
-			varying vec2 varScreenPos;
-			varying vec3 varPos;
-
-			void main() {
-				vec4 pos = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-				varScreenPos = vec2(0.5, 0.5) + 0.5 * vec2(pos) / pos.z;
-				varPos = vec3(position);       
-				varNormal = normal;	
-				gl_Position = pos;
-			}
-		</script>
-
-		<script id="waterFragmentShader" type="x-shader/x-fragment">
-			uniform sampler2D background;
-			varying vec3 varNormal;
-			varying vec2 varScreenPos;
-			varying vec3 varPos;			
-
-			void main() {
-				float r = 0.02;	// todo: should be distance dependent!
-				vec2 uv = varScreenPos + r * vec2(varNormal.x, varNormal.z);
-				vec4 color = texture2D(background, uv);
-				color.z = min(color.z + 0.2, 1.0);
-
-				vec3 L = normalize(vec3(10.0, 10.0, 10.0) - varPos);   
-				float s = max(dot(varNormal,L), 0.0); 
-				color *= (0.5 + 0.5 * s);
-			 
-				gl_FragColor = color;
-			}
-		</script>
-
-		<script>
-
-            // ------------------------------------------------------------------
-
-			// physics scene
-
-			var gPhysicsScene = 
-			{
-				gravity : new THREE.Vector3(0.0, -10.0, 0.0),
-				dt : 1.0 / 30.0,
-				tankSize : { x: 2.5, y : 1.0, z : 3.0 },
-				tankBorder : 0.03,
-				waterHeight : 0.8,
-				waterSpacing : 0.02,
-				paused: true,
-				waterSurface: null,
-				objects: []
-			};
-
-			// globals
-			
-			var gThreeScene;
-			var gRenderer;
-			var gRenderTarget;
-			var gCamera;
-			var gCameraControl;
-			var gWaterMaterial; 
-			var gGrabber;
-			var gMouseDown;
-			var gPrevTime = 0.0;
-
-			// ------------------------------------------------------------------
-			class WaterSurface {
-				constructor(sizeX, sizeZ, depth, spacing, visMaterial)
-				{
-					// physics data
-
-					this.waveSpeed = 2.0;
-					this.posDamping = 1.0;
-					this.velDamping = 0.3;
-					this.alpha = 0.5;
-					this.time = 0.0;
-
-					this.numX = Math.floor(sizeX / spacing) + 1
-					this.numZ = Math.floor(sizeZ / spacing) + 1
-					this.spacing = spacing;
-					this.numCells = this.numX * this.numZ;
-					this.heights = new Float32Array(this.numCells);
-					this.bodyHeights = new Float32Array(this.numCells);
-					this.prevHeights = new Float32Array(this.numCells);
-					this.velocities = new Float32Array(this.numCells);		
-					this.heights.fill(depth)
-					this.velocities.fill(0.0)
-
-					// visual mesh
-
-					let positions = new Float32Array(this.numCells * 3);
-					let uvs = new Float32Array(this.numCells * 2);
-					let cx = Math.floor(this.numX / 2.0);
-					let cz = Math.floor(this.numZ / 2.0);
-
-					for (let i = 0; i < this.numX; i++) {
-						for (let j = 0; j < this.numZ; j++) {
-							positions[3 * (i * this.numZ + j)] = (i - cx) * spacing; 
-							positions[3 * (i * this.numZ + j) + 2] = (j - cz) * spacing; 
-
-							uvs[2 * (i * this.numZ + j)] = i / this.numX;
-							uvs[2 * (i * this.numZ + j) + 1] = j / this.numZ;
-						}
-					}
-
-					var index = new Uint32Array((this.numX - 1) * (this.numZ - 1) * 2 * 3);
-					let pos = 0;
-					for (let i = 0; i < this.numX - 1; i++) {
-						for (let j = 0; j < this.numZ - 1; j++) {
-							let id0 = i * this.numZ + j;
-							let id1 = i * this.numZ + j + 1;
-							let id2 = (i + 1) * this.numZ + j + 1;
-							let id3 = (i + 1) * this.numZ + j;
-
-							index[pos++] = id0;
-							index[pos++] = id1;
-							index[pos++] = id2;
-
-							index[pos++] = id0;
-							index[pos++] = id2;
-							index[pos++] = id3;
-						}
-					}
-					var geometry = new THREE.BufferGeometry();
-
-//					var positions = new Float32Array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0]);
-					geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-					geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-					
-//					geometry.setIndex(index);
-					geometry.setIndex(new THREE.BufferAttribute(index,1));
-
-					this.visMesh = new THREE.Mesh(geometry, visMaterial);
-
-					this.updateVisMesh();
-                    gThreeScene.add(this.visMesh);
-				}
-
-				simulateCoupling() 
-				{
-					let cx = Math.floor(this.numX / 2.0);
-					let cz = Math.floor(this.numZ / 2.0);
-					let h1 = 1.0 / this.spacing;
-
-					this.prevHeights.set(this.bodyHeights);
-					this.bodyHeights.fill(0.0);
-
-					for (let i = 0; i < gPhysicsScene.objects.length; i++) {
-						let ball = gPhysicsScene.objects[i];
-						let pos = ball.pos;
-						let br = ball.radius;
-						let h2 = this.spacing * this.spacing;
-
-						let x0 = Math.max(0, cx + Math.floor((pos.x - br) * h1));
-						let x1 = Math.min(this.numX - 1, cx + Math.floor((pos.x + br) * h1));
-						let z0 = Math.max(0, cz + Math.floor((pos.z - br) * h1));
-						let z1 = Math.min(this.numZ - 1, cz + Math.floor((pos.z + br) * h1));
-
-						for (let xi = x0; xi <= x1; xi++) {
-							for (let zi = z0; zi <= z1; zi++) {
-								let x = (xi - cx) * this.spacing; 
-								let z = (zi - cz) * this.spacing;
-								let r2 = (pos.x - x) * (pos.x - x) + (pos.z - z) * (pos.z - z);
-								if (r2 < br * br) {
-									let bodyHalfHeight = Math.sqrt(br * br - r2);
-									let waterHeight = this.heights[xi * this.numZ + zi];
-
-									let bodyMin = Math.max(pos.y - bodyHalfHeight, 0.0);
-									let bodyMax = Math.min(pos.y + bodyHalfHeight, waterHeight);
-									var bodyHeight = Math.max(bodyMax - bodyMin, 0.0);
-									if (bodyHeight > 0.0) {
-										ball.applyForce(-bodyHeight * h2 * gPhysicsScene.gravity.y);
-										this.bodyHeights[xi * this.numZ + zi] += bodyHeight;
-									}
-								}
-							}
-						}
-					}
-
-					for (let iter = 0; iter < 2; iter++) {
-						for (let xi = 0; xi < this.numX; xi++) {
-							for (let zi = 0; zi < this.numZ; zi++) {
-								let id = xi * this.numZ + zi;
-
-								let num = xi > 0 && xi < this.numX - 1 ? 2 : 1;
-								num += zi > 0 && zi < this.numZ - 1 ? 2 : 1; 
-								let avg = 0.0;
-								if (xi > 0) avg += this.bodyHeights[id - this.numZ];
-								if (xi < this.numX - 1) avg += this.bodyHeights[id + this.numZ];
-								if (zi > 0) avg += this.bodyHeights[id - 1];
-								if (zi < this.numZ - 1) avg += this.bodyHeights[id + 1];
-								avg /= num;
-								this.bodyHeights[id] = avg;
-							}
-						}
-					}
-
-					for (let i = 0; i < this.numCells; i++) {
-						let bodyChange = this.bodyHeights[i] - this.prevHeights[i];
-						this.heights[i] += this.alpha * bodyChange;
-					}
-				}
-
-				simulateSurface()
-				{
-					this.waveSpeed = Math.min(this.waveSpeed, 0.5 * this.spacing / gPhysicsScene.dt);
-					let c = this.waveSpeed * this.waveSpeed / this.spacing / this.spacing
-					let pd = Math.min(this.posDamping * gPhysicsScene.dt, 1.0);
-					let vd = Math.max(0.0, 1.0 - this.velDamping * gPhysicsScene.dt);
-
-					for (let i = 0; i < this.numX; i++) {
-						for (let j = 0; j < this.numZ; j++) {
-							let id = i * this.numZ + j
-							let h = this.heights[id];
-							let sumH = 0.0;
-							sumH += i > 0 ? this.heights[id - this.numZ] : h;
-							sumH += i < this.numX - 1 ? this.heights[id + this.numZ] : h;
-							sumH += j > 0 ? this.heights[id - 1] : h;
-							sumH += j < this.numZ - 1 ? this.heights[id + 1] : h;
-							this.velocities[id] += gPhysicsScene.dt * c * (sumH - 4.0 * h)
-							this.heights[id] += (0.25 * sumH - h) * pd;  // positional damping
-						}
-					}
-
-					for (var i = 0; i < this.numCells; i++) {
-						this.velocities[i] *= vd;		// velocity damping
-						this.heights[i] += this.velocities[i] * gPhysicsScene.dt;
-					}
-				}
-
-				simulate() 
-				{
-					this.time += gPhysicsScene.dt;
-					this.simulateCoupling()
-					this.simulateSurface()
-					this.updateVisMesh();
-				}
-
-				updateVisMesh()
-				{
-					const positions = this.visMesh.geometry.attributes.position.array;
-					for (let i = 0; i < this.numCells; i++)
-						positions[3 * i + 1] = this.heights[i];
-					this.visMesh.geometry.attributes.position.needsUpdate = true;
-					this.visMesh.geometry.computeVertexNormals();
-					this.visMesh.geometry.computeBoundingSphere();
-				}
-
-				setVisible(visible)
-				{
-					this.visMesh.visible = visible;
-				}
-			}
-
-			// ------------------------------------------------------------------
-			class Ball {
-				constructor(pos, radius, density, color = 0xff0000)
-				{
-					// physics data 
-
-                    this.pos = new THREE.Vector3(pos.x, pos.y, pos.z);
-                    this.radius = radius;
-					this.mass = 4.0 * Math.PI / 3.0 * radius * radius * radius * density;
-                    this.vel = new THREE.Vector3(0.0, 0.0, 0.0);
-					this.grabbed = false;
-					this.restitution = 0.1;
-
-					// visual mesh
-
-                    let geometry = new THREE.SphereGeometry( radius, 32, 32 );
-                    let material = new THREE.MeshPhongMaterial({color: color});
-                    this.visMesh = new THREE.Mesh( geometry, material );
-					this.visMesh.position.copy(pos);
-					this.visMesh.userData = this;		// for raycasting
-					this.visMesh.layers.enable(1);
-					gThreeScene.add(this.visMesh);
-				}
-
-				handleCollision(other) 
-				{
-					let dir = new THREE.Vector3();
-					dir.subVectors(other.pos, this.pos);
-					let d = dir.length();
-
-					let minDist = this.radius + other.radius;
-					if (d >= minDist)
-						return;
-
-					dir.multiplyScalar(1.0 / d);
-					let corr = (minDist - d) / 2.0;
-					this.pos.addScaledVector(dir, -corr);
-					other.pos.addScaledVector(dir, corr);
-
-					let v1 = this.vel.dot(dir);
-					let v2 = other.vel.dot(dir);
-
-					let m1 = this.mass;
-					let m2 = other.mass;
-
-					let newV1 = (m1 * v1 + m2 * v2 - m2 * (v1 - v2) * this.restitution) / (m1 + m2);
-					let newV2 = (m1 * v1 + m2 * v2 - m1 * (v2 - v1) * this.restitution) / (m1 + m2);
-
-					this.vel.addScaledVector(dir, newV1 - v1);
-					other.vel.addScaledVector(dir, newV2 - v2);					
-
-				}
-			
-				simulate()
-				{
-					if (this.grabbed)
-						return;
-
-					this.vel.addScaledVector(gPhysicsScene.gravity, gPhysicsScene.dt);
-					this.pos.addScaledVector(this.vel, gPhysicsScene.dt);
-
-					let wx = 0.5 * gPhysicsScene.tankSize.x - this.radius - 0.5 * gPhysicsScene.tankBorder;
-					let wz = 0.5 * gPhysicsScene.tankSize.z - this.radius - 0.5 * gPhysicsScene.tankBorder;
-
-					if (this.pos.x < -wx) {
-						this.pos.x = -wx; this.vel.x = -this.restitution * this.vel.x;
-					}
-					if (this.pos.x >  wx) {
-						this.pos.x =  wx; this.vel.x = -this.restitution * this.vel.x;
-					}
-					if (this.pos.z < -wz) {
-						this.pos.z = -wz; this.vel.z = -this.restitution * this.vel.z;
-					}
-					if (this.pos.z >  wz) {
-						this.pos.z =  wz; this.vel.z = -this.restitution * this.vel.z;
-					}
-					if (this.pos.y < this.radius) {
-						this.pos.y = this.radius; this.vel.y = -this.restitution * this.vel.y;
-					}
-
-					this.visMesh.position.copy(this.pos);
-					this.visMesh.geometry.computeBoundingSphere();
-				}
-
-				applyForce(force)
-				{
-					this.vel.y += gPhysicsScene.dt * force / this.mass;
-					this.vel.multiplyScalar(0.999);
-				}
-
-				startGrab(pos) 
-				{
-					this.grabbed = true;
-					this.pos.copy(pos);
-					this.visMesh.position.copy(pos);
-				}
-
-				moveGrabbed(pos, vel) 
-				{
-					this.pos.copy(pos);
-					this.visMesh.position.copy(pos);
-				}
-
-				endGrab(pos, vel) 
-				{
-					this.grabbed = false;
-					this.vel.copy(vel);
-				}		
-			}	
-
-			// ------------------------------------------------------------------
-			function initScene(scene) 
-			{				
-				// water surface
-
-				let wx = gPhysicsScene.tankSize.x;
-				let wy = gPhysicsScene.tankSize.y;
-				let wz = gPhysicsScene.tankSize.z;
-				let b = gPhysicsScene.tankBorder;
-
-				var waterSurface = new WaterSurface(wx, wz, gPhysicsScene.waterHeight, 
-										gPhysicsScene.waterSpacing, gWaterMaterial)
-				gPhysicsScene.waterSurface = waterSurface;
-
-				// tank
-
-				var tankMaterial = new THREE.MeshPhongMaterial({color: 0x909090});
-				var boxGeometry = new THREE.BoxGeometry(b, wy, wz);
-				var box = new THREE.Mesh(boxGeometry, tankMaterial);
-				box.position.set(-0.5 * wx, wy * 0.5, 0.0)
-                gThreeScene.add(box);
-				var box = new THREE.Mesh(boxGeometry, tankMaterial);
-				box.position.set(0.5 * wx, 0.5 * wy, 0.0)
-                gThreeScene.add(box);
-				var boxGeometry = new THREE.BoxGeometry(wx, wy, b);
-				var box = new THREE.Mesh(boxGeometry, tankMaterial);
-				box.position.set(0.0, 0.5 * wy, - wz * 0.5)
-                gThreeScene.add(box);
-				var box = new THREE.Mesh(boxGeometry, tankMaterial);
-				box.position.set(0.0, 0.5 * wy, wz * 0.5)
-                gThreeScene.add(box);
-
-				// ball
-
-				gPhysicsScene.objects.push(new Ball({x:-0.5, y:1.0, z:-0.5}, 0.2, 2.0, 0xffff00));
-				gPhysicsScene.objects.push(new Ball({x:0.5, y:1.0, z:-0.5}, 0.3, 0.7, 0xff8000));				
-				gPhysicsScene.objects.push(new Ball({x:0.5, y:1.0, z:0.5}, 0.25, 0.2, 0xff0000));
-
-			}
-
-			// ------------------------------------------------------------------
-			function simulate() 
-			{
-				if (gPhysicsScene.paused)
-					return;
-
-				gPhysicsScene.waterSurface.simulate();
-				
-				for (let i = 0; i < gPhysicsScene.objects.length; i++) {
-					obj = gPhysicsScene.objects[i]
-					obj.simulate();
-					for (let j = 0; j < i; j++) 
-						obj.handleCollision(gPhysicsScene.objects[j]);
-				}
-			}
-
-			// ------------------------------------------
-			function render() {
-
-				gPhysicsScene.waterSurface.setVisible(false);
-				gRenderer.setRenderTarget(gRenderTarget);
-				gRenderer.clear();
-				gRenderer.render(gThreeScene, gCamera);
-
-				gPhysicsScene.waterSurface.setVisible(true);
-				gRenderer.setRenderTarget(null);
-				gRenderer.render(gThreeScene, gCamera);
-			}
-
-			// ------------------------------------------
-					
-			function initThreeScene() 
-			{
-				gThreeScene = new THREE.Scene();
-				
-				// Lights
-				
-				gThreeScene.add( new THREE.AmbientLight( 0x505050 ) );	
-				gThreeScene.fog = new THREE.Fog( 0x000000, 0, 15 );				
-
-				var spotLight = new THREE.SpotLight( 0xffffff );
-				spotLight.angle = Math.PI / 5;
-				spotLight.penumbra = 0.2;
-				spotLight.position.set( 2, 3, 3 );
-				spotLight.castShadow = true;
-				spotLight.shadow.camera.near = 1;
-				spotLight.shadow.camera.far = 10;
-				spotLight.shadow.mapSize.width = 1024;
-				spotLight.shadow.mapSize.height = 1024;
-				gThreeScene.add( spotLight );
-
-				var dirLight = new THREE.DirectionalLight( 0x55505a, 1 );
-				dirLight.position.set( 0, 3, 0 );
-				dirLight.castShadow = true;
-				dirLight.shadow.camera.near = 1;
-				dirLight.shadow.camera.far = 10;
-
-				dirLight.shadow.camera.right = 1;
-				dirLight.shadow.camera.left = - 1;
-				dirLight.shadow.camera.top	= 1;
-				dirLight.shadow.camera.bottom = - 1;
-
-				dirLight.shadow.mapSize.width = 1024;
-				dirLight.shadow.mapSize.height = 1024;
-				gThreeScene.add( dirLight );
-				
-				// Geometry
-
-				var ground = new THREE.Mesh(
-					new THREE.PlaneBufferGeometry( 20, 20, 1, 1 ),
-					new THREE.MeshPhongMaterial( { color: 0xa0adaf, shininess: 150 } )
-				);				
-
-				ground.rotation.x = - Math.PI / 2; // rotates X/Y to X/Z
-				ground.receiveShadow = true;
-				gThreeScene.add( ground );
-				
-				var helper = new THREE.GridHelper( 20, 20 );
-				helper.material.opacity = 1.0;
-				helper.material.transparent = true;
-				helper.position.set(0, 0.002, 0);
-				gThreeScene.add( helper );				
-				
-				// gRenderer
-
-				gRenderer = new THREE.WebGLRenderer();
-				gRenderer.shadowMap.enabled = true;
-				gRenderer.setPixelRatio( window.devicePixelRatio );
-				gRenderer.setSize( window.innerWidth, window.innerHeight );
-				window.addEventListener( 'resize', onWindowResize, false );
-				container.appendChild( gRenderer.domElement );
-
-				gRenderTarget = new THREE.WebGLRenderTarget( window.innerWidth, window.innerHeight, 
-					{ minFilter: THREE.LinearFilter, magFilter: THREE.NearestFilter, format: THREE.RGBAFormat } );
-
-				gWaterMaterial = new THREE.ShaderMaterial( {
-					uniforms: { background: { value: gRenderTarget.texture } },
-					vertexShader: document.getElementById( 'waterVertexShader' ).textContent,
-					fragmentShader: document.getElementById( 'waterFragmentShader' ).textContent} );
-					
-				// gCamera
-						
-				gCamera = new THREE.PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 0.01, 100);
-			    gCamera.position.set(0.0, 2.1, 1.5);
-				gCamera.updateMatrixWorld();	
-
-				gThreeScene.add( gCamera );
-
-				gCameraControl = new THREE.OrbitControls(gCamera, gRenderer.domElement);
-    			gCameraControl.zoomSpeed = 2.0;
-    			gCameraControl.panSpeed = 0.4;
-				gCameraControl.target.set(0.0, 0.8, 0.0)
-
-				// Grabber
-
-				gGrabber = new Grabber();
-				container.addEventListener( 'pointerdown', onPointer, false );
-				container.addEventListener( 'pointermove', onPointer, false );
-				container.addEventListener( 'pointerup', onPointer, false );
-			}
-
-			// ------- Grabber -----------------------------------------------------------
-
-			class Grabber {
-				constructor() {
-					this.raycaster = new THREE.Raycaster();
-					this.raycaster.layers.set(1);
-					this.raycaster.params.Line.threshold = 0.1;
-					this.physicsObject = null;
-					this.distance = 0.0;
-					this.prevPos = new THREE.Vector3();
-					this.vel = new THREE.Vector3();
-					this.time = 0.0;
-				}
-				increaseTime(dt) {
-					this.time += dt;
-				}
-				updateRaycaster(x, y) {
-					var rect = gRenderer.domElement.getBoundingClientRect();
-					this.mousePos = new THREE.Vector2();
-					this.mousePos.x = ((x - rect.left) / rect.width ) * 2 - 1;
-					this.mousePos.y = -((y - rect.top) / rect.height ) * 2 + 1;
-					this.raycaster.setFromCamera( this.mousePos, gCamera );
-				}
-				start(x, y) {
-					this.physicsObject = null;
-					this.updateRaycaster(x, y);
-					var intersects = this.raycaster.intersectObjects( gThreeScene.children );
-					if (intersects.length > 0) {
-						var obj = intersects[0].object.userData;
-						if (obj) {
-							this.physicsObject = obj;
-							this.distance = intersects[0].distance;
-							var pos = this.raycaster.ray.origin.clone();
-							pos.addScaledVector(this.raycaster.ray.direction, this.distance);
-							this.physicsObject.startGrab(pos);
-							this.prevPos.copy(pos);
-							this.vel.set(0.0, 0.0, 0.0);
-							this.time = 0.0;
-							if (gPhysicsScene.paused)
-								run();
-						}
-					}
-				}
-				move(x, y) {
-					if (this.physicsObject) {
-						this.updateRaycaster(x, y);
-						var pos = this.raycaster.ray.origin.clone();
-						pos.addScaledVector(this.raycaster.ray.direction, this.distance);
-
-						this.vel.copy(pos);
-						this.vel.sub(this.prevPos);
-						if (this.time > 0.0)
-							this.vel.divideScalar(this.time);
-						else
-							this.vel.set(0.0, 0.0, 0.0);
-						this.prevPos.copy(pos);
-						this.time = 0.0;
-
-						this.physicsObject.moveGrabbed(pos, this.vel);
-					}
-				}
-				end(x, y) {
-					if (this.physicsObject) { 
-						this.physicsObject.endGrab(this.prevPos, this.vel);
-						this.physicsObject = null;
-					}
-				}
-			}			
-
-			function onPointer( evt ) 
-			{
-				event.preventDefault();
-				if (evt.type == "pointerdown") {
-					gGrabber.start(evt.clientX, evt.clientY);
-					gMouseDown = true;
-					if (gGrabber.physicsObject) {
-						gCameraControl.saveState();
-						gCameraControl.enabled = false;
-					}
-				}
-				else if (evt.type == "pointermove" && gMouseDown) {
-					gGrabber.move(evt.clientX, evt.clientY);
-				}
-				else if (evt.type == "pointerup") {
-					if (gGrabber.physicsObject) {
-						gGrabber.end();
-						gCameraControl.reset();
-					}
-					gMouseDown = false;
-					gCameraControl.enabled = true;
-				}
-			}				
-
-			function onWindowResize() {
-
-				gCamera.aspect = window.innerWidth / window.innerHeight;
-				gCamera.updateProjectionMatrix();
-				gRenderer.setSize( window.innerWidth, window.innerHeight );
-				gRenderTarget.setSize(window.innerWidth, window.innerHeight);
-			}
-
-			function run() {
-				var button = document.getElementById('buttonRun');
-				if (gPhysicsScene.paused)
-					button.innerHTML = "Stop";
-				else
-					button.innerHTML = "Run";
-				gPhysicsScene.paused = !gPhysicsScene.paused;
-			}
-
-			function restart() {
-				location.reload();
-			}
-			
-			// make browser to call us repeatedly -----------------------------------
-
-			function update() 
-			{
-				let time = performance.now();
-				let dt = (time - gPrevTime) / 1000.0;
-				gPrevTime = time;
-
-				gPhysicsScene.dt = Math.min(1.0 / 30.0, 2.0 * dt);
-
-				simulate();
-				render();
-				gCameraControl.update();	
-				gGrabber.increaseTime(gPhysicsScene.dt);			
-				
-				requestAnimationFrame(update);
-			}
-			
-			initThreeScene();
-			initScene();
-			update();
-			
-		</script>
-	</body>
-</html>
-
+## Boundary Conditions
+
+At the edges of the grid, one or more neighbors fall outside the domain. The choice of how to handle them determines the physical behavior at the boundary.
+
+For **reflecting walls** — the behavior of a tank — we substitute the column's own height for any out-of-domain neighbor. Algebraically, the missing term cancels with the corresponding subtracted term, so the column at the boundary feels no net force from the missing direction. Waves hit the wall and bounce back, conserving energy exactly as a rigid wall would.
+
+---
+
+## Numerical Integration
+
+With the acceleration formula established, advancing the simulation is a two-pass loop over the grid. The first pass updates velocities; the second updates heights:
+
+```javascript
+// Pass 1: update velocities
+for (let i = 0; i < numX; i++) {
+    for (let j = 0; j < numZ; j++) {
+        let id = i * numZ + j;
+        let h = heights[id];
+        let sumH = 0.0;
+        sumH += i > 0          ? heights[id - numZ] : h;
+        sumH += i < numX - 1   ? heights[id + numZ] : h;
+        sumH += j > 0          ? heights[id - 1]    : h;
+        sumH += j < numZ - 1   ? heights[id + 1]    : h;
+        velocities[id] += dt * c * (sumH - 4.0 * h);
+    }
+}
+
+// Pass 2: update heights
+for (let i = 0; i < numCells; i++) {
+    heights[i] += velocities[i] * dt;
+}
 ```
+
+This is semi-implicit Euler integration. The velocity is updated using the current height configuration, and the height is then updated using the freshly computed velocity. Splitting the two passes is important: if we updated height and velocity together in a single pass we would be using partially updated heights when computing accelerations, introducing asymmetric errors.
+
+The stability condition for this scheme is the **CFL condition** — named after Courant, Friedrichs, and Lewy — which requires that a wave must not travel more than one grid cell in one time step:
+
+$$\Delta t \cdot c < s$$
+
+In practice, we enforce this by clamping the wave speed before each step:
+
+```javascript
+waveSpeed = Math.min(waveSpeed, 0.5 * spacing / dt);
+let c = waveSpeed * waveSpeed / (spacing * spacing);
+```
+
+---
+
+## Damping
+
+Undamped waves reflect endlessly between the walls. Real water dissipates energy through viscosity and turbulence. Two separate damping mechanisms are useful here.
+
+**Velocity damping** multiplies every velocity by a factor slightly less than one each step, exponentially draining energy from the system:
+
+```javascript
+velocities[i] *= Math.max(0.0, 1.0 - velDamping * dt);
+```
+
+**Positional damping** nudges each column height a small fraction of the way toward the average of its neighbors, which suppresses high-frequency noise without strongly affecting long-wavelength waves:
+
+```javascript
+heights[id] += (0.25 * sumH - h) * Math.min(posDamping * dt, 1.0);
+```
+
+Together these two mechanisms give good control over how quickly the water settles after a disturbance.
+
+---
+
+## Coupling Objects to the Water
+
+A simulation with no objects floating in the water is not very interesting. Making the coupling work in both directions — objects disturbing the water, and water exerting forces on objects — requires a small amount of bookkeeping.
+
+### Objects Pushing Down on the Water
+
+The naive approach is to push water columns downward wherever a submerged object occupies space. This is easy to implement but has two serious flaws: it does not conserve water volume, and it fails entirely for fully submerged bodies because it leaves an empty void inside them.
+
+A better solution introduces an auxiliary field $b_{i,j}$ that stores the **height covered by objects** in each column. At each time step we compute how $b$ has changed since the last step and add that change to the water column heights:
+
+$$h_{i,j} \leftarrow h_{i,j} + \alpha\,(b_{i,j} - b^{\text{prev}}_{i,j})$$
+
+The scalar $\alpha \in [0, 1]$ controls the coupling strength. When an object moves downward into the water ($b$ increases), the water surface rises around it. When the object rises ($b$ decreases), the surface lowers. Because we add the *change* in $b$ rather than setting $h$ directly, volume is automatically conserved — water pushed up in one place does not disappear. The same mechanism handles fully submerged objects correctly, since $b$ simply tracks the body's cross-section at every depth.
+
+To prevent sharp spikes at object boundaries, the $b$ field is smoothed with a few iterations of neighbor averaging before it is applied:
+
+```javascript
+simulateCoupling() {
+    this.prevBodyHeights.set(this.bodyHeights);
+    this.bodyHeights.fill(0.0);
+
+    // Accumulate body cross-sections into bodyHeights
+    for (let ball of objects) {
+        // ... (compute overlap of ball with each grid column)
+        if (bodyHeight > 0.0) {
+            ball.applyForce(-bodyHeight * cellArea * gravity.y);  // buoyancy
+            this.bodyHeights[xi * numZ + zi] += bodyHeight;
+        }
+    }
+
+    // Smooth bodyHeights to suppress spikes
+    for (let iter = 0; iter < 2; iter++) {
+        for (let xi = 0; xi < numX; xi++) {
+            for (let zi = 0; zi < numZ; zi++) {
+                let id = xi * numZ + zi;
+                let avg = /* neighbor average */ 0.0;
+                // ... accumulate and divide by neighbor count
+                this.bodyHeights[id] = avg;
+            }
+        }
+    }
+
+    // Apply change to water heights
+    for (let i = 0; i < numCells; i++) {
+        let bodyChange = this.bodyHeights[i] - this.prevBodyHeights[i];
+        this.heights[i] += this.alpha * bodyChange;
+    }
+}
+```
+
+### Water Pushing Up on Objects
+
+In the other direction, Archimedes' principle gives us the upward force directly. For each grid column that overlaps with an object, the overlap volume is $o \cdot s^2$, where $o$ is the height of the intersection between the object and the water column and $s^2$ is the column's cross-sectional area. The buoyancy force is the weight of the displaced water:
+
+$$f = \rho_{\text{water}} \cdot o \cdot s^2 \cdot g$$
+
+This force is applied upward at the center of the column. For a ball of mass $m$ this translates to a velocity impulse:
+
+```javascript
+applyForce(f) {
+    this.vel.y += dt * f / this.mass;
+}
+```
+
+The force is applied per column, so an object spanning many columns receives contributions from each one. A ball floating with half its volume submerged experiences a net upward force equal to its own weight — the equilibrium condition Archimedes described. Objects with density greater than water will experience a buoyancy force smaller than their weight and sink; objects less dense than water will float with just enough of their volume submerged to balance.
+
+---
+
+## Refraction Rendering
+
+The wave simulation produces a height field and a normal at every vertex. Converting those normals into a convincing water appearance uses a simple screen-space trick.
+
+The scene behind the water plane is rendered first to an offscreen texture. Then, when rendering each fragment of the water mesh, instead of sampling the texture at the fragment's own screen coordinates, we add a small offset proportional to the surface normal:
+
+```glsl
+// Fragment shader
+float r = 0.02;
+vec2 uv = varScreenPos + r * vec2(varNormal.x, varNormal.z);
+vec4 color = texture2D(background, uv);
+color.z = min(color.z + 0.2, 1.0);  // tint slightly blue
+```
+
+The offset shifts the apparent position of the background in a direction that depends on the local surface slope. Where the water surface tilts toward the viewer, the background appears to shift in one direction; where it tilts away, it shifts in the other. The result mimics the way refraction bends light at the water–air interface, bending the image of objects below the surface as waves pass overhead. A more accurate implementation would make the offset magnitude proportional to the camera distance to the water surface — closer water refracts more noticeably in screen space — but the constant approximation is plausible at typical camera distances.
+
+The two-pass rendering is arranged so that the offscreen render captures everything *except* the water mesh, giving a clean background. The water mesh is then rendered on top, sampling the background texture with the normal-derived offset.
+
+---
+
+## Putting It Together
+
+The top-level simulation step runs three stages in order:
+
+1. **Coupling pass** — compute object-to-water displacements, apply buoyancy forces back to objects.
+2. **Surface pass** — propagate the wave equation across the height field, apply damping.
+3. **Mesh update** — write the new heights into the vertex buffer and recompute normals.
+
+```javascript
+simulate() {
+    this.simulateCoupling();   // two-way object ↔ water
+    this.simulateSurface();    // wave equation + damping
+    this.updateVisMesh();      // push heights to GPU
+}
+```
+
+The entire physics core, including coupling, wave propagation, and damping, fits in roughly one hundred lines of JavaScript. Rendering and scene setup add more, but the simulation heart is genuinely compact. That compactness is not accidental: by restricting the water representation to a height field and the dynamics to the discrete wave equation, we avoided all of the algorithmic complexity of pressure solvers, advection schemes, and particle resamplers that appear in more general fluid simulations.
+
+---
+
+## Key Takeaways
+
+- A **height-field** (2.5D column grid) represents water as heights $h_{i,j}$ and velocities $v_{i,j}$, enabling fast simulation with trivial surface extraction at the cost of no overturning waves.
+- The **discrete wave equation** $a_{i,j} = (c^2/s^2)(h_{i-1,j} + h_{i+1,j} + h_{i,j-1} + h_{i,j+1} - 4h_{i,j})$ governs column acceleration, derived directly from Archimedes' principle and Newton's second law.
+- **Reflecting boundary conditions** are implemented by substituting a column's own height for any out-of-domain neighbor, making missing terms cancel.
+- **Semi-implicit Euler** integration — update velocities first, then heights — is stable and simple. The **CFL condition** $\Delta t \cdot c < s$ bounds the time step.
+- **Two-way coupling** is achieved via an auxiliary body-height field $b_{i,j}$: the *change* in $b$ is added to water heights (conserving volume), while Archimedes' principle applied per column yields buoyancy forces on objects.
+- Smoothing the body-height field before applying it suppresses sharp spikes at object boundaries and improves stability.
+- **Screen-space refraction** requires only two render passes: render the background to a texture, then sample that texture at normal-offset coordinates when drawing the water surface.

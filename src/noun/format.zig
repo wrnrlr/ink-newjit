@@ -256,7 +256,7 @@ pub const TerseFormatter = struct {
       try self.formatAtom(T, slice[0], w);
     } else {
       for (slice, 0..) |e, i| {
-        if (i > 0 and (T != u32 or self.mode == .Repl)) try w.writeAll(" ");
+        if (i > 0 and T != u32) try w.writeAll(" ");
         try self.formatAtom(T, e, w);
       }
     }

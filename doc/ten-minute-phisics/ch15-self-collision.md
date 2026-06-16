@@ -1,940 +1,228 @@
-# Chapter 15 — Self-Collisions: Solving the Hardest Problem in Animation
+# Chapter 15 — Self-Collision: The Hardest Problem in Cloth Simulation
 
-**Video:** https://youtu.be/XY3dLpgOk4Q
-**Slides:** https://matthias-research.github.io/pages/tenMinutePhysics/15-selfCollision.pdf
-**Code:** https://raw.githubusercontent.com/matthias-research/pages/master/tenMinutePhysics/15-selfCollision.html
+The cloth simulation developed in Chapter 14 produces convincing drape, fold, and stretch, but it has a silent flaw: the cloth passes through itself. Pull two corners toward each other and the fabric interpenetrates without resistance. For a hanging flag this is merely ugly; for a garment on a character it is completely unacceptable. Solving self-collision is what separates a cloth simulation that works on a test sphere from one that works in production.
 
-## Lecture Notes
-
-### Why Self-Collision is Hard
-
-Self-collision has no global "inside/outside" — after cloth passes through itself, the problem is ill-posed. The key principle: **start in a valid state and prevent entanglement from ever happening**.
+Self-collision is considered one of the hardest open problems in real-time physics. This chapter explains why, then shows a practical combination of five techniques that together make self-collision robust enough for cloth at interactive frame rates.
 
 ---
 
-### Five Tricks
+## Why Self-Collision Is Uniquely Hard
 
-**1. Use particles and a particle hash**
+Collision between a cloth particle and a static object — a floor, a sphere, a rigid body — is straightforward. The object has a well-defined inside and outside. When a particle ends up on the wrong side, the correction is obvious: push it back to the surface in the direction of the outward normal.
 
-Represent cloth thickness as particle spheres of radius r. Use many small primitives rather than few complex ones. The spatial hash from tutorial 11 gives O(1) neighbor queries.
+Self-collision has no such structure. After two patches of cloth interpenetrate, the configuration is globally ambiguous. Consider a piece of cloth that has folded so that one triangle pierces another. To separate them, you could push the top patch upward or the bottom patch downward — both corrections are locally valid. There is no geometric signal to indicate which is right. The problem is, in the formal sense, ill-posed.
 
-**2. Use rest distance to avoid jittering**
+The only way to resolve this ambiguity is to never let it arise. The entire self-collision strategy rests on a single principle: **start in a valid state and prevent any entanglement from ever occurring.** This shifts the problem from resolution to prevention, which is a much more tractable goal.
 
-If rest distance d_rest < 2r, distance constraints and collision constraints fight each other. Fix:
+Two technical obstacles make prevention difficult.
 
-d_coll = min(2r, d_rest)
+The first is scale. A cloth mesh with 6,000 triangles has thousands of particles. A naive check of every pair is $O(n^2)$ — on the order of millions of distance evaluations per frame. At 60 fps with 10 substeps, that is simply not feasible.
 
-Compute d_rest on the fly from the rest-pose particle positions.
+The second is tunneling. A fast-moving particle can pass through a thin feature — another fold of cloth — between one substep and the next. No distance check at discrete time points will catch it, because the particle was outside before and outside after, even though it crossed through. Continuous collision detection can catch this, but swept-volume tests for thousands of deforming particle pairs are extremely expensive, and handling the rollback after detection is complicated.
 
-**3. Use sub-stepping, not CCD**
+The following five techniques address both obstacles together.
 
-Sub-stepping (XPBD) instead of continuous collision detection. Create the spatial hash once per frame, then run n sub-steps:
+---
 
+## Trick 1: Use Particles and a Spatial Hash
+
+The first simplification is to treat cloth thickness as a physical property from the start. Each particle is modeled as a sphere of radius $r$. Two particles collide when the distance between their centers drops below $2r$. This is the simplest possible collision primitive: sphere versus sphere.
+
+The sphere primitive makes the broad phase straightforward. Chapter 11 introduced a spatial hash that answers the query "find all particles within distance $d$ of particle $i$" in expected $O(1)$ time. The hash divides space into cells of side length roughly $2r$ and, for each particle, checks only the $3 \times 3 \times 3 = 27$ neighboring cells. For $n$ particles, building the hash is $O(n)$ and querying all pairs is $O(n)$ expected — far better than the $O(n^2)$ naive approach.
+
+Using many small spheres instead of a few complex primitives is a general principle worth remembering. It keeps the narrow-phase test trivial and allows the data structure to stay simple and cache-friendly.
+
+---
+
+## Trick 2: Use Rest Distance to Prevent Jittering
+
+Cloth particles that are close together in the rest configuration — adjacent on the mesh — will naturally have a small rest distance. If that rest distance is less than $2r$, the stretch constraint (which pushes them to their rest separation) and the collision constraint (which pushes them apart to $2r$) will fight each other at every substep, causing visible jittering.
+
+The fix is to clip the collision distance from above by the rest distance:
+
+$$d_\text{coll} = \min(2r,\ d_\text{rest})$$
+
+where $d_\text{rest}$ is the Euclidean distance between the two particles in their rest configuration. This way, if two particles are "meant" to be close, the collision constraint targets that same closeness rather than a larger separation, and the two constraints agree.
+
+Computing $d_\text{rest}$ for every pair in advance would require $O(n^2)$ memory. Instead, the rest positions are stored in a second array alongside the live positions. At collision time, $d_\text{rest}$ is computed on the fly from `restPos` with a single distance call.
+
+The collision constraint also checks whether the current distance already exceeds $d_\text{rest}$. If it does, the particles are farther apart than they were in the rest pose, and no collision correction is applied — only when the current separation is less than $d_\text{rest}$ (or $2r$, whichever is smaller) does the constraint activate.
+
+---
+
+## Trick 3: Sub-step Instead of Continuous Collision Detection
+
+Continuous collision detection (CCD) tests whether the swept volumes of two moving objects overlap during the interval $[t, t + \Delta t]$. For two moving spheres, this reduces to finding the minimum distance between two line segments in 4D space-time — doable, but expensive, and the rollback required after a hit is even more involved.
+
+Sub-stepping sidesteps this entirely. If we take $n$ substeps per frame, a particle moves at most $v \cdot \Delta t / n$ per substep. With enough substeps, the chance that a particle tunnels through a feature within a single substep becomes negligible. The spatial hash is built once per frame (not once per substep, which would be prohibitively expensive) and then reused across all substeps:
+
+```javascript
+// Once per frame
+this.hash.create(this.pos);
+var maxTravelDist = maxVelocity * frameDt;
+this.hash.queryAll(this.pos, maxTravelDist);
+
+// Then n substeps, reusing the precomputed neighbor lists
+for (var step = 0; step < numSubSteps; step++) {
+    integrateParticles(dt);
+    solveConstraints(dt);
+    solveCollisions(dt);
+    updateVelocities(dt);
+}
 ```
-createHash()
-for n sub-steps:
-    integrate all particles
-    solve all constraints
-    update velocities
+
+Building the hash from positions at the start of the frame and querying with a search radius of `maxVelocity * frameDt` ensures that all particles that could possibly come into contact during the frame are captured in the neighbor lists. The neighbor lists remain valid throughout the substep loop because no particle can travel farther than this distance.
+
+---
+
+## Trick 4: Enforce a Maximum Velocity
+
+Sub-stepping reduces the chance of tunneling, but does not eliminate it. A particle moving at an extreme velocity can still leap across a thin fold in one substep. The remedy is to cap particle velocities directly.
+
+The safety condition is simple: a particle should not move more than one radius per substep. If the substep duration is $\Delta t_\text{sub} = \Delta t / n$, then:
+
+$$v_\text{max} = \frac{r}{\Delta t_\text{sub}} = \frac{r \cdot n}{\Delta t}$$
+
+This limit is less restrictive than it might appear. With $r = 0.01$ m, $n = 10$ substeps, and $\Delta t = 1/60$ s:
+
+$$v_\text{max} = \frac{0.01 \times 10}{1/60} = 6 \text{ m/s}$$
+
+That is roughly the running speed of a human character. The cloth will not separate from a sprinting character, and it will not tunnel through itself during any motion a cloth garment would realistically experience. The velocity cap is enforced each substep before the position update:
+
+```javascript
+var v = Math.sqrt(vecLengthSquared(this.vel, i));
+var maxV = 0.2 * this.thickness / dt;
+if (v > maxV) {
+    vecScale(this.vel, i, maxV / v);
+}
 ```
 
-**4. Enforce maximal velocity**
+Note the factor of `0.2` — a conservative safety margin below the theoretical limit, accounting for the fact that multiple constraints can combine to produce larger position changes than any single one.
 
-The maximum safe velocity per sub-step:
+---
 
-v_max = r / Δt_substep = r · n_substeps / Δt
+## Trick 5: Unconditionally Stable Cloth-Cloth Friction
 
-Example: r = 1 cm, 20 substeps, Δt = 1/30 s → v_max = 6 m/s (fast running speed).
-Cap all particle velocities to v_max.
+When two cloth particles collide, it is not enough to push them apart. Without friction, they would slide past each other freely even after the separation is corrected. With standard explicit friction (apply a tangential impulse proportional to the relative tangential velocity), the damping force can overshoot, reversing the relative velocity instead of zeroing it — which leads to oscillation.
 
-**5. Stable cloth-cloth friction**
+The stable approach averages the velocities of the two particles after collision. Let $\mathbf{x}_1, \mathbf{p}_1$ and $\mathbf{x}_2, \mathbf{p}_2$ be the current and previous positions of the two particles. Within XPBD, the implicit velocity of each particle is $(\mathbf{x}_i - \mathbf{p}_i) / h$, where $h$ is the substep duration. The average velocity is:
 
+$$\mathbf{v}_\text{avg} = \frac{(\mathbf{x}_1 - \mathbf{p}_1) + (\mathbf{x}_2 - \mathbf{p}_2)}{2h}$$
+
+Pushing both particles' velocities toward this average — with a damping coefficient $d \in [0, 1]$ — in position form:
+
+$$\mathbf{x}_1 \leftarrow \mathbf{x}_1 + d \cdot (\mathbf{v}_\text{avg} - \mathbf{v}_1) \cdot h$$
+$$\mathbf{x}_2 \leftarrow \mathbf{x}_2 + d \cdot (\mathbf{v}_\text{avg} - \mathbf{v}_2) \cdot h$$
+
+The factors of $h$ cancel, so the correction depends only on position differences:
+
+$$\mathbf{x}_1 \leftarrow \mathbf{x}_1 + d \cdot \tfrac{1}{2}\left[(\mathbf{x}_2 - \mathbf{p}_2) - (\mathbf{x}_1 - \mathbf{p}_1)\right]$$
+$$\mathbf{x}_2 \leftarrow \mathbf{x}_2 + d \cdot \tfrac{1}{2}\left[(\mathbf{x}_1 - \mathbf{p}_1) - (\mathbf{x}_2 - \mathbf{p}_2)\right]$$
+
+This never overshoots: with $d = 1$ the velocities are equalized exactly; with $d < 1$ they are partially equalized. The scheme is unconditionally stable for any $d \in [0, 1]$. To give $d$ a physical interpretation, set $d = \text{clamp}(h \cdot d_\text{physical}, 0, 1)$, where $d_\text{physical}$ is a friction coefficient in units of $\text{s}^{-1}$.
+
+---
+
+## The Collision Solver in Full
+
+With all five tricks in place, the `solveCollisions` method is compact. For each particle, it iterates over the precomputed neighbor list from the spatial hash and applies the position correction followed by the friction update:
+
+```javascript
+solveCollisions(dt) {
+    var thickness2 = this.thickness * this.thickness;
+
+    for (var i = 0; i < this.numParticles; i++) {
+        if (this.invMass[i] == 0.0) continue;
+        var id0 = i;
+        var first = this.hash.firstAdjId[i];
+        var last  = this.hash.firstAdjId[i + 1];
+
+        for (var j = first; j < last; j++) {
+            var id1 = this.hash.adjIds[j];
+            if (this.invMass[id1] == 0.0) continue;
+
+            vecSetDiff(this.vecs, 0, this.pos, id1, this.pos, id0);
+            var dist2 = vecLengthSquared(this.vecs, 0);
+            if (dist2 > thickness2 || dist2 == 0.0) continue;
+
+            var restDist2 = vecDistSquared(this.restPos, id0, this.restPos, id1);
+            if (dist2 > restDist2) continue;
+
+            var minDist = this.thickness;
+            if (restDist2 < thickness2)
+                minDist = Math.sqrt(restDist2);
+
+            // Push particles apart
+            var dist = Math.sqrt(dist2);
+            vecScale(this.vecs, 0, (minDist - dist) / dist);
+            vecAdd(this.pos, id0, this.vecs, 0, -0.5);
+            vecAdd(this.pos, id1, this.vecs, 0,  0.5);
+
+            // Friction: blend velocities toward their average
+            vecSetDiff(this.vecs, 0, this.pos, id0, this.prevPos, id0);
+            vecSetDiff(this.vecs, 1, this.pos, id1, this.prevPos, id1);
+            vecSetSum(this.vecs, 2, this.vecs, 0, this.vecs, 1, 0.5);
+            vecSetDiff(this.vecs, 0, this.vecs, 2, this.vecs, 0);
+            vecSetDiff(this.vecs, 1, this.vecs, 2, this.vecs, 1);
+
+            var friction = 0.0;  // set > 0 to enable tangential damping
+            vecAdd(this.pos, id0, this.vecs, 0, friction);
+            vecAdd(this.pos, id1, this.vecs, 1, friction);
+        }
+    }
+}
 ```
-v1 ← (x1 − p1) / h
-v2 ← (x2 − p2) / h
-v_avg ← (v1 + v2) / 2
-x1 ← x1 + d·(v_avg − v1)·h
-x2 ← x2 + d·(v_avg − v2)·h
+
+Several details deserve attention. The early exit `if (dist2 > restDist2) continue` implements trick 2: if the particles are farther apart than they are in the rest pose, no collision is relevant. The variable `minDist` starts at `thickness` but is reduced to `Math.sqrt(restDist2)` when the rest distance is smaller than the cloth thickness — this is the clipping formula $d_\text{coll} = \min(2r, d_\text{rest})$ from trick 2. The position corrections use equal weights of $\pm 0.5$ because both particles have equal inverse mass in this example; a general implementation would weight them by $w_0 / (w_0 + w_1)$ and $w_1 / (w_0 + w_1)$ respectively.
+
+---
+
+## The Hash's `queryAll` Method
+
+The `Hash` class from Chapter 11 gains one new method for this use case. Rather than returning candidates for a single query particle, `queryAll` builds a compact adjacency list covering all pairs across the entire cloth in one pass:
+
+```javascript
+queryAll(pos, maxDist) {
+    var num = 0;
+    var maxDist2 = maxDist * maxDist;
+
+    for (var i = 0; i < this.maxNumObjects; i++) {
+        this.firstAdjId[i] = num;
+        this.query(pos, i, maxDist);
+
+        for (var j = 0; j < this.querySize; j++) {
+            var id1 = this.queryIds[j];
+            if (id1 >= i) continue;                    // avoid duplicate pairs
+            if (vecDistSquared(pos, i, pos, id1) > maxDist2) continue;
+            this.adjIds[num++] = id1;
+        }
+    }
+    this.firstAdjId[this.maxNumObjects] = num;
+}
 ```
 
-Damping coefficient d ∈ [0,1], unconditionally stable. h cancels → can be omitted. Make physical: d = clamp(h · d_physical, 0, 1).
+The adjacency list is stored as two flat arrays: `firstAdjId[i]` gives the start index and `firstAdjId[i+1]` gives the end index of particle $i$'s neighbor range in `adjIds`. This is a standard compressed sparse row (CSR) layout. It avoids any per-pair memory allocation and is highly cache-friendly during the substep loop.
 
+The guard `if (id1 >= i) continue` ensures each pair $(i, j)$ with $i > j$ appears exactly once. Because the outer loop visits $i$ in increasing order and the inner loop filters to $\text{id1} < i$, each unordered pair is recorded under the larger of its two indices.
 
-## Video Transcript
+The search radius passed to `queryAll` is `maxVelocity * frameDt` — the maximum distance any particle can travel over the entire frame. This ensures that even particles which are not yet in contact at the start of the frame will be in the neighbor list if they could come into contact by the end.
 
-hi malthus from 10 minute physics here welcome to tutorial number 15. today i'm going to show you how to handle cloth self collision which is one of the toughest problems in animation or you could say it's the holy grail of animation so let's start let me make a few announcements first i now created a twitter account i also have a gmail address now if you have cool demos that run in a single html file and that use ideas for my tutorials please send them to me and i will publish them now let's dive right into our subject cloth self-collision handling as usual for the slides and demos have a look at my web page at www.matiasmirror.info 10 minute physics let me first explain to you why cloth self-collision is such a tricky problem so let's assume we have a soft body for a soft body we know exactly what's inside and what's outside so if we have a vertex inside the body we know exactly how to resolve the collision and where this vertex has to go now for cloth the situation is different there is no inside and no outside resolving collisions is a global problem because there are multiple solutions we can for instance move this piece of cloth completely down or completely up to resolve the collision one solution is to start in a valid state and make sure that no entanglements ever happen sometimes however this is not avoidable even though i don't have the perfect solution for class self-collision handling i will give you five tricks that make it work very well the first is to use particles in the particle hash for collision detection the second is to use the rest distance between the particles to avoid jittering use substepping instead of continuous collision detection and force a maximal velocity and use an unconditionally stable cloth cloth friction method the first trick is to use simple particles and particle hash for collision detection my general advice is to use as many simple primitives as possible instead of just a few complicated ones this makes the simulation much simpler you get more degrees of freedom in the simulation and higher fidelity since we use simple particles we can use the simple hash for unifor particles for collision detection i introduced it in tutorial number 11. typically we want the particles to be twice their radius apart from each other however sometimes the rest distance is smaller than 2r in this case the distance constraints and the collision constraints fight each other which results in jittering the solution to this problem is to set the collision distance to the minimum of 2r and the rest distance it would require a lot of memory to store the rest distance from a particle to all its close neighbors instead we compute the rest distance on the fly from the rest positions of the particles my third trick is to use substepping instead of continuous collision detection let's assume you have two particles and they do not collide at the beginning of the time step they do not collide at the end of the time step either but they have collided during the time step in order to detect that one typically uses continuous collision detection or ccd here we test the overlap of the swept volumes of the two objects a swept volume is the volume that is touched by an object that rotates and moves in a curved way potentially of course this is a complicated geometric object once we have detected the collision we have to roll back the simulation somehow if we use sub stepping instead the chances that we miss the collision are much smaller i explain in tutorial number nine how sub-stepping works basically instead of performing and solver iterations per time step we perform n sub steps what's important here is that we create the hash only once otherwise the simulation would be much too slow however even with substepping we might miss collisions to avoid this problem we enforce a maximal velocity we want that the particles do not move further than r during a sub step the size of a sub step is the size of a simulation step divided by the number of sub steps so what you can see is the maximal velocity is proportional to the number of sub steps this means the larger the number of sub steps the larger the limiting velocity let's do an example here let's say the radius of a particle is one centimeter we have 20 sub steps and the simulation time step is a 30th of a second in this case we get a maximal velocity of 20 kilometers per hour or about 13 miles per hour this is the speed of a fast running character so it's not a severe restriction the last trick is to use stable cloth cloth friction let's assume we have two particles with current position x1 and previous position p1 we can use the size of a substep and compute their current velocity as current position minus previous position divided by h next we compute their average velocity then we push the current velocity towards the average velocity as you can see the time step size cancels and can be omitted d is a damping coefficient between zero and one as you can see these two statements never overshoot which means we have an unconditionally stable simulation this is the final demo as you can see we have 12 000 triangles and the simulation runs at about 60 milliseconds per frame i can pull the cloth and it never self intersects in this demo i can also disable collision handling as you can see things look very bad in this case the code is based on the code of the last tutorial about cloth simulation therefore i will only show you what i added this is the hash that i introduced in tutorial number 11. i added one new method it's the method query all this method computes the enable list of all the particles in the simulation loop i first compute the maximal velocity then i create the hash next i create all the neighbor lists using a maximal travel distance the maximal travel distance is the maximum velocity times the size of the time step of the simulation next we integrate all the particles in the solved part we solve all the constraints if we want to handle collisions we also call the solve collision method then we update the velocities in the solve collision method we run through all the particles for each particle we retrieve the neighbor list from the hash next we run through all the neighbors here we compute the distance between the two particles then we compute the rest distance then we check whether the current distance is smaller than the minimum of the rest distance and the cloth thickness if this is the case we push the particles apart here you can see the friction method we first compute the velocities of the two particles then we compute the average velocity next we modify the velocities as i explained in the slides this concludes the tutorial thanks for watching i hope you enjoyed it and i see you in the next one you
+---
 
-## Source Code
+## Performance in Practice
 
-### 15-selfCollision.html
+A cloth mesh of 12,000 triangles (roughly 6,000 particles) running with 10 substeps at 60 fps takes approximately 60 ms per frame on a contemporary CPU in this JavaScript implementation. The simulation remains intersection-free under interactive manipulation — the cloth can be grabbed and folded, crumpled against itself, and released, all without tunneling or entanglement.
 
-```html
-<!DOCTYPE html>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<html lang="en">
-	<head>
-		<title>Cloth Self Collision Handling</title>
-		<style>
-			body {
-				font-family: verdana; 
-				font-size: 15px;
-			}			
-			.button {
-			background-color: #606060;
-			border: none;
-			color: white;
-			padding: 15px 32px;
-			font-size: 16px;
-			margin: 4px 2px;
-			cursor: pointer;
-		}
-		</style>	
-	</head>
-	
-	<body>
+The key to this performance is building the spatial hash and neighbor lists only once per frame. If the hash were rebuilt at every substep, the overhead would increase by a factor of 10. The precomputed neighbor lists remain valid because the velocity cap guarantees no particle moves farther than `maxTravelDist` between the hash construction and the end of the frame.
 
-        <h1>Cloth Self Collision Handling</h1> 
-		<button id = "buttonRun" onclick="run()" class="button">Run</button>
-		<button onclick="restart()" class="button">Restart</button>
-		<input type = "checkbox" onclick = "onShowEdges()"> Show edges</p>
-		<input type = "checkbox" onclick = "onCollision()" checked> Handle collisions</p>
-	
-		<span id = "numTris">0</span> tris&nbsp;&nbsp;
-		<span id = "numVerts">0</span> verts&nbsp;&nbsp;
-		<span id = "ms">0.000</span> ms per frame
-		<br>
-		Bending compliance:
-		<input type = "range" min = "0" max = "10" value = "1" id = "bendingComplianceSlider" class = "slider"> 
+---
 
+## Key Takeaways
 
-		<br><br>		
-        <div id="container"></div>
-        
-        <script src="https://unpkg.com/three@0.139.2/build/three.min.js"></script>
-        <script src="https://unpkg.com/three@0.139.2/examples/js/controls/OrbitControls.js"></script>
-		<script>
-
-			// ----- math on vector arrays -------------------------------------------------------------
-
-			function vecSetZero(a,anr) {
-				anr *= 3;
-				a[anr++] = 0.0;
-				a[anr++] = 0.0;
-				a[anr]   = 0.0;
-			}
-
-			function vecScale(a,anr, scale) {
-				anr *= 3;
-				a[anr++] *= scale;
-				a[anr++] *= scale;
-				a[anr]   *= scale;
-			}
-
-			function vecCopy(a,anr, b,bnr) {
-				anr *= 3; bnr *= 3;
-				a[anr++] = b[bnr++]; 
-				a[anr++] = b[bnr++]; 
-				a[anr]   = b[bnr];
-			}
-			
-			function vecAdd(a,anr, b,bnr, scale = 1.0) {
-				anr *= 3; bnr *= 3;
-				a[anr++] += b[bnr++] * scale; 
-				a[anr++] += b[bnr++] * scale; 
-				a[anr]   += b[bnr] * scale;
-			}
-
-			function vecSetDiff(dst,dnr, a,anr, b,bnr, scale = 1.0) {
-				dnr *= 3; anr *= 3; bnr *= 3;
-				dst[dnr++] = (a[anr++] - b[bnr++]) * scale;
-				dst[dnr++] = (a[anr++] - b[bnr++]) * scale;
-				dst[dnr]   = (a[anr] - b[bnr]) * scale;
-			}
-
-			function vecSetSum(dst,dnr, a,anr, b,bnr, scale = 1.0) {
-				dnr *= 3; anr *= 3; bnr *= 3;
-				dst[dnr++] = (a[anr++] + b[bnr++]) * scale;
-				dst[dnr++] = (a[anr++] + b[bnr++]) * scale;
-				dst[dnr]   = (a[anr] + b[bnr]) * scale;
-			}
-
-			function vecLengthSquared(a,anr) {
-				anr *= 3;
-				let a0 = a[anr], a1 = a[anr + 1], a2 = a[anr + 2];
-				return a0 * a0 + a1 * a1 + a2 * a2;
-			}
-
-			function vecDistSquared(a,anr, b,bnr) {
-				anr *= 3; bnr *= 3;
-				let a0 = a[anr] - b[bnr], a1 = a[anr + 1] - b[bnr + 1], a2 = a[anr + 2] - b[bnr + 2];
-				return a0 * a0 + a1 * a1 + a2 * a2;
-			}	
-
-			function vecDot(a,anr, b,bnr) {
-				anr *= 3; bnr *= 3;
-				return a[anr] * b[bnr] + a[anr + 1] * b[bnr + 1] + a[anr + 2] * b[bnr + 2];
-			}	
-
-			function vecSetCross(a,anr, b,bnr, c,cnr) {
-				anr *= 3; bnr *= 3; cnr *= 3;
-				a[anr++] = b[bnr + 1] * c[cnr + 2] - b[bnr + 2] * c[cnr + 1];
-				a[anr++] = b[bnr + 2] * c[cnr + 0] - b[bnr + 0] * c[cnr + 2];
-				a[anr]   = b[bnr + 0] * c[cnr + 1] - b[bnr + 1] * c[cnr + 0];
-			}			
-			
-			var gThreeScene;
-			var gRenderer;
-			var gCamera;
-			var gCameraControl;
-			var gGrabber;
-			var gMouseDown = false;
-
-			// ------------------------------------------------------------------
-
-			var gPhysicsScene = 
-			{
-				gravity : [0.0, -10.0, 0.0],
-				dt : 1.0 / 60.0,
-				numSubsteps : 10,
-				paused: true,
-				showEdges: false,
-				cloth: null,				
-			};
-
-			// ------------------------------------------------------------------
-			function onShowEdges() 
-			{
-				gPhysicsScene.showEdges = !gPhysicsScene.showEdges;
-				for (var i = 0; i < gPhysicsScene.objects.length; i++) {
-					gPhysicsScene.objects[i].edgeMesh.visible = gPhysicsScene.showEdges;
-					gPhysicsScene.objects[i].triMesh.visible = !gPhysicsScene.showEdges;
-				}
-			}			
-
-			// ------------------------------------------------------------------
-			function onCollision() 
-			{
-				if (gPhysicsScene.cloth)
-					gPhysicsScene.cloth.handleCollisions = !gPhysicsScene.cloth.handleCollisions;
-			}			
-
-			// ------------------------------------------------------------------
-			class Hash {
-				constructor(spacing, maxNumObjects) 
-				{
-					this.spacing = spacing;
-					this.tableSize = 5 * maxNumObjects;
-					this.cellStart = new Int32Array(this.tableSize + 1);
-					this.cellEntries = new Int32Array(maxNumObjects);
-					this.queryIds = new Int32Array(maxNumObjects);
-					this.querySize = 0;
-
-					this.maxNumObjects = maxNumObjects;
-					this.firstAdjId = new Int32Array(maxNumObjects + 1);
-					this.adjIds = new Int32Array(10 * maxNumObjects);
-				}
-
-				hashCoords(xi, yi, zi) {
-					var h = (xi * 92837111) ^ (yi * 689287499) ^ (zi * 283923481);	// fantasy function
-					return Math.abs(h) % this.tableSize; 
-				}
-
-				intCoord(coord) {
-					return Math.floor(coord / this.spacing);
-				}
-
-				hashPos(pos, nr) {
-					return this.hashCoords(
-						this.intCoord(pos[3 * nr]), 
-						this.intCoord(pos[3 * nr + 1]),
-						this.intCoord(pos[3 * nr + 2]));
-				}
-
-				create(pos) {
-					var numObjects = Math.min(pos.length / 3, this.cellEntries.length);
-
-					// determine cell sizes
-
-					this.cellStart.fill(0);
-					this.cellEntries.fill(0);
-
-					for (var i = 0; i < numObjects; i++) {
-						var h = this.hashPos(pos, i);
-						this.cellStart[h]++;
-					}
-
-					// determine cells starts
-
-					var start = 0;
-					for (var i = 0; i < this.tableSize; i++) {
-						start += this.cellStart[i];
-						this.cellStart[i] = start;
-					}
-					this.cellStart[this.tableSize] = start;	// guard
-
-					// fill in objects ids
-
-					for (var i = 0; i < numObjects; i++) {
-						var h = this.hashPos(pos, i);
-						this.cellStart[h]--;
-						this.cellEntries[this.cellStart[h]] = i;
-					}
-				}
-
-				query(pos, nr, maxDist) {
-					var x0 = this.intCoord(pos[3 * nr] - maxDist);
-					var y0 = this.intCoord(pos[3 * nr + 1] - maxDist);
-					var z0 = this.intCoord(pos[3 * nr + 2] - maxDist);
-
-					var x1 = this.intCoord(pos[3 * nr] + maxDist);
-					var y1 = this.intCoord(pos[3 * nr + 1] + maxDist);
-					var z1 = this.intCoord(pos[3 * nr + 2] + maxDist);
-
-					this.querySize = 0;
-
-					for (var xi = x0; xi <= x1; xi++) {
-						for (var yi = y0; yi <= y1; yi++) {
-							for (var zi = z0; zi <= z1; zi++) {
-								var h = this.hashCoords(xi, yi, zi);
-								var start = this.cellStart[h];
-								var end = this.cellStart[h + 1];
-
-								for (var i = start; i < end; i++) {
-									this.queryIds[this.querySize] = this.cellEntries[i];
-									this.querySize++;
-								}
-							}
-						}
-					}
-				}
-
-				queryAll(pos, maxDist) {
-
-					var num = 0;
-					var maxDist2 = maxDist * maxDist;
-
-					for (var i = 0; i < this.maxNumObjects; i++) {
-						var id0 = i;
-						this.firstAdjId[id0] = num;
-						this.query(pos, id0, maxDist);
-
-						for (var j = 0; j < this.querySize; j++) {
-							var id1 = this.queryIds[j];
-							if (id1 >= id0)
-								continue;
-							var dist2 = vecDistSquared(pos, id0, pos, id1);
-							if (dist2 > maxDist2)
-								continue;
-							
-							if (num >= this.adjIds.length) {
-								var newIds = new Int32Array(2 * num);  // dynamic array
-								newIds.set(this.adjIds);
-								this.adjIds = newIds;
-							}
-							this.adjIds[num++] = id1;
-						}
-					}
-
-					this.firstAdjId[this.maxNumObjects] = num;
-				}
-			};
-
-			// ------------------------------------------------------------------
-			class Cloth {
-				constructor(scene, numX, numY, spacing, thickness, bendingCompliance = 1.0)
-				{
-					// particles
-
-					var jitter = 0.001 * spacing;
-
-					this.numParticles = numX * numY;
-					this.pos = new Float32Array(3 * this.numParticles);
-					this.prevPos = new Float32Array(3 * this.numParticles);
-					this.restPos = new Float32Array(3 * this.numParticles);
-					this.vel = new Float32Array(3 * this.numParticles);
-					this.invMass = new Float32Array(this.numParticles);
-					this.thickness = thickness;
-					this.handleCollisions = true;
-					this.vecs = new Float32Array(4 * 3);
-
-						// particles
-
-					var attach = false;
-
-					for (var i = 0; i < numX; i++) {
-						for (var j = 0; j < numY; j++) {
-							var id = i * numY + j;
-							this.pos[3 * id] = - numX * spacing * 0.5 + i * spacing;
-							this.pos[3 * id + 1] = 0.2 + j * spacing;
-							this.pos[3 * id + 2] = 0.0;
-							this.invMass[id] = 1.0;
-							if (attach && j == numY - 1 && (i == 0 || i == numX - 1))
-								this.invMass[id] = 0.0;
-						}
-					}
-
-					for (var i = 0; i < this.pos.length; i++) 
-						this.pos[i] += -jitter * 2.0 * jitter * Math.random()
-
-					this.hash = new Hash(spacing, this.numParticles);
-
-					this.restPos.set(this.pos);
-					this.vel.fill(0.0);
-
-					// constraints
-
-					var numConstraintTypes = 6;
-
-					this.ids = new Int32Array(this.numParticles * numConstraintTypes * 2);
-					this.compliances = new Float32Array(this.numParticles * numConstraintTypes);
-					var offsets = [0,0, 0,1,  0,0, 1,0,  0,0, 1,1,  0,1, 1,0,  0,0, 0,2,  0,0, 2,0];
-					var num = 0;
-
-					var stretchCompliance = 0.0;
-					var shearCompliance = 0.0001;
-
-					var compliances = [stretchCompliance, stretchCompliance, shearCompliance, shearCompliance, bendingCompliance, bendingCompliance];
-
-					for (var constType = 0; constType < numConstraintTypes; constType++) {
-						for (var i = 0; i < numX; i++) {
-							for (var j = 0; j < numY; j++) {
-								var p = 4 * constType;
-
-								var i0 = i + offsets[p];
-								var j0 = j + offsets[p + 1];
-								var i1 = i + offsets[p + 2];
-								var j1 = j + offsets[p + 3];
-								if (i0 < numX && j0 < numY && i1 < numX && j1 < numY) {
-									this.ids[num++] = i0 * numY + j0;
-									this.ids[num++] = i1 * numY + j1;
-									this.compliances[Math.floor(num / 2)] = compliances[constType];
-								}
-							}
-						}
-					}
-
-					// randomize
-
-					this.numConstraints = Math.floor(num / 2);
-
-					// for (var i = 0; i < this.numConstraints; i++) {
-					// 	var j = i + Math.floor(Math.random() * (this.numConstraints - i));
-					// 	var c = this.compliances[i]; this.compliances[i] = this.compliances[j]; this.compliances[j] = c;
-					// 	var id = this.ids[2 * i]; this.ids[2 * i] = this.ids[2 * j]; this.ids[2 * j] = id;
-					// 	id = this.ids[2 * i + 1]; this.ids[2 * i + 1] = this.ids[2 * j + 1]; this.ids[2 * j + 1] = id;
-					// }
-
-					// pre-compute rest lengths
-
-					this.restLens = new Float32Array(this.numConstraints);
-					for (var i = 0; i < this.numConstraints; i++) {
-						var id0 = this.ids[2 * i];
-						var id1 = this.ids[2 * i + 1];
-						this.restLens[i] = Math.sqrt(vecDistSquared(this.pos,id0, this.pos,id1));
-					}
-
-					// visual meshes
-
-					var triIds = [];
-					var edgeIds = [];
-
-					for (var i = 0; i < numX; i++) {
-						for (var j = 0; j < numY; j++) {
-							var id = i * numY + j;
-							if (i < numX - 1 && j < numY - 1) {
-								triIds.push(id + 1); triIds.push(id); triIds.push(id + 1 + numY);
-								triIds.push(id + 1 + numY); triIds.push(id); triIds.push(id + numY);
-							}
-							if (i < numX - 1) {
-								edgeIds.push(id);
-								edgeIds.push(id + numY);
-							}
-							if (j < numY - 1) {
-								edgeIds.push(id);
-								edgeIds.push(id + 1);
-							}
-						}
-					}					
-
-					geometry = new THREE.BufferGeometry();
-					geometry.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-					geometry.setIndex(triIds);
-					var visMaterial = new THREE.MeshPhongMaterial({color: 0xff0000, side: THREE.FrontSide});
-					this.triMesh = new THREE.Mesh(geometry, visMaterial);
-					this.triMesh.castShadow = true;
-					this.triMesh.userData = this;	// for raycasting
-					this.triMesh.layers.enable(1);
-					scene.add(this.triMesh);
-
-					var backMaterial = new THREE.MeshPhongMaterial({color: 0xff8000, side: THREE.BackSide});
-					this.backMesh = new THREE.Mesh(geometry, backMaterial);
-					this.backMesh.userData = this;	// for raycasting
-					this.backMesh.layers.enable(1);
-					
-					scene.add(this.backMesh);
-					geometry.computeVertexNormals();
-
-					// visual edge mesh
-
-					var geometry = new THREE.BufferGeometry();
-					geometry.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-					geometry.setIndex(edgeIds);
-					var lineMaterial = new THREE.LineBasicMaterial({color: 0xff0000, linewidth: 2});
-					this.edgeMesh = new THREE.LineSegments(geometry, lineMaterial);
-					this.edgeMesh.visible = false;
-					scene.add(this.edgeMesh);
-
-					this.updateVisMeshes();
-				}
-
-				simulate(frameDt, numSubSteps, gravity)
-				{
-					var dt = frameDt / numSubSteps;
-					var maxVelocity = 0.2 * this.thickness / dt;
-
-					if (this.handleCollisions) {
-						this.hash.create(this.pos);
-						var maxTravelDist = maxVelocity * frameDt;
-						this.hash.queryAll(this.pos, maxTravelDist);
-					}
-					
-					for (var step = 0; step < numSubSteps; step++)  {
-
-						// integrate 
-
-						for (var i = 0; i < this.numParticles; i++) {
-							if (this.invMass[i] > 0.0) {
-								vecAdd(this.vel,i, gravity,0, dt);
-								var v = Math.sqrt(vecLengthSquared(this.vel,i));
-								var maxV = 0.2 * this.thickness / dt;
-								if (v > maxV) {
-									vecScale(this.vel,i, maxV / v);
-								}
-								vecCopy(this.prevPos,i, this.pos,i);
-								vecAdd(this.pos,i, this.vel,i, dt);
-							}
-						}
-
-						// solve
-
-						this.solveGroundCollisions();
-
-						this.solveConstraints(dt);
-						if (this.handleCollisions)
-						 	this.solveCollisions(dt);
-
-						// update velocities
-
-						for (var i = 0; i < this.numParticles; i++) {
-							if (this.invMass[i] > 0.0)
-								vecSetDiff(this.vel,i, this.pos,i, this.prevPos,i, 1.0 / dt);
-						}
-					}
-
-					this.updateVisMeshes();
-				}
-				
-				solveConstraints(dt) {
-					for (var i = 0; i < this.numConstraints; i++) {
-						var id0 = this.ids[2 * i];
-						var id1 = this.ids[2 * i + 1];
-						var w0 = this.invMass[id0];
-						var w1 = this.invMass[id1];
-						var w = w0 + w1;
-						if (w == 0.0)
-							continue;
-
-						vecSetDiff(this.vecs,0, this.pos,id0, this.pos,id1);
-						var len = Math.sqrt(vecLengthSquared(this.vecs,0));
-						if (len == 0.0)
-							continue;
-						vecScale(this.vecs,0, 1.0 / len);
-						var restLen = this.restLens[i];
-						var C = len - restLen;
-						var alpha = this.compliances[i] / dt /dt;
-						var s = -C / (w + alpha);
-						vecAdd(this.pos,id0, this.vecs,0, s * w0);
-						vecAdd(this.pos,id1, this.vecs,0, -s * w1);
-					}
-					var done = 0;
-				}
-
-				solveGroundCollisions() {
-					for (var i = 0; i < this.numParticles; i++) {
-						if (this.invMass[i] == 0.0)
-							continue;
-						var y = this.pos[3 * i + 1];
-						if (y < 0.5 * this.thickness) {
-							var damping = 1.0
-							vecSetDiff(this.vecs,0, this.pos,i, this.prevPos,i);
-							vecAdd(this.pos,i, this.vecs,0, -damping);
-							this.pos[3 * i + 1] = 0.5 * this.thickness;
-						}
-					}
-				}
-
-				solveCollisions(dt) { 
-
-					var thickness2 = this.thickness * this.thickness;
-
-					for (var i = 0; i < this.numParticles; i++) {
-						if (this.invMass[i] == 0.0)
-							continue;
-						var id0 = i;
-						var first = this.hash.firstAdjId[i];
-						var last = this.hash.firstAdjId[i + 1];
-
-						for (var j = first; j < last; j++) {
-
-							var id1 = this.hash.adjIds[j];
-							if (this.invMass[id1] == 0.0)
-								continue;
-
-							vecSetDiff(this.vecs,0, this.pos,id1, this.pos,id0);
-
-							var dist2 = vecLengthSquared(this.vecs,0);
-							if (dist2 > thickness2 || dist2 == 0.0)
-								continue;
-							var restDist2 = vecDistSquared(this.restPos,id0, this.restPos,id1);
-
-							var minDist = this.thickness;
-							if (dist2 > restDist2)
-								continue;
-							if (restDist2 < thickness2)
-								minDist = Math.sqrt(restDist2);
-
-							// position correction
-							var dist = Math.sqrt(dist2);
-							vecScale(this.vecs,0, (minDist - dist) / dist);
-							vecAdd(this.pos,id0, this.vecs,0, -0.5);
-							vecAdd(this.pos,id1, this.vecs,0,  0.5);
-
-							// velocities
-							vecSetDiff(this.vecs,0, this.pos,id0, this.prevPos, id0);
-							vecSetDiff(this.vecs,1, this.pos,id1, this.prevPos, id1);
-
-							// average velocity
-							vecSetSum(this.vecs,2, this.vecs,0, this.vecs,1, 0.5);
-
-							// velocity corrections
-							vecSetDiff(this.vecs,0, this.vecs,2, this.vecs,0);
-							vecSetDiff(this.vecs,1, this.vecs,2, this.vecs,1);
-							
-							// add corrections
-							var friction = 0.0;
-							vecAdd(this.pos,id0, this.vecs,0, friction);
-							vecAdd(this.pos,id1, this.vecs,1, friction);
-						}
-					}
-				}
-				
-				updateVisMeshes() {
-					this.triMesh.geometry.computeVertexNormals();
-					this.triMesh.geometry.attributes.position.needsUpdate = true;
-					this.triMesh.geometry.computeBoundingSphere();
-
-					this.edgeMesh.geometry.attributes.position.needsUpdate = true;
-				}
-
-				startGrab(pos) 
-				{
-					var p = [pos.x, pos.y, pos.z];
-					var minD2 = Number.MAX_VALUE;
-					this.grabId = -1;
-					for (let i = 0; i < this.numParticles; i++) {
-						var d2 = vecDistSquared(p,0, this.pos,i);
-						if (d2 < minD2) {
-							minD2 = d2;
-							this.grabId = i;
-						}
-					}
-
-					if (this.grabId >= 0) {
-						this.grabInvMass = this.invMass[this.grabId];
-						this.invMass[this.grabId] = 0.0;
-						vecCopy(this.pos,this.grabId, p,0);	
-					}
-				}
-
-				moveGrabbed(pos, vel) 
-				{
-					if (this.grabId >= 0) {
-						var p = [pos.x, pos.y, pos.z];
-						vecCopy(this.pos,this.grabId, p,0);
-					}
-				}
-
-				endGrab(pos, vel) 
-				{
-					if (this.grabId >= 0) {
-						this.invMass[this.grabId] = this.grabInvMass;
-						var v = [vel.x, vel.y, vel.z];
-						vecCopy(this.vel,this.grabId, v,0);
-					}
-					this.grabId = -1;
-				}								
-			}
-
-			var timeFrames = 0;
-			var timeSum = 0;	
-
-			// ------------------------------------------------------------------
-			function simulate() 
-			{
-				if (gPhysicsScene.paused)
-					return;
-
-				var startTime = performance.now();
-
-				gPhysicsScene.cloth.simulate(gPhysicsScene.dt, gPhysicsScene.numSubsteps, gPhysicsScene.gravity);
-
-				gGrabber.increaseTime(gPhysicsScene.dt);
-
-				var endTime = performance.now();
-				timeSum += endTime - startTime; 
-				timeFrames++;
-
-				if (timeFrames > 10) {
-					timeSum /= timeFrames;
-					document.getElementById("ms").innerHTML = timeSum.toFixed(3);		
-					timeFrames = 0;
-					timeSum = 0;
-				}					
-			}
-
-			// ------------------------------------------
-					
-			function initThreeScene() 
-			{
-				gThreeScene = new THREE.Scene();
-				
-				// Lights
-				
-				gThreeScene.add( new THREE.AmbientLight( 0x505050 ) );	
-				gThreeScene.fog = new THREE.Fog( 0x000000, 0, 15 );				
-
-				var spotLight = new THREE.SpotLight( 0xffffff );
-				spotLight.angle = Math.PI / 5;
-				spotLight.penumbra = 0.2;
-				spotLight.position.set( 2, 3, 3 );
-				spotLight.castShadow = true;
-				spotLight.shadow.camera.near = 3;
-				spotLight.shadow.camera.far = 10;
-				spotLight.shadow.mapSize.width = 1024;
-				spotLight.shadow.mapSize.height = 1024;
-				gThreeScene.add( spotLight );
-
-				var dirLight = new THREE.DirectionalLight( 0x55505a, 1 );
-				dirLight.position.set( 0, 3, 0 );
-				dirLight.castShadow = true;
-				dirLight.shadow.camera.near = 1;
-				dirLight.shadow.camera.far = 10;
-
-				dirLight.shadow.camera.right = 1;
-				dirLight.shadow.camera.left = - 1;
-				dirLight.shadow.camera.top	= 1;
-				dirLight.shadow.camera.bottom = - 1;
-
-				dirLight.shadow.mapSize.width = 1024;
-				dirLight.shadow.mapSize.height = 1024;
-				gThreeScene.add( dirLight );
-				
-				// Geometry
-
-				var ground = new THREE.Mesh(
-					new THREE.PlaneBufferGeometry( 20, 20, 1, 1 ),
-					new THREE.MeshPhongMaterial( { color: 0xa0adaf, shininess: 150 } )
-				);				
-
-				ground.rotation.x = - Math.PI / 2; // rotates X/Y to X/Z
-				ground.receiveShadow = true;
-				gThreeScene.add( ground );
-				
-				var helper = new THREE.GridHelper( 20, 20 );
-				helper.material.opacity = 1.0;
-				helper.material.transparent = true;
-				helper.position.set(0, 0.002, 0);
-				gThreeScene.add( helper );				
-				
-				// Renderer
-
-				gRenderer = new THREE.WebGLRenderer();
-				gRenderer.shadowMap.enabled = true;
-				gRenderer.setPixelRatio( window.devicePixelRatio );
-				gRenderer.setSize( 0.8 * window.innerWidth, 0.8 * window.innerHeight );
-				window.addEventListener( 'resize', onWindowResize, false );
-				container.appendChild( gRenderer.domElement );
-				
-				// Camera
-						
-				gCamera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.01, 100);
-			    gCamera.position.set(0, 0.3, 0.5);
-				gCamera.updateMatrixWorld();	
-
-				gThreeScene.add(gCamera);
-
-				gCameraControl = new THREE.OrbitControls(gCamera, gRenderer.domElement);
-				gCameraControl.zoomSpeed = 0.8;
-    			gCameraControl.panSpeed = 0.4;
-				gCameraControl
-				gCameraControl.target = new THREE.Vector3(0.0, 0.1, 0.0);
-				gCameraControl.update();
-
-				// grabber
-
-				gGrabber = new Grabber();
-				container.addEventListener( 'pointerdown', onPointer, false );
-				container.addEventListener( 'pointermove', onPointer, false );
-				container.addEventListener( 'pointerup', onPointer, false );
-			}
-
-			function initPhysics(triIds) 
-			{
-				var spacing = 0.01;
-				var thickness = 0.01;
-				var numX = 30;
-				var numY = 200;
-
-				gPhysicsScene.cloth = new Cloth(gThreeScene, numX, numY, spacing, thickness);
-				document.getElementById("numTris").innerHTML = numX * numY * 2;
-				document.getElementById("numVerts").innerHTML = numX * numY;
-			}
-
-			// ------- grabber -----------------------------------------------------------
-
-			class Grabber {
-				constructor() {
-					this.raycaster = new THREE.Raycaster();
-					this.raycaster.layers.set(1);
-					this.raycaster.params.Line.threshold = 0.1;
-					this.physicsObject = null;
-					this.distance = 0.0;
-					this.prevPos = new THREE.Vector3();
-					this.vel = new THREE.Vector3();
-					this.time = 0.0;
-				}
-				increaseTime(dt) {
-					this.time += dt;
-				}
-				updateRaycaster(x, y) {
-					var rect = gRenderer.domElement.getBoundingClientRect();
-					this.mousePos = new THREE.Vector2();
-					this.mousePos.x = ((x - rect.left) / rect.width ) * 2 - 1;
-					this.mousePos.y = -((y - rect.top) / rect.height ) * 2 + 1;
-					this.raycaster.setFromCamera( this.mousePos, gCamera );
-				}
-				start(x, y) {
-					this.physicsObject = null;
-					this.updateRaycaster(x, y);
-					var intersects = this.raycaster.intersectObjects( gThreeScene.children );
-					if (intersects.length > 0) {
-						var obj = intersects[0].object.userData;
-						if (obj) {
-							this.physicsObject = obj;
-							this.distance = intersects[0].distance;
-							var pos = this.raycaster.ray.origin.clone();
-							pos.addScaledVector(this.raycaster.ray.direction, this.distance);
-							this.physicsObject.startGrab(pos);
-							this.prevPos.copy(pos);
-							this.vel.set(0.0, 0.0, 0.0);
-							this.time = 0.0;
-							if (gPhysicsScene.paused)
-								run();
-						}
-					}
-				}
-				move(x, y) {
-					if (this.physicsObject) {
-						this.updateRaycaster(x, y);
-						var pos = this.raycaster.ray.origin.clone();
-						pos.addScaledVector(this.raycaster.ray.direction, this.distance);
-
-						this.vel.copy(pos);
-						this.vel.sub(this.prevPos);
-						if (this.time > 0.0)
-							this.vel.divideScalar(this.time);
-						else
-							this.vel.set(0.0, 0.0, 0.0);
-						this.prevPos.copy(pos);
-						this.time = 0.0;
-
-						this.physicsObject.moveGrabbed(pos, this.vel);
-					}
-				}
-				end(x, y) {
-					if (this.physicsObject) { 
-						this.physicsObject.endGrab(this.prevPos, this.vel);
-						this.physicsObject = null;
-					}
-				}
-			}			
-
-			function onPointer( evt ) 
-			{
-				event.preventDefault();
-				if (evt.type == "pointerdown") {
-					gGrabber.start(evt.clientX, evt.clientY);
-					gMouseDown = true;
-					if (gGrabber.physicsObject) {
-						gCameraControl.saveState();
-						gCameraControl.enabled = false;
-					}
-				}
-				else if (evt.type == "pointermove" && gMouseDown) {
-					gGrabber.move(evt.clientX, evt.clientY);
-				}
-				else if (evt.type == "pointerup") {
-					if (gGrabber.physicsObject) {
-						gGrabber.end();
-						gCameraControl.reset();
-					}
-					gMouseDown = false;
-					gCameraControl.enabled = true;
-				}
-			}	
-
-			document.getElementById("bendingComplianceSlider").oninput = function() {
-				for (var i = 0; i < gPhysicsScene.objects.length; i++) 
-					gPhysicsScene.objects[i].bendingCompliance = this.value;
-			}
-			
-			// ------------------------------------------------------
-
-			function onWindowResize() {
-
-				gCamera.aspect = window.innerWidth / window.innerHeight;
-				gCamera.updateProjectionMatrix();
-				gRenderer.setSize( window.innerWidth, window.innerHeight );
-			}
-
-			function run() {
-				var button = document.getElementById('buttonRun');
-				if (gPhysicsScene.paused)
-					button.innerHTML = "Stop";
-				else
-					button.innerHTML = "Run";
-				gPhysicsScene.paused = !gPhysicsScene.paused;
-			}
-
-			function restart() {
-				location.reload();
-			}
-			
-			// make browser to call us repeatedly -----------------------------------
-
-			function update() {
-				simulate();
-				gRenderer.render(gThreeScene, gCamera);
-				requestAnimationFrame(update);
-			}
-					
-			initThreeScene();
-			onWindowResize();
-			initPhysics();
-			update();
-			
-		</script>
-	</body>
-</html>
-
-```
+- **Self-collision is ill-posed after the fact.** Once cloth passes through itself, there is no local geometric signal to indicate the correct resolution. The only reliable strategy is to prevent penetration from ever occurring.
+- **Represent thickness as sphere radius $r$.** Treating each particle as a sphere of radius $r$ reduces all self-collision narrow-phase tests to sphere-sphere distance comparisons — the simplest possible primitive.
+- **Spatial hashing gives $O(n)$ broad phase.** Building the hash once per frame and querying a search radius of `maxVelocity * frameDt` captures all potentially colliding pairs without any per-substep rebuild cost.
+- **Use rest distance to set the collision target.** When two particles are closer in their rest pose than $2r$, targeting $d_\text{coll} = \min(2r, d_\text{rest})$ eliminates the jitter caused by competing stretch and collision constraints.
+- **The velocity cap $v_\text{max} = r \cdot n / \Delta t$ prevents tunneling.** It is less restrictive than it sounds — for reasonable cloth parameters it allows motion at running speed while guaranteeing at most one radius of travel per substep.
+- **Velocity averaging gives unconditionally stable friction.** Blending the implicit velocities of two colliding particles toward their average with coefficient $d \in [0, 1]$ never overshoots and requires no timestep tuning.
+- **The precomputed CSR neighbor list is the performance linchpin.** Computing it once per frame and reusing it across all substeps is what makes the approach fast enough for interactive use.
