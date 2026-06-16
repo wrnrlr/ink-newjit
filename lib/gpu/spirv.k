@@ -236,7 +236,7 @@ ncVec: [f32:1; v2:2; v3:3; v4:4]
 jnRty: {[a;b] n: ncVec[a]+ncVec[b]; $[n=2;`v2;n=3;`v3;`v4]}
 
 / Comparison ops always produce bool; others propagate vector type or use operand type
-cmpOps: (`<;`>;`=;`~;`&;`|)
+cmpOps: `<`>`=`~`&`|
 binRty: {[op;aty;bty;oty] $[op in cmpOps; `bool; op~`,; jnRty[aty;bty]; isVecTy[aty]; aty; isVecTy[bty]; bty; aty]}
 
 / ── Known 1-arg and multi-arg math function names ────────────────────────────
@@ -334,28 +334,31 @@ compLit: {[node; oty]
   val: $[(litTy~`int) & (useTy~`float); 0.+node[2]; node[2]]
   r: newId[]
   emitCon opConst[t;r;val]
-  (r; LitSym[useTy])}
+  (r; LitSym[useTy])
+}
 
 compVar: {[node; env] env[node[2]]}
 
 compTrans: {[node; env; oty]
   op: node[2]
   / Feed the right hint to operands: numeric comparisons want f32, bool ops want bool
-  opTy: $[op in (`<;`>;`=;`~); `f32; op in (`&;`|); `bool; oty]
+  opTy: $[op in `<`>`=`~; `f32; op in (`&;`|); `bool; oty]
   ap: compNode[node[1]; env; opTy]
   bp: compNode[node[3]; env; opTy]
   aty: ap[1]; bty: bp[1]
   rty: binRty[op; aty; bty; oty]
   r: newId[]
   emitBuf dispBin[op; rty; r; aty; ap[0]; bty; bp[0]]
-  (r; rty)}
+  (r; rty)
+}
 
 compAppos: {[node; env; oty]
   ap: compNode[node[2]; env; oty]
   r: newId[]
   emitBuf dispUn[node[1]; ap[1]; r; ap[0]]
   rty: $[node[1]~`length; `f32; node[1]~`~; `bool; ap[1]]
-  (r; rty)}
+  (r; rty)
+}
 
 / Composite indexing fallback: v[i] → OpCompositeExtract
 compApplyIdx: {[fn; argsSeq; env; oty]
@@ -363,7 +366,8 @@ compApplyIdx: {[fn; argsSeq; env; oty]
   idx: argsSeq[1][2]
   r:   newId[]
   emitBuf opXtract[Tf32; r; ap[0]; idx]
-  (r; `f32)}
+  (r; `f32)
+}
 
 / Explicit apply: f[a;b;c]
 / Handles: math function calls AND composite indexing (v[0])
@@ -374,7 +378,8 @@ compApply: {[node; env; oty]
   isMath: fnName in mathFns
   $[isMath
     ; compFnCall[fnName; node[2]; env; oty]
-    ; compApplyIdx[fn; node[2]; env; oty]]}
+    ; compApplyIdx[fn; node[2]; env; oty]]
+}
 
 / Tuple → vec2/vec3/vec4 via OpCompositeConstruct
 / Dispatch on element count.
@@ -391,7 +396,8 @@ compList: {[node; env; oty]
   $[n=2; emitBuf opCons2[rt;r;p0[0];p1[0]]
     n=3; emitBuf opCons3[rt;r;p0[0];p1[0];p2[0]]
     emitBuf opCons4[rt;r;p0[0];p1[0];p2[0];p3[0]]]
-  (r; rty)}
+  (r; rty)
+}
 
 / $[c; then; else] and chained $[c1;t1;c2;t2;...;default] → OpSelect (eager both branches)
 / Handles scalar bool condition selecting scalar or vector values.
@@ -403,7 +409,8 @@ compCond: {[node; env; oty]
   r:   newId[]
   rty: tp[1]
   emitBuf opSel[Tid[rty]; r; cp[0]; tp[0]; ep[0]]
-  (r; rty)}
+  (r; rty)
+}
 
 / AST node dispatcher
 compNode: {[node; env; oty]
@@ -416,7 +423,8 @@ compNode: {[node; env; oty]
     tag~`cond;     compCond[node;env;oty]
     tag~`right;    compNode[node[1];env;oty]   / parenthesised expression
     tag~`group;    compNode[node[1];env;oty]
-    (0; oty)]}
+    (0; oty)]
+}
 
 / ── Layer 3: sequential body with local bindings ──────────────────────────
 / stmts: list of statement nodes (seq/div markers already stripped)
