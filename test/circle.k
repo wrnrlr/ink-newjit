@@ -17,12 +17,13 @@
 / smoothstep gives a 1px anti-aliased edge.
 / Output: white on black, v4 rgba.
 
-spirvWds: FragmentShader[`uv`out!`v2`v4; {[uv]
-  ux: ((uv[0]*2.0)-1.0)*(4.0%3.0)
+spirvWds: FragmentShader[[uv:`v2; out:`v4]; {[uv]
+  ux: ((uv[0]*2.0)-1.0)*4.0%3.0
   uy: (uv[1]*2.0)-1.0
   d: sqrt[(sqr ux)+(sqr uy)]-0.45
   c: smoothstep[0.015;-0.015;d]
-  (c; c; c; 1.0)}]
+  (c; c; c; 1.0)
+}]
 
 / Full-screen quad [x y u v] × 6 vertices for an 800×600 window
 verts: 0. 0. 0. 0. 800. 0. 1. 0. 800. 600. 1. 1. 0. 0. 0. 0. 800. 600. 1. 1. 0. 600. 0. 1.

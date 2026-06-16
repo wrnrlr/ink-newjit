@@ -101,9 +101,13 @@ LitSym: [`float:`f32; `int:`i32; `bool:`bool]
 
 isVecTy: {[ty] (ty~`v4) | (ty~`v2) | (ty~`v3)}
 
+/ Component count for join result type: f32=1, v2=2, v3=3, v4=4
+ncVec: [`f32:1; `v2:2; `v3:3; `v4:4]
+jnRty: {[a;b] n: ncVec[a]+ncVec[b]; $[n=2;`v2;n=3;`v3;`v4]}
+
 / Comparison ops always produce bool; others propagate vector type or use operand type
 cmpOps: (`<;`>;`=;`~;`&;`|)
-binRty: {[op;aty;bty;oty] $[op in cmpOps; `bool; isVecTy[aty]; aty; isVecTy[bty]; bty; aty]}
+binRty: {[op;aty;bty;oty] $[op in cmpOps; `bool; op~`,; jnRty[aty;bty]; isVecTy[aty]; aty; isVecTy[bty]; bty; aty]}
 
 / ── Known 1-arg and multi-arg math function names ────────────────────────────
 mathFns1: `abs`floor`fract`sign`sqrt`sqr`sin`cos`length`normalize
@@ -119,6 +123,7 @@ dispBin: {[op;rty;r;aty;a;bty;b]
     op~`*;   $[isVecTy[aty] & ~isVecTy[bty]; opVTS[rt;r;a;b]
                isVecTy[bty] & ~isVecTy[aty]; opVTS[rt;r;b;a]
                opFmul[rt;r;a;b]]
+    op~`,;   (0x00050050;rt;r;a;b)   / OpCompositeConstruct, 2 constituents: v2+f32→v3, v3+f32→v4, etc.
     op~`<;   opFOlt[at;r;a;b]
     op~`>;   opFOgt[at;r;a;b]
     op~`<=;  opFOle[at;r;a;b]
