@@ -189,8 +189,13 @@ pub const Compiler = struct {
   }
 
   fn compileUTable(self: *Compiler, u: ast.UTable) anyerror!ir.ValueId {
-    _ = self; _ = u;
-    @panic("utable not implemented in compiler");
+    // [[keys][vals]] — each half is a flipped dict (table), then keyed with !
+    const keys_id = try self.compileDict(.{ .items = u.keys }, true);
+    if (keys_id == ir.NO_VALUE) return ir.NO_VALUE;
+    const vals_id = try self.compileDict(.{ .items = u.items }, true);
+    if (vals_id == ir.NO_VALUE) return ir.NO_VALUE;
+    var pair = [_]ir.ValueId{ keys_id, vals_id };
+    return try self.emitOpWithArg(.Apply2, @intFromEnum(Op2.@"!"), &pair);
   }
 
   fn compileApply(self: *Compiler, ap: ast.Apply, is_tail: bool) anyerror!ir.ValueId {

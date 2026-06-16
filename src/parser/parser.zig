@@ -153,6 +153,8 @@ pub const Parser = struct {
   fn parseAfterNoun(self: *Parser, noun: *Node) ParseError!*Node {
     self.skipComments();
     if (self.is(.@"[")) return self.parseAfterNoun(try self.parseApply(noun));
+    // f[[dict;...];...] — [[ is lexed as a single token; treat as apply where first arg is a dict.
+    if (self.is(.@"[[")) return self.parseAfterNoun(try self.parseApplyWithDict(noun));
     if (self.is(.@":")) return self.parseBind(noun, null);
 
     if (self.is(.op) or self.is(.keyword)) {
@@ -341,20 +343,32 @@ pub const Parser = struct {
   }
 
   fn parseSeq(self: *Parser, end_tt: TT) ParseError!ast.Seq {
+    // Inside lambda bodies (end_tt='}'), newlines are statement separators.
+    // Inside brackets/parens (end_tt=']'/'}'), only ';' separates args; newlines are whitespace.
+    const nl_is_sep = end_tt == .@"}";
     var stmts = try std.ArrayList(*Node).initCapacity(self.al(), 0);
     var last_sep = false;
+    var last_sep_is_sc = false;
     while (!self.is(end_tt) and !self.is(.eof)) {
       self.skipComments();
       if (self.is(end_tt) or self.is(.eof)) break;
       if (self.is(.sep)) {
-        if (last_sep) try stmts.append(self.al(), try self.node(.blank));
-        self.advance(); last_sep = true; continue;
+        const is_sc = self.slice().len > 0 and self.slice()[0] == ';';
+        const counts = is_sc or nl_is_sep;
+        if (counts) {
+          if (last_sep and last_sep_is_sc) try stmts.append(self.al(), try self.node(.blank));
+          last_sep = true;
+          last_sep_is_sc = is_sc;
+        }
+        self.advance();
+        continue;
       }
       last_sep = false;
+      last_sep_is_sc = false;
       try stmts.append(self.al(), try self.parseStmt());
       self.skipComments();
     }
-    if (last_sep) try stmts.append(self.al(), try self.node(.blank));
+    if (last_sep and last_sep_is_sc) try stmts.append(self.al(), try self.node(.blank));
     return stmts.toOwnedSlice(self.al());
   }
 
@@ -451,6 +465,21 @@ pub const Parser = struct {
     const seq = try self.parseSeq(.@"]");
     _ = self.eat(.@"]");
     return self.node(.{ .apply = .{ .f = f, .a = seq } });
+  }
+
+  // Handles f[[dict;...];arg2;...] where [[ was lexed as a single token.
+  // The [[ acts as the opening [ of the apply call, and [dict;...] is the first argument.
+  fn parseApplyWithDict(self: *Parser, f: *Node) ParseError!*Node {
+    self.advance(); // consume '[['
+    const dict_items = try self.parseItems(.@"]");
+    _ = self.eat(.@"]");
+    const first_arg = try self.node(.{ .dict = .{ .items = if (dict_items.len > 0) dict_items else null } });
+    const rest = try self.parseSeq(.@"]");
+    _ = self.eat(.@"]");
+    var seq = try std.ArrayList(*Node).initCapacity(self.al(), rest.len + 1);
+    try seq.append(self.al(), first_arg);
+    for (rest) |r| try seq.append(self.al(), r);
+    return self.node(.{ .apply = .{ .f = f, .a = try seq.toOwnedSlice(self.al()) } });
   }
 
   fn parseCond(self: *Parser) ParseError!*Node {

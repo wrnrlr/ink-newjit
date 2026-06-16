@@ -1,6 +1,9 @@
 # Agent Instructions
 - Implementation of the Ink array programming language similar to ngn/k and k9.
 - Ink is a polysemic language; operators have different meanings based on argument count and type.
+- It has a runtime written in Zig for interpreting k code on the CPU.
+- It has a compiler targetting SPIRV for written in k for the GPU.
+- A transpiler 
 - Commands can get stuck in a loop, run with a timeout: `timeout 1s ./zig-out/bin/ink; [ $? -eq 124 ] && echo 'Script timed out!'`.
 - Use 2 spaces for code indentation.
 - Use zig version 0.16.
