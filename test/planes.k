@@ -39,17 +39,18 @@ frag: FragmentShader[[nor:`v3; out:`v4]; {[nor]
 
 / Vertex shader: 45° Y-rotation then isometric X-tilt, scale by 0.5.
 / c30=cos(35.26°)=√(2/3), s30=sin(35.26°)=1/√3 — equal rhombuses for all planes.
-vert: VertexShader[[pos:`v3;nor:`v3]; (,`vNor)!(,`v3); {[pos;nor]
+vert: VertexShader[[pos:`v3;nor:`v3]; [vNor:`v3]; {[pos;nor]
   c45: 0.7071; s45: 0.7071; c30: 0.8165; s30: 0.5774; sc: 0.5
   py0: (c45*pos[0])+s45*pos[2]
-  py1: pos[1]
   py2: (0.0-s45*pos[0])+c45*pos[2]
-  px1: (c30*py1)+0.0-s30*py2
-  px2: (s30*py1)+c30*py2
+  px1: (c30*pos[1])+0.0-s30*py2
+  px2: (s30*pos[1])+c30*py2
   clipPos: (sc*py0; sc*px1; 0.5+(0.0-px2*sc*0.5); 1.0)
-  (clipPos; nor)}]
+  (clipPos; nor)
+}]
 
 handle:: 0
 RunWindow[{[props]
   $[handle=0; handle:: CompileMesh[vert; frag]; 0]
-  DrawMesh[verts; handle]}; 0]
+  DrawMesh[verts; handle]
+}; 0]
