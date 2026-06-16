@@ -71,11 +71,11 @@ A composition is a sequence of variadics applied in succession.
 ### Blank `` ` ``
 Blanks are used for empty assignment and defining partials.
 
-## Nouns
-## Verbs
-### Assignment
-#### Local Assign `` : ``
-#### Global Assign `` :: ``
+## Variables
+A variable is a name associated with a value, a name is an aphanumeric identifier starting with a alphametic character. Underscores are not permitted in a variable name.
+A variable declared at the top level of a fileis a global variable and a variable declared inside a lambda is a local variable. 
+Assignmet of globals and locals at the top level happens with the singe colon `:`,
+while assigment of globals in a lambda happen with a double colon `::`
 
 ### Monadic Operators `:+-*!#@&|<>=?,^~$.`
 - Identity `:x` - return right-hand side
@@ -122,6 +122,7 @@ Blanks are used for empty assignment and defining partials.
 - Take `x#y` - resize/cycle y to length |x|
 - TakeKeys `X#d` - filter dictionary d to keys X
 - Reshape `I#y` - reshape y to shape I
+  - A `0N` value 
 - Fill `x^y` - replace nulls in y with x
 - Without `X^y` - remove occurrences of X from y
 - Pad `i$C` - pad string to length |i|
@@ -133,19 +134,21 @@ Blanks are used for empty assignment and defining partials.
 
 ### IO Verbs
 The IO system is organized around file descriptors (filename, port number, etc.).
-- Open file `` <"file.txt" `` or `` <"/path/to/file.txt" ``
-- Open port `` <":port" `` or `` <"host:port" ``
+- Open File `` <"file.txt" `` or `` <"/path/to/file.txt" ``
+- Open Connection `` <":port" `` or `` <"host:port" ``
 - Close handle `` >s ``
 - Read line `` 0:x `` - read lines from stdin
 - Write line `` x 0:y `` - write text. `` `0 0:"Hi" ``
 - Read bytes `` 1:x ``
 - Write bytes `` x 1:y ``
+- Load code `` 2:y `` used for importing other files
 
 ### Special Forms
 - Amend3 `` @[x;y;f] `` - `` @["ABC";1;_:] `` → `"AbC"`
 - Amend4 `` @[x;y;F;z] `` - `` @["abc";1;:;"x"] `` → `"axc"`
 - Drill3 `` .[x;y;f] `` - `` .[("AB";"CD");1 0;_:] `` → `("AB";"cD")`
 - Drill4 `` .[x;y;F;z] `` - `` .[("ab";"cd");1 0;:;"x"] `` → `("ab";"xd")`
+- Splice `` ?[C;I;C] `` - `` ?["abcd";1 3;"xyz"] -> "axyzd" ``
 
 ## Adverbs
 - Each `f'` - apply f to each item. `` #'("abc";3 4 5 6) `` → `3 4`
@@ -193,9 +196,6 @@ A command always starts at the beginning of a line with `\`.
 ### Time Command `\t:n expr`
 Time elapsed in milliseconds after n runs (n is optional).
 
-### Adverbs `' / \ ': /: \:`
-An adverb is any of `` ' / \ `` with an optional `:`.
-
 # About Ink
 Ink is an array programming language for high-performance computing, based on ngn/k and k9.
 The parser, compiler, and runtime are all written in Zig 0.16.
@@ -205,6 +205,9 @@ The parser, compiler, and runtime are all written in Zig 0.16.
   - `alloc.k`
   - `simulate.k` - Monte Carlo simulation of random walks
 - `doc`
+  - `bivector`
+  - `papers`
+  - `ten-minute-physics`
   - `triage.md` - open correctness issues
   - `spec.md` - language specification (WIP)
   - `changelog.md` - change log
@@ -214,12 +217,12 @@ The parser, compiler, and runtime are all written in Zig 0.16.
   - `font`
   - `json`
   - `gpu`
-    - `src`
-      - `fill.wgsl`
-      - `main.zig`
-    - `gpu.k` Load functions from `libgpu.dylib`
+    - `fill.wgsl`
+    - `gpu.k` Load RunWindow, FillFrame from `libgpu.dylib`
+    - `gpu.zig`
+    - `main.zig` 
     - `render.zig`
-    - `spirv.k`
+    - `spirv.k` - FragmentShader, VertexShader
     - `triangulate.zig`
   - `md5`
 - `src` - core language components
@@ -246,18 +249,26 @@ The parser, compiler, and runtime are all written in Zig 0.16.
     - `fntable.zig`, `ir.zig`
     - `tape.zig` - OpCode enum, BasicBlock, Chunk
     - `vm.zig`
-  - `ffi.zig`, `runner.zig`, `test.zig`
+  - `ffi.zig`
+  - `runner.zig`
+  - `test.zig`
 - `test/` - test scripts and data
+  - `circle.k` Example of fragment shader with simple SDF for circle
+  - `eyes.k` Eyes that follow the mouse drawn using 2D raster API FillFrame & Tessellate
+  - `planes.k` 
 
 # Optimizations
 - Static allocated array for `!N` with N<256.
 - Ref counting, copy-on-write.
+- Dead code ellimination
+- Constant folding
 
 ## Common Idioms
 - First n even numbers: `` {2*!x} ``
 - Capitalize first letter of each word: `` {s:~" "=x;@[x;&s>0,-1_s;`c$-32+]}"hi an" ``
 - Flatten list `` ,/(1 0 0; 0 1 0) `` -> `1 0 0 0 1 0`.
 - No `<=`/`>=` operators `x <= y` parses as `x < (= y)`, use `~(x > y)` and `~(x < y)`.
+- Reshape array into 2 columns and infer size of rows `0N 2#x`
 
 ## Useful Commands
 - Build debug: `time zig build`

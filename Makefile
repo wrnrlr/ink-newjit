@@ -24,6 +24,7 @@ demo:
 	$(INK) test/sphere.k
 
 qa:
+	time zig build test
 	$(INK) test/circle.k
 	$(INK) test/walk.k
 	$(INK) test/eyes.k
