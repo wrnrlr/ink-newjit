@@ -28,23 +28,23 @@ const RTLD_DEFAULT = @as(?*anyopaque, @ptrFromInt(@as(usize, @bitCast(@as(isize,
 extern fn dlsym(handle: ?*anyopaque, symbol: [*:0]const u8) ?*anyopaque;
 
 const KApi = struct {
-    k_call:      *const fn (K, K) callconv(.c) ?K,
-    k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?K) callconv(.c) ?K,
-    kf:          *const fn (f32) callconv(.c) ?K,
-    ki:          *const fn (i32) callconv(.c) ?K,
-    kn:          *const fn (?K) callconv(.c) i32,
-    kfp:         *const fn (?K) callconv(.c) ?[*]f32,
-    kip:         *const fn (?K) callconv(.c) ?[*]i32,
-    kcp:         *const fn (?K) callconv(.c) ?[*]u8,
-    ki_val:      *const fn (?K) callconv(.c) i32,
-    KF:          *const fn (i32) callconv(.c) ?K,
-    ku:          *const fn (?K) callconv(.c) void,
+  k_call:      *const fn (K, K) callconv(.c) ?K,
+  k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?K) callconv(.c) ?K,
+  kf:          *const fn (f32) callconv(.c) ?K,
+  ki:          *const fn (i32) callconv(.c) ?K,
+  kn:          *const fn (?K) callconv(.c) i32,
+  kfp:         *const fn (?K) callconv(.c) ?[*]f32,
+  kip:         *const fn (?K) callconv(.c) ?[*]i32,
+  kcp:         *const fn (?K) callconv(.c) ?[*]u8,
+  ki_val:      *const fn (?K) callconv(.c) i32,
+  KF:          *const fn (i32) callconv(.c) ?K,
+  ku:          *const fn (?K) callconv(.c) void,
 };
 var g_api: ?KApi = null;
 
 fn lookupFn(comptime T: type, name: [*:0]const u8) ?T {
-    const ptr = dlsym(RTLD_DEFAULT, name) orelse return null;
-    return @ptrCast(@alignCast(ptr));
+  const ptr = dlsym(RTLD_DEFAULT, name) orelse return null;
+  return @ptrCast(@alignCast(ptr));
 }
 
 // Thin wrappers so the rest of the file can call ki/kf/etc. without changing.
@@ -59,7 +59,7 @@ fn KF(n: i32) ?K         { return g_api.?.KF(n); }
 fn ku(x: ?K) void        { g_api.?.ku(x); }
 fn k_call(f: K, a: K) ?K { return g_api.?.k_call(f, a); }
 fn k_make_dict(n: i32, keys: [*]const [*:0]const u8, vals: [*]const ?K) ?K {
-    return g_api.?.k_make_dict(n, keys, vals);
+  return g_api.?.k_make_dict(n, keys, vals);
 }
 
 // ── Frame-local renderer (set while the frame callback executes) ───────────────
@@ -116,10 +116,10 @@ export fn gpuTess(pts_k: ?K) callconv(.c) ?K {
   const result_k = KF(@intCast(n_out * 4)) orelse return ki(0);
   const rf = kfp(result_k) orelse { ku(result_k); return ki(0); };
   for (out.items, 0..) |p, i| {
-    rf[i * 4 + 0] = p.x;
-    rf[i * 4 + 1] = p.y;
-    rf[i * 4 + 2] = 0.5;
-    rf[i * 4 + 3] = 1.0;
+  rf[i * 4 + 0] = p.x;
+  rf[i * 4 + 1] = p.y;
+  rf[i * 4 + 2] = 0.5;
+  rf[i * 4 + 3] = 1.0;
   }
   return result_k;
 }
@@ -156,39 +156,39 @@ fn createPipeline(device: wgpu.Device, bgl: wgpu.BindGroupLayout) !wgpu.RenderPi
   defer shader_module.release();
 
   const pipeline_layout = device.createPipelineLayout(.{
-    .bind_group_layout_count = 1,
-    .bind_group_layouts = &[_]wgpu.BindGroupLayout{bgl},
+  .bind_group_layout_count = 1,
+  .bind_group_layouts = &[_]wgpu.BindGroupLayout{bgl},
   });
   defer pipeline_layout.release();
 
   const vtx_attrs = [_]wgpu.VertexAttribute{
-    .{ .format = .float32x2, .offset = 0, .shader_location = 0 },
-    .{ .format = .float32x2, .offset = 8, .shader_location = 1 },
+  .{ .format = .float32x2, .offset = 0, .shader_location = 0 },
+  .{ .format = .float32x2, .offset = 8, .shader_location = 1 },
   };
   const vtx_bufs = [_]wgpu.VertexBufferLayout{.{
-    .array_stride    = 16,
-    .attribute_count = vtx_attrs.len,
-    .attributes      = &vtx_attrs,
+  .array_stride    = 16,
+  .attribute_count = vtx_attrs.len,
+  .attributes      = &vtx_attrs,
   }};
   const color_targets = [_]wgpu.ColorTargetState{.{
-    .format     = zgpu.GraphicsContext.swapchain_format,
-    .write_mask = wgpu.ColorWriteMask.all,
-    .blend      = &wgpu.BlendState{
-      .color = .{ .operation = .add, .src_factor = .src_alpha, .dst_factor = .one_minus_src_alpha },
-      .alpha = .{ .operation = .add, .src_factor = .one,       .dst_factor = .one_minus_src_alpha },
-    },
+  .format     = zgpu.GraphicsContext.swapchain_format,
+  .write_mask = wgpu.ColorWriteMask.all,
+  .blend      = &wgpu.BlendState{
+    .color = .{ .operation = .add, .src_factor = .src_alpha, .dst_factor = .one_minus_src_alpha },
+    .alpha = .{ .operation = .add, .src_factor = .one,       .dst_factor = .one_minus_src_alpha },
+  },
   }};
   return device.createRenderPipeline(.{
-    .layout   = pipeline_layout,
-    .vertex   = .{
-      .module = shader_module, .entry_point = "vs_main",
-      .buffer_count = vtx_bufs.len, .buffers = &vtx_bufs,
-    },
-    .primitive = .{ .topology = .triangle_list },
-    .fragment  = &wgpu.FragmentState{
-      .module = shader_module, .entry_point = "fs_main",
-      .target_count = color_targets.len, .targets = &color_targets,
-    },
+  .layout   = pipeline_layout,
+  .vertex   = .{
+    .module = shader_module, .entry_point = "vs_main",
+    .buffer_count = vtx_bufs.len, .buffers = &vtx_bufs,
+  },
+  .primitive = .{ .topology = .triangle_list },
+  .fragment  = &wgpu.FragmentState{
+    .module = shader_module, .entry_point = "fs_main",
+    .target_count = color_targets.len, .targets = &color_targets,
+  },
   });
 }
 
@@ -204,9 +204,9 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   var win_w: i32 = 800;
   var win_h: i32 = 600;
   if (config_k) |cfg| {
-    if (kfp(cfg)) |cf| {
-      if (kn(cfg) >= 2) { win_w = @intFromFloat(cf[0]); win_h = @intFromFloat(cf[1]); }
-    }
+  if (kfp(cfg)) |cf| {
+    if (kn(cfg) >= 2) { win_w = @intFromFloat(cf[0]); win_h = @intFromFloat(cf[1]); }
+  }
   }
 
   var da = std.heap.DebugAllocator(.{}).init;
@@ -222,34 +222,34 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   defer zglfw.destroyWindow(window);
 
   const gctx = zgpu.GraphicsContext.create(alloc, .{
-    .window              = window,
-    .fn_getTime          = getTime,
-    .fn_getFramebufferSize = getFramebufferSize,
-    .fn_getCocoaWindow   = getCocoaWindow,
+  .window              = window,
+  .fn_getTime          = getTime,
+  .fn_getFramebufferSize = getFramebufferSize,
+  .fn_getCocoaWindow   = getCocoaWindow,
   }, .{}) catch return ki(-1);
   defer gctx.destroy(alloc);
 
   gctx.device.setUncapturedErrorCallback(struct {
-    fn cb(typ: wgpu.ErrorType, msg: ?[*:0]const u8, _: ?*anyopaque) callconv(.c) void {
-      std.debug.print("[Dawn error] type={} msg={s}\n", .{ typ, msg orelse "(null)" });
-    }
+  fn cb(typ: wgpu.ErrorType, msg: ?[*:0]const u8, _: ?*anyopaque) callconv(.c) void {
+    std.debug.print("[Dawn error] type={} msg={s}\n", .{ typ, msg orelse "(null)" });
+  }
   }.cb, null);
   gctx.device.setDeviceLostCallback(struct {
-    fn cb(reason: wgpu.DeviceLostReason, msg: ?[*:0]const u8, _: ?*anyopaque) callconv(.c) void {
-      std.debug.print("[Dawn device lost] reason={} msg={s}\n", .{ reason, msg orelse "(null)" });
-    }
+  fn cb(reason: wgpu.DeviceLostReason, msg: ?[*:0]const u8, _: ?*anyopaque) callconv(.c) void {
+    std.debug.print("[Dawn device lost] reason={} msg={s}\n", .{ reason, msg orelse "(null)" });
+  }
   }.cb, null);
 
   const bgl_entries = [_]wgpu.BindGroupLayoutEntry{
-    zgpu.bufferEntry(0, .{ .vertex = true, .fragment = true }, .uniform, false, 0),
-    zgpu.bufferEntry(1, .{ .fragment = true }, .uniform, false, 0),
-    .{ .binding = 2, .visibility = .{ .fragment = true }, .texture = .{ .sample_type = .float } },
-    zgpu.samplerEntry(3, .{ .fragment = true }, .filtering),
-    .{ .binding = 4, .visibility = .{ .fragment = true }, .texture = .{ .sample_type = .float } },
-    zgpu.samplerEntry(5, .{ .fragment = true }, .filtering),
+  zgpu.bufferEntry(0, .{ .vertex = true, .fragment = true }, .uniform, false, 0),
+  zgpu.bufferEntry(1, .{ .fragment = true }, .uniform, false, 0),
+  .{ .binding = 2, .visibility = .{ .fragment = true }, .texture = .{ .sample_type = .float } },
+  zgpu.samplerEntry(3, .{ .fragment = true }, .filtering),
+  .{ .binding = 4, .visibility = .{ .fragment = true }, .texture = .{ .sample_type = .float } },
+  zgpu.samplerEntry(5, .{ .fragment = true }, .filtering),
   };
   const bgl = gctx.device.createBindGroupLayout(.{
-    .label = "gpu_ext bgl", .entry_count = bgl_entries.len, .entries = &bgl_entries,
+  .label = "gpu_ext bgl", .entry_count = bgl_entries.len, .entries = &bgl_entries,
   });
   defer bgl.release();
 
@@ -264,90 +264,90 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   var depth_view_opt: ?wgpu.TextureView = null;
   var depth_fb: [2]u32 = .{ 0, 0 };
   defer {
-    if (depth_view_opt) |dv| dv.release();
-    if (depth_tex_opt) |dt| dt.release();
+  if (depth_view_opt) |dv| dv.release();
+  if (depth_tex_opt) |dt| dt.release();
   }
 
   const start_time = zglfw.getTime();
 
   while (!zglfw.windowShouldClose(window)) {
-    zglfw.pollEvents();
+  zglfw.pollEvents();
 
-    const fb = getFramebufferSize(window);
-    if (fb[0] == 0 or fb[1] == 0) { zgpu.wgpuDeviceTick(); continue; }
+  const fb = getFramebufferSize(window);
+  if (fb[0] == 0 or fb[1] == 0) { zgpu.wgpuDeviceTick(); continue; }
 
-    // Recreate depth texture whenever framebuffer size changes.
-    if (fb[0] != depth_fb[0] or fb[1] != depth_fb[1]) {
-      if (depth_view_opt) |dv| dv.release();
-      if (depth_tex_opt) |dt| dt.release();
-      const dt = gctx.device.createTexture(.{
-        .label = "depth",
-        .usage = .{ .render_attachment = true },
-        .size  = .{ .width = fb[0], .height = fb[1], .depth_or_array_layers = 1 },
-        .format = .depth24_plus,
-      });
-      depth_tex_opt = dt;
-      depth_view_opt = dt.createView(.{});
-      depth_fb = fb;
-    }
-
-    const fw: f32 = @floatFromInt(fb[0]);
-    const fh: f32 = @floatFromInt(fb[1]);
-
-    const ws = getWindowSize(window);
-    const dpr_x: f64 = if (ws[0] > 0) @as(f64, @floatFromInt(fb[0])) / @as(f64, @floatFromInt(ws[0])) else 1.0;
-    const dpr_y: f64 = if (ws[1] > 0) @as(f64, @floatFromInt(fb[1])) / @as(f64, @floatFromInt(ws[1])) else 1.0;
-
-    const swapchain_view = gctx.swapchain.getCurrentTextureView();
-    defer swapchain_view.release();
-    const encoder = gctx.device.createCommandEncoder(.{ .label = "frame" });
-    defer encoder.release();
-
-    const pass = encoder.beginRenderPass(.{
-      .color_attachment_count = 1,
-      .color_attachments = &[_]wgpu.RenderPassColorAttachment{.{
-        .view        = swapchain_view,
-        .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 1 },
-        .load_op     = .clear,
-        .store_op    = .store,
-      }},
+  // Recreate depth texture whenever framebuffer size changes.
+  if (fb[0] != depth_fb[0] or fb[1] != depth_fb[1]) {
+    if (depth_view_opt) |dv| dv.release();
+    if (depth_tex_opt) |dt| dt.release();
+    const dt = gctx.device.createTexture(.{
+    .label = "depth",
+    .usage = .{ .render_attachment = true },
+    .size  = .{ .width = fb[0], .height = fb[1], .depth_or_array_layers = 1 },
+    .format = .depth24_plus,
     });
+    depth_tex_opt = dt;
+    depth_view_opt = dt.createView(.{});
+    depth_fb = fb;
+  }
 
-    g_renderer = renderer;
-    defer g_renderer = null;
+  const fw: f32 = @floatFromInt(fb[0]);
+  const fh: f32 = @floatFromInt(fb[1]);
 
-    var mx: f64 = 0;
-    var my: f64 = 0;
-    zglfw.getCursorPos(window, &mx, &my);
-    const t: f32 = @floatCast(zglfw.getTime() - start_time);
+  const ws = getWindowSize(window);
+  const dpr_x: f64 = if (ws[0] > 0) @as(f64, @floatFromInt(fb[0])) / @as(f64, @floatFromInt(ws[0])) else 1.0;
+  const dpr_y: f64 = if (ws[1] > 0) @as(f64, @floatFromInt(fb[1])) / @as(f64, @floatFromInt(ws[1])) else 1.0;
 
-    // Build props dict and call loop_fn
-    const keys = [5][*:0]const u8{ "width", "height", "mx", "my", "time" };
-    const v_w = kf(fw); const v_h = kf(fh);
-    const v_mx = kf(@floatCast(mx * dpr_x)); const v_my = kf(@floatCast(my * dpr_y));
-    const v_t = kf(t);
-    const vals = [5]?K{ v_w, v_h, v_mx, v_my, v_t };
+  const swapchain_view = gctx.swapchain.getCurrentTextureView();
+  defer swapchain_view.release();
+  const encoder = gctx.device.createCommandEncoder(.{ .label = "frame" });
+  defer encoder.release();
 
-    if (k_make_dict(5, &keys, &vals)) |pk| {
-      const result = k_call(loop_fn, pk);
-      ku(result);
-      ku(pk);
-    }
-    ku(v_w); ku(v_h); ku(v_mx); ku(v_my); ku(v_t);
+  const pass = encoder.beginRenderPass(.{
+    .color_attachment_count = 1,
+    .color_attachments = &[_]wgpu.RenderPassColorAttachment{.{
+    .view        = swapchain_view,
+    .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 1 },
+    .load_op     = .clear,
+    .store_op    = .store,
+    }},
+  });
 
-    renderer.flush(pass, fw, fh, t) catch {};
-    pass.release();
+  g_renderer = renderer;
+  defer g_renderer = null;
 
-    // 3-D mesh pass — runs after the 2-D layer, loads colour, adds depth.
-    if (depth_view_opt) |depth_view| {
-      renderer.flushMeshes(encoder, swapchain_view, depth_view) catch {};
-    }
+  var mx: f64 = 0;
+  var my: f64 = 0;
+  zglfw.getCursorPos(window, &mx, &my);
+  const t: f32 = @floatCast(zglfw.getTime() - start_time);
 
-    const cmd = encoder.finish(.{});
-    defer cmd.release();
-    gctx.queue.submit(&[_]wgpu.CommandBuffer{cmd});
-    _ = gctx.present();
-    gctx.device.tick();
+  // Build props dict and call loop_fn
+  const keys = [5][*:0]const u8{ "width", "height", "mx", "my", "time" };
+  const v_w = kf(fw); const v_h = kf(fh);
+  const v_mx = kf(@floatCast(mx * dpr_x)); const v_my = kf(@floatCast(my * dpr_y));
+  const v_t = kf(t);
+  const vals = [5]?K{ v_w, v_h, v_mx, v_my, v_t };
+
+  if (k_make_dict(5, &keys, &vals)) |pk| {
+    const result = k_call(loop_fn, pk);
+    ku(result);
+    ku(pk);
+  }
+  ku(v_w); ku(v_h); ku(v_mx); ku(v_my); ku(v_t);
+
+  renderer.flush(pass, fw, fh, t) catch {};
+  pass.release();
+
+  // 3-D mesh pass — runs after the 2-D layer, loads colour, adds depth.
+  if (depth_view_opt) |depth_view| {
+    renderer.flushMeshes(encoder, swapchain_view, depth_view) catch {};
+  }
+
+  const cmd = encoder.finish(.{});
+  defer cmd.release();
+  gctx.queue.submit(&[_]wgpu.CommandBuffer{cmd});
+  _ = gctx.present();
+  gctx.device.tick();
   }
 
   return ki(0);
@@ -355,9 +355,9 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
 
 // WebGPU SPIRV descriptor (not in zgpu bindings — defined manually from Dawn C API).
 const ShaderModuleSPIRVDescriptor = extern struct {
-    chain: wgpu.ChainedStruct,
-    code_size: u32,
-    code: [*]const u32,
+  chain: wgpu.ChainedStruct,
+  code_size: u32,
+  code: [*]const u32,
 };
 
 // ── gpuSpirv ──────────────────────────────────────────────────────────────────
@@ -368,66 +368,66 @@ const ShaderModuleSPIRVDescriptor = extern struct {
 // Must be called inside the gpuRun frame callback (needs active renderer).
 
 export fn gpuSpirv(words_k: ?K, _: ?K) callconv(.c) ?K {
-    const r = g_renderer orelse return ki(0);
-    const ip = kip(words_k) orelse return ki(0);
-    const n = kn(words_k);
-    if (n < 5) return ki(0);
+  const r = g_renderer orelse return ki(0);
+  const ip = kip(words_k) orelse return ki(0);
+  const n = kn(words_k);
+  if (n < 5) return ki(0);
 
-    const words: [*]const u32 = @ptrCast(@alignCast(ip));
+  const words: [*]const u32 = @ptrCast(@alignCast(ip));
 
-    // Vertex stage: use fill.wgsl vs_main (outputs ftcoord at @location(0)).
-    const fill_wgsl = @embedFile("fill.wgsl");
-    const vert_z = r.allocator.dupeZ(u8, fill_wgsl) catch return ki(0);
-    defer r.allocator.free(vert_z);
-    const vert_module = zgpu.createWgslShaderModule(r.device, vert_z, "vert");
-    defer vert_module.release();
+  // Vertex stage: use fill.wgsl vs_main (outputs ftcoord at @location(0)).
+  const fill_wgsl = @embedFile("fill.wgsl");
+  const vert_z = r.allocator.dupeZ(u8, fill_wgsl) catch return ki(0);
+  defer r.allocator.free(vert_z);
+  const vert_module = zgpu.createWgslShaderModule(r.device, vert_z, "vert");
+  defer vert_module.release();
 
-    // Fragment stage: caller-supplied SPIR-V binary.
-    const spirv_desc = ShaderModuleSPIRVDescriptor{
-        .chain = .{ .next = null, .struct_type = .shader_module_spirv_descriptor },
-        .code_size = @intCast(n),
-        .code = words,
-    };
-    const frag_module = r.device.createShaderModule(.{
-        .next_in_chain = @ptrCast(&spirv_desc),
-    });
-    defer frag_module.release();
+  // Fragment stage: caller-supplied SPIR-V binary.
+  const spirv_desc = ShaderModuleSPIRVDescriptor{
+    .chain = .{ .next = null, .struct_type = .shader_module_spirv_descriptor },
+    .code_size = @intCast(n),
+    .code = words,
+  };
+  const frag_module = r.device.createShaderModule(.{
+    .next_in_chain = @ptrCast(&spirv_desc),
+  });
+  defer frag_module.release();
 
-    const color_targets = [_]wgpu.ColorTargetState{.{
-        .format     = zgpu.GraphicsContext.swapchain_format,
-        .write_mask = wgpu.ColorWriteMask.all,
-        .blend      = &wgpu.BlendState{
-            .color = .{ .operation = .add, .src_factor = .src_alpha, .dst_factor = .one_minus_src_alpha },
-            .alpha = .{ .operation = .add, .src_factor = .one,       .dst_factor = .one_minus_src_alpha },
-        },
-    }};
-    const vtx_attrs = [_]wgpu.VertexAttribute{
-        .{ .format = .float32x2, .offset = 0, .shader_location = 0 },
-        .{ .format = .float32x2, .offset = 8, .shader_location = 1 },
-    };
-    const vtx_bufs = [_]wgpu.VertexBufferLayout{.{
-        .array_stride = 16, .attribute_count = vtx_attrs.len, .attributes = &vtx_attrs,
-    }};
-    // Reuse the renderer's bind_group_layout: vs_main reads group 0 binding 0 (view);
-    // the SPIR-V fragment shader declares no resources but extra bindings are allowed.
-    const layout = r.device.createPipelineLayout(.{
-        .bind_group_layout_count = 1,
-        .bind_group_layouts = &[_]wgpu.BindGroupLayout{r.bind_group_layout},
-    });
-    defer layout.release();
-    const pipeline = r.device.createRenderPipeline(.{
-        .layout  = layout,
-        .vertex  = .{ .module = vert_module, .entry_point = "vs_main",
-                      .buffer_count = vtx_bufs.len, .buffers = &vtx_bufs },
-        .primitive = .{ .topology = .triangle_list },
-        .fragment = &wgpu.FragmentState{
-            .module = frag_module, .entry_point = "main",
-            .target_count = color_targets.len, .targets = &color_targets,
-        },
-    });
-    // Negative handle signals "spirv pipeline, no bind group" to flush()
-    r.spirv_pipelines.append(r.allocator, pipeline) catch return ki(0);
-    return ki(-@as(i32, @intCast(r.spirv_pipelines.items.len)));
+  const color_targets = [_]wgpu.ColorTargetState{.{
+    .format     = zgpu.GraphicsContext.swapchain_format,
+    .write_mask = wgpu.ColorWriteMask.all,
+    .blend      = &wgpu.BlendState{
+      .color = .{ .operation = .add, .src_factor = .src_alpha, .dst_factor = .one_minus_src_alpha },
+      .alpha = .{ .operation = .add, .src_factor = .one,       .dst_factor = .one_minus_src_alpha },
+    },
+  }};
+  const vtx_attrs = [_]wgpu.VertexAttribute{
+    .{ .format = .float32x2, .offset = 0, .shader_location = 0 },
+    .{ .format = .float32x2, .offset = 8, .shader_location = 1 },
+  };
+  const vtx_bufs = [_]wgpu.VertexBufferLayout{.{
+    .array_stride = 16, .attribute_count = vtx_attrs.len, .attributes = &vtx_attrs,
+  }};
+  // Reuse the renderer's bind_group_layout: vs_main reads group 0 binding 0 (view);
+  // the SPIR-V fragment shader declares no resources but extra bindings are allowed.
+  const layout = r.device.createPipelineLayout(.{
+    .bind_group_layout_count = 1,
+    .bind_group_layouts = &[_]wgpu.BindGroupLayout{r.bind_group_layout},
+  });
+  defer layout.release();
+  const pipeline = r.device.createRenderPipeline(.{
+    .layout  = layout,
+    .vertex  = .{ .module = vert_module, .entry_point = "vs_main",
+            .buffer_count = vtx_bufs.len, .buffers = &vtx_bufs },
+    .primitive = .{ .topology = .triangle_list },
+    .fragment = &wgpu.FragmentState{
+      .module = frag_module, .entry_point = "main",
+      .target_count = color_targets.len, .targets = &color_targets,
+    },
+  });
+  // Negative handle signals "spirv pipeline, no bind group" to flush()
+  r.spirv_pipelines.append(r.allocator, pipeline) catch return ki(0);
+  return ki(-@as(i32, @intCast(r.spirv_pipelines.items.len)));
 }
 
 // ── gpuFillShader ─────────────────────────────────────────────────────────────
@@ -436,16 +436,16 @@ export fn gpuSpirv(words_k: ?K, _: ?K) callconv(.c) ?K {
 // shader_k: int scalar — handle returned by gpuSpirv
 
 export fn gpuFillShader(verts_k: ?K, shader_k: ?K) callconv(.c) ?K {
-    const r = g_renderer orelse return ki(0);
-    const vf = kfp(verts_k) orelse return ki(0);
-    const vn = kn(verts_k);
-    const shader: i32 = ki_val(shader_k);
-    if (shader == 0) return ki(0);
+  const r = g_renderer orelse return ki(0);
+  const vf = kfp(verts_k) orelse return ki(0);
+  const vn = kn(verts_k);
+  const shader: i32 = ki_val(shader_k);
+  if (shader == 0) return ki(0);
 
-    const n_verts: usize = @intCast(@divTrunc(vn, 4));
-    const verts_slice = @as([*]const render.Vertex, @ptrCast(@alignCast(vf)))[0..n_verts];
-    r.drawShader(verts_slice, shader) catch {};
-    return ki(0);
+  const n_verts: usize = @intCast(@divTrunc(vn, 4));
+  const verts_slice = @as([*]const render.Vertex, @ptrCast(@alignCast(vf)))[0..n_verts];
+  r.drawShader(verts_slice, shader) catch {};
+  return ki(0);
 }
 
 // ── gpuCompute ────────────────────────────────────────────────────────────────
@@ -461,126 +461,126 @@ export fn gpuFillShader(verts_k: ?K, shader_k: ?K) callconv(.c) ?K {
 //   - use workgroup size 64 (as generated by compCompute)
 
 fn computeMapCallback(status: wgpu.BufferMapAsyncStatus, userdata: ?*anyopaque) callconv(.c) void {
-    const done: *bool = @ptrCast(@alignCast(userdata.?));
-    done.* = (status == .success);
+  const done: *bool = @ptrCast(@alignCast(userdata.?));
+  done.* = (status == .success);
 }
 
 export fn gpuCompute(words_k: ?K, input_k: ?K) callconv(.c) ?K {
-    const r = g_renderer orelse return ki(0);
-    const ip = kip(words_k) orelse return ki(0);
-    const n_words = kn(words_k);
-    if (n_words < 5) return ki(0);
-    const fp = kfp(input_k) orelse return ki(0);
-    const n_input = kn(input_k);
-    if (n_input <= 0) return ki(0);
-    const n: usize = @intCast(n_input);
+  const r = g_renderer orelse return ki(0);
+  const ip = kip(words_k) orelse return ki(0);
+  const n_words = kn(words_k);
+  if (n_words < 5) return ki(0);
+  const fp = kfp(input_k) orelse return ki(0);
+  const n_input = kn(input_k);
+  if (n_input <= 0) return ki(0);
+  const n: usize = @intCast(n_input);
 
-    const words: [*]const u32 = @ptrCast(@alignCast(ip));
-    const byte_size: u64 = @intCast(n * @sizeOf(f32));
+  const words: [*]const u32 = @ptrCast(@alignCast(ip));
+  const byte_size: u64 = @intCast(n * @sizeOf(f32));
 
-    // SPIR-V compute shader module
-    const spirv_desc = ShaderModuleSPIRVDescriptor{
-        .chain = .{ .next = null, .struct_type = .shader_module_spirv_descriptor },
-        .code_size = @intCast(n_words),
-        .code = words,
-    };
-    const cs_module = r.device.createShaderModule(.{
-        .next_in_chain = @ptrCast(&spirv_desc),
-    });
-    defer cs_module.release();
+  // SPIR-V compute shader module
+  const spirv_desc = ShaderModuleSPIRVDescriptor{
+    .chain = .{ .next = null, .struct_type = .shader_module_spirv_descriptor },
+    .code_size = @intCast(n_words),
+    .code = words,
+  };
+  const cs_module = r.device.createShaderModule(.{
+    .next_in_chain = @ptrCast(&spirv_desc),
+  });
+  defer cs_module.release();
 
-    // Bind group layout: binding 0 = input (read-write storage), binding 1 = output
-    const bgl_entries = [_]wgpu.BindGroupLayoutEntry{
-        .{ .binding = 0, .visibility = .{ .compute = true }, .buffer = .{ .binding_type = .storage } },
-        .{ .binding = 1, .visibility = .{ .compute = true }, .buffer = .{ .binding_type = .storage } },
-    };
-    const bgl = r.device.createBindGroupLayout(.{
-        .entry_count = bgl_entries.len,
-        .entries = &bgl_entries,
-    });
-    defer bgl.release();
+  // Bind group layout: binding 0 = input (read-write storage), binding 1 = output
+  const bgl_entries = [_]wgpu.BindGroupLayoutEntry{
+    .{ .binding = 0, .visibility = .{ .compute = true }, .buffer = .{ .binding_type = .storage } },
+    .{ .binding = 1, .visibility = .{ .compute = true }, .buffer = .{ .binding_type = .storage } },
+  };
+  const bgl = r.device.createBindGroupLayout(.{
+    .entry_count = bgl_entries.len,
+    .entries = &bgl_entries,
+  });
+  defer bgl.release();
 
-    const pl_layout = r.device.createPipelineLayout(.{
-        .bind_group_layout_count = 1,
-        .bind_group_layouts = &[_]wgpu.BindGroupLayout{bgl},
-    });
-    defer pl_layout.release();
+  const pl_layout = r.device.createPipelineLayout(.{
+    .bind_group_layout_count = 1,
+    .bind_group_layouts = &[_]wgpu.BindGroupLayout{bgl},
+  });
+  defer pl_layout.release();
 
-    const pipeline = r.device.createComputePipeline(.{
-        .layout = pl_layout,
-        .compute = .{ .module = cs_module, .entry_point = "main" },
-    });
-    defer pipeline.release();
+  const pipeline = r.device.createComputePipeline(.{
+    .layout = pl_layout,
+    .compute = .{ .module = cs_module, .entry_point = "main" },
+  });
+  defer pipeline.release();
 
-    // Input buffer: upload caller data
-    const input_buf = r.device.createBuffer(.{
-        .label = "compute_in",
-        .usage = .{ .storage = true, .copy_dst = true },
-        .size = byte_size,
-        .mapped_at_creation = .false,
-    });
-    defer input_buf.release();
+  // Input buffer: upload caller data
+  const input_buf = r.device.createBuffer(.{
+    .label = "compute_in",
+    .usage = .{ .storage = true, .copy_dst = true },
+    .size = byte_size,
+    .mapped_at_creation = .false,
+  });
+  defer input_buf.release();
 
-    // Output buffer: shader writes here, then we copy to staging
-    const output_buf = r.device.createBuffer(.{
-        .label = "compute_out",
-        .usage = .{ .storage = true, .copy_src = true },
-        .size = byte_size,
-        .mapped_at_creation = .false,
-    });
-    defer output_buf.release();
+  // Output buffer: shader writes here, then we copy to staging
+  const output_buf = r.device.createBuffer(.{
+    .label = "compute_out",
+    .usage = .{ .storage = true, .copy_src = true },
+    .size = byte_size,
+    .mapped_at_creation = .false,
+  });
+  defer output_buf.release();
 
-    // Staging buffer: CPU-readable copy of the output
-    const staging_buf = r.device.createBuffer(.{
-        .label = "compute_stage",
-        .usage = .{ .map_read = true, .copy_dst = true },
-        .size = byte_size,
-        .mapped_at_creation = .false,
-    });
-    defer staging_buf.release();
+  // Staging buffer: CPU-readable copy of the output
+  const staging_buf = r.device.createBuffer(.{
+    .label = "compute_stage",
+    .usage = .{ .map_read = true, .copy_dst = true },
+    .size = byte_size,
+    .mapped_at_creation = .false,
+  });
+  defer staging_buf.release();
 
-    r.queue.writeBuffer(input_buf, 0, f32, fp[0..n]);
+  r.queue.writeBuffer(input_buf, 0, f32, fp[0..n]);
 
-    const bg_entries = [_]wgpu.BindGroupEntry{
-        .{ .binding = 0, .buffer = input_buf,  .size = byte_size },
-        .{ .binding = 1, .buffer = output_buf, .size = byte_size },
-    };
-    const bg = r.device.createBindGroup(.{
-        .layout = bgl,
-        .entry_count = bg_entries.len,
-        .entries = &bg_entries,
-    });
-    defer bg.release();
+  const bg_entries = [_]wgpu.BindGroupEntry{
+    .{ .binding = 0, .buffer = input_buf,  .size = byte_size },
+    .{ .binding = 1, .buffer = output_buf, .size = byte_size },
+  };
+  const bg = r.device.createBindGroup(.{
+    .layout = bgl,
+    .entry_count = bg_entries.len,
+    .entries = &bg_entries,
+  });
+  defer bg.release();
 
-    const encoder = r.device.createCommandEncoder(.{ .label = "compute" });
-    defer encoder.release();
+  const encoder = r.device.createCommandEncoder(.{ .label = "compute" });
+  defer encoder.release();
 
-    {
-        const pass = encoder.beginComputePass(null);
-        defer pass.release();
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, bg, null);
-        const workgroups: u32 = @intCast((n + 63) / 64);
-        pass.dispatchWorkgroups(workgroups, 1, 1);
-        pass.end();
-    }
-    encoder.copyBufferToBuffer(output_buf, 0, staging_buf, 0, byte_size);
+  {
+    const pass = encoder.beginComputePass(null);
+    defer pass.release();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bg, null);
+    const workgroups: u32 = @intCast((n + 63) / 64);
+    pass.dispatchWorkgroups(workgroups, 1, 1);
+    pass.end();
+  }
+  encoder.copyBufferToBuffer(output_buf, 0, staging_buf, 0, byte_size);
 
-    const cmd = encoder.finish(.{});
-    defer cmd.release();
-    r.queue.submit(&[_]wgpu.CommandBuffer{cmd});
+  const cmd = encoder.finish(.{});
+  defer cmd.release();
+  r.queue.submit(&[_]wgpu.CommandBuffer{cmd});
 
-    // Synchronous readback: spin until mapped
-    var done: bool = false;
-    staging_buf.mapAsync(.{ .read = true }, 0, byte_size, computeMapCallback, &done);
-    while (!done) r.device.tick();
+  // Synchronous readback: spin until mapped
+  var done: bool = false;
+  staging_buf.mapAsync(.{ .read = true }, 0, byte_size, computeMapCallback, &done);
+  while (!done) r.device.tick();
 
-    const result_k = KF(@intCast(n)) orelse { staging_buf.unmap(); return ki(0); };
-    const rf = kfp(result_k) orelse { ku(result_k); staging_buf.unmap(); return ki(0); };
-    if (staging_buf.getConstMappedRange(f32, 0, n)) |data| @memcpy(rf[0..n], data);
-    staging_buf.unmap();
+  const result_k = KF(@intCast(n)) orelse { staging_buf.unmap(); return ki(0); };
+  const rf = kfp(result_k) orelse { ku(result_k); staging_buf.unmap(); return ki(0); };
+  if (staging_buf.getConstMappedRange(f32, 0, n)) |data| @memcpy(rf[0..n], data);
+  staging_buf.unmap();
 
-    return result_k;
+  return result_k;
 }
 
 // ── gpuMesh ───────────────────────────────────────────────────────────────────
@@ -591,73 +591,73 @@ export fn gpuCompute(words_k: ?K, input_k: ?K) callconv(.c) ?K {
 // Must be called inside the gpuRun frame callback.
 
 export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
-    const r = g_renderer orelse return ki(0);
-    const vp = kip(vtx_k) orelse return ki(0);
-    const vn = kn(vtx_k);
-    if (vn < 5) return ki(0);
-    const fp = kip(frg_k) orelse return ki(0);
-    const fn_ = kn(frg_k);
-    if (fn_ < 5) return ki(0);
+  const r = g_renderer orelse return ki(0);
+  const vp = kip(vtx_k) orelse return ki(0);
+  const vn = kn(vtx_k);
+  if (vn < 5) return ki(0);
+  const fp = kip(frg_k) orelse return ki(0);
+  const fn_ = kn(frg_k);
+  if (fn_ < 5) return ki(0);
 
-    const vtx_words: [*]const u32 = @ptrCast(@alignCast(vp));
-    const frg_words: [*]const u32 = @ptrCast(@alignCast(fp));
+  const vtx_words: [*]const u32 = @ptrCast(@alignCast(vp));
+  const frg_words: [*]const u32 = @ptrCast(@alignCast(fp));
 
-    const spirv_v = ShaderModuleSPIRVDescriptor{
-        .chain = .{ .next = null, .struct_type = .shader_module_spirv_descriptor },
-        .code_size = @intCast(vn), .code = vtx_words,
-    };
-    const vtx_mod = r.device.createShaderModule(.{ .next_in_chain = @ptrCast(&spirv_v) });
-    defer vtx_mod.release();
+  const spirv_v = ShaderModuleSPIRVDescriptor{
+    .chain = .{ .next = null, .struct_type = .shader_module_spirv_descriptor },
+    .code_size = @intCast(vn), .code = vtx_words,
+  };
+  const vtx_mod = r.device.createShaderModule(.{ .next_in_chain = @ptrCast(&spirv_v) });
+  defer vtx_mod.release();
 
-    const spirv_f = ShaderModuleSPIRVDescriptor{
-        .chain = .{ .next = null, .struct_type = .shader_module_spirv_descriptor },
-        .code_size = @intCast(fn_), .code = frg_words,
-    };
-    const frg_mod = r.device.createShaderModule(.{ .next_in_chain = @ptrCast(&spirv_f) });
-    defer frg_mod.release();
+  const spirv_f = ShaderModuleSPIRVDescriptor{
+    .chain = .{ .next = null, .struct_type = .shader_module_spirv_descriptor },
+    .code_size = @intCast(fn_), .code = frg_words,
+  };
+  const frg_mod = r.device.createShaderModule(.{ .next_in_chain = @ptrCast(&spirv_f) });
+  defer frg_mod.release();
 
-    const vtx_attrs = [_]wgpu.VertexAttribute{
-        .{ .format = .float32x3, .offset = 0,  .shader_location = 0 },
-        .{ .format = .float32x3, .offset = 12, .shader_location = 1 },
-    };
-    const vtx_bufs = [_]wgpu.VertexBufferLayout{.{
-        .array_stride = @sizeOf(render.MeshVertex),
-        .attribute_count = vtx_attrs.len, .attributes = &vtx_attrs,
-    }};
-    const color_targets = [_]wgpu.ColorTargetState{.{
-        .format     = zgpu.GraphicsContext.swapchain_format,
-        .write_mask = wgpu.ColorWriteMask.all,
-        .blend = &wgpu.BlendState{
-            .color = .{ .operation = .add, .src_factor = .src_alpha, .dst_factor = .one_minus_src_alpha },
-            .alpha = .{ .operation = .add, .src_factor = .one,       .dst_factor = .one_minus_src_alpha },
-        },
-    }};
-    const depth_state = wgpu.DepthStencilState{
-        .format              = .depth24_plus,
-        .depth_write_enabled = true,
-        .depth_compare       = .less,
-    };
-    // No uniforms in the mesh shaders — empty pipeline layout.
-    const layout = r.device.createPipelineLayout(.{
-        .bind_group_layout_count = 0,
-        .bind_group_layouts = &[_]wgpu.BindGroupLayout{},
-    });
-    defer layout.release();
+  const vtx_attrs = [_]wgpu.VertexAttribute{
+    .{ .format = .float32x3, .offset = 0,  .shader_location = 0 },
+    .{ .format = .float32x3, .offset = 12, .shader_location = 1 },
+  };
+  const vtx_bufs = [_]wgpu.VertexBufferLayout{.{
+    .array_stride = @sizeOf(render.MeshVertex),
+    .attribute_count = vtx_attrs.len, .attributes = &vtx_attrs,
+  }};
+  const color_targets = [_]wgpu.ColorTargetState{.{
+    .format     = zgpu.GraphicsContext.swapchain_format,
+    .write_mask = wgpu.ColorWriteMask.all,
+    .blend = &wgpu.BlendState{
+      .color = .{ .operation = .add, .src_factor = .src_alpha, .dst_factor = .one_minus_src_alpha },
+      .alpha = .{ .operation = .add, .src_factor = .one,       .dst_factor = .one_minus_src_alpha },
+    },
+  }};
+  const depth_state = wgpu.DepthStencilState{
+    .format              = .depth24_plus,
+    .depth_write_enabled = true,
+    .depth_compare       = .less,
+  };
+  // No uniforms in the mesh shaders — empty pipeline layout.
+  const layout = r.device.createPipelineLayout(.{
+    .bind_group_layout_count = 0,
+    .bind_group_layouts = &[_]wgpu.BindGroupLayout{},
+  });
+  defer layout.release();
 
-    const pipeline = r.device.createRenderPipeline(.{
-        .layout  = layout,
-        .vertex  = .{ .module = vtx_mod, .entry_point = "main",
-                      .buffer_count = vtx_bufs.len, .buffers = &vtx_bufs },
-        .primitive    = .{ .topology = .triangle_list, .cull_mode = .none },
-        .depth_stencil = &depth_state,
-        .fragment = &wgpu.FragmentState{
-            .module = frg_mod, .entry_point = "main",
-            .target_count = color_targets.len, .targets = &color_targets,
-        },
-    });
-    if (@intFromPtr(pipeline) == 0) return ki(0);
-    r.mesh_pipelines.append(r.allocator, pipeline) catch return ki(0);
-    return ki(@intCast(r.mesh_pipelines.items.len));
+  const pipeline = r.device.createRenderPipeline(.{
+    .layout  = layout,
+    .vertex  = .{ .module = vtx_mod, .entry_point = "main",
+            .buffer_count = vtx_bufs.len, .buffers = &vtx_bufs },
+    .primitive    = .{ .topology = .triangle_list, .cull_mode = .none },
+    .depth_stencil = &depth_state,
+    .fragment = &wgpu.FragmentState{
+      .module = frg_mod, .entry_point = "main",
+      .target_count = color_targets.len, .targets = &color_targets,
+    },
+  });
+  if (@intFromPtr(pipeline) == 0) return ki(0);
+  r.mesh_pipelines.append(r.allocator, pipeline) catch return ki(0);
+  return ki(@intCast(r.mesh_pipelines.items.len));
 }
 
 // ── gpuDrawMesh ───────────────────────────────────────────────────────────────
@@ -666,16 +666,16 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
 // handle_k: int scalar — handle returned by gpuMesh
 
 export fn gpuDrawMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
-    const r = g_renderer orelse return ki(0);
-    const vf = kfp(verts_k) orelse return ki(0);
-    const vn = kn(verts_k);
-    const handle = ki_val(handle_k);
-    if (handle <= 0 or vn < 6) return ki(0);
+  const r = g_renderer orelse return ki(0);
+  const vf = kfp(verts_k) orelse return ki(0);
+  const vn = kn(verts_k);
+  const handle = ki_val(handle_k);
+  if (handle <= 0 or vn < 6) return ki(0);
 
-    const n_verts: usize = @intCast(@divTrunc(vn, 6));
-    const verts_slice = @as([*]const render.MeshVertex, @ptrCast(@alignCast(vf)))[0..n_verts];
-    r.drawMesh(verts_slice, @intCast(handle - 1)) catch {};
-    return ki(0);
+  const n_verts: usize = @intCast(@divTrunc(vn, 6));
+  const verts_slice = @as([*]const render.MeshVertex, @ptrCast(@alignCast(vf)))[0..n_verts];
+  r.drawMesh(verts_slice, @intCast(handle - 1)) catch {};
+  return ki(0);
 }
 
 // ── gpuWgsl ───────────────────────────────────────────────────────────────────
@@ -687,28 +687,28 @@ export fn gpuDrawMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
 // Must be called inside the gpuRun frame callback.
 
 export fn gpuWgsl(source_k: ?K) callconv(.c) ?K {
-    const r = g_renderer orelse return ki(0);
-    const cp = kcp(source_k) orelse return ki(0);
-    const n = kn(source_k);
-    if (n <= 0) return ki(0);
-    const source = cp[0..@intCast(n)];
-    const handle = r.createShader(source) catch return ki(0);
-    return ki(handle);
+  const r = g_renderer orelse return ki(0);
+  const cp = kcp(source_k) orelse return ki(0);
+  const n = kn(source_k);
+  if (n <= 0) return ki(0);
+  const source = cp[0..@intCast(n)];
+  const handle = r.createShader(source) catch return ki(0);
+  return ki(handle);
 }
 
 export fn terse_init(reg: *anyopaque) callconv(.c) void {
-    _ = reg;
-    g_api = .{
-        .k_call      = lookupFn(*const fn (K, K) callconv(.c) ?K, "k_call")           orelse return,
-        .k_make_dict = lookupFn(*const fn (i32, [*]const [*:0]const u8, [*]const ?K) callconv(.c) ?K, "k_make_dict") orelse return,
-        .kf          = lookupFn(*const fn (f32) callconv(.c) ?K, "kf")                 orelse return,
-        .ki          = lookupFn(*const fn (i32) callconv(.c) ?K, "ki")                 orelse return,
-        .kn          = lookupFn(*const fn (?K) callconv(.c) i32, "kn")                 orelse return,
-        .kfp         = lookupFn(*const fn (?K) callconv(.c) ?[*]f32, "kfp")            orelse return,
-        .kip         = lookupFn(*const fn (?K) callconv(.c) ?[*]i32, "kip")            orelse return,
-        .kcp         = lookupFn(*const fn (?K) callconv(.c) ?[*]u8, "kcp")             orelse return,
-        .ki_val      = lookupFn(*const fn (?K) callconv(.c) i32, "ki_val")             orelse return,
-        .KF          = lookupFn(*const fn (i32) callconv(.c) ?K, "KF")                 orelse return,
-        .ku          = lookupFn(*const fn (?K) callconv(.c) void, "ku")                 orelse return,
-    };
+  _ = reg;
+  g_api = .{
+    .k_call      = lookupFn(*const fn (K, K) callconv(.c) ?K, "k_call")           orelse return,
+    .k_make_dict = lookupFn(*const fn (i32, [*]const [*:0]const u8, [*]const ?K) callconv(.c) ?K, "k_make_dict") orelse return,
+    .kf          = lookupFn(*const fn (f32) callconv(.c) ?K, "kf")                 orelse return,
+    .ki          = lookupFn(*const fn (i32) callconv(.c) ?K, "ki")                 orelse return,
+    .kn          = lookupFn(*const fn (?K) callconv(.c) i32, "kn")                 orelse return,
+    .kfp         = lookupFn(*const fn (?K) callconv(.c) ?[*]f32, "kfp")            orelse return,
+    .kip         = lookupFn(*const fn (?K) callconv(.c) ?[*]i32, "kip")            orelse return,
+    .kcp         = lookupFn(*const fn (?K) callconv(.c) ?[*]u8, "kcp")             orelse return,
+    .ki_val      = lookupFn(*const fn (?K) callconv(.c) i32, "ki_val")             orelse return,
+    .KF          = lookupFn(*const fn (i32) callconv(.c) ?K, "KF")                 orelse return,
+    .ku          = lookupFn(*const fn (?K) callconv(.c) void, "ku")                 orelse return,
+  };
 }
