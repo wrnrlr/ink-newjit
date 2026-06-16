@@ -190,6 +190,9 @@ Adverbs are polysemic based on operand types:
 - Random number `` `prng[] ``
 - Exit `` `exit@i ``
 
+## Native Extension
+Ink supports writing native extensions based on a FFI.
+
 ## Commands
 A command always starts at the beginning of a line with `\`.
 
@@ -249,9 +252,9 @@ The parser, compiler, and runtime are all written in Zig 0.16.
     - `fntable.zig`, `ir.zig`
     - `tape.zig` - OpCode enum, BasicBlock, Chunk
     - `vm.zig`
-  - `ffi.zig`
+  - `ffi.zig` bridges ink K values to C shared-library functions
   - `runner.zig`
-  - `test.zig`
+  - `test.zig` 
 - `test/` - test scripts and data
   - `circle.k` Example of fragment shader with simple SDF for circle
   - `eyes.k` Eyes that follow the mouse drawn using 2D raster API FillFrame & Tessellate
