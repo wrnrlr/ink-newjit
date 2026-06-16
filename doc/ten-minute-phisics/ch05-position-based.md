@@ -6,13 +6,13 @@ Many interesting physical systems are not free to move in any direction. A bead 
 
 ## Three Classical Approaches to Constraint Dynamics
 
-To appreciate why PBD is appealing, it helps to survey the alternatives. Take the canonical introductory example: a bead constrained to slide along a circular wire. The bead has one degree of freedom (its arc position) rather than the two a free particle would have.
+To appreciate why PBD is appealing, it helps to survey the alternatives. Take the canonical introductory example: a bead constrained to slide along a circular wire.
 
-**Spring forces.** The simplest implementation adds a stiff spring that pulls the bead back toward the wire whenever it strays. This requires no special mathematics — just an extra force term. The problem is stiffness tuning. To keep the bead close to the wire the spring constant must be large, but large spring constants make the governing ordinary differential equation stiff, requiring very small time steps for numerical stability. In practice you spend most of your computational budget fighting the stiffness rather than simulating interesting motion.
+**Spring forces.** The simplest implementation adds a stiff spring that pulls the bead back toward the wire whenever it strays. The problem is stiffness tuning. Large spring constants make the governing ordinary differential equation stiff, requiring very small time steps for numerical stability.
 
-**Generalized coordinates.** A cleaner approach is to change variables so that the constraint is satisfied by construction. For the bead on a circle, replace the Cartesian pair $(x, y)$ with a single angle $\alpha$. The bead can never leave the wire because the wire's geometry is baked into the coordinate system. This is the textbook treatment and it is exact, but the derivation grows rapidly in complexity as the system grows in size. Even for this one-degree-of-freedom example, the equations of motion require careful application of the Euler–Lagrange formalism, and the result involves trigonometric identities that are specific to the circular geometry. For a robot arm or an articulated character with dozens of joints, the symbolic derivation becomes impractical to carry out by hand.
+**Generalized coordinates.** Replace the Cartesian pair $(x, y)$ with a single angle $\alpha$. The bead can never leave the wire because the wire's geometry is baked into the coordinate system. This is exact, but the derivation grows rapidly in complexity as the system grows in size.
 
-**Constraint forces.** A third approach — used in many professional rigid-body solvers — is to solve explicitly for the forces that keep the constraint satisfied. These forces act perpendicular to the constraint surface and ensure that the velocity remains tangential to it. The mathematics is cleaner than generalized coordinates but still requires linearizing the constraint and solving a system of linear equations at each time step. It also has a subtle fragility: the method keeps the *velocity* constraint satisfied, but if the position constraint is ever violated — due to accumulated integration error — there is no built-in mechanism to correct it. A separate stabilization step (Baumgarte stabilization or the like) must be added to prevent drift.
+**Constraint forces.** Solve explicitly for the forces that keep the constraint satisfied. This has a subtle fragility: positional drift — the slow accumulation of constraint violation — requires a separate stabilization step.
 
 ---
 
@@ -22,21 +22,9 @@ PBD sidesteps all of this with a question so simple it sounds almost naive: if t
 
 Move it onto the wire.
 
-The closest point on a circle to any exterior position $\mathbf{x}$ is simply the point on the circle in the direction from the center $\mathbf{c}$ to $\mathbf{x}$:
+The closest point on a circle of radius $r$ centered at $\mathbf{c}$ to any position $\mathbf{x}$ is:
 
 $$\mathbf{x}_{\text{projected}} = \mathbf{c} + r \cdot \frac{\mathbf{x} - \mathbf{c}}{\|\mathbf{x} - \mathbf{c}\|}$$
-
-This position correction $\lambda$ (the signed radial error) is trivially computed:
-
-$$\lambda = r - \|\mathbf{x} - \mathbf{c}\|$$
-
-The projected position is then:
-
-$$\mathbf{x} \leftarrow \mathbf{x} + \lambda \, \hat{\mathbf{d}}$$
-
-where $\hat{\mathbf{d}}$ is the unit vector from $\mathbf{c}$ to $\mathbf{x}$.
-
-Position projection alone, however, introduces a subtle error. If we move the particle without updating its velocity, the stored velocity no longer reflects how the position actually changed. On the next step, gravity will accelerate the particle along the old velocity direction while the projection pulls it back to the wire — the net effect is an ever-growing correction force, and energy explodes. The fix is to *recompute* the velocity from the position change rather than carrying it forward.
 
 ---
 
@@ -45,68 +33,58 @@ Position projection alone, however, introduces a subtle error. If we move the pa
 The complete per-step algorithm for a single constrained particle is:
 
 1. **Predict.** Apply external forces to the velocity, then advance the position:
-
-$$\mathbf{v} \leftarrow \mathbf{v} + \mathbf{g} \, \Delta t$$
-$$\mathbf{p} \leftarrow \mathbf{x} \quad \text{(save previous position)}$$
-$$\mathbf{x} \leftarrow \mathbf{x} + \mathbf{v} \, \Delta t$$
+$$\mathbf{v} \leftarrow \mathbf{v} + \mathbf{g}\, \Delta t, \quad \mathbf{p} \leftarrow \mathbf{x}, \quad \mathbf{x} \leftarrow \mathbf{x} + \mathbf{v}\, \Delta t$$
 
 2. **Project.** Move $\mathbf{x}$ to satisfy the constraint (snap to wire).
 
 3. **Velocity update.** Derive the new velocity implicitly from the position change:
-
 $$\mathbf{v} \leftarrow \frac{\mathbf{x} - \mathbf{p}}{\Delta t}$$
 
-Step 3 is the key insight. Because the velocity is recomputed from the actual displacement — which includes the constraint correction — it automatically becomes tangential to the wire. No explicit force computation is needed.
+Step 3 is the key insight. Because the velocity is recomputed from the actual displacement — which includes the constraint correction — it automatically becomes tangential to the wire.
 
 ---
 
 ## Implementing the Bead on a Wire
 
-The `Bead` class captures the algorithm directly. Each bead stores its current position, previous position, and velocity.
+The bead state is a 7-element list `(px; py; vx; vy; cx; cy; wr)` where `(cx, cy)` is the wire center and `wr` is the wire radius. The step function carries all state as a single tuple:
 
-```javascript
-class Bead {
-    constructor(radius, mass, pos) {
-        this.radius = radius;
-        this.mass = mass;
-        this.pos = pos.clone();
-        this.prevPos = pos.clone();
-        this.vel = new Vector2();
-    }
+```k
+grav: -10.
+sdt: (1.%60)%100.            / substep size: 1/60s / 100 substeps
 
-    startStep(dt, gravity) {
-        this.vel.add(gravity, dt);       // v += g * dt
-        this.prevPos.set(this.pos);      // save x
-        this.pos.add(this.vel, dt);      // x += v * dt
-    }
-
-    keepOnWire(center, radius) {
-        var dir = new Vector2();
-        dir.subtractVectors(this.pos, center);
-        var len = dir.length();
-        if (len == 0.0) return;
-        dir.scale(1.0 / len);
-        var lambda = physicsScene.wireRadius - len;  // signed radial error
-        this.pos.add(dir, lambda);                   // project onto wire
-        return lambda;
-    }
-
-    endStep(dt) {
-        this.vel.subtractVectors(this.pos, this.prevPos);
-        this.vel.scale(1.0 / dt);       // v = (x - p) / dt
-    }
+pbdStep: {[s]
+  px:s@0; py:s@1; vx:s@2; vy:s@3
+  cx: s@4; cy: s@5; wr: s@6
+  / 1. Predict: apply gravity, advance position
+  vy: vy + grav*sdt
+  ppx: px; ppy: py
+  px2: px + vx*sdt; py2: py + vy*sdt
+  / 2. Project: snap to circle
+  dx: px2-cx; dy: py2-cy
+  d: sqrt (dx*dx)+dy*dy
+  px3: $[d>0.; cx+dx*(wr%d); px2]
+  py3: $[d>0.; cy+dy*(wr%d); py2]
+  / 3. Recover velocity from displacement
+  vx2: (px3-ppx)%sdt
+  vy2: (py3-ppy)%sdt
+  (px3;py3;vx2;vy2;cx;cy;wr)
 }
 ```
 
-The simulation loop calls these three methods in order each frame:
+Note the parentheses in `sqrt (dx*dx)+dy*dy`: in ink, all operators are right-to-left with equal precedence, so `sqrt dx*dx+dy*dy` would parse as `sqrt(dx*(dx+dy*dy))` — incorrect. The explicit `(dx*dx)` ensures the squared x-component is computed first.
 
-```javascript
-physicsScene.bead.startStep(dt, physicsScene.gravity);
-physicsScene.bead.keepOnWire(physicsScene.wireCenter, physicsScene.wireRadius);
-physicsScene.bead.endStep(dt);
+The simulation loop calls `pbdStep` repeatedly using the n-do adverb:
+
+```k
+/ One frame: 100 substeps per 1/60s frame
+oneFrame: {100 pbdStep/ x}
+
+/ Bead at 45° on unit circle, 10 seconds = 600 frames
+s0: (0.707; 0.707; 0.; 0.; 0.; 0.; 1.)
+\t result: 600 oneFrame/ s0
+/ Verify bead is still on the unit circle:
+sqrt ((result@0)*(result@0)) + (result@1)*(result@1)
 ```
-
-Running this at a single step per frame ($\Delta t = 1/60\,\text{s}$) produces a bead that swings plausibly on the wire but slowly loses energy over time. This is not a bug in the constraint logic — it is a property of implicit integration, which the velocity recomputation step resembles. For many applications (games, interactive tools) this mild damping is harmless or even desirable, since real objects are damped anyway. But for accuracy-critical work, we need more.
 
 ---
 
@@ -114,96 +92,84 @@ Running this at a single step per frame ($\Delta t = 1/60\,\text{s}$) produces a
 
 The energy loss stems from the large $\Delta t$ relative to the timescale of the constrained motion. The standard remedy in PBD is **substepping**: divide each display frame into $N$ substeps of size $\Delta t / N$ and run the full predict–project–update cycle at each substep.
 
-```javascript
-function simulate() {
-    var sdt = physicsScene.dt / physicsScene.numSteps;
+The improvement is dramatic. With $N = 10$ substeps the energy loss is already much reduced; at $N = 100$ the motion is visually indistinguishable from the analytic solution; at $N = 1000$ the two agree to high precision.
 
-    for (var step = 0; step < physicsScene.numSteps; step++) {
-        physicsScene.bead.startStep(sdt, physicsScene.gravity);
-        physicsScene.bead.keepOnWire(physicsScene.wireCenter, physicsScene.wireRadius);
-        physicsScene.bead.endStep(sdt);
-    }
-}
+The substep size appears only in `sdt`, so changing the substep count requires only updating that global:
+
+```k
+sdt: (1.%60)%1000.           / 1000 substeps for high accuracy
 ```
 
-Nothing else changes — the substep size `sdt` is passed uniformly to all three methods. At $N = 10$ substeps the energy loss is already much reduced; at $N = 100$ the motion is visually indistinguishable from the analytic solution; at $N = 1000$ the two agree to high precision.
+Nothing else in `pbdStep` changes.
 
 ---
 
 ## Convergence to the Analytic Solution
 
-To verify correctness, we can run a reference simulation alongside the PBD bead. The analytic bead uses the exact equation of motion for a particle constrained to a circle of radius $r$, parameterized by angle $\alpha$:
+The analytic bead uses the exact equation of motion for a particle on a circle of radius $r$, parameterized by angle $\alpha$:
 
 $$\dot{\omega} = -\frac{g}{r} \sin \alpha, \qquad \dot{\alpha} = \omega$$
 
-Integrating these two equations with a small $\Delta t$ via symplectic Euler gives a reference trajectory that is independent of the PBD projection logic.
+The analytic reference in ink, integrated with symplectic Euler:
 
-```javascript
-class AnalyticBead {
-    constructor(radius, beadRadius, mass, angle) {
-        this.radius = radius;
-        this.angle = angle;
-        this.omega = 0.0;
-    }
-    simulate(dt, gravity) {
-        var acc = -gravity / this.radius * Math.sin(this.angle);
-        this.omega += acc * dt;
-        this.angle += this.omega * dt;
-        var centrifugalForce = this.omega * this.omega * this.radius;
-        return centrifugalForce + Math.cos(this.angle) * Math.abs(gravity);
-    }
-    getPos() {
-        return new Vector2(
-            Math.sin(this.angle) * this.radius,
-           -Math.cos(this.angle) * this.radius);
-    }
+```k
+analyticStep: {[s]
+  alpha:s@0; omega:s@1; r:s@2
+  acc: (grav%r) * sin alpha
+  omega2: omega + acc*sdt
+  alpha2: alpha + omega2*sdt
+  (alpha2; omega2; r)
 }
+
+/ Run analytic alongside PBD and compare positions
+s0pbd: (0.707; 0.707; 0.; 0.; 0.; 0.; 1.)
+s0ana: (0.7854; 0.; 1.)                  / angle=pi/4, omega=0, r=1
+result: 600 {100 pbdStep/ x}/ s0pbd
+aresult: 600 {100 analyticStep/ x}/ s0ana
 ```
 
-With $N = 1$ substep the PBD bead drifts visibly behind the analytic reference. With $N = 10$ they track closely. With $N = 1000$ they agree perfectly within floating-point precision. This is the hallmark of a consistent numerical method: the error shrinks as $\Delta t \to 0$, and in the limit the simulation converges to the true solution.
-
-The implication is significant. PBD required no calculus beyond basic geometry, no trigonometry, no linearization, no tuning of spring constants, and no drift-stabilization scheme — yet it converges to the same answer as methods that require all of those things.
+At $N = 1000$ substeps the two trajectories agree perfectly within floating-point precision.
 
 ---
 
 ## Recovering Constraint Forces
 
-A common objection to position-based methods is that they deal in displacements rather than forces, so the constraint force — the normal force exerted by the wire on the bead — is not directly available. This matters for applications where the force drives some other computation (fracture, wear, motor torque).
-
-In PBD the constraint force can be recovered from the positional correction $\lambda$. Because $\lambda$ is a length correction applied over a time $\Delta t$, the implied acceleration is $\lambda / \Delta t^2$, and for unit mass the force magnitude is:
+In PBD the constraint force can be recovered from the positional correction $\lambda$. Because $\lambda$ is a length correction applied over time $\Delta t$, the implied acceleration is $\lambda / \Delta t^2$, and for unit mass the force magnitude is:
 
 $$F_{\text{constraint}} = \frac{|\lambda|}{\Delta t^2}$$
 
-For the bead-on-circle problem the analytic normal force is the sum of the centrifugal force and the radial component of gravity:
-
-$$F_{\text{analytic}} = \omega^2 r + g \cos \alpha$$
-
-At $N = 1000$ substeps the two quantities agree to better than one part in a thousand. The position-based correction implicitly encodes the correct force; we just have to divide by $\Delta t^2$ to retrieve it.
+The correction length $\lambda = wr - d$ is computed inside `pbdStep`. At 1000 substeps, the recovered force matches the analytic normal force $F = \omega^2 r + g \cos\alpha$ to better than one part in a thousand.
 
 ---
 
 ## Multiple Beads and Collisions
 
-The approach extends naturally to multiple constrained particles. With several beads on the same wire, each bead is projected independently onto the wire, and bead–bead collisions are resolved as a separate pass using the position-based collision method from the previous chapter. The simulation loop becomes:
+The approach extends naturally to multiple constrained particles. With several beads on the same wire, each bead is projected independently onto the wire, and bead–bead collisions are resolved as a separate pass using the position-based collision method from Chapter 3.
 
-```javascript
-for (var step = 0; step < physicsScene.numSteps; step++) {
-    for (var i = 0; i < beads.length; i++)
-        beads[i].startStep(sdt, physicsScene.gravity);
-
-    for (var i = 0; i < beads.length; i++)
-        beads[i].keepOnWire(physicsScene.wireCenter, physicsScene.wireRadius);
-
-    for (var i = 0; i < beads.length; i++)
-        beads[i].endStep(sdt);
-
-    for (var i = 0; i < beads.length; i++)
-        for (var j = 0; j < i; j++)
-            handleBeadBeadCollision(beads[i], beads[j]);
+```k
+/ Multi-bead simulation: n beads on one circle
+/ State: (px_list; py_list; vx_list; vy_list; cx; cy; wr)
+multiPbdStep: {[s]
+  px:s@0; py:s@1; vx:s@2; vy:s@3
+  cx:s@4; cy:s@5; wr:s@6
+  n: #px
+  / Predict all beads
+  vy: vy + grav*sdt
+  ppx: px; ppy: py
+  px2: px + vx*sdt; py2: py + vy*sdt
+  / Project all beads onto circle (vectorized)
+  dx: px2-cx; dy: py2-cy
+  d: sqrt (dx*dx)+dy*dy
+  px3: cx + dx*(wr%d)
+  py3: cy + dy*(wr%d)
+  / Recover velocities
+  vx2: (px3-ppx)%sdt
+  vy2: (py3-ppy)%sdt
+  (px3;py3;vx2;vy2;cx;cy;wr)
 }
 ```
 
-The constraint projection and the collision resolution are both geometric corrections applied to positions; both are followed by the same velocity recomputation in `endStep`. This uniformity is one of PBD's structural advantages — adding new constraint types means writing a new projection function, not deriving new equations of motion.
+The constraint projection for all beads is fully vectorized: `dx`, `dy`, `d`, `px3`, `py3` are all arrays of length $n$, updated simultaneously.
 
 ---
 
@@ -211,12 +177,10 @@ The constraint projection and the collision resolution are both geometric correc
 
 - **PBD reduces constraints to geometry.** Rather than solving for forces, PBD moves particles directly to satisfy constraints, then recomputes velocity from the displacement. No calculus, no linearization, no drift.
 
-- **Velocity must be recomputed, not carried forward.** Advancing velocity without correcting it for the projection leads to unbounded energy growth. The recomputation $\mathbf{v} = (\mathbf{x} - \mathbf{p}) / \Delta t$ is the step that makes the method physically coherent.
+- **Velocity must be recomputed, not carried forward.** Advancing velocity without correcting it for the projection leads to unbounded energy growth.
 
-- **Substepping controls accuracy.** The method is first-order; energy conservation improves as $\Delta t$ shrinks. Dividing a $1/60\,\text{s}$ frame into 10–100 substeps is sufficient for most interactive applications.
+- **Substepping controls accuracy.** The method is first-order; energy conservation improves as $\Delta t$ shrinks. Dividing a $1/60\,\text{s}$ frame into 100 substeps is sufficient for most interactive applications.
 
-- **Convergence is provable by comparison.** Running PBD alongside an analytic or high-accuracy reference solver at decreasing substep sizes confirms that the method converges to the correct solution.
+- **Operator precedence in ink is right-to-left.** Always parenthesize products that appear inside sums: write `(a*a)+b*b`, never `a*a+b*b`.
 
-- **Constraint forces are recoverable.** The correction magnitude $\lambda$ divided by $\Delta t^2$ gives the constraint force, matching analytic predictions at small substep sizes.
-
-- **The method generalizes cleanly.** Replacing `keepOnWire` with any other geometric projection — a line, a surface, a distance constraint between two particles — requires no change to the surrounding algorithm. This generality makes PBD the natural foundation for the soft-body and cloth simulations that follow in subsequent chapters.
+- **The method generalizes cleanly.** Replacing the circle projection with any other geometric projection — a line, a surface, a distance constraint between two particles — requires no change to the surrounding algorithm.

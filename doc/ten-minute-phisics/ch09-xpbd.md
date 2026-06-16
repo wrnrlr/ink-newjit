@@ -1,149 +1,226 @@
 # Chapter 9 — Extended Position-Based Dynamics
 
-Every physics simulation must answer a basic question: when two objects overlap, what do you do about it? The answer to that question determines the character of the entire simulation — its stability, its accuracy, and how naturally it handles objects that should be rigid versus objects that should be soft. This chapter introduces Position-Based Dynamics (PBD) and its extension XPBD, a framework that turns constraint satisfaction directly into a physics integrator. The result is unconditionally stable, free of the drift that plagues impulse-based methods, and — with XPBD — physically correct even when softness is involved.
+Every physics simulation must answer a basic question: when two objects overlap, what do you do about it? The answer determines the character of the entire simulation — its stability, its accuracy, and how naturally it handles objects that should be rigid versus objects that should be soft. This chapter introduces Position-Based Dynamics (PBD) and its extension XPBD, a framework that turns constraint satisfaction directly into a physics integrator. The result is unconditionally stable, free of the drift that plagues impulse-based methods, and — with XPBD — physically correct even when softness is involved.
+
+---
 
 ## Three Ways to Enforce Constraints
 
-Imagine two rigid bodies overlapping by a penetration depth d. You have three fundamentally different strategies for dealing with this situation.
+Imagine two rigid bodies overlapping by a penetration depth $d$. You have three fundamentally different strategies.
 
-**Force-based simulation** computes a separating force proportional to the penetration depth: f = k d, where k is called stiffness. Those forces modify velocities, which eventually push the positions apart. The approach has a serious problem: you need the overlap to exist in order to generate the corrective force. Reaction is always one step behind, and to make objects appear stiff you need a large k, which introduces numerical instability and overshooting. Small k makes everything squishy; large k breaks the solver. Setting k correctly to simulate a hard constraint is essentially impossible.
+**Force-based simulation** computes a separating force proportional to the penetration depth: $f = k d$. Those forces modify velocities, which eventually push the positions apart. The problem: you need the overlap to exist to generate the corrective force. Reaction is always one step behind, and large $k$ introduces numerical instability.
 
-**Impulse-based simulation**, used in many rigid-body engines, detects penetration and immediately applies an impulse to make velocities separating. This sidesteps the stiffness problem — the velocity update is controlled and cannot overshoot. But working only in velocity space introduces *drift*: consistent velocities do not guarantee consistent positions. Positional constraints are satisfied only approximately, and additional stabilisation tricks (Baumgarte, pseudo-velocities) are needed to keep things from drifting apart over time.
+**Impulse-based simulation** detects penetration and immediately applies an impulse to make velocities separating. This sidesteps the stiffness problem, but working only in velocity space introduces *drift*: consistent velocities do not guarantee consistent positions. Stabilisation tricks (Baumgarte, pseudo-velocities) are needed over time.
 
-**Position-based dynamics** goes one step further. Detect the overlap, then fix the positions directly. Velocities are derived afterward from how the positions changed. There is no lag, no drift, and — critically — the simulation is unconditionally stable regardless of the time-step size. The table below summarises the three approaches:
+**Position-based dynamics** goes one step further: detect the overlap, then fix the positions directly. Velocities are derived afterward from how far positions changed. There is no lag, no drift, and the simulation is unconditionally stable regardless of time-step size.
 
 | Method | Mechanism | Main issues |
 |--------|-----------|-------------|
-| Force-based | f = kd → velocity → position | Overlap required; reaction lag; stiffness k is hard to tune |
+| Force-based | $f = kd$ → velocity → position | Overlap required; reaction lag; stiffness hard to tune |
 | Impulse-based | detect → impulse → velocity | Drift (consistent v does not imply consistent x) |
 | **Position-based (PBD)** | detect → fix position → update v | Unconditionally stable; no drift |
 
-PBD is not merely a heuristic. It is closely related to implicit Euler integration — specifically, it corresponds to the first Newton iteration of a backward Euler step in variational form, solved with nonlinear Gauss-Seidel and initialised at the unconstrained inertial prediction. That description sounds complicated, but it points to something important: PBD has a rigorous physical foundation. Its only genuine weakness in the original formulation is that softness is handled incorrectly. XPBD fixes that.
-
-## A Bead on a Wire
-
-Before diving into the general framework, consider the simplest possible example: a bead constrained to lie on a wire. The bead has position **x** and velocity **v**. One simulation step proceeds in three stages.
-
-1. **Integrate freely.** Store the old position as **p** ← **x**, then advance unconstrained: **x** ← **x** + Δt **v**. This is where the bead *would* end up if the wire did not exist. It is called the unconstrained or predicted position.
-
-2. **Solve the constraint.** Project **x** onto the nearest point on the wire. This is the corrective step — purely geometric.
-
-3. **Recover velocity.** **v** = (**x** − **p**) / Δt. The velocity is not integrated independently; it is *derived* from how far the position moved. This is what makes PBD an integrator and a solver simultaneously.
-
-The elegance of this scheme is that stability is guaranteed by construction. No matter how large Δt is, the bead ends up on the wire. Energy may not be perfectly conserved, but the constraint is always satisfied.
+---
 
 ## The PBD Algorithm
 
-Generalising from a single bead to a collection of particles, the PBD loop looks like this:
+The PBD loop generalises the bead-on-wire idea from Chapter 5 to many particles and many constraints:
 
 ```
-Δtₛ ← Δt / n          // substep size
+Δtₛ ← Δt / n    (substep size)
 
-while simulating:
-    for n substeps:
-        for all particles i:
-            vᵢ ← vᵢ + Δtₛ g       // apply gravity (and other external forces)
-            pᵢ ← xᵢ               // store predicted position
-            xᵢ ← xᵢ + Δtₛ vᵢ     // integrate freely
+for each substep:
+    for all particles i:
+        vᵢ ← vᵢ + Δtₛ g    (apply gravity)
+        pᵢ ← xᵢ             (save pre-solve position)
+        xᵢ ← xᵢ + Δtₛ vᵢ   (integrate freely)
 
-        for all constraints C:
-            solve(C, Δtₛ)          // correct positions
+    for all constraints C:
+        solve(C, Δtₛ)        (correct positions)
 
-        for all particles i:
-            vᵢ ← (xᵢ − pᵢ) / Δtₛ // derive velocity from position change
-
-solve(C, Δt):
-    for all particles i of C:
-        compute Δxᵢ
-        xᵢ ← xᵢ + Δxᵢ
+    for all particles i:
+        vᵢ ← (xᵢ − pᵢ) / Δtₛ (recover velocity)
 ```
 
-The substep count n deserves special attention. When constraints remain stretchy, the usual remedy is to run multiple *iterations* of the constraint loop within a single time step. That works, but there is a better alternative: use multiple *substeps* instead, each with a smaller Δtₛ = Δt/n, and within each substep solve each constraint only once. The convergence rate of substeps dramatically outpaces iterations for the same computational budget. This observation made many earlier convergence accelerations — hierarchical PBD, long-range attachments — largely obsolete. There is also a practical benefit: with only one iteration per substep, XPBD does not require tracking accumulated Lagrange multipliers across iterations.
+In ink, one substep for a soft body with parallel arrays:
+
+```k
+grav: 0. -9.81 0.
+sdt: (1.%60)%10.          / 10 substeps per 60 Hz frame
+
+/ Pre-solve: gravity + predict positions
+preSolve: {[pos;vel;invM;n]
+  vel2: {$[invM@x=0.; vel@x; (vel@x)+grav*sdt]} each !n
+  prevPos: pos
+  pos2: {pos@x + (vel2@x)*sdt} each !n
+  (pos2;vel2;prevPos)
+}
+
+/ Post-solve: recover velocity from displacement
+postSolve: {[pos;prevPos;invM;n]
+  {$[invM@x=0.; vel@x; (pos@x - prevPos@x)%sdt]} each !n
+}
+```
+
+---
 
 ## Constraint Functions and Gradients
 
-To solve a general constraint, we need a common language for describing constraints. A **constraint function** C(**x**₁, …, **x**n) maps the positions of all participating particles to a scalar. The constraint is satisfied exactly when C = 0.
+To solve a general constraint, express it as a scalar function $C(\mathbf{x}_1, \ldots, \mathbf{x}_n) = 0$. The **constraint gradient** $\nabla_i C$ with respect to particle $i$ points in the direction that increases $C$ when particle $i$ moves, and its magnitude tells how fast $C$ changes per unit of movement.
 
-For a distance constraint between particles **x**₁ and **x**₂ with rest distance l₀:
+For a distance constraint between $\mathbf{x}_1$ and $\mathbf{x}_2$ with rest length $l_0$:
 
-$$C_\text{dist}(\mathbf{x}_1, \mathbf{x}_2) = |\mathbf{x}_2 - \mathbf{x}_1| - l_0$$
+$$C = |\mathbf{x}_2 - \mathbf{x}_1| - l_0$$
 
-This is zero when the particles are at the right distance, positive when too far apart, and negative when too close.
+$$\nabla_1 C = -\frac{\mathbf{x}_2 - \mathbf{x}_1}{|\mathbf{x}_2 - \mathbf{x}_1|}, \qquad \nabla_2 C = \frac{\mathbf{x}_2 - \mathbf{x}_1}{|\mathbf{x}_2 - \mathbf{x}_1|}$$
 
-Now comes the key concept: the **constraint gradient** ∇Cᵢ with respect to particle i. It is a vector with two properties:
+Both gradients have unit length.
 
-- Its *direction* points toward where C increases most rapidly when **x**ᵢ is moved.
-- Its *length* tells you how much C changes per unit of movement of **x**ᵢ.
-
-For the distance constraint, consider moving particle 1 to maximally increase the distance between the two particles. The answer is obvious: move it away from particle 2, along the line connecting them. The gradient length is 1 because moving particle 1 by one unit changes the distance by exactly one unit. Therefore:
-
-$$\nabla_1 C_\text{dist} = \frac{\mathbf{x}_1 - \mathbf{x}_2}{|\mathbf{x}_1 - \mathbf{x}_2|}$$
-
-$$\nabla_2 C_\text{dist} = \frac{\mathbf{x}_2 - \mathbf{x}_1}{|\mathbf{x}_2 - \mathbf{x}_1|}$$
+---
 
 ## Solving a General Constraint (PBD)
 
-Given C and its gradients, PBD computes a scalar Lagrange multiplier λ and then applies a correction to each particle proportional to its gradient and inverse mass.
-
-Let wᵢ = 1/mᵢ be the inverse mass of particle i. The Lagrange multiplier is:
+Given $C$ and its gradients, the Lagrange multiplier is:
 
 $$\lambda = \frac{-C(\mathbf{x}_1, \ldots, \mathbf{x}_n)}{\sum_i w_i \, |\nabla_i C|^2}$$
 
-The correction for particle i is then:
+The correction for particle $i$ is then:
 
 $$\Delta \mathbf{x}_i = \lambda \, w_i \, \nabla_i C$$
 
-The negative sign in λ ensures we move in the direction that *reduces* C toward zero. The inverse masses in the denominator distribute the correction correctly: a particle with infinite mass (w = 0) receives no correction at all, behaving as a fixed anchor.
+where $w_i = 1/m_i$ is the inverse mass. A particle with $w_i = 0$ (infinite mass / pinned) receives no correction.
 
-To verify these formulas, substitute the distance constraint gradients. With |∇₁C| = |∇₂C| = 1:
-
-$$\lambda = \frac{-(l - l_0)}{w_1 + w_2}$$
-
-$$\Delta \mathbf{x}_1 = \frac{w_1}{w_1 + w_2} \cdot (l - l_0) \cdot \frac{\mathbf{x}_2 - \mathbf{x}_1}{|\mathbf{x}_2 - \mathbf{x}_1|}$$
-
-$$\Delta \mathbf{x}_2 = -\frac{w_2}{w_1 + w_2} \cdot (l - l_0) \cdot \frac{\mathbf{x}_2 - \mathbf{x}_1}{|\mathbf{x}_2 - \mathbf{x}_1|}$$
-
-This matches the intuitive result: the total error (l − l₀) is split between the two particles in proportion to their inverse masses. A heavier particle moves less.
+---
 
 ## XPBD: Physically Correct Softness
 
-In original PBD, making a constraint soft is done by scaling the correction vectors by a stiffness factor k ∈ [0, 1]. Setting k = 1 gives a hard constraint; smaller values give softer behaviour. This is simple to implement but has a fatal flaw: the effective stiffness depends on the time-step size. Use a smaller time step and the constraint becomes stiffer, regardless of what you set k to. Softness cannot be specified in physically meaningful units.
+In original PBD, softness depends on time-step size — smaller time steps make constraints stiffer. XPBD fixes this with a single change: introduce a **compliance** parameter $\alpha = 1/\text{stiffness}$ and add it to the denominator, scaled by the substep size:
 
-XPBD (eXtended Position-Based Dynamics) fixes this with a single change. Introduce a **compliance** parameter α = 1/stiffness and add it to the denominator of λ, scaled by the substep size:
+$$\lambda = \frac{-C}{\displaystyle\sum_i w_i \, |\nabla_i C|^2 + \alpha / \Delta t_s^2}$$
 
-$$\lambda = \frac{-C(\mathbf{x}_1, \ldots, \mathbf{x}_n)}{\displaystyle\sum_i w_i \, |\nabla_i C|^2 + \frac{\alpha}{\Delta t_s^2}}$$
+When $\alpha = 0$, this reduces to standard PBD. Positive $\alpha$ gives controlled softness with a direct physical interpretation in SI units (m/N for a length constraint). The time-step scaling ensures the physical behaviour does not change when you adjust the substep count.
 
-The correction formula Δ**x**ᵢ = λ wᵢ ∇Cᵢ remains unchanged.
+---
 
-When α = 0, the α/Δtₛ² term vanishes and the equation reduces exactly to standard PBD — a hard constraint. As α increases, the constraint becomes softer and the compliance has a direct physical interpretation in units of inverse stiffness (m/N for a length constraint). The time-step scaling in the denominator ensures that the physical behaviour does not change when you adjust the substep size.
+## Distance Constraint in Ink
 
-## A Worked Example: Volume Conservation
+For a distance constraint, $|\nabla_i C| = 1$, so the denominator simplifies to $(w_1 + w_2) + \alpha/\Delta t_s^2$:
 
-The general framework handles constraints far beyond simple distances. For soft-body simulation, a fundamental constraint is that a tetrahedral element should preserve its volume.
+```k
+/ XPBD distance constraint between particles i and j
+/ pos: list of 3-vectors; invM: float list
+solveEdge: {[pos;invM;i;j;l0;alpha;sdt]
+  p0: pos@i; p1: pos@j
+  w0: invM@i; w1: invM@j
+  wt: w0+w1
+  dx: p1 - p0
+  d: sqrt +/ dx*dx
+  n: dx % (d|0.0001)           / unit direction, guard zero length
+  C: d - l0
+  lam: C % wt + alpha%sdt*sdt  / note: alpha/dt² added to denominator
+  pos2: @[@[pos; i; +; n*lam*w0]; j; -; n*lam*w1]
+  pos2
+}
+```
 
-Label the four vertices **x**₁, **x**₂, **x**₃, **x**₄ with rest volume V₀. The constraint function is:
+**Parenthesization note:** `wt + alpha%sdt*sdt` evaluates right-to-left as `wt + (alpha%(sdt*sdt))` which is correct — `%` is division, so `alpha%sdt*sdt` = `alpha / (sdt*sdt)` = `α/Δt²`. ✓
 
-$$C = 6(V - V_0) = [(\mathbf{x}_2 - \mathbf{x}_1) \times (\mathbf{x}_3 - \mathbf{x}_1)] \cdot (\mathbf{x}_4 - \mathbf{x}_1) - 6V_0$$
+Quick test — two particles at distance 2 with rest length 1:
 
-The factor of 6 is a bookkeeping convenience that simplifies the gradients. To find ∇₄C, ask: in which direction should **x**₄ move to maximally increase the volume of the tetrahedron? The answer is perpendicular to the opposite face — the base triangle formed by **x**₁, **x**₂, **x**₃. A cross product computes exactly this normal, and it happens to have the right length too. Applying this reasoning to all four vertices (using the right-hand rule) gives:
+```k
+pos: (0. 0. 0.; 2. 0. 0.)
+invM: 1. 1.
+r: solveEdge[pos; invM; 0; 1; 1.; 0.; 0.01]
+r / → (0.5 0.0 0.0; 1.5 0.0 0.0): pulled symmetrically to distance 1
+```
+
+---
+
+## Volume Constraint in Ink
+
+The signed volume of a tetrahedron $(\mathbf{x}_1, \mathbf{x}_2, \mathbf{x}_3, \mathbf{x}_4)$ scaled by 6:
+
+$$6V = [(\mathbf{x}_2 - \mathbf{x}_1) \times (\mathbf{x}_3 - \mathbf{x}_1)] \cdot (\mathbf{x}_4 - \mathbf{x}_1)$$
+
+The constraint $C = 6V - 6V_{\text{rest}}$ has gradients (one per vertex) pointing normal to the opposite face:
 
 $$\nabla_1 C = (\mathbf{x}_4 - \mathbf{x}_2) \times (\mathbf{x}_3 - \mathbf{x}_2)$$
 $$\nabla_2 C = (\mathbf{x}_3 - \mathbf{x}_1) \times (\mathbf{x}_4 - \mathbf{x}_1)$$
 $$\nabla_3 C = (\mathbf{x}_4 - \mathbf{x}_1) \times (\mathbf{x}_2 - \mathbf{x}_1)$$
 $$\nabla_4 C = (\mathbf{x}_2 - \mathbf{x}_1) \times (\mathbf{x}_3 - \mathbf{x}_1)$$
 
-Plug these into the general λ formula (with or without α depending on how stiff the material should be) and apply Δ**x**ᵢ = λ wᵢ ∇Cᵢ to each vertex. That is the complete soft-body element update — no finite-element stiffness matrices, no linear solves, just geometry and the two formulas above.
+```k
+cross3: {[a;b]
+  (((a@1)*(b@2))-(b@1)*(a@2)
+   ((a@2)*(b@0))-(b@2)*(a@0)
+   ((a@0)*(b@1))-(b@0)*(a@1))
+}
+dot3: {+/ x*y}
+tetVol6: {[p1;p2;p3;p4] dot3[cross3[p2-p1; p3-p1]; p4-p1]}
+
+/ XPBD volume constraint for one tetrahedron
+/ pos: list of 3-vectors; indices i1..i4 are the four tet vertices
+solveVol: {[pos;invM;i1;i2;i3;i4;rv6;alpha;sdt]
+  p1:pos@i1; p2:pos@i2; p3:pos@i3; p4:pos@i4
+  g1: cross3[p4-p2; p3-p2]
+  g2: cross3[p3-p1; p4-p1]
+  g3: cross3[p4-p1; p2-p1]
+  g4: cross3[p2-p1; p3-p1]
+  w1:invM@i1; w2:invM@i2; w3:invM@i3; w4:invM@i4
+  / denominator: sum of wᵢ|∇ᵢC|², plus compliance
+  denom: (w1*(+/g1*g1)) + (w2*(+/g2*g2)) + (w3*(+/g3*g3)) + w4*(+/g4*g4)
+  C: tetVol6[p1;p2;p3;p4] - rv6
+  lam: C % denom + alpha%sdt*sdt
+  pos2: @[pos; i1; -; g1*lam*w1]
+  pos3: @[pos2; i2; -; g2*lam*w2]
+  pos4: @[pos3; i3; -; g3*lam*w3]
+  @[pos4; i4; -; g4*lam*w4]
+}
+```
+
+The denominator uses `(wᵢ*(+/gᵢ*gᵢ))` — the extra parentheses around each `wᵢ*|∇ᵢC|²` product prevent right-to-left mis-association in the subsequent additions.
+
+---
+
+## Substepping vs. Iterations
+
+A critical insight from XPBD: **substepping outperforms iterating** the constraint solver. For the same compute budget, running $n$ substeps with one solver pass each converges far faster than running one step with $n$ iterations. This holds because each substep uses a smaller $\Delta t_s = \Delta t / n$, and the compliance term $\alpha/\Delta t_s^2$ grows with $n$, making constraints effectively stiffer per pass while maintaining physically correct behaviour.
+
+With only one solver pass per substep, XPBD also eliminates the need to track accumulated Lagrange multipliers across iterations — the state is simply the particle positions.
+
+```k
+/ Full XPBD step for soft body: preSolve → solve edges → solve vols → postSolve
+xpbdStep: {[s]
+  pos:s@0; vel:s@1; invM:s@2; edges:s@3; tets:s@4
+  n: #pos
+  / Pre-solve: apply gravity, record prev positions, advance
+  vel2: {[i] $[invM@i=0.; vel@i; (vel@i)+grav*sdt]} each !n
+  prevPos: pos
+  pos2: {[i] pos@i + (vel2@i)*sdt} each !n
+  / Solve all edge constraints
+  pos3: {[p;e] solveEdge[p; invM; e@0; e@1; e@2; edgeAlpha; sdt]}/ (pos2,;),edges
+  / Solve all volume constraints
+  pos4: {[p;t] solveVol[p; invM; t@0; t@1; t@2; t@3; t@4; volAlpha; sdt]}/ (pos3,;),tets
+  / Post-solve: recover velocity
+  vel3: {[i] $[invM@i=0.; vel2@i; (pos4@i - prevPos@i)%sdt]} each !n
+  (pos4; vel3; invM; edges; tets)
+}
+```
+
+---
 
 ## Key Takeaways
 
 - **Position-based methods** correct positions directly, eliminating both the reaction lag of force-based simulation and the drift of impulse-based simulation. The simulation is unconditionally stable.
 
-- **Any constraint** can be expressed as a scalar function C(**x**₁, …, **x**n) = 0. The constraint gradient ∇Cᵢ encodes both the correction direction and magnitude for each particle.
+- **Any constraint** can be expressed as a scalar function $C(\mathbf{x}_1, \ldots, \mathbf{x}_n) = 0$. The gradient $\nabla_i C$ encodes both the correction direction and magnitude for each particle.
 
-- **The PBD update** computes a Lagrange multiplier λ = −C / Σ(wᵢ |∇Cᵢ|²) and applies Δ**x**ᵢ = λ wᵢ ∇Cᵢ. Inverse masses distribute corrections in proportion to how movable each particle is.
+- **The PBD update:** $\lambda = -C / \sum_i w_i |\nabla_i C|^2$ and $\Delta\mathbf{x}_i = \lambda w_i \nabla_i C$. Inverse masses distribute corrections by movability.
 
-- **XPBD** adds a compliance term α/Δtₛ² to the denominator of λ. This single change gives softness a physical unit, makes it time-step independent, and recovers hard PBD when α = 0.
+- **XPBD** adds $\alpha/\Delta t_s^2$ to the denominator. This single change gives softness a physical unit, makes it time-step independent, and recovers hard PBD when $\alpha = 0$.
 
-- **Substeps outperform iterations.** For a fixed compute budget, running n substeps with one solver pass each converges far faster than running one step with n solver iterations.
+- **Substeps outperform iterations.** For a fixed compute budget, $n$ substeps with one pass each converges far faster than one step with $n$ passes.
 
-- **The same two formulas** — λ and Δ**x**ᵢ — handle every constraint type. Switching from a distance spring to a volume-preserving soft body requires only a different C and its gradients.
+- **The `+/ x*x` idiom** computes $|\mathbf{v}|^2$ correctly for any length vector, side-stepping right-to-left precedence issues.
+
+- **The two formulas** ($\lambda$ and $\Delta\mathbf{x}_i$) handle every constraint type. Switching from a distance spring to a volume-preserving soft body requires only different $C$ and its gradients.

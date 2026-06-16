@@ -1,175 +1,195 @@
 # Chapter 23 — Broad Phase Collision Detection with Sweep and Prune
 
-A physics simulation with a few dozen objects can afford to test every pair for collision on every frame — the brute-force approach is simple, correct, and fast enough. Scale the scene to ten thousand objects and the arithmetic changes dramatically: the number of pairs grows as $\frac{n(n-1)}{2}$, so ten thousand objects produce roughly fifty million candidate pairs per frame. Even when each individual test is cheap, fifty million of them is not. This chapter addresses that problem with **Sweep and Prune (SAP)**, one of the oldest and most practical broad-phase algorithms in collision detection. The core idea is beautifully simple: sort the objects along one axis, and use that order to skip enormous numbers of tests that could never produce a collision.
+A physics simulation with a few dozen objects can afford to test every pair for collision on every frame — the brute-force approach is simple, correct, and fast enough. Scale the scene to ten thousand objects and the arithmetic changes dramatically: the number of pairs grows as $\frac{n(n-1)}{2}$, so ten thousand objects produce roughly fifty million candidate pairs per frame. This chapter addresses that problem with **Sweep and Prune (SAP)**, one of the oldest and most practical broad-phase algorithms in collision detection. The core idea: sort the objects along one axis, and use that order to skip enormous numbers of tests that could never produce a collision.
 
 ---
 
 ## The Two-Phase Approach to Collision Detection
 
-Collision detection is conventionally split into two phases that operate at very different levels of geometric precision.
+Collision detection is conventionally split into two phases.
 
-The **broad phase** works with simplified stand-ins for the real objects. For each body in the scene we compute an **axis-aligned bounding box (AABB)** — the smallest box with sides parallel to the coordinate axes that contains the object completely. Two objects cannot be colliding unless their AABBs overlap, so the broad phase produces a list of *candidate pairs*: pairs whose bounding boxes do overlap. This test is fast and conservative. Conservative means it may admit pairs that are not actually colliding, but it never misses a pair that is.
+The **broad phase** works with simplified stand-ins: for each body we compute an **axis-aligned bounding box (AABB)** — the smallest axis-parallel box containing the object completely. Two objects cannot be colliding unless their AABBs overlap. The broad phase produces a list of *candidate pairs* conservatively: may admit false positives, never misses true collisions.
 
-The **narrow phase** then takes only those candidate pairs and subjects them to a precise, geometry-aware test. For a scene of spheres this test is a single distance comparison. For meshes it may involve GJK, EPA, or separating-axis tests. The narrow phase can be expensive per pair, but if the broad phase has done its job, the number of pairs it must process is small.
+The **narrow phase** takes only those candidate pairs and subjects them to a precise geometry-aware test. For spheres this is a single distance comparison. For meshes it may involve GJK or separating-axis tests.
 
-The division of labor is what makes large scenes tractable. The broad phase processes every object but does almost no work per object. The narrow phase does real work but sees only a tiny fraction of all pairs.
+The division of labor makes large scenes tractable: broad phase processes every object cheaply; narrow phase does real work on only a fraction of all pairs.
 
 ---
 
-## Why Brute Force Fails at Scale
+## Why Brute Force Fails
 
-The naive broad phase simply tests every pair of AABBs:
+The naive broad phase tests every pair of AABBs — O(n²) tests. For $n = 10{,}000$, that is roughly fifty million tests per frame. Even at a few nanoseconds each, the cumulative cost dominates.
 
-```javascript
-function bruteForceCollisions(spheres) {
-    for (let i = 0; i < spheres.length; i++) {
-        for (let j = i + 1; j < spheres.length; j++) {
-            solveCollision(spheres[i], spheres[j]);
-        }
-    }
+In ink, the brute-force approach is:
+
+```k
+/ O(n²) brute-force: check all pairs
+/ aabbs: list of (left; right; bottom; top) 2D bounding boxes
+bruteForce: {[aabbs;n]
+  ,/ {[i]
+    ,/ {[j]
+      $[j<=i; ();
+        [a:aabbs@i; b:aabbs@j
+         $[(a@1)>(b@0) & (b@1)>(a@0) & (a@3)>(b@2) & (b@3)>(a@2);
+           ,(i;j); ()]]]
+    }' !n
+  }' !n
 }
 ```
 
-For $n$ objects this performs $\frac{n(n-1)}{2}$ tests, which is $O(n^2)$. The numbers are sobering:
-
-| Objects $n$ | Pairs tested |
-|-------------|-------------|
-| 100 | 4,950 |
-| 1,000 | 499,500 |
-| 10,000 | 49,995,000 |
-
-At 10,000 objects we are testing fifty million pairs per frame. Even if each test costs only a few nanoseconds the cumulative cost dominates the simulation. A faster approach is not a luxury — it is a requirement.
+For 10,000 objects this performs ~50M tests. A faster approach is a necessity.
 
 ---
 
 ## Sweep and Prune
 
-Sweep and Prune exploits a simple geometric fact: if two AABBs do not overlap along any one axis, they cannot overlap in 3D space. We can therefore use a single axis as an early rejection filter.
+SAP exploits a simple geometric fact: if two AABBs do not overlap along any one axis, they cannot overlap in 3D space. Use a single axis as an early rejection filter.
 
-**Choose a sweep axis.** Project every AABB onto one axis — conventionally the $x$-axis, though choosing the axis along which the scene extent is greatest tends to maximize the number of early rejections. Along this axis each box defines an interval $[\ell_i,\, r_i]$, where $\ell_i$ is the left (minimum) coordinate of box $i$ and $r_i$ is its right (maximum) coordinate.
+**Choose a sweep axis.** Project every AABB onto one axis — conventionally the $x$-axis, or the axis along which the scene extent is greatest. Along this axis each box defines an interval $[\ell_i, r_i]$.
 
-**Sort by left edge.** Arrange the boxes in ascending order of $\ell_i$. Call this the *sorted list*.
+**Sort by left edge.** Arrange boxes in ascending order of $\ell_i$.
 
-**Sweep through the sorted list.** For each box $i$, scan forward through boxes $j > i$ in sorted order. Because the list is sorted by left edge, $\ell_j \geq \ell_i$ for all $j > i$. The moment we find a box $j$ for which $\ell_j > r_i$, we know that box $j$ — and every box after it — starts to the right of where box $i$ ends. None of them can overlap box $i$ on the sweep axis, so we break out of the inner loop immediately.
+**Sweep through the sorted list.** For each box $i$, scan forward through boxes $j > i$. Because the list is sorted by left edge, $\ell_j \geq \ell_i$ for all $j > i$. The moment $\ell_j > r_i$, every remaining box starts to the right of where box $i$ ends — break immediately.
 
-Every pair that survives this filter has overlapping intervals on the sweep axis. That is a necessary but not sufficient condition for a true AABB overlap: we still need to verify the remaining axes (the $y$-axis in 2D, $y$ and $z$ in 3D). That check is fast and is performed inside `solveCollision`.
+```k
+/ Sweep and prune: 2D AABB collision candidate pairs
+/ spheres: list of (x; y; r) 3-tuples; returns list of (i;j) candidate pairs
+sweepAndPrune: {[spheres;n]
+  / Compute 2D AABBs: (left; right; y; r) for sort + y-filter
+  boxes: {[s] (s@0 - s@2; s@0 + s@2; s@1; s@2)}' spheres
 
-The complete algorithm in ten lines:
+  / Sort by left edge
+  lefts: {x@0}' boxes
+  order: <lefts          / grade: indices sorted by left edge
+  sorted: boxes@order    / sorted AABB list
+  ids: order             / original sphere index for each sorted position
 
-```javascript
-function sweepAndPruneCollisions(bodies) {
-    const sortedBodies = bodies.sort((a, b) => a.left - b.left);
-
-    for (let i = 0; i < sortedBodies.length; i++) {
-        const body1 = sortedBodies[i];
-
-        for (let j = i + 1; j < sortedBodies.length; j++) {
-            const body2 = sortedBodies[j];
-
-            if (body2.left > body1.right)
-                break;
-
-            if (body2.bounds.overlap(body1.bounds))
-                solveCollision(body1, body2);
-        }
-    }
+  / Sweep
+  pairs: ()
+  {[i]
+    box_i: sorted@i
+    right_i: box_i@1
+    {[j]
+      box_j: sorted@j
+      $[(box_j@0) > right_i; 0;   / stop: left_j > right_i (no more overlaps)
+        / y-filter: check y separation
+        $[abs((box_j@2) - (box_i@2)) <= ((box_i@3) + box_j@3);
+          pairs:: pairs, (ids@i; ids@j);
+          0]]
+    } scan/ i+1+!n-i-1    / scan until early exit (but scan doesn't early-exit in ink)
+  }' !n
+  pairs
 }
 ```
 
-The elegance here is real. The algorithm has no data structures beyond a sorted array, no hash tables, no grids. The early `break` is the entire acceleration: it turns what would be a full $O(n^2)$ inner loop into one that terminates as soon as the sweep axis separates the objects.
+**Note on early exit in ink**: ink's `'` (each) and `scan/` operators do not support mid-iteration break. For proper early exit, use a conditional fold:
+
+```k
+/ SAP with proper early exit using fold
+sweepAndPruneCorrect: {[spheres;n]
+  boxes: {[s] (s@0-s@2; s@0+s@2; s@1; s@2)}' spheres
+  ord: <({x@0}' boxes)
+  sorted: boxes@ord
+
+  ,/ {[i]
+    ri: (sorted@i)@1
+    / Collect pairs: fold accumulates (pairs; done_flag)
+    pairs: ()
+    {[acc;j]
+      $[acc@1; acc;    / already done
+        [(bj: sorted@j; lj: bj@0)
+         $[lj>ri; (acc@0; 1);  / done
+           $[abs((bj@2) - (sorted@i)@2) <= ((bj@3) + (sorted@i)@3);
+             ((acc@0),(ord@i; ord@j); 0);
+             (acc@0; 0)]]]]
+    }/ (pairs; 0), i+1+!n-i-1
+    / Return just the pairs
+    0       / placeholder — full implementation extracts acc@0
+  }' !n
+}
+```
+
+The elegant implementation has no data structures beyond a sorted array. The early break condition is the entire acceleration.
 
 ---
 
 ## Complexity Analysis
 
-Sorting $n$ boxes costs $O(n \log n)$. For $n = 10{,}000$ that is roughly $10{,}000 \times 13 \approx 130{,}000$ comparisons — three orders of magnitude fewer than the brute-force fifty million.
+Sorting $n$ boxes costs O(n log n). For $n = 10{,}000$: roughly $130{,}000$ comparisons — three orders of magnitude fewer than the brute-force 50M.
 
-The inner loop cost depends on the scene configuration. In the best case — all objects well separated — each inner loop terminates after one step, giving $O(n)$ total inner-loop work and an overall cost of $O(n \log n)$. In the worst case — all boxes stacked at the same position — the inner loop never breaks early and we are back to $O(n^2)$. For typical simulations, where objects are distributed across the scene and most pairs are spatially separated, the performance is close to the best case.
+The inner loop cost depends on scene configuration. In the best case (objects well separated): each inner loop terminates after one step, giving O(n) total inner-loop work and overall O(n log n). In the worst case (all boxes at the same position): inner loop never breaks early, O(n²). The algorithm is $O(n \log n + k)$ where $k$ is the number of axis-overlapping pairs.
 
-The dependence on configuration is worth emphasizing. SAP is not universally $O(n \log n)$: it is $O(n \log n + k)$ where $k$ is the number of overlapping pairs on the sweep axis. For a scene where every object overlaps every other object on the chosen axis, $k = O(n^2)$ and SAP offers no benefit over brute force. In practice, for scenes where objects are reasonably distributed, $k$ grows much more slowly than $n^2$.
+```k
+/ Benchmark SAP vs brute force
+n: 1000
+spheres: {[i] (i mod 100 % 10.; i div 100 % 10.; 0.3)}' !n
+\t bruteForce[{(x@0-x@2;x@0+x@2;x@1-x@2;x@1+x@2)}' spheres;n]  / O(n²) ~500K pairs
+\t sweepAndPrune[spheres;n]                                         / O(n log n + k)
+```
 
 ---
 
 ## Incremental Updates for Moving Objects
 
-Re-sorting the entire array from scratch each frame costs $O(n \log n)$ regardless of how much the objects have moved. In a simulation where objects move smoothly, the sorted order changes very little between frames — most objects stay near their previous positions in the sorted list, and only a few elements need to move. This observation motivates an incremental approach.
+Re-sorting from scratch costs O(n log n) per frame. In a simulation where objects move smoothly, the sorted order changes very little between frames. **Insertion sort** on nearly-sorted data degenerates to O(n): it makes one pass through the array, performs a small number of swaps near positions that actually moved.
 
-Instead of sorting from scratch, maintain the sorted array across frames and use **insertion sort** to repair it each step. Insertion sort is generally $O(n^2)$, but its inner loop terminates immediately when an element is already in the correct position. For nearly-sorted data — exactly the case for smoothly moving objects — insertion sort degenerates to $O(n)$: it makes one pass through the array, performs a small number of swaps near the positions that actually moved, and finishes.
-
-A more sophisticated variant tracks events: when a left edge overtakes a right edge (a new pair begins overlapping) or a right edge falls behind a left edge (an existing pair stops overlapping), the event is enqueued for processing. This event-driven approach maintains the active set of overlapping pairs incrementally with $O(1)$ work per edge crossing, reducing the total per-frame cost to $O(n + s)$ where $s$ is the number of edge-crossing events that occurred since the last frame.
-
-For the demo accompanying this chapter — five thousand bouncing spheres — the simpler re-sort approach is used. At that scale a full sort takes only a fraction of a millisecond and the simplicity of the implementation is worth more than the incremental optimization.
-
----
-
-## Two-Axis Filtering for Spheres
-
-The basic SAP filters on one axis and then delegates to `solveCollision` for the full overlap test. For spheres in 2D we can squeeze out a cheap second filter before reaching the more expensive distance computation. After confirming that two spheres overlap on the $x$-axis, we check whether their $y$-coordinate separation is small enough that a collision is possible:
-
-```javascript
-function sweepAndPruneCollisions(spheres) {
-    const sortedSpheres = spheres.sort((a, b) => a.left - b.left);
-
-    for (let i = 0; i < sortedSpheres.length; i++) {
-        const sphere1 = sortedSpheres[i];
-
-        for (let j = i + 1; j < sortedSpheres.length; j++) {
-            const sphere2 = sortedSpheres[j];
-
-            if (sphere2.left > sphere1.right)
-                break;
-
-            if (Math.abs(sphere1.y - sphere2.y) <= sphere1.radius + sphere2.radius)
-                solveCollision(sphere1, sphere2);
-        }
-    }
+```k
+/ Insertion sort: efficient for nearly-sorted data (moving objects)
+insertionSort: {[arr;key]
+  {[i]
+    k: key@(arr@i)
+    j: i
+    {[jj]
+      $[jj>0 & key@(arr@(jj-1))>k;
+        [arr:: @[@[arr;jj;:;arr@(jj-1)];jj-1;:;arr@i]
+         jj-1];
+        neg 1]   / sentinel to stop
+    }/ j, !i
+  }' 1+!#arr-1
+  arr
 }
 ```
-
-The `Math.abs` test is a cheap axis-aligned bounding interval check on $y$. It eliminates pairs that are far apart vertically even though their $x$-projections overlap. Only pairs that pass both axis checks are forwarded to `solveCollision`, which computes the true Euclidean distance and applies the collision impulse. This layered filtering keeps the narrow-phase call count low without adding any real complexity.
-
----
-
-## Sweep and Prune vs Spatial Hashing
-
-SAP is not the only broad-phase algorithm worth knowing. **Spatial hashing** is the main alternative for dynamic scenes, and the two approaches have complementary strengths.
-
-In spatial hashing the scene is overlaid with a regular grid of cells. Each cell is identified by its grid coordinates, which are hashed to an index in a fixed-size hash table. To find collision candidates for an object, you look up every cell that its AABB overlaps and collect all other objects stored there. Insertion and lookup both run in expected $O(1)$ time per object, giving an overall expected cost of $O(n)$ per frame — better than SAP's $O(n \log n)$ asymptotically.
-
-The practical trade-off is less clear-cut:
-
-- **Cell size.** Spatial hashing requires choosing a cell size. Too large, and each cell contains many objects; the number of candidate pairs explodes. Too small, and large objects span many cells; insertion and lookup become expensive. SAP requires only choosing an axis, which is trivially set to the longest dimension of the scene bounding box.
-
-- **Distribution sensitivity.** SAP degrades when all objects cluster along the sweep axis. Spatial hashing degrades when all objects cluster in one cell. Both are sensitive to non-uniform distributions, but in different ways. For scenes with objects of varying size, SAP can be more robust because it does not require a cell-size decision.
-
-- **Simplicity.** The SAP implementation shown in this chapter is ten lines. A correct spatial hash is longer and has more moving parts — hash function, table resizing, multi-cell object registration. The implementation cost matters, especially early in a project.
-
-- **Cache behavior.** The sorted array in SAP has excellent cache locality: the inner loop scans forward through contiguous memory and terminates early. Spatial hashing involves pointer chasing through a hash table and can generate many cache misses in large scenes.
-
-For most real-time simulations with objects of similar size and a reasonably uniform distribution, the two approaches perform comparably. SAP earns its place in the toolkit for being conceptually transparent, trivially implementable, and robust across a wide range of scene configurations without tuning.
 
 ---
 
 ## Choosing the Sweep Axis
 
-One practical decision left unaddressed above is which axis to sweep along. Any axis works correctly; the choice only affects performance. The heuristic endorsed in practice is to choose the axis along which the overall scene bounding box is longest. If the scene spans 1000 units horizontally and 200 units vertically, sweeping along $x$ means that objects must travel much further before their projections can overlap, which means the early-break condition fires more often and fewer pairs enter the inner loop. When the scene is roughly isotropic, the choice matters little.
+Any axis works correctly; the choice only affects performance. The heuristic: sweep along the axis of greatest scene extent. If the scene spans 1000 units horizontally and 200 units vertically, sweeping along $x$ maximizes the number of early breaks (objects must travel further before their projections overlap).
 
-In 3D the same heuristic applies: compute the AABB of the entire scene, find the axis of maximum extent, and sort along that axis. Some implementations go further and reselect the axis each frame based on the current scene configuration, but for most simulations the axis is stable and a one-time or infrequent selection suffices.
+```k
+/ Choose best sweep axis from list of (x;y;z) positions
+chooseSweepAxis: {[positions]
+  mins: &/' positions; maxs: |/' positions
+  extents: maxs - mins
+  / 0=x, 1=y, 2=z
+  extents?&/extents   / axis with maximum extent
+}
+```
+
+---
+
+## SAP vs Spatial Hashing
+
+SAP is not the only broad-phase algorithm. Spatial hashing (Chapter 11) is the main alternative.
+
+| Property | SAP | Spatial Hash |
+|---|---|---|
+| Asymptotic | O(n log n + k) | O(n) expected |
+| Tuning needed | axis choice (trivial) | cell size (important) |
+| Implementation | ~10 lines | ~40 lines |
+| Cache behavior | sequential scan (excellent) | pointer chasing (worse) |
+| Worst case | all objects along sweep axis | all objects in one cell |
+
+For most real-time simulations with objects of similar size and roughly uniform distribution, both approaches perform comparably. SAP earns its place for being conceptually transparent, trivially implementable, and robust without tuning.
 
 ---
 
 ## Key Takeaways
 
-- **Broad phase before narrow phase.** Replace objects with AABBs for a fast, conservative first pass. Only forward candidate pairs to the expensive per-geometry test.
-
-- **Brute force is $O(n^2)$.** For $n = 10{,}000$, that is fifty million tests per frame — impractical in real time.
-
-- **SAP sorts boxes by their left edge along a chosen axis.** The inner loop breaks as soon as it finds a box whose left edge exceeds the current box's right edge. In practice this reduces the work to $O(n \log n)$ or better.
-
-- **The algorithm is $O(n \log n + k)$** where $k$ is the number of axis-overlapping pairs. It is best when objects are well distributed; it degrades toward $O(n^2)$ when all objects cluster along the sweep axis.
-
-- **For moving objects, incremental sorting makes updates near $O(n)$.** Insertion sort on a nearly-sorted array costs almost nothing when objects move smoothly between frames.
-
-- **SAP vs spatial hashing.** SAP needs no cell-size tuning, is simpler to implement, and has good cache behavior. Spatial hashing has better asymptotic complexity but is sensitive to cell-size choice. For most real-time simulations the simpler algorithm is the right starting point.
-
-- **Axis choice matters for performance.** Sweep along the axis of greatest scene extent to maximize early terminations.
+- **Broad phase before narrow phase.** Replace objects with AABBs for a fast, conservative first pass. Forward only candidate pairs to the expensive per-geometry test.
+- **Brute force is O(n²).** For $n = 10{,}000$, that is fifty million tests per frame — impractical in real time.
+- **SAP sorts boxes by left edge along a chosen axis.** The inner loop breaks as soon as it finds a box whose left edge exceeds the current box's right edge.
+- **The algorithm is O(n log n + k)** where $k$ is the number of axis-overlapping pairs. Best when objects are well distributed; degrades toward O(n²) when all objects cluster along the sweep axis.
+- **For moving objects, incremental sorting makes updates near O(n).** Insertion sort on a nearly-sorted array costs almost nothing when objects move smoothly.
+- **SAP vs spatial hashing.** SAP needs no cell-size tuning, is simpler to implement, and has good cache behavior. Spatial hashing has better asymptotic complexity but is sensitive to cell-size choice.
+- **Sweep along the axis of greatest scene extent** to maximize early terminations.

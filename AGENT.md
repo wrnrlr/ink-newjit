@@ -28,13 +28,28 @@ Ink (sometimes called terse) is an array programming language based on k.
 Nouns can be combined into expressions using verbs and adverbs.
 Expressions are evaluated right-to-left. There are no special precedence rules for operators.
 
+```k
+Integers: -2 1 0 0N
+Types: `i`f`s`c`m`I`F`S`C`M`L
+List: (1;2.3;`c)
+Lambda: {x}
+Dict: [id:1;name:"Bob"]
+```
+
+
 ## Types `` ` `i`f`s`c`m`I`F`S`C`M`L ``
-- Integer - numbers like `-2 0 1 0N`, type symbol `` `i ``.
-- Float - floating point numbers `0.1 2. -3. 0n 0w -0w`, type symbol `` `f ``.
+- Integer - numbers like `-2 0 1 0N`
+  - null value `0N`
+  - type symbol `` `i ``.
+- Float - floating point numbers `0.1 2. -3.`
+  - null value `0n`, positive/negative infinity `` 0w -0w ``
+  - type symbol `` `f ``.
 - Symbol - interned names, e.g. `` `id`Red100 ``, type symbol `` `s ``.
 - Char - single u8 character; whitespace is interpreted as empty `" "`. E.g. `"H"`, type symbol `` `c ``.
-- Integers - vector of integers, type symbol `` `I ``.
-- Floats - vector of floats, type symbol `` `F ``.
+- Integers - vector of integers
+  - type symbol `` `I ``
+- Floats - vector of floats
+  - type symbol `` `F ``
 - Symbols - array of symbols, type symbol `` `S ``.
 - Chars - string of characters (`[]u8`), type symbol `` `C ``.
 - List - heterogeneous list; empty list is `` ,() ``, type symbol `` `L ``.

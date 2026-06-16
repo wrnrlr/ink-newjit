@@ -1,8 +1,8 @@
 # Chapter 12 — Mesh Skinning for Soft Bodies
 
-A physically accurate soft-body simulation demands tetrahedral elements that fill the entire volume of an object. The problem is that the number of tetrahedra grows roughly in proportion to the cube of linear resolution — so a visually convincing surface mesh of 60,000 triangles, when naively tetrahedralized, produces something in the region of 300,000 tetrahedra. Simulating that many constrained elements in real time is impractical.
+A physically accurate soft-body simulation demands tetrahedral elements that fill the entire volume of an object. The problem is that the number of tetrahedra grows roughly in proportion to the cube of linear resolution — so a visually convincing surface mesh of 60,000 triangles produces something in the region of 300,000 tetrahedra when naively tetrahedralized. Simulating that many constrained elements in real time is impractical.
 
-This chapter introduces a clean solution: decouple the simulation mesh from the render mesh. The physics engine works on a coarse tetrahedral mesh with perhaps 3,000 tetrahedra. The high-resolution visual surface — the mesh the viewer actually sees — is "skinned" to that coarse mesh, meaning each visual vertex is expressed as a weighted combination of the surrounding simulation vertices. After each physics step, updating the full render mesh costs almost nothing. The result is a factor of roughly 100x in simulation speed with no perceptible loss of visual fidelity for the kinds of motion a soft body exhibits.
+This chapter introduces a clean solution: decouple the simulation mesh from the render mesh. The physics engine works on a coarse tetrahedral mesh with perhaps 3,000 tetrahedra. The high-resolution visual surface is "skinned" to that coarse mesh — each visual vertex is expressed as a weighted combination of the surrounding simulation vertices. After each physics step, updating the full render mesh costs almost nothing.
 
 ---
 
@@ -10,211 +10,168 @@ This chapter introduces a clean solution: decouple the simulation mesh from the 
 
 When a simulation is too expensive, there are broadly two ways to reduce it without abandoning the underlying physics.
 
-The first is **model reduction**. Here you start with the full high-resolution system matrix, decompose it into eigenmodes — the natural deformation patterns of the object — and then retain only the k most significant modes. The simulation then operates entirely in that low-dimensional space. This approach is mathematically elegant and provably optimal in the sense that you keep exactly the deformation patterns that matter most. The catch is that the eigendecomposition is non-trivial for nonlinear materials and becomes significantly more complex when collision handling is involved.
+**Model reduction** decomposes the full system matrix into eigenmodes and retains only the $k$ most significant ones. This is mathematically elegant but becomes complex with collision handling and nonlinear materials.
 
-The second approach, and the one developed here, is **surface embedding**. Rather than reducing the simulation mathematics, we reduce the simulation mesh directly. The steps are:
-
-1. Take the high-resolution visual mesh and produce a decimated, feature-aware version of it (a tool like Blender's decimate modifier works well for this).
+**Surface embedding** — the approach developed here — reduces the simulation mesh directly:
+1. Take the high-resolution visual mesh and decimate it to a coarser version.
 2. Tetrahedralize that decimated surface to produce the coarse physics mesh.
-3. Embed the original visual mesh inside the coarse volumetric mesh and compute, for each visual vertex, how to reconstruct its position from the surrounding tet vertices.
+3. For each visual vertex, compute how to reconstruct its position from the surrounding tet vertices.
 
-Step 3 is what this chapter covers. Once the embedding is computed — which happens once at startup — the per-frame skinning update is a simple weighted sum requiring no physics at all.
+Step 3 is what this chapter covers. Once the embedding is computed at startup, the per-frame skinning update is a simple weighted sum requiring no physics at all.
 
 ---
 
 ## Barycentric Coordinates
 
-The embedding is built on **barycentric coordinates**, a classical construction in computational geometry. Given a tetrahedron with four vertices **p**₁, **p**₂, **p**₃, **p**₄, any point **v** in space can be written as:
+The embedding is built on **barycentric coordinates**. Given a tetrahedron with four vertices $\mathbf{p}_1, \mathbf{p}_2, \mathbf{p}_3, \mathbf{p}_4$, any point $\mathbf{v}$ in space can be written as:
 
-> **v** = b₁·**p**₁ + b₂·**p**₂ + b₃·**p**₃ + b₄·**p**₄
+$$\mathbf{v} = b_1 \mathbf{p}_1 + b_2 \mathbf{p}_2 + b_3 \mathbf{p}_3 + b_4 \mathbf{p}_4, \qquad b_1 + b_2 + b_3 + b_4 = 1$$
 
-The four scalars b₁…b₄ are the barycentric coordinates of **v** with respect to that tetrahedron. They always sum to one:
+The four scalars $b_1, \ldots, b_4$ are the barycentric coordinates of $\mathbf{v}$. When all four are non-negative, $\mathbf{v}$ lies inside the tetrahedron. When some are negative, $\mathbf{v}$ is outside but the interpolation still works — it extrapolates from the nearest tet.
 
-> b₁ + b₂ + b₃ + b₄ = 1
-
-When all four coordinates are non-negative, **v** lies inside (or on the boundary of) the tetrahedron. When any coordinate is negative, **v** is outside, but the interpolation still works — it simply extrapolates from the nearest tet.
-
-The key property for skinning is that the coordinates are constant in the reference frame of the tetrahedron. As the simulation deforms the tet — stretching it, rotating it, squashing it — the visual vertex follows automatically, reconstructed from the same weighted sum applied to the deformed tet vertices.
+The key property for skinning: as the simulation deforms the tet — stretching it, rotating it, squashing it — the visual vertex follows automatically, reconstructed from the same weighted sum applied to the deformed tet vertices.
 
 ### Computing the Coordinates
 
-To solve for b₁, b₂, b₃, b₄ given the tet vertices and a visual vertex **v**, start by subtracting **p**₄ from all points. This eliminates b₄ from the equation because **p**₄ − **p**₄ = 0:
+To solve for $b_1, b_2, b_3, b_4$ given the tet vertices and a visual vertex $\mathbf{v}$, subtract $\mathbf{p}_4$ from all points to eliminate $b_4$ from the equation:
 
-> **v** − **p**₄ = b₁(**p**₁ − **p**₄) + b₂(**p**₂ − **p**₄) + b₃(**p**₃ − **p**₄)
+$$\mathbf{v} - \mathbf{p}_4 = b_1(\mathbf{p}_1 - \mathbf{p}_4) + b_2(\mathbf{p}_2 - \mathbf{p}_4) + b_3(\mathbf{p}_3 - \mathbf{p}_4)$$
 
-Define the 3×3 matrix **P** whose columns are the three edge vectors from **p**₄:
+Define the $3 \times 3$ matrix $P$ whose columns are the three edge vectors from $\mathbf{p}_4$:
 
-> **P** = [**p**₁ − **p**₄,  **p**₂ − **p**₄,  **p**₃ − **p**₄]
+$$P = [\mathbf{p}_1 - \mathbf{p}_4, \; \mathbf{p}_2 - \mathbf{p}_4, \; \mathbf{p}_3 - \mathbf{p}_4]$$
 
-Then the first three coordinates follow directly by matrix inversion:
+The first three coordinates follow directly by matrix inversion:
 
-> [b₁, b₂, b₃]ᵀ = **P**⁻¹ (**v** − **p**₄)
+$$[b_1, b_2, b_3]^T = P^{-1}(\mathbf{v} - \mathbf{p}_4), \qquad b_4 = 1 - b_1 - b_2 - b_3$$
 
-And the fourth:
+This is cheap: one $3 \times 3$ inverse per tetrahedron (computed once at startup) and one matrix-vector multiply per candidate visual vertex.
 
-> b₄ = 1 − b₁ − b₂ − b₃
+In ink, using the `mat3x3vec` and 3×3 inverse from `lib/lin.k` or `lib/svd.k`:
 
-This is cheap: one 3×3 inverse per tetrahedron (computed once at startup) and one matrix-vector multiply per candidate visual vertex.
+```k
+/ Compute barycentric coordinates of v in tet (p1,p2,p3,p4)
+/ Returns (b1,b2,b3,b4); b4 = 1 - b1 - b2 - b3
+baryCoords: {[v;p1;p2;p3;p4]
+  / Build P matrix: columns are edge vectors from p4
+  P: (p1-p4; p2-p4; p3-p4)
+  / Solve P * b = (v - p4) using PLU from lib/lin.k
+  b3: pluSolve[P; v-p4]
+  b4: 1. - (b3@0) - ((b3@1) + b3@2)
+  (b3@0; b3@1; b3@2; b4)
+}
+```
 
 ### Barycentric Distance
 
-Visual vertices do not always fall neatly inside one of the tets. Surface vertices near concavities or near the border of the coarse mesh may fall outside every tetrahedron. To handle this gracefully, define a **barycentric distance** from a point to a tetrahedron as:
+Visual vertices do not always fall neatly inside one of the tets. To handle exterior vertices gracefully, define a **barycentric distance** from a point to a tetrahedron:
 
-> d = max(−b₁, −b₂, −b₃, −b₄)
+$$d = \max(-b_1, -b_2, -b_3, -b_4)$$
 
-When **v** is inside the tet, all bᵢ ≥ 0 and d ≤ 0. When **v** is outside, at least one bᵢ is negative, and d measures how far outside. Attaching each visual vertex to the tetrahedron with the smallest d — even if d > 0 — gives the best possible skinning for every vertex, whether interior or exterior.
+When $\mathbf{v}$ is inside the tet, all $b_i \geq 0$ and $d \leq 0$. When outside, $d > 0$ measures how far outside. Attaching each visual vertex to the tetrahedron with the smallest $d$ gives the best possible skinning for every vertex.
+
+```k
+/ Barycentric distance (>0 means outside)
+baryDist: {[b] |/ neg b}    / max of negated coordinates
+```
 
 ---
 
 ## Computing the Skinning Attachment
 
-Before simulation begins, every visual vertex must be matched to its best tetrahedron and its barycentric coordinates stored. A brute-force search over all pairs of visual vertices and tetrahedra would be O(V·T), which is too slow for large meshes. The trick is to use a spatial hash.
+Before simulation begins, every visual vertex is matched to its best tetrahedron. The algorithm uses a spatial hash (from Chapter 11) to avoid an O(V·T) brute-force search.
 
-Hash all visual vertices by their 3D position into a grid. Then iterate over tetrahedra: for each tet, compute a bounding sphere, query the hash for all visual vertices that fall within that sphere, and for each candidate, compute and store the barycentric coordinates if they improve on the current best attachment.
+For each tetrahedron:
+1. Compute the bounding sphere of the tet plus a small border.
+2. Query the spatial hash for all visual vertices within that sphere.
+3. For each candidate, compute barycentric coordinates and store if this tet improves the attachment.
 
-```javascript
-computeSkinningInfo(visVerts) {
-    var hash = new Hash(0.05, this.numVisVerts);
-    hash.create(visVerts);
+```k
+/ Compute skinning info: for each visual vertex, find best tet and bary coords
+/ visPos: flat visual positions; tetPos: sim positions; tetIds: tet index list
+computeSkinning: {[visPos;nVis;tetPos;tetIds;h;ts]
+  / Build spatial hash of visual vertices
+  buildHash[visPos;nVis;h;ts]
 
-    this.skinningInfo.fill(-1.0);
-    var minDist = new Float32Array(this.numVisVerts);
-    minDist.fill(Number.MAX_VALUE);
-    var border = 0.05;
+  / For each visual vertex: initial attachment = (tetIdx=-1; dist=inf)
+  skinInfo: nVis # , (-1; 0. 0. 0. 0.)   / (tetIdx; b1 b2 b3 b4)
+  bestDist: nVis # 0w                     / initial dist = infinity
 
-    var tetCenter = new Float32Array(3);
-    var mat = new Float32Array(9);
-    var bary = new Float32Array(4);
+  {[ti]
+    t: tetIds@ti
+    p1:tetPos@(t@0); p2:tetPos@(t@1); p3:tetPos@(t@2); p4:tetPos@(t@3)
+    / Tet center and bounding radius
+    ctr: (p1+p2+p3+p4)%4.
+    rMax: 0.05 + |/ {sqrt +/ x*x}' (p1-ctr; p2-ctr; p3-ctr; p4-ctr)
+    / Query visual vertices near this tet
+    candidates: ?queryNeighbors[visPos;0;rMax;h;ts]  / using tet center
+    / Check each candidate
+    {[vi]
+      v: visPos@vi    / this would need separate 3D position extraction
+      b: baryCoords[v;p1;p2;p3;p4]
+      d: baryDist[b]
+      / Update if this tet is better
+      bestDist:: $[d < bestDist@vi; @[bestDist;vi;:;d]; bestDist]
+      skinInfo:: $[d < bestDist@vi; @[skinInfo;vi;:;(ti;b)]; skinInfo]
+    }' candidates
+  }' !#tetIds
 
-    for (var i = 0; i < this.numTets; i++) {
-        // Compute bounding sphere of this tetrahedron
-        tetCenter.fill(0.0);
-        for (var j = 0; j < 4; j++)
-            vecAdd(tetCenter, 0, this.pos, this.tetIds[4 * i + j], 0.25);
-
-        var rMax = 0.0;
-        for (var j = 0; j < 4; j++) {
-            var r2 = vecDistSquared(tetCenter, 0, this.pos, this.tetIds[4 * i + j]);
-            rMax = Math.max(rMax, Math.sqrt(r2));
-        }
-        rMax += border;
-
-        hash.query(tetCenter, 0, rMax);
-
-        // Build P matrix and invert it once for this tet
-        var id0 = this.tetIds[4 * i],     id1 = this.tetIds[4 * i + 1];
-        var id2 = this.tetIds[4 * i + 2], id3 = this.tetIds[4 * i + 3];
-
-        vecSetDiff(mat, 0, this.pos, id0, this.pos, id3);
-        vecSetDiff(mat, 1, this.pos, id1, this.pos, id3);
-        vecSetDiff(mat, 2, this.pos, id2, this.pos, id3);
-        matSetInverse(mat);
-
-        for (var j = 0; j < hash.querySize; j++) {
-            var id = hash.queryIds[j];
-
-            // Skip if already found a containing tet
-            if (minDist[id] <= 0.0) continue;
-
-            // Skip if outside the bounding sphere
-            if (vecDistSquared(visVerts, id, tetCenter, 0) > rMax * rMax) continue;
-
-            // Compute barycentric coords: b = P^{-1} (v - p4)
-            vecSetDiff(bary, 0, visVerts, id, this.pos, id3);
-            matSetMult(mat, bary, 0, bary, 0);
-            bary[3] = 1.0 - bary[0] - bary[1] - bary[2];
-
-            // Barycentric distance: how far outside (negative = inside)
-            var dist = 0.0;
-            for (var k = 0; k < 4; k++)
-                dist = Math.max(dist, -bary[k]);
-
-            // Keep the best (smallest distance) attachment
-            if (dist < minDist[id]) {
-                minDist[id] = dist;
-                this.skinningInfo[4 * id]     = i;       // tet index
-                this.skinningInfo[4 * id + 1] = bary[0];
-                this.skinningInfo[4 * id + 2] = bary[1];
-                this.skinningInfo[4 * id + 3] = bary[2]; // b3 = 1 - b0 - b1 - b2
-            }
-        }
-    }
+  skinInfo
 }
 ```
-
-A few implementation details are worth noting. The bounding sphere is computed as the circumscribed sphere of the tet center plus a small border. The border exists because we want to catch visual vertices that lie just outside every tet — we want to attach them to the nearest tet, not leave them unattached. The matrix **P** is inverted once per tet and reused for every candidate vertex, keeping the per-vertex cost to a single matrix-vector multiply.
-
-The `skinningInfo` array stores four floats per visual vertex: the tet index followed by b₁, b₂, b₃. The fourth coordinate b₄ is not stored because it is always `1 − b₁ − b₂ − b₃` and is reconstructed on the fly.
 
 ---
 
-## Updating the Visual Mesh
+## Per-Frame Skinning Update
 
-Once the skinning attachment is computed, updating the visual mesh after each simulation step is straightforward:
+Once the skinning attachment is computed, updating the visual mesh after each simulation step is a pure weighted sum — one of the cheapest operations in the entire pipeline:
 
-```javascript
-updateVisMesh() {
-    const positions = this.visMesh.geometry.attributes.position.array;
-    var nr = 0;
-    for (let i = 0; i < this.numVisVerts; i++) {
-        var tetNr = this.skinningInfo[nr++] * 4;
-        if (tetNr < 0) { nr += 3; continue; }
+```k
+/ Update visual positions from current sim positions (vectorized per visual vertex)
+/ skinInfo: list of (tetIdx; b1 b2 b3 b4) per visual vertex
+/ tetPos: current simulation positions (list of 3-vectors)
+/ tetIds: list of (v1 v2 v3 v4) per tet
 
-        var b0 = this.skinningInfo[nr++];
-        var b1 = this.skinningInfo[nr++];
-        var b2 = this.skinningInfo[nr++];
-        var b3 = 1.0 - b0 - b1 - b2;
-
-        var id0 = this.tetIds[tetNr++], id1 = this.tetIds[tetNr++];
-        var id2 = this.tetIds[tetNr++], id3 = this.tetIds[tetNr++];
-
-        vecSetZero(positions, i);
-        vecAdd(positions, i, this.pos, id0, b0);
-        vecAdd(positions, i, this.pos, id1, b1);
-        vecAdd(positions, i, this.pos, id2, b2);
-        vecAdd(positions, i, this.pos, id3, b3);
-    }
-    this.visMesh.geometry.computeVertexNormals();
-    this.visMesh.geometry.attributes.position.needsUpdate = true;
+updateVisMesh: {[skinInfo;tetPos;tetIds]
+  {[si]
+    ti: si@0; b: si@1     / tet index and barycentric coords
+    $[ti<0; 0. 0. 0.;     / unattached vertex: leave at origin
+      [t: tetIds@ti
+       p1:tetPos@(t@0); p2:tetPos@(t@1); p3:tetPos@(t@2); p4:tetPos@(t@3)
+       (p1*(b@0)) + (p2*(b@1)) + (p3*(b@2)) + p4*(b@3)]]
+  }' skinInfo
 }
 ```
 
-This is a pure weighted-sum kernel. For each of the 60,000 visual vertices we do four scalar multiplications and additions — no constraints, no matrix solves, no iteration. The cost is proportional to the visual vertex count, not the simulation vertex count, and the constant factor is very small. Vertex normals are recomputed from the new positions, which is necessary for correct shading.
+The inner expression `(p1*(b@0)) + (p2*(b@1)) + (p3*(b@2)) + p4*(b@3)` is the weighted sum of four 3-vectors — the barycentric reconstruction. The extra parens around `(p1*(b@0))` etc. protect the products from right-to-left mis-association.
+
+For 60,000 visual vertices, this update costs roughly four multiplications and additions per vertex — a trivial cost compared to the constraint solve.
 
 ---
 
 ## The Performance Argument
 
-The physics simulation scales roughly as O(T · S) per frame, where T is the number of tetrahedra and S is the number of solver substeps. Replacing 300,000 tetrahedra with 3,000 is a 100x reduction in T, which translates directly to a 100x reduction in constraint solve time — the dominant cost. The skinning update adds a term proportional to the visual vertex count, but this term has a very small constant: it is data-parallel, cache-friendly, and requires no synchronization.
+The physics simulation scales as O(T × S) per frame, where T is the number of tetrahedra and S is the substep count. Replacing 300,000 tetrahedra with 3,000 is a 100x reduction in T, directly reducing the constraint solve time by 100x. The skinning update adds a term proportional to the visual vertex count, but its constant factor is tiny: data-parallel, cache-friendly, no synchronization.
 
-Crucially, the coarse mesh still captures all the large-scale deformation modes of the object. The visual mesh rides along faithfully because the barycentric interpolation is linear — it respects rigid-body motion exactly, so a rotating or translating tet produces exactly the correct motion in every attached visual vertex. Stretching and shear are also captured exactly. The only motions the coarse mesh cannot represent are high-frequency surface ripples with wavelengths smaller than the tet spacing, but for a soft body those modes are not dynamically interesting — they would either be filtered out by material stiffness or would require an unrealistically stiff constraint to resolve.
-
-The same simulation framework from Chapter 10 (XPBD soft bodies) operates unchanged underneath. The coarse mesh benefits from the same unbreakable, substep-based integration — the skinning layer is purely a rendering concern and has no effect on simulation stability.
+The coarse mesh captures all large-scale deformation modes. The visual mesh rides along faithfully because barycentric interpolation is linear — it respects rigid-body motion exactly, so a rotating or translating tet produces exactly the correct motion in every attached visual vertex. Stretching and shear are captured exactly. The only modes the coarse mesh cannot represent are high-frequency surface ripples with wavelengths smaller than the tet spacing — those modes are not dynamically interesting for a bulk elastic material.
 
 ---
 
-## Practical Setup
+## Practical Workflow
 
-The workflow in practice:
-
-1. Start with the high-resolution visual mesh (the asset as authored, with full detail).
-2. Decimate it to a low-polygon proxy (roughly 100x fewer triangles). Feature-aware decimation tools preserve sharp edges and important silhouettes.
-3. Tetrahedralize the proxy to produce the simulation mesh. Chapter 13 covers this step.
-4. At application startup, call `computeSkinningInfo` to attach every visual vertex to its nearest tet and store the barycentric coordinates.
-5. Each frame: run the physics on the coarse mesh, then call `updateVisMesh` to push the result to the GPU.
-
-The attachment computation is fast enough to run at startup without a noticeable load time even for large meshes, because the spatial hash bounds the work to a small neighborhood per tet rather than a global search.
+1. Create or import a high-resolution visual mesh.
+2. Decimate it (Blender: Mesh → Decimate modifier) to a coarser surface.
+3. Tetrahedralize the decimated surface using the Blender plugin from Chapter 13.
+4. Export both meshes (positions + tetrahedral connectivity).
+5. At startup: call `computeSkinning` once to bind visual vertices to tets.
+6. Each frame: run XPBD soft body (Chapter 10), then call `updateVisMesh`.
 
 ---
 
 ## Key Takeaways
 
-- **Decouple physics from rendering.** The simulation mesh and the render mesh serve different purposes. The simulation mesh must be compatible with the physics solver; the render mesh must look good. There is no reason they must be the same.
-
-- **Barycentric coordinates are the right tool.** They express any point as a linear combination of tet vertices, they are unique, they are invariant under affine deformation of the tet, and they generalize naturally to points outside the tet (at the cost of mild extrapolation artifacts).
-
-- **Attachment is a one-time precomputation.** Using a spatial hash, every visual vertex can be matched to its best tetrahedron in time proportional to the total number of visual vertices plus the number of tets, with a small constant. This is fast enough to absorb at scene load time.
-
-- **The per-frame skinning update is trivially cheap.** Four multiplies and adds per visual vertex, no branch, no iteration. On modern hardware this is memory-bandwidth-limited, not compute-limited.
-
-- **100x is not an exaggeration.** Dropping from 300,000 to 3,000 simulation tetrahedra reduces solver time by that factor, and the overhead of the skinning pass does not come close to recovering it. The same visual quality is maintained because soft-body dynamics do not excite the high-frequency modes that the coarse mesh omits.
+- **Decouple simulation from rendering.** Run physics on a coarse tet mesh (hundreds or thousands of tets); render with a fine visual mesh (tens of thousands of triangles).
+- **Barycentric coordinates** express each visual vertex as a weighted combination of its host tet's four vertices. The weights are constant in the material frame — they do not change as the object deforms.
+- **Barycentric distance** $\max(-b_i)$ measures how far a point is outside a tet. Attach each visual vertex to the tet that minimizes this distance.
+- **The skinning update** is a pure weighted sum: four scalar multiplications and additions per visual vertex, with no physics.
+- **100x speedup** from using a coarse tet mesh vs a fine one, with no perceptible loss of visual quality for bulk elastic deformation modes.

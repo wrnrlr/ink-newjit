@@ -1,79 +1,78 @@
 # Chapter 22 — Rigid Body Simulation with Position-Based Dynamics
 
-Simulating rigid bodies is the cornerstone of almost every interactive physics engine. A rigid body is an object that does not deform — every pair of points on the body maintains a fixed distance. This constraint, simple as it sounds, transforms the mathematics substantially. A free particle has three degrees of freedom; a rigid body in three dimensions has six: three translational and three rotational. The rotational degrees of freedom introduce new state variables, new inertia quantities, and new integration equations, and they must be handled with some care if the simulation is to remain stable and physically plausible.
+Simulating rigid bodies is the cornerstone of almost every interactive physics engine. A rigid body is an object that does not deform — every pair of points maintains a fixed distance. This constraint transforms the mathematics substantially. A free particle has three degrees of freedom; a rigid body in 3D has six: three translational and three rotational.
 
-This chapter develops a complete rigid body simulator from first principles using Extended Position-Based Dynamics (XPBD). The approach is deliberately accessible: rotations are represented by quaternions, but you do not need to understand quaternion algebra to follow the derivation. The key insight is that the center of mass of a rigid body behaves exactly like a particle — we already know how to simulate that — and the rotational degrees of freedom can be integrated using a formula that mirrors the translational one almost line-for-line. Connecting two bodies with a distance constraint then follows from a straightforward generalization of the particle distance constraint from Chapter 5.
+This chapter develops a complete rigid body simulator using Extended Position-Based Dynamics (XPBD). Rotations are represented by quaternions (from Chapter 7). The key insight: the center of mass behaves exactly like a particle; the rotational degrees of freedom can be integrated using a formula that mirrors the translational one almost line-for-line.
 
 ---
 
 ## The State of a Rigid Body
 
-A free particle needs only two quantities to describe its state: position **x** and velocity **v**. A rigid body needs four:
+A free particle needs position and velocity. A rigid body needs four quantities:
 
 | Translational | Rotational |
 |---|---|
 | position **x** | orientation quaternion **q** |
 | linear velocity **v** | angular velocity **ω** |
-| inverse mass $w = 1/m$ | moment of inertia tensor **I** |
+| inverse mass $w = 1/m$ | inverse inertia tensor **I**⁻¹ |
 
-The position **x** is the world-space location of the body's center of mass. The orientation **q** is a unit quaternion that encodes how the body has been rotated away from its reference pose. The linear velocity **v** is the velocity of the center of mass. The angular velocity **ω** is a three-dimensional vector whose direction is the current axis of rotation and whose magnitude is the rotation speed in radians per second.
+The position **x** is the world-space location of the center of mass. The orientation **q** is a unit quaternion encoding how the body has been rotated from its reference pose. The angular velocity **ω** is a 3-vector: direction is the axis of rotation, magnitude is the angular speed in radians/second.
 
-The inverse mass $w = 1/m$ is stored rather than the mass directly, because static (immovable) objects are represented by $w = 0$ — the inverse of infinite mass — without any special-case logic.
+Inverse mass and inverse inertia are stored (not mass/inertia directly) so that static bodies are represented by $w = 0$ — infinite mass — without special-case logic.
 
-Each body defines a *local frame* whose origin is at the center of mass and whose axes are aligned with the body's principal dimensions. A point **a** in the local frame maps to a world-space point **a'** via the rigid transform:
+A point **a** in local frame maps to world space:
 
 $$\mathbf{a}' = \mathbf{x} + \mathbf{q} \otimes \mathbf{a}$$
 
-where $\otimes$ denotes the quaternion rotation operation (rotating the vector **a** by **q**). The inverse transform is:
+In ink, using `qrotate` from Chapter 7:
 
-$$\mathbf{a} = \mathbf{q}^{-1} \otimes (\mathbf{a}' - \mathbf{x})$$
+```k
+/ Rigid body state layout: (pos; vel; rot; omega; invM; invI; prevPos; prevRot)
+/ pos, vel, prevPos: 3-vectors; rot, prevRot: quaternion (x;y;z;w)
+/ omega: 3-vector (angular velocity); invM: scalar; invI: 3-vector (diagonal inertia)
 
-These two operations — local-to-world and world-to-local — are the only quaternion primitives the rest of the code needs to call. In practice they are one-liners using whichever quaternion library you have at hand.
+/ Local to world: apply rotation then add position
+localToWorld: {[body;a] (body@0) + qrotate[body@2; a]}
+
+/ World to local: subtract position then inverse-rotate
+worldToLocal: {[body;aw] qrotate[qconj body@2; aw - body@0]}
+```
 
 ---
 
-## The Moment of Inertia Tensor
+## Moment of Inertia Tensor
 
-Newton's second law has a rotational analogue. For linear motion:
+Newton's second law has a rotational analogue: $\boldsymbol{\tau} = \mathbf{I}\, \boldsymbol{\alpha}$. The scalar mass $m$ is replaced by the **moment of inertia tensor** **I**, a 3×3 symmetric matrix. Aligning the body's local frame with its principal axes makes **I** diagonal — three numbers $(I_x, I_y, I_z)$.
 
-$$\mathbf{F} = m \mathbf{a}$$
-
-The corresponding law for rotation is:
-
-$$\boldsymbol{\tau} = \mathbf{I} \, \boldsymbol{\alpha}$$
-
-Here $\boldsymbol{\tau}$ is the *torque* — the rotational equivalent of force, computed as $\mathbf{r} \times \mathbf{F}$ where **r** is the vector from the center of mass to the point where **F** is applied — and $\boldsymbol{\alpha}$ is the angular acceleration. The scalar mass $m$ is replaced by the *moment of inertia tensor* **I**, a 3×3 symmetric matrix. Just as a large mass resists linear acceleration, a large moment of inertia resists angular acceleration. But unlike scalar mass, the resistance depends on direction: a cylinder is easy to spin about its long axis and harder to spin about a perpendicular axis.
-
-In a general pose the full 3×3 tensor **I** has off-diagonal terms. If, however, we align the body's local frame with its principal axes — the natural symmetry axes of the shape — the tensor becomes diagonal:
-
-$$\mathbf{I} = \begin{pmatrix} I_x & 0 & 0 \\ 0 & I_y & 0 \\ 0 & 0 & I_z \end{pmatrix}$$
-
-This diagonal form can be stored as a plain three-vector $(I_x, I_y, I_z)$, which is what the code does. The principal moments for common shapes are tabulated on any physics reference sheet; here are the two shapes used in the demo:
+Principal moments for common shapes:
 
 **Solid box** with half-dimensions $(a, b, c)$ and mass $m$:
+$$I_x = \tfrac{1}{12}m(b^2+c^2), \quad I_y = \tfrac{1}{12}m(a^2+c^2), \quad I_z = \tfrac{1}{12}m(a^2+b^2)$$
 
-$$I_x = \tfrac{1}{12} m (b^2 + c^2), \quad I_y = \tfrac{1}{12} m (a^2 + c^2), \quad I_z = \tfrac{1}{12} m (a^2 + b^2)$$
+**Solid sphere** of radius $r$ and mass $m$: $I_x = I_y = I_z = \tfrac{2}{5}mr^2$
 
-**Solid sphere** of radius $r$ and mass $m$:
-
-$$I_x = I_y = I_z = \tfrac{2}{5} m r^2$$
-
-In the code both `invMass` and `invInertia` store the *inverses* of these quantities for the same reason as before: a zero inverse denotes an infinite (immovable) quantity.
-
-```javascript
-if (type == "box") {
-    mass = density * size.x * size.y * size.z;
-    this.invMass = 1.0 / mass;
-    let Ix = 1.0/12.0 * mass * (size.y*size.y + size.z*size.z);
-    let Iy = 1.0/12.0 * mass * (size.x*size.x + size.z*size.z);
-    let Iz = 1.0/12.0 * mass * (size.x*size.x + size.y*size.y);
-    this.invInertia.set(1.0/Ix, 1.0/Iy, 1.0/Iz);
+```k
+/ Compute inverse inertia for a box with half-extents (a;b;c) and mass m
+boxInvI: {[a;b;c;m]
+  (12.%(m*(b*b+c*c)); 12.%(m*(a*a+c*c)); 12.%(m*(a*a+b*b)))
 }
-else if (type == "sphere") {
-    mass = 4.0/3.0 * Math.PI * size.x*size.x*size.x * density;
-    this.invMass = 1.0 / mass;
-    let I = 2.0/5.0 * mass * size.x*size.x;
-    this.invInertia.set(1.0/I, 1.0/I, 1.0/I);
+
+/ Compute inverse inertia for a sphere of radius r and mass m
+sphereInvI: {[r;m] 5.%(2.*m*r*r) * 1. 1. 1.}
+
+/ Build a rigid body: type=0 box, type=1 sphere; size=(a;b;c) or (r;0;0)
+mkBody: {[type;size;density;pos;vel;rot;omega]
+  $[type=0;
+    [a:size@0; b:size@1; c:size@2
+     m: density*2.*a * 2.*b * 2.*c
+     invM: 1.%m
+     invI: boxInvI[a;b;c;m]];
+    / sphere
+    [r: size@0
+     m: (4.%3.) * 3.14159 * r*r*r * density
+     invM: 1.%m
+     invI: sphereInvI[r;m]]]
+  (pos; vel; rot; omega; invM; invI; pos; rot)   / prevPos=pos, prevRot=rot
 }
 ```
 
@@ -81,81 +80,60 @@ else if (type == "sphere") {
 
 ## Integrating Orientation
 
-The integration loop for a rigid body mirrors the particle loop. For the translational part nothing changes at all — the center of mass is a particle:
+The translational part of integration is unchanged — the center of mass is a particle:
 
-$$\mathbf{v} \leftarrow \mathbf{v} + \mathbf{g} \, h, \qquad \mathbf{x} \leftarrow \mathbf{x} + \mathbf{v} \, h$$
+$$\mathbf{v} \leftarrow \mathbf{v} + \mathbf{g} h, \qquad \mathbf{x} \leftarrow \mathbf{x} + \mathbf{v} h$$
 
-where $h$ is the substep size. The rotational part requires one additional idea: how to advance a quaternion given an angular velocity.
-
-If the body is rotating at angular velocity **ω**, then after a small time $h$ the orientation changes by a rotation of angle $|\boldsymbol{\omega}| h$ about the axis $\hat{\boldsymbol{\omega}}$. For small $h$ this can be approximated by the quaternion derivative formula:
+For the rotational part: a body rotating at angular velocity **ω** advances by:
 
 $$\mathbf{q} \leftarrow \mathbf{q} + \tfrac{1}{2} h \, [\omega_x, \omega_y, \omega_z, 0] \cdot \mathbf{q}$$
 
-followed by normalization. The term $[\omega_x, \omega_y, \omega_z, 0]$ is a pure quaternion formed from **ω** with $w = 0$, and the product is ordinary quaternion multiplication. This is the quaternion equivalent of $\mathbf{x} \leftarrow \mathbf{x} + \mathbf{v} h$.
+followed by normalization. The term $[\boldsymbol{\omega}, 0]$ is a pure quaternion formed from **ω** with $w = 0$.
 
-The complete integration step is:
+```k
+/ Quaternion operations from ch07
+qnorm: {x % sqrt +/ x*x}    / normalize
+grav: 0. -9.81 0.
 
-```javascript
-integrate(dt, gravity) {
-    if (this.invMass == 0.0) return;
-
-    // translational
-    this.prevPos.copy(this.pos);
-    this.vel.addScaledVector(gravity, dt);
-    this.pos.addScaledVector(this.vel, dt);
-
-    // rotational
-    this.prevRot.copy(this.rot);
-    this.dRot.set(this.omega.x, this.omega.y, this.omega.z, 0.0);
-    this.dRot.multiply(this.rot);
-    this.rot.x += 0.5 * dt * this.dRot.x;
-    this.rot.y += 0.5 * dt * this.dRot.y;
-    this.rot.z += 0.5 * dt * this.dRot.z;
-    this.rot.w += 0.5 * dt * this.dRot.w;
-    this.rot.normalize();
-    this.invRot.copy(this.rot);
-    this.invRot.invert();
+/ Integrate rigid body for one substep
+rbIntegrate: {[body;sdt]
+  pos:body@0; vel:body@1; rot:body@2; omega:body@3; invM:body@4
+  $[invM=0.; body;   / static body
+    [/ Save prev state
+     prevPos: pos; prevRot: rot
+     / Translational
+     vel2: vel + grav*sdt
+     pos2: pos + vel2*sdt
+     / Rotational: q += 0.5*sdt * [omega,0] * q
+     dq: qmul[(omega,0.); rot]    / pure quat [omega;0] multiplied by rot
+     rot2: qnorm rot + 0.5*sdt*dq
+     @[@[@[@[@[@[@[body;0;:;pos2];1;:;vel2];2;:;rot2];6;:;prevPos];7;:;prevRot]]]]
 }
 ```
-
-The current orientation and its inverse are both maintained; the inverse is needed for the world-to-local transform. Note that the check `invMass == 0.0` skips integration entirely for static bodies, which is both efficient and correct.
 
 ---
 
 ## Updating Velocities After the Solve
 
-After the constraint solver has moved the bodies, we recompute both velocities from the actual position and orientation changes, just as PBD does for particles. The translational update is identical to the particle case:
+After constraints have moved the bodies, recompute velocities from actual displacements:
 
 $$\mathbf{v} \leftarrow \frac{\mathbf{x} - \mathbf{x}_{\text{prev}}}{h}$$
 
-For the angular velocity we compute the quaternion that rotates from the pre-solve orientation $\mathbf{q}_{\text{prev}}$ to the post-solve orientation **q**:
+For angular velocity: compute the rotation delta $\Delta\mathbf{q} = \mathbf{q} \cdot \mathbf{q}_{\text{prev}}^{-1}$, then extract $\boldsymbol{\omega}$:
 
-$$\Delta\mathbf{q} = \mathbf{q} \cdot \mathbf{q}_{\text{prev}}^{-1}$$
+$$\boldsymbol{\omega} = \frac{2}{h} (\Delta q_x, \Delta q_y, \Delta q_z), \quad \text{negate if } \Delta q_w < 0$$
 
-The angular velocity is then extracted from the vector part of $\Delta\mathbf{q}$:
-
-$$\boldsymbol{\omega} = \frac{2}{h} \begin{pmatrix} \Delta q_x \\ \Delta q_y \\ \Delta q_z \end{pmatrix}$$
-
-One subtlety: quaternions represent rotations with a sign ambiguity — $\mathbf{q}$ and $-\mathbf{q}$ encode the same rotation. If the scalar part $\Delta q_w$ is negative, the vector part has the wrong sign and must be negated.
-
-```javascript
-updateVelocities() {
-    if (this.invMass == 0.0) return;
-
-    // translational
-    this.vel.subVectors(this.pos, this.prevPos);
-    this.vel.multiplyScalar(1.0 / this.dt);
-
-    // rotational
-    this.prevRot.invert();
-    this.dRot.multiplyQuaternions(this.rot, this.prevRot);
-    this.omega.set(
-        this.dRot.x * 2.0 / this.dt,
-        this.dRot.y * 2.0 / this.dt,
-        this.dRot.z * 2.0 / this.dt
-    );
-    if (this.dRot.w < 0.0)
-        this.omega.negate();
+```k
+/ Update velocities from position/orientation change after solve
+rbUpdateVel: {[body;sdt]
+  pos:body@0; vel:body@1; rot:body@2; omega:body@3; invM:body@4
+  prevPos:body@6; prevRot:body@7
+  $[invM=0.; body;
+    [vel2: (pos - prevPos) % sdt
+     dq: qmul[rot; qconj prevRot]
+     omega2: (2.%sdt) * 3#dq
+     omega3: $[(dq@3)<0.; neg omega2; omega2]
+     @[@[body;1;:;vel2];3;:;omega3]]]
 }
 ```
 
@@ -163,196 +141,170 @@ updateVelocities() {
 
 ## XPBD Constraint Solver for Rigid Bodies
 
-The particle distance constraint from Chapter 5 computes a correction vector and splits it between two particles proportional to their inverse masses. Extending this to rigid bodies requires two additional steps: computing a *generalized inverse mass* that accounts for rotational resistance, and applying an orientation correction alongside the position correction.
-
 ### Generalized Inverse Mass
 
-When a constraint pulls on a point **p** of body $i$ with force along direction **n**, the body responds both by translating (resisted by $m_i^{-1}$) and by rotating (resisted by **I**$_i^{-1}$). The combined resistance is the *generalized inverse mass*:
+When a constraint pulls on a point **p** of body $i$ with force along direction **n**, the body responds both by translating (resisted by $m_i^{-1}$) and by rotating (resisted by **I**$_i^{-1}$):
 
-$$w_i = m_i^{-1} + (\mathbf{r}_i \times \mathbf{n})^\mathsf{T} \, \mathbf{I}_i^{-1} \, (\mathbf{r}_i \times \mathbf{n})$$
+$$w_i = m_i^{-1} + (\mathbf{r}_i \times \mathbf{n})^\mathsf{T} \mathbf{I}_i^{-1} (\mathbf{r}_i \times \mathbf{n})$$
 
-where $\mathbf{r}_i = \mathbf{p}_i - \mathbf{x}_i$ is the vector from the center of mass to the attachment point. The cross product $\mathbf{r}_i \times \mathbf{n}$ is the angular impulse direction; projecting it through the inverse inertia tensor gives the angular compliance. Because we store the inertia tensor in the body's local frame, this computation must be carried out there: rotate $\mathbf{r}_i \times \mathbf{n}$ into local space, multiply component-wise by `invInertia`, and the dot product with itself gives the scalar term.
+where $\mathbf{r}_i = \mathbf{p}_i - \mathbf{x}_i$ is the vector from the center of mass to the attachment point. The inverse inertia **I**$_i^{-1}$ is diagonal (stored in local frame), so the computation requires rotating $\mathbf{r}_i \times \mathbf{n}$ to local frame first:
 
-```javascript
-getInverseMass(normal, pos) {
-    if (this.invMass == 0.0) return 0.0;
-
-    let rn = normal.clone();
-    rn.subVectors(pos, this.pos);   // r = p - x
-    rn.cross(normal);               // r × n
-    rn.applyQuaternion(this.invRot); // into local frame
-
-    let w = rn.x*rn.x * this.invInertia.x
-          + rn.y*rn.y * this.invInertia.y
-          + rn.z*rn.z * this.invInertia.z;
-
-    return w + this.invMass;
+```k
+/ Generalized inverse mass for body at attachment point worldPos in direction n
+rbInvMass: {[body;n;worldPos]
+  pos:body@0; rot:body@2; invM:body@4; invI:body@5
+  $[invM=0.; 0.;
+    [r: worldPos - pos
+     rn: cross3[r;n]                   / r × n
+     rnLocal: qrotate[qconj rot; rn]   / into local frame
+     angTerm: +/ invI * rnLocal*rnLocal    / dot(rnLocal, I⁻¹ * rnLocal)
+     invM + angTerm]]
 }
 ```
 
-### The XPBD Update
+### Applying the XPBD Correction
 
-Given a scalar constraint violation $C$, a constraint direction **n**, and the total generalized inverse mass $w = w_1 + w_2$, the XPBD Lagrange multiplier is:
+Given constraint violation $C$, direction **n**, and total generalized inverse mass $w$:
 
-$$\lambda = -\frac{C}{w + \tilde{\alpha}}$$
+$$\lambda = -\frac{C}{w + \alpha/h^2}$$
 
-where $\tilde{\alpha} = \alpha / h^2$ is the compliance $\alpha$ scaled by the squared substep size. Setting $\alpha = 0$ recovers rigid (infinite stiffness) constraints; larger $\alpha$ yields softer springs with a physically meaningful stiffness of $1/\alpha$.
-
-The position correction applied to body $i$ is:
+Position correction for body $i$:
 
 $$\mathbf{x}_i \leftarrow \mathbf{x}_i \pm \lambda w_i \mathbf{n}$$
 
-The sign is positive for body 1 and negative for body 2 (or vice versa depending on sign convention). The orientation correction is:
+Orientation correction:
 
-$$\mathbf{q}_i \leftarrow \mathbf{q}_i + \tfrac{1}{2} \lambda \, [\mathbf{I}_i^{-1}(\mathbf{r}_i \times \mathbf{n}), \, 0] \cdot \mathbf{q}_i$$
+$$\mathbf{q}_i \leftarrow \mathbf{q}_i + \tfrac{1}{2}\lambda \left[\mathbf{I}_i^{-1}(\mathbf{r}_i \times \mathbf{n}), 0\right] \cdot \mathbf{q}_i$$
 
-again followed by normalization. The angular correction vector $\mathbf{I}_i^{-1}(\mathbf{r}_i \times \mathbf{n})$ must be rotated back to world space before the quaternion product is formed.
+```k
+/ Apply position and orientation correction to one body
+rbApplyCorr: {[body;corr;worldPos]
+  pos:body@0; rot:body@2; invM:body@4; invI:body@5
+  $[invM=0.; body;
+    [/ Position correction
+     pos2: pos + corr*invM
+     / Orientation correction
+     r: worldPos - pos
+     dOmega: cross3[r;corr]               / r × corr
+     dOmegaLocal: qrotate[qconj rot; dOmega]   / into local frame
+     dOmegaScaled: invI * dOmegaLocal         / I⁻¹ * dOmega
+     dOmegaWorld: qrotate[rot; dOmegaScaled]  / back to world frame
+     dq: qmul[(dOmegaWorld,0.); rot]
+     rot2: qnorm rot + 0.5*dq
+     @[@[body;0;:;pos2];2;:;rot2]]]
+}
 
-```javascript
-_applyCorrection(corr, pos) {
-    if (this.invMass == 0.0) return;
-
-    // position correction
-    this.pos.addScaledVector(corr, this.invMass);
-
-    // orientation correction
-    let dOmega = new THREE.Vector3();
-    dOmega.subVectors(pos, this.pos);
-    dOmega.cross(corr);
-    dOmega.applyQuaternion(this.invRot);     // into local frame
-    dOmega.multiply(this.invInertia);         // I⁻¹ (r × corr)
-    dOmega.applyQuaternion(this.rot);         // back to world frame
-
-    this.dRot.set(dOmega.x, dOmega.y, dOmega.z, 0.0);
-    this.dRot.multiply(this.rot);
-    this.rot.x += 0.5 * this.dRot.x;
-    this.rot.y += 0.5 * this.dRot.y;
-    this.rot.z += 0.5 * this.dRot.z;
-    this.rot.w += 0.5 * this.dRot.w;
-    this.rot.normalize();
-    this.invRot.copy(this.rot);
-    this.invRot.invert();
+/ Full XPBD correction: compute lambda, apply to both bodies
+/ alpha: compliance; sdt: substep size; C: constraint violation (scalar)
+/ n: constraint direction (unit vector); p0,p1: attachment world positions
+rbSolveConstraint: {[b0;b1;alpha;sdt;C;n;p0;p1]
+  w0: rbInvMass[b0;n;p0]
+  w1: rbInvMass[b1;n;p1]
+  wt: w0+w1
+  $[wt=0.; (b0;b1);
+    [alph: alpha%sdt*sdt
+     lam: (neg C) % wt+alph
+     corr: n*lam
+     b02: rbApplyCorr[b0; corr; p0]
+     b12: rbApplyCorr[b1; neg corr; p1]
+     (b02; b12)]]
 }
 ```
-
-### Applying a Full Distance Constraint
-
-The `applyCorrection` method on the body orchestrates the whole XPBD calculation and delegates to `_applyCorrection` for each body:
-
-```javascript
-applyCorrection(compliance, corr, pos, otherBody, otherPos) {
-    let C = corr.length();
-    if (C == 0.0) return;
-    let normal = corr.clone().normalize();
-
-    let w = this.getInverseMass(normal, pos);
-    if (otherBody != undefined)
-        w += otherBody.getInverseMass(normal, otherPos);
-    if (w == 0.0) return;
-
-    let alpha  = compliance / this.dt / this.dt;
-    let lambda = -C / (w + alpha);
-    normal.multiplyScalar(-lambda);
-
-    this._applyCorrection(normal, pos);
-    if (otherBody != undefined) {
-        normal.multiplyScalar(-1.0);
-        otherBody._applyCorrection(normal, otherPos);
-    }
-    return lambda / this.dt / this.dt;  // constraint force magnitude
-}
-```
-
-The return value $\lambda / h^2$ is the constraint force magnitude — exactly analogous to the $\lambda / \Delta t^2$ formula from Chapter 5. This allows the simulation to annotate each constraint with its current tension, which the demo renders as a floating label next to each link in the chain scene.
 
 ---
 
-## The Distance Constraint Between Bodies
+## Distance Constraint Between Bodies
 
-The `DistanceConstraint` class wraps the above machinery into a reusable constraint that keeps two attachment points a fixed distance apart. Each attachment point is stored in the *local frame* of its body; at solve time the points are rotated into world space using the bodies' current orientations.
+The most fundamental constraint keeps two attachment points a fixed distance apart. Attachment points are stored in local frames; at solve time they are rotated to world space:
 
-```javascript
-solve() {
-    this.body0.localToWorld(this.localPos0, this.worldPos0);
-    if (this.body1 != undefined)
-        this.body1.localToWorld(this.localPos1, this.worldPos1);
-
-    this.corr.subVectors(this.worldPos1, this.worldPos0);
-    let distance = this.corr.length();
-    this.corr.normalize();
-    if (this.unilateral && distance < this.distance)
-        return;
-    this.corr.multiplyScalar(distance - this.distance);
-
-    this.body0.applyCorrection(
-        this.compliance, this.corr, this.worldPos0,
-        this.body1,      this.worldPos1
-    );
+```k
+/ Rigid body distance constraint
+/ bodies: list of body tuples; i,j: body indices
+/ localA: attachment in body i's local frame; localB: attachment in body j's local frame
+/ restLen: rest distance; alpha: compliance; unilateral: only active when d > restLen
+rbDistConstraint: {[bodies;sdt;i;j;localA;localB;restLen;alpha;unilateral]
+  b0: bodies@i; b1: bodies@j
+  / Transform attachment points to world space
+  p0: localToWorld[b0;localA]
+  p1: localToWorld[b1;localB]
+  / Compute constraint
+  dx: p1 - p0; d: vlen dx
+  $[d=0.; bodies;
+    [C: d - restLen
+     $[unilateral & C<0.; bodies;
+       [n: dx%d
+        res: rbSolveConstraint[b0;b1;alpha;sdt;C;n;p0;p1]
+        @[@[bodies;i;:;res@0];j;:;res@1]]]]]
 }
 ```
 
-The `unilateral` flag makes the constraint one-sided: active only when the distance exceeds the rest length. This is used for the crib-mobile demo, where the strings can go slack but cannot push.
-
 ---
 
-## The Simulation Loop
+## The Full Simulation Loop
 
-The full simulator follows the same substep structure as the particle PBD from Chapter 5. A `numSubSteps` of 10 is typical; each substep runs integrate, solve all constraints, update velocities in that order.
+```k
+/ Rigid body simulation: one frame = numSubsteps substeps
+rbSimFrame: {[bodies;constraints;sdt;numSubsteps]
+  {[sub]
+    / Integrate all bodies
+    bodies:: rbIntegrate[;sdt]' bodies
 
-```javascript
-simulate() {
-    let sdt = this.dt / this.numSubSteps;
+    / Solve all constraints
+    {[c]
+      / c: (i; j; localA; localB; restLen; alpha; unilateral)
+      bodies:: rbDistConstraint[bodies;sdt;c@0;c@1;c@2;c@3;c@4;c@5;c@6]
+    }' constraints
 
-    for (let sub = 0; sub < this.numSubSteps; sub++) {
-        for (let body of this.rigidBodies)
-            body.integrate(sdt, this.gravity);
-
-        for (let c of this.distanceConstraints)
-            c.solve();
-        if (this.dragConstraint)
-            this.dragConstraint.solve();
-
-        for (let body of this.rigidBodies)
-            body.updateVelocities(sdt);
-    }
-
-    for (let body of this.rigidBodies)
-        body.updateMeshes();
+    / Update velocities from displacements
+    bodies:: rbUpdateVel[;sdt]' bodies
+  }' !numSubsteps
+  bodies
 }
 ```
 
-The mesh update is done once per display frame after all substeps complete, not once per substep. This keeps the rendering cost constant regardless of how many substeps are used.
-
 ---
 
-## Mouse Interaction via a Dynamic Constraint
+## Example: Chain of Linked Bodies
 
-Mouse dragging is implemented with the same distance-constraint machinery, just with one endpoint fixed to the mouse cursor rather than to another body.
+```k
+/ Build a chain of N boxes linked by distance constraints
+/ Each link is a box hanging from the previous
+buildChain: {[n;boxH;density;dt]
+  / Create n bodies hanging vertically
+  bods: {[i]
+    pos: 0. (neg i*boxH*2.) 0.
+    mkBody[0; (0.1;boxH;0.1); density; pos; 0. 0. 0.; 0. 0. 0. 1.; 0. 0. 0.]
+  }' !n
+  / First body is static (invM=0)
+  bods2: @[bods; 0; ; @[bods@0; 4; :; 0.]]
 
-On mouse-down the code casts a ray into the scene. When it hits a body, it records the intersection point **p** in the body's local frame as **r**, and the ray distance $d$. A zero-rest-length distance constraint is created between the body's attachment point and a world-space "anchor" at the intersection.
+  / Create constraints: each link connects bottom of one box to top of next
+  consts: {[i]
+    (i; i+1;                   / body indices
+     0. (neg boxH) 0.;         / bottom of body i (local)
+     0. boxH 0.;               / top of body i+1 (local)
+     0.;                       / rest distance = 0 (touching)
+     0.;                       / hard constraint
+     0)                        / bilateral
+  }' !n-1
 
-On mouse-move the anchor is updated by advancing along the camera ray to depth $d$:
+  (bods2; consts)
+}
 
-$$\mathbf{p}_{\text{anchor}} = \mathbf{o}_{\text{ray}} + d \, \hat{\mathbf{d}}_{\text{ray}}$$
-
-The constraint solver pulls the body's attachment point toward the anchor each substep. Since the rest length is zero, the body tends to follow the mouse cursor, with a softness controlled by `dragCompliance`. On mouse-up the constraint is simply removed.
-
-This is a nice illustration of a general principle: constraints are not just physical joints. Any desired relationship between objects or between an object and an external reference point can be expressed as a constraint and plugged directly into the XPBD loop with no changes to the surrounding machinery.
+/ Run chain simulation
+chain: buildChain[5; 0.15; 1000.; 1.%60]
+bodies: chain@0; constraints: chain@1
+bodies2: rbSimFrame[bodies;constraints;1.%(60*10);10]
+```
 
 ---
 
 ## Key Takeaways
 
-- **Rigid body state pairs translational and rotational quantities.** Position pairs with orientation (quaternion), linear velocity with angular velocity, inverse mass with inverse inertia tensor. The code for each pair is structurally parallel.
-
-- **The quaternion integration formula mirrors the Euler step.** Advancing **q** by $\frac{1}{2} h [\boldsymbol{\omega}, 0] \cdot \mathbf{q}$ (followed by normalization) is the rotational analogue of advancing **x** by $\mathbf{v} h$. No special quaternion theory is required.
-
-- **Velocities are always recomputed from displacements, never propagated.** After constraints move the bodies, both **v** and **ω** are derived from $(\mathbf{x} - \mathbf{x}_{\text{prev}}) / h$ and from $\Delta\mathbf{q}$. This is the PBD principle applied to both translational and rotational degrees of freedom.
-
-- **Generalized inverse mass unifies translation and rotation in one scalar.** The expression $w_i = m_i^{-1} + (\mathbf{r}_i \times \mathbf{n})^\mathsf{T} \mathbf{I}_i^{-1} (\mathbf{r}_i \times \mathbf{n})$ captures both the linear and angular response to a constraint impulse in a single number. It makes the XPBD multiplier formula identical to the particle case.
-
-- **Inertia tensor computations live in local space.** The diagonal principal-axis tensor avoids full matrix algebra. Any expression involving **I**$^{-1}$ first rotates its argument into local space, multiplies component-wise, then rotates back.
-
-- **XPBD compliance gives physical stiffness with time-step independence.** Setting compliance $\alpha$ to zero gives a rigid constraint; larger $\alpha$ yields a spring of stiffness $1/\alpha$, and the behavior does not change as the substep size changes. This is the key difference from the unscaled position correction of plain PBD.
-
-- **The same machinery handles joints, soft connections, and mouse interaction.** Any constraint between two points on two bodies — or between a body point and a world-space anchor — slots into the same `applyCorrection` interface. The distance constraint shown here is the simplest example; the chapters that follow extend it to angular constraints, contact constraints, and articulated joints.
+- **Rigid body state pairs translational and rotational quantities.** Position pairs with orientation quaternion, linear velocity with angular velocity, inverse mass with diagonal inverse inertia. Each pair is structurally parallel.
+- **Quaternion integration mirrors the Euler step.** Advancing **q** by $\frac{1}{2}h[\boldsymbol{\omega},0]\cdot\mathbf{q}$ followed by normalization is the rotational analogue of advancing **x** by $\mathbf{v}h$.
+- **Velocities are always recomputed from displacements.** After constraints move bodies, both **v** and **ω** are derived from position/orientation change divided by $h$.
+- **Generalized inverse mass** unifies translation and rotation in one scalar: $w_i = m_i^{-1} + (\mathbf{r}_i \times \mathbf{n})^\mathsf{T}\mathbf{I}_i^{-1}(\mathbf{r}_i \times \mathbf{n})$. The XPBD multiplier formula is identical to the particle case.
+- **Inertia tensor computations live in local space.** The diagonal principal-axis tensor avoids full matrix algebra: rotate into local space, multiply element-wise by `invI`, rotate back.
+- **XPBD compliance** $\alpha$ gives physical stiffness with time-step independence. Zero compliance gives a rigid constraint; larger $\alpha$ gives a spring of stiffness $1/\alpha$.
+- **The same machinery handles joints, soft connections, and mouse interaction.** Any constraint between two points on two bodies slots into `rbSolveConstraint`. The distance constraint shown here is the simplest example; angular constraints and contact constraints follow the same pattern.

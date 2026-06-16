@@ -1,268 +1,244 @@
 # Chapter 10 — Soft Bodies: Squish, Bounce, and Volume
 
-A rigid body is an idealization. Real objects deform: rubber bands stretch, gel cubes squish, foam pillows compress and spring back. Simulating this behavior is the domain of *soft body dynamics*, and it is traditionally one of the most mathematically demanding areas of physics simulation. Finite element methods, constitutive models, implicit global solvers, and third-order tensor derivatives all appear in the standard treatment. This chapter takes a different path. By representing a soft body as a cloud of particles connected by simple constraints — the same framework introduced in the previous chapter for XPBD — we arrive at a simulation that is stable, fast, and surprisingly accurate, with very little code.
+A rigid body is an idealization. Real objects deform: rubber bands stretch, gel cubes squish, foam pillows compress and spring back. Simulating this behavior is traditionally one of the most mathematically demanding areas of physics simulation — finite element methods, constitutive models, global solvers. This chapter takes a different path. By representing a soft body as a cloud of particles connected by simple XPBD constraints from Chapter 9, we arrive at a simulation that is stable, fast, and surprisingly accurate.
 
 ---
 
 ## Why Not Finite Elements?
 
-The classical approach to soft body simulation borrows from structural engineering. It represents the object as a continuous deformable medium, describes deformation with vector-valued functions over the material's interior, and derives equations of motion by appealing to continuum mechanics. This yields *finite element methods* (FEM), which are powerful but carry heavy engineering baggage.
+The classical approach to soft body simulation borrows from structural engineering: represent the object as a continuous deformable medium and derive equations of motion from continuum mechanics. This yields **finite element methods (FEM)**, powerful but carrying heavy engineering baggage:
 
-The difficulty is not just implementation complexity — though that is real. The deeper problem is a long list of failure modes that require specialist knowledge to handle:
+- **Volume loss under stretch.** Popular linear elastic models shed volume as the object deforms.
+- **Inversion artifacts.** When elements flip inside out under large deformation, linear models produce severe visual artifacts.
+- **Global solvers.** FEM requires assembling and solving large sparse matrices at every time step.
+- **Stability under high damping.** Implicit integration helps with stiffness but introduces its own convergence problems.
 
-- **Volume loss under stretch.** Popular linear elastic models shed volume as the object deforms, so a rubber band stretched to twice its length visibly thins in a physically incorrect way.
-- **Inversion artifacts.** When elements flip inside out under large deformation, linear models produce severe visual artifacts and often require expensive recovery procedures.
-- **Global solvers.** FEM requires assembling and solving large sparse matrices at every time step. The matrices can be non-symmetric, and handling both over-constrained and under-constrained configurations is non-trivial.
-- **Stability under high damping.** Implicit integration helps with stiffness but introduces its own convergence and overshoot problems.
-
-Each issue has known solutions, and entire research careers have been built on them. But if we are willing to think differently about what a material *is*, we can sidestep most of them at once.
-
-Nature does not use continuous functions. Rubber, at the scale that matters, looks like a mass-spring network — long polymer chains that resist being pulled apart. Modeling materials as particles connected by constraints is not an approximation of FEM; it is an equally valid physical model at a different scale. And with the XPBD constraint solver from the previous chapter, that model becomes trivial to implement.
+Nature does not use continuous functions. Rubber, at the scale that matters, looks like a mass-spring network. Modeling materials as particles connected by constraints is an equally valid physical model at a different scale. With XPBD, that model becomes trivial to implement.
 
 ---
 
 ## Representing a Soft Body
 
-The geometric foundation is a *tetrahedral mesh*: a solid 3D shape decomposed into tetrahedra in the same way that a surface mesh decomposes a 2D shape into triangles. Each tetrahedron fills a small region of the object's interior. A good tetrahedral mesh for physics uses *Delaunay tetrahedralization*, which maximizes the minimum angle of each tetrahedron and avoids numerically degenerate slivers.
+The geometric foundation is a **tetrahedral mesh**: a solid 3D shape decomposed into tetrahedra in the same way that a surface mesh decomposes a 2D shape into triangles.
 
 From this mesh, the simulation constructs three things:
 
 1. **One particle per vertex.** Each vertex becomes a point mass with a position, a velocity, and an inverse mass.
-2. **One distance constraint per edge.** Edges are the connections between vertices. A distance constraint keeps a pair of particles at their rest separation, providing the material's resistance to stretching and compression along that edge.
-3. **One volume constraint per tetrahedron.** Each tet has a rest volume. The volume constraint resists compression and expansion of that tet, acting as a kind of local incompressibility condition.
+2. **One distance constraint per edge.** Keeps pairs of particles at their rest separation, providing resistance to stretching and compression.
+3. **One volume constraint per tetrahedron.** Resists compression and expansion of each tet — a local incompressibility condition.
 
-Together, these two constraint types approximate the behavior of a neo-Hookean elastic material — one that resists volume change much more strongly than shape change, which is characteristic of rubber and biological tissue. In controlled experiments comparing a discrete XPBD model against a continuous Hookean FEM model, the XPBD model actually shows *less* volume loss under extreme stretch. The simplicity is not a compromise; it is a different and often better physical model.
-
----
-
-## The XPBD Constraint Solve
-
-Both constraint types use the same XPBD formula introduced in Chapter 9. Given a constraint function $C$ whose value is zero when the constraint is exactly satisfied, and particles $i = 1 \ldots n$ participating in the constraint with inverse masses $w_i$, the position correction for each particle is:
-
-$$\lambda = \frac{-C}{\sum_i w_i \|\nabla_i C\|^2 + \alpha / \Delta t^2}$$
-
-$$\Delta \mathbf{x}_i = \lambda\, w_i\, \nabla_i C$$
-
-The scalar $\alpha$ is the *compliance*, the inverse of stiffness. Setting $\alpha = 0$ gives a perfectly rigid constraint that enforces $C = 0$ exactly. Positive compliance allows controlled softness. Crucially, this formula is stable at any compliance value, including zero, with no need for implicit integration or global matrix solves.
-
-For performance, we use *substepping* rather than iterating the constraint solve multiple times within a single time step. Ten substeps per frame at a 60 Hz frame rate means each substep sees a time step of about 1.67 ms — small enough that a single pass through all constraints per substep converges well in practice.
+Together, these two constraint types approximate the behavior of a neo-Hookean elastic material. In practice, this approach shows *less* volume loss under extreme stretch than standard linear FEM.
 
 ---
 
-## Distance Constraint
+## Data Layout
 
-The distance constraint between particles at positions $\mathbf{x}_1$ and $\mathbf{x}_2$ with rest length $l_0$ is:
+In ink, all particle data lives in parallel arrays. The simulation mesh is a tuple of arrays:
 
-$$C = \|\mathbf{x}_2 - \mathbf{x}_1\| - l_0$$
-
-The gradients with respect to the two positions are:
-
-$$\nabla_1 C = -\frac{\mathbf{x}_2 - \mathbf{x}_1}{\|\mathbf{x}_2 - \mathbf{x}_1\|}, \qquad \nabla_2 C = \frac{\mathbf{x}_2 - \mathbf{x}_1}{\|\mathbf{x}_2 - \mathbf{x}_1\|}$$
-
-Each gradient has unit length, so the denominator in the $\lambda$ formula simplifies to $(w_1 + w_2) + \alpha/\Delta t^2$. The code follows directly:
-
-```javascript
-solveEdges(compliance, dt) {
-    var alpha = compliance / dt / dt;
-
-    for (var i = 0; i < this.edgeLengths.length; i++) {
-        var id0 = this.edgeIds[2 * i];
-        var id1 = this.edgeIds[2 * i + 1];
-        var w0  = this.invMass[id0];
-        var w1  = this.invMass[id1];
-        var w   = w0 + w1;
-        if (w == 0.0) continue;
-
-        vecSetDiff(this.grads, 0, this.pos, id0, this.pos, id1);
-        var len = Math.sqrt(vecLengthSquared(this.grads, 0));
-        if (len == 0.0) continue;
-
-        vecScale(this.grads, 0, 1.0 / len);   // unit gradient
-        var C = len - this.edgeLengths[i];
-        var s = -C / (w + alpha);
-        vecAdd(this.pos, id0, this.grads, 0,  s * w0);
-        vecAdd(this.pos, id1, this.grads, 0, -s * w1);
-    }
-}
+```k
+/ Soft body state tuple layout:
+/ s@0: pos    — list of 3-vectors, one per vertex
+/ s@1: vel    — list of 3-vectors
+/ s@2: invM   — float list, inverse masses
+/ s@3: edges  — list of (i; j; restLen; alpha) tuples
+/ s@4: tets   — list of (i1; i2; i3; i4; restVol6; alpha) tuples
+/ s@5: prevPos — list of 3-vectors (previous positions for velocity recovery)
 ```
-
-The two particles are nudged toward each other when the edge is too long, and apart when it is too short, weighted by their inverse masses. A particle with infinite mass (inverse mass zero) does not move — useful for pinned or static particles.
-
----
-
-## Volume Constraint
-
-The signed volume of a tetrahedron with vertices $\mathbf{x}_1, \mathbf{x}_2, \mathbf{x}_3, \mathbf{x}_4$ is:
-
-$$V = \frac{1}{6}\bigl[(\mathbf{x}_2 - \mathbf{x}_1) \times (\mathbf{x}_3 - \mathbf{x}_1)\bigr] \cdot (\mathbf{x}_4 - \mathbf{x}_1)$$
-
-The constraint function is $C = 6(V - V_\text{rest})$, scaled by six to clear the fraction and simplify the gradient expressions. The gradients of $6V$ with respect to each vertex are:
-
-$$\nabla_1 C = (\mathbf{x}_4 - \mathbf{x}_2) \times (\mathbf{x}_3 - \mathbf{x}_2)$$
-$$\nabla_2 C = (\mathbf{x}_3 - \mathbf{x}_1) \times (\mathbf{x}_4 - \mathbf{x}_1)$$
-$$\nabla_3 C = (\mathbf{x}_4 - \mathbf{x}_1) \times (\mathbf{x}_2 - \mathbf{x}_1)$$
-$$\nabla_4 C = (\mathbf{x}_2 - \mathbf{x}_1) \times (\mathbf{x}_3 - \mathbf{x}_1)$$
-
-Each gradient points in the direction that maximally increases the volume when vertex $i$ moves, which geometrically is the direction normal to the face of the tetrahedron opposite vertex $i$. When the tetrahedron is too small, each vertex is pushed outward along its face normal; when it is too large, inward.
-
-The implementation loops over the four vertices, computes the gradient for each using a fixed lookup table for which faces to cross-product, then accumulates $w_i \|\nabla_i C\|^2$ in the denominator:
-
-```javascript
-solveVolumes(compliance, dt) {
-    var alpha = compliance / dt / dt;
-
-    for (var i = 0; i < this.numTets; i++) {
-        var w = 0.0;
-
-        for (var j = 0; j < 4; j++) {
-            var id0 = this.tetIds[4 * i + this.volIdOrder[j][0]];
-            var id1 = this.tetIds[4 * i + this.volIdOrder[j][1]];
-            var id2 = this.tetIds[4 * i + this.volIdOrder[j][2]];
-
-            vecSetDiff(this.temp, 0, this.pos, id1, this.pos, id0);
-            vecSetDiff(this.temp, 1, this.pos, id2, this.pos, id0);
-            vecSetCross(this.grads, j, this.temp, 0, this.temp, 1);
-            vecScale(this.grads, j, 1.0 / 6.0);
-
-            w += this.invMass[this.tetIds[4 * i + j]] *
-                 vecLengthSquared(this.grads, j);
-        }
-        if (w == 0.0) continue;
-
-        var vol     = this.getTetVolume(i);
-        var restVol = this.restVol[i];
-        var C = vol - restVol;
-        var s = -C / (w + alpha);
-
-        for (var j = 0; j < 4; j++) {
-            var id = this.tetIds[4 * i + j];
-            vecAdd(this.pos, id, this.grads, j, s * this.invMass[id]);
-        }
-    }
-}
-```
-
-The `volIdOrder` table records, for each of the four vertices, which other three vertices form the opposite face in the correct winding order. Setting `volCompliance = 0.0` gives a perfectly incompressible material. Raising it allows controlled squishiness.
 
 ---
 
 ## Mass Assignment
 
-Mass is not uniform in the mesh. Each vertex belongs to multiple tetrahedra, and its mass should reflect the total material volume it represents. The initialization computes an inverse mass for each vertex by summing contributions from every tetrahedron it touches:
+Mass is derived from the mesh geometry: each vertex receives mass contributions from all tetrahedra it belongs to. A tet of volume $V$ contributes $V/4$ of mass to each of its four vertices:
 
-```javascript
-initPhysics() {
-    for (var i = 0; i < this.numTets; i++) {
-        var vol = this.getTetVolume(i);
-        this.restVol[i] = vol;
-        var pInvMass = vol > 0.0 ? 1.0 / (vol / 4.0) : 0.0;
-        for (var j = 0; j < 4; j++)
-            this.invMass[this.tetIds[4 * i + j]] += pInvMass;
-    }
-    for (var i = 0; i < this.edgeLengths.length; i++) {
-        var id0 = this.edgeIds[2 * i];
-        var id1 = this.edgeIds[2 * i + 1];
-        this.edgeLengths[i] = Math.sqrt(
-            vecDistSquared(this.pos, id0, this.pos, id1));
-    }
+```k
+cross3: {[a;b]
+  (((a@1)*(b@2))-(b@1)*(a@2)
+   ((a@2)*(b@0))-(b@2)*(a@0)
+   ((a@0)*(b@1))-(b@0)*(a@1))
+}
+dot3: {+/ x*y}
+tetVol6: {[p1;p2;p3;p4] dot3[cross3[p2-p1; p3-p1]; p4-p1]}
+
+/ Compute inverse masses for all particles from tet list
+/ tetIds: list of (i1;i2;i3;i4) index tuples; pos: position list
+initMasses: {[pos;tetIds]
+  n: #pos
+  mass: n#0.
+  / Each tet contributes V/4 to each of its 4 vertices
+  {[t]
+    p1:pos@t@0; p2:pos@t@1; p3:pos@t@2; p4:pos@t@3
+    vol: tetVol6[p1;p2;p3;p4] % 6.        / actual volume (not ×6)
+    contrib: vol%4.
+    mass:: @[@[@[@[mass; t@0; +; contrib]; t@1; +; contrib]; t@2; +; contrib]; t@3; +; contrib]
+  } each tetIds
+  {$[x=0.; 0.; 1.%x]} each mass           / invert: m → 1/m (0 mass stays pinned)
 }
 ```
 
-Each tetrahedron distributes its mass equally among its four vertices: a tet of volume $V$ contributes inverse mass $4/V$ to each vertex, so the contribution to $w_i = 1/m_i$ is $4/V$ per tet. Vertices at the center of the mesh, surrounded by many tetrahedra, accumulate more mass than vertices at the surface — the same way that interior material is denser in terms of how many constraints act on it.
+Edge rest lengths are the initial distances between connected vertices:
+
+```k
+initEdges: {[pos;edgeIds;alpha]
+  {[e]
+    i:e@0; j:e@1
+    d: sqrt +/ (pos@j - pos@i) * pos@j - pos@i
+    (i; j; d; alpha)
+  } each edgeIds
+}
+```
 
 ---
 
-## The Simulation Loop
+## The XPBD Simulation Loop
 
-The main loop follows the XPBD pattern exactly. Each frame is divided into substeps, and within each substep: apply forces, record previous positions, integrate positions, then solve constraints.
+Each frame runs $N$ substeps. Within each substep:
 
-```javascript
-function simulate() {
-    var sdt = gPhysicsScene.dt / gPhysicsScene.numSubsteps;
-    for (var step = 0; step < gPhysicsScene.numSubsteps; step++) {
-        for (var i = 0; i < gPhysicsScene.objects.length; i++)
-            gPhysicsScene.objects[i].preSolve(sdt, gPhysicsScene.gravity);
-        for (var i = 0; i < gPhysicsScene.objects.length; i++)
-            gPhysicsScene.objects[i].solve(sdt);
-        for (var i = 0; i < gPhysicsScene.objects.length; i++)
-            gPhysicsScene.objects[i].postSolve(sdt);
-    }
+1. **Pre-solve:** apply gravity to free particles, record predicted positions, advance.
+2. **Solve edges:** apply distance constraints.
+3. **Solve volumes:** apply volume constraints.
+4. **Post-solve:** recover velocity from position change.
+
+```k
+grav: 0. -9.81 0.
+dt: 1.%60
+numSubsteps: 10
+
+solveEdge: {[pos;invM;i;j;l0;alpha;sdt]
+  p0: pos@i; p1: pos@j
+  w0: invM@i; w1: invM@j
+  wt: w0+w1
+  dx: p1 - p0
+  d: sqrt +/ dx*dx
+  n: dx % (d|0.0001)
+  C: d - l0
+  lam: C % wt + alpha%sdt*sdt
+  @[@[pos; i; +; n*lam*w0]; j; -; n*lam*w1]
 }
+
+solveVol: {[pos;invM;i1;i2;i3;i4;rv6;alpha;sdt]
+  p1:pos@i1; p2:pos@i2; p3:pos@i3; p4:pos@i4
+  g1: cross3[p4-p2; p3-p2]
+  g2: cross3[p3-p1; p4-p1]
+  g3: cross3[p4-p1; p2-p1]
+  g4: cross3[p2-p1; p3-p1]
+  w1:invM@i1; w2:invM@i2; w3:invM@i3; w4:invM@i4
+  denom: (w1*(+/g1*g1)) + (w2*(+/g2*g2)) + (w3*(+/g3*g3)) + w4*(+/g4*g4)
+  C: tetVol6[p1;p2;p3;p4] - rv6
+  lam: C % denom + alpha%sdt*sdt
+  pos2: @[pos; i1; -; g1*lam*w1]
+  pos3: @[pos2; i2; -; g2*lam*w2]
+  pos4: @[pos3; i3; -; g3*lam*w3]
+  @[pos4; i4; -; g4*lam*w4]
+}
+
+/ One substep of XPBD soft body simulation
+sbStep: {[s;sdt]
+  pos:s@0; vel:s@1; invM:s@2; edges:s@3; tets:s@4
+  n: #pos
+  / 1. Pre-solve: gravity + predict + floor clamp
+  vel2: {[i] $[invM@i=0.; vel@i; (vel@i)+grav*sdt]} each !n
+  prevPos: pos
+  pos2: {[i]
+    p2: (pos@i) + (vel2@i)*sdt
+    / Floor collision: reset to prevPos with y clamped to 0
+    $[(p2@1)<0.; (prevPos@i;(prevPos@i)@0,0.,(prevPos@i)@2)@1; p2]
+  } each !n
+  / 2. Solve edges
+  pos3: {[p;e] solveEdge[p; invM; e@0; e@1; e@2; e@3; sdt]}/ (pos2;),edges
+  / 3. Solve volumes
+  pos4: {[p;t] solveVol[p; invM; t@0; t@1; t@2; t@3; t@4; t@5; sdt]}/ (pos3;),tets
+  / 4. Post-solve: recover velocity
+  vel3: {[i] $[invM@i=0.; vel@i; (pos4@i - prevPos@i)%sdt]} each !n
+  (pos4; vel3; invM; edges; tets)
+}
+
+softStep: {[s] numSubsteps sbStep[;dt%numSubsteps]/ s}
 ```
 
-The `preSolve` step applies gravity to each particle's velocity, saves the current position to `prevPos`, and advances the position by the velocity. Ground collision is handled here as well: if any particle drops below $y = 0$, its position is reset to the saved `prevPos` and its $y$-coordinate is clamped to zero. This effectively freezes the particle at the floor without introducing explicit collision forces.
-
-```javascript
-preSolve(dt, gravity) {
-    for (var i = 0; i < this.numParticles; i++) {
-        if (this.invMass[i] == 0.0) continue;
-        vecAdd(this.vel, i, gravity, 0, dt);
-        vecCopy(this.prevPos, i, this.pos, i);
-        vecAdd(this.pos, i, this.vel, i, dt);
-        if (this.pos[3 * i + 1] < 0.0) {
-            vecCopy(this.pos, i, this.prevPos, i);
-            this.pos[3 * i + 1] = 0.0;
-        }
-    }
-}
-```
-
-After the constraint solve, `postSolve` recovers the velocity from the displacement that occurred during the substep:
-
-```javascript
-postSolve(dt) {
-    for (var i = 0; i < this.numParticles; i++) {
-        if (this.invMass[i] == 0.0) continue;
-        vecSetDiff(this.vel, i, this.pos, i, this.prevPos, i, 1.0 / dt);
-    }
-    this.updateMeshes();
-}
-```
-
-This velocity recovery is what gives the simulation its bounce: when constraints push particles away from each other or away from the floor, the displacement between `prevPos` and `pos` translates directly into outgoing velocity.
+The fold `{fn}/ (initialState;), constraintList` threads the state through all constraints in sequence, applying each one in turn.
 
 ---
 
-## Flat Arrays for Performance
+## Compliance and Material Properties
 
-One implementation detail that matters at scale is memory layout. Rather than allocating one JavaScript object per particle, all positions, velocities, and previous positions live in flat `Float32Array` buffers, with coordinates packed as consecutive triplets:
+Two compliance values control the material's feel:
 
-```javascript
-this.pos     = new Float32Array(tetMesh.verts);
-this.prevPos = tetMesh.verts.slice();
-this.vel     = new Float32Array(3 * this.numParticles);
-```
+| Parameter | Value | Effect |
+|-----------|-------|--------|
+| `edgeAlpha` | `0.` | Hard — infinite stiffness edges (very rubber-like) |
+| `edgeAlpha` | `1e-5` | Slightly stretchy |
+| `volAlpha` | `0.` | Incompressible — volume conserved exactly |
+| `volAlpha` | `1e-3` | Slightly compressible (squishy) |
 
-The index of particle $i$'s $x$-coordinate is $3i$, its $y$-coordinate is $3i+1$, and its $z$-coordinate is $3i+2$. Every vector operation receives both the array and the particle number, and computes the byte offset internally. This is why the vector functions have signatures like `vecAdd(a, anr, b, bnr, scale)` rather than operating on objects.
+Setting both to zero produces a nearly rigid body. Setting `volAlpha = 0` and `edgeAlpha` to a small positive value gives an elastic solid that stretches and bounces but preserves volume. This combination closely matches the behavior of rubber.
 
-The payoff is significant. Because the Three.js renderer stores vertex positions in the same packed format, the `pos` buffer can be shared directly with the GPU — `this.surfaceMesh.geometry.attributes.position.needsUpdate = true` is all it takes to upload the new positions for rendering. With ten thousand tetrahedra, the simulation runs at interactive frame rates without any special optimization.
+The compliance values go in the edge and tet tuples:
 
----
-
-## Interactive Behavior
-
-The demo includes a grabber that lets the user drag the soft body around. When a grab begins, the nearest particle is identified by brute-force search, and its inverse mass is set to zero, making it immovable. The constraint solver then propagates the constraint violations caused by the locked particle through the rest of the mesh. When the grab is released, the original inverse mass is restored and the thrown velocity is injected:
-
-```javascript
-endGrab(pos, vel) {
-    if (this.grabId >= 0) {
-        this.invMass[this.grabId] = this.grabInvMass;
-        vecCopy(this.vel, this.grabId, [vel.x, vel.y, vel.z], 0);
-    }
-    this.grabId = -1;
+```k
+/ Build soft body from a loaded tet mesh (edgeAlpha, volAlpha are globals)
+buildSoftBody: {[pos;edgeIds;tetIds]
+  invM: initMasses[pos;tetIds]
+  edges: initEdges[pos;edgeIds;edgeAlpha]
+  tets: {[t]
+    p1:pos@t@0; p2:pos@t@1; p3:pos@t@2; p4:pos@t@3
+    rv6: tetVol6[p1;p2;p3;p4]     / rest volume × 6
+    (t@0; t@1; t@2; t@3; rv6; volAlpha)
+  } each tetIds
+  vel: (#pos)#,3#0.               / zero initial velocity
+  (pos; vel; invM; edges; tets)
 }
 ```
 
-No matter how aggressively the object is dragged or squashed, the simulation remains stable. Setting compliance to zero means the volume constraints are hard constraints: the object can deform but it cannot lose volume. Clamping a bunny mesh to half its height with a single button press, then releasing it, sends it bouncing off the ground in a physically plausible way — all from distance and volume constraints acting locally on each particle and tetrahedron.
+---
+
+## Floor Collision and Grabbing
+
+Floor collision is handled in the pre-solve step by clamping any particle that drops below $y = 0$. Because we record `prevPos` before the prediction and clamp `pos2` afterward, the post-solve velocity recovery automatically gives a zero or positive y-velocity — no bounce artifacts.
+
+Grabbing a particle (interactive dragging) sets its inverse mass to zero temporarily:
+
+```k
+/ Pin particle idx: set invM[idx] = 0 and override position each frame
+pinParticle: {[s;idx;target]
+  pos2: @[s@0; idx; :; target]
+  invM2: @[s@2; idx; :; 0.]
+  @[@[s; 0; :; pos2]; 2; :; invM2]
+}
+
+/ Unpin particle idx: restore saved inverse mass
+unpinParticle: {[s;idx;savedInvM;throwVel]
+  invM2: @[s@2; idx; :; savedInvM]
+  vel2: @[s@1; idx; :; throwVel]
+  @[@[s; 1; :; vel2]; 2; :; invM2]
+}
+```
+
+When the grab is released, injecting the drag velocity as `throwVel` gives throw physics for free.
+
+---
+
+## Performance
+
+With 10 substeps per frame at 60 Hz, each substep has $\Delta t_s = 1/600\,\text{s} \approx 1.67\,\text{ms}$. A single solver pass per substep is sufficient for convergence at this scale:
+
+```k
+/ Benchmark: 600 frames of 10-substep soft body with ~100 particles
+edgeAlpha: 0.
+volAlpha: 0.
+\t 600 softStep/ s0
+```
+
+For a coarse bunny mesh (~3,000 edges, ~1,000 tetrahedra), this runs in well under 100ms per 600 frames on a modern machine.
 
 ---
 
 ## Key Takeaways
 
 - **Tetrahedral meshes** decompose a solid 3D object into tetrahedra. One particle per vertex, one distance constraint per edge, and one volume constraint per tetrahedron are sufficient to simulate elastic behavior.
-- **Distance constraints** resist edge stretching and compression. They are the primary source of shear stiffness in the material.
-- **Volume constraints** resist compression and expansion of each tetrahedron. Setting their compliance to zero produces a near-incompressible material that conserves volume even under extreme deformation.
-- **Compliance** $\alpha = 1/k$ is the inverse of stiffness. Setting $\alpha = 0$ enforces a constraint exactly; positive $\alpha$ allows controlled elasticity. XPBD remains stable at any compliance value.
-- **Substepping** — running multiple constraint passes per rendered frame at a smaller time step — replaces the need for iteration within a single step, keeping the implementation simple while achieving good convergence.
-- **Flat Float32Array buffers** for positions and velocities eliminate per-particle object overhead and allow the position buffer to be shared directly with the GPU renderer.
-- The XPBD soft body approach **matches or exceeds** standard Hookean FEM models for volume conservation under large stretch, despite being far simpler to implement. The discrete particle model is not an approximation; it is an equally valid physical description of elastic materials.
+- **Distance constraints** resist edge stretching and compression. They are the primary source of shear stiffness.
+- **Volume constraints** resist compression and expansion of each tetrahedron. Setting $\alpha = 0$ produces a near-incompressible material that conserves volume even under extreme deformation.
+- **Compliance** $\alpha = 1/k$ is the inverse of stiffness. $\alpha = 0$ enforces a constraint exactly; positive $\alpha$ allows controlled elasticity. XPBD remains stable at any compliance value.
+- **Substepping** — running multiple constraint passes per rendered frame at a smaller time step — replaces the need for iteration within a single step.
+- **Mass comes from geometry.** Each vertex's mass is proportional to the volume of the tetrahedra surrounding it. This naturally makes interior vertices heavier than surface vertices.
+- The XPBD soft body approach **matches or exceeds** standard Hookean FEM models for volume conservation under large stretch, despite being far simpler to implement.

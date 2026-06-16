@@ -1,7 +1,8 @@
 # Chapter 8 — User Interaction: Picking and Dragging in 3D
 
-A physics simulation that runs on its own is satisfying to watch. One that responds to your touch is compelling to use. This chapter adds that missing ingredient: the ability to reach into a 3D scene with a mouse or finger, grab a simulated object, drag it through space, and release it with velocity. Along the way we will work through the mathematics of unprojecting a 2D screen point into a 3D ray, the mechanics of raycasting, and the design of a small, reusable `Grabber` class that keeps camera control and object dragging from stepping on each other.
+A physics simulation that runs on its own is satisfying to watch. One that responds to your touch is compelling to use. This chapter adds that missing ingredient: the ability to reach into a 3D scene, grab a simulated object, drag it through space, and release it with velocity. Along the way we work through the mathematics of unprojecting a 2D screen point into a 3D ray, the mechanics of raycasting, and a clean design for separating camera control from object dragging.
 
+---
 
 ## The Geometry of Seeing
 
@@ -9,235 +10,174 @@ Before we can pick anything, we need to understand what a 2D click actually mean
 
 The scene displayed on screen is a *perspective projection* of a 3D world. Every pixel on screen corresponds not to a single world point but to an entire line — a ray that stretches from the camera's near plane outward through that pixel and into infinity. This is the **mouse ray**. Its origin is roughly the camera position, and its direction is the vector from the camera through the clicked screen pixel.
 
-A useful analogy: close one eye and hold a pencil at arm's length. No matter how you orient the pencil, you can tilt it so that it appears as a single dot. The entire length of the pencil maps to that one point in your visual field. Clicking on a pixel in a 3D viewport is the inverse problem — given that dot, reconstruct all the possible 3D positions it could represent.
+Concretely, if the camera has position $\mathbf{o}$ and we can compute the unit direction $\mathbf{d}$ toward the clicked pixel, then any point on the mouse ray is:
 
-Concretely, if the camera has position **o** and we can compute the unit direction **d** toward the clicked pixel, then any point on the mouse ray is:
+$$P(t) = \mathbf{o} + t\, \mathbf{d}, \quad t \geq 0$$
 
-```
-P(t) = o + t · d,   t ≥ 0
-```
+The parameter $t$ is a depth along the ray. Converting a screen-space pixel into this $(\mathbf{o}, \mathbf{d})$ pair is called **unprojection**.
 
-The parameter *t* is a depth along the ray. Converting a screen-space pixel into this (o, d) pair is called **unprojection**.
-
+---
 
 ## Raycasting: Finding What the Mouse Hits
 
-Once we have the mouse ray, we cast it into the scene to find intersections with geometry. For each object, we solve for the values of *t* at which the ray touches the surface. A sphere of radius *r* centered at **c** yields a quadratic in *t*; a triangle mesh is tested face by face.
+Once we have the mouse ray, we cast it into the scene to find intersections with geometry. For each object we solve for the values of $t$ at which the ray touches the surface.
 
-In practice the renderer library handles all of this. Three.js provides a `Raycaster` that takes a camera and a normalized device coordinate (NDC) — a 2D value in [-1, 1] × [-1, 1] — computes the ray, and intersects it against any scene objects you hand it. The result is a list of hits sorted by ascending *t*, so `intersects[0]` is always the nearest surface.
+**Sphere intersection.** A sphere of radius $r$ centered at $\mathbf{c}$ yields a quadratic in $t$. Let $\mathbf{f} = \mathbf{o} - \mathbf{c}$:
 
-To keep pickable objects separate from decorative geometry such as the ground plane or grid lines, Three.js supports **layers**. We assign layer 1 to every physics object mesh and configure the raycaster to only consider layer 1:
+$$|\mathbf{f} + t\, \mathbf{d}|^2 = r^2$$
+$$t^2 + 2(\mathbf{f} \cdot \mathbf{d})\,t + |\mathbf{f}|^2 - r^2 = 0$$
 
-```js
-this.raycaster = new THREE.Raycaster();
-this.raycaster.layers.set(1);
+In ink, the discriminant and smallest positive root:
+
+```k
+/ Ray-sphere intersection. Returns t, or infinity if no hit.
+/ ray: (ox;oy;oz;dx;dy;dz) sphere: (cx;cy;cz;r)
+raySphere: {[ray;sph]
+  ox:ray@0; oy:ray@1; oz:ray@2
+  dx:ray@3; dy:ray@4; dz:ray@5
+  cx:sph@0; cy:sph@1; cz:sph@2; r:sph@3
+  fx:ox-cx; fy:oy-cy; fz:oz-cz
+  b: (fx*dx) + (fy*dy) + fz*dz
+  c: (fx*fx) + (fy*fy) + (fz*fz) - r*r
+  disc: (b*b) - c
+  $[disc<0.; 0w; / no hit
+    [sq: sqrt disc
+     t1: -b-sq; t2: -b+sq
+     $[t1>0.; t1; $[t2>0.; t2; 0w]]]]
+}
 ```
 
-On the physics object side, enabling the layer on the mesh is one line:
+`0w` is ink's positive infinity, used as a sentinel for "no hit". The nearest hit across all spheres is found with `&/`:
 
-```js
-this.visMesh.layers.enable(1);
+```k
+/ Nearest sphere index for a ray. spheres: list of (cx;cy;cz;r) tuples
+nearestSphere: {[ray;spheres]
+  ts: raySphere[ray;] each spheres
+  i: ts?&/ts                   / index of minimum t
+  $[ts@i<0w; i; -1]            / -1 if no hit
+}
 ```
 
-Everything that should not be pickable simply stays on the default layer 0.
-
-
-## Linking Visual Meshes to Physics Objects
-
-Raycasting returns a Three.js mesh. But we need to know which physics object owns that mesh so we can call its interaction methods. Three.js provides a general-purpose `userData` property on every object for exactly this kind of back-reference:
-
-```js
-this.visMesh.userData = this;   // 'this' is the Ball instance
-```
-
-When a raycast hit comes back, we recover the physics object with a single property lookup:
-
-```js
-var obj = intersects[0].object.userData;
-```
-
-This pattern — attaching a physics object reference to its visual mesh — appears in every subsequent tutorial. It is the glue between the rendering world and the simulation world.
-
+---
 
 ## Dragging at a Fixed Depth
 
-Once we know which object was clicked and at what distance *t = d_down* along the ray, we have enough information to drag it smoothly.
+Once we know which object was clicked and at what depth $d_{\text{down}} = t_{\text{hit}}$ along the ray, we can drag smoothly.
 
-The key insight is that during a drag we do not need to raycast on every mouse-move event. We already know the depth of the grab point in camera space. As the mouse moves, we compute the new mouse ray and evaluate it at the same stored depth:
+The key insight is that during a drag we do not need to raycast on every mouse-move event. We already know the depth of the grab point in camera space. As the mouse moves, compute the new mouse ray and evaluate it at the same stored depth:
 
-```
-grab_pos = ray.origin + d_down · ray.direction
-```
+$$\mathbf{g} = \mathbf{o}_{\text{new}} + d_{\text{down}}\, \mathbf{d}_{\text{new}}$$
 
-This keeps the object on a spherical shell around the camera at radius *d_down*, which closely approximates the flat plane perpendicular to the viewing direction passing through the original grab point. For typical viewing angles and moderate drags the difference is imperceptible, and the approach is far cheaper than solving a plane-ray intersection on every event.
+This keeps the object on a spherical shell around the camera at radius $d_{\text{down}}$, which closely approximates the flat plane perpendicular to the viewing direction through the original grab point. For typical viewing angles and moderate drags the difference is imperceptible, and the approach is far cheaper than solving a plane-ray intersection on every event.
 
+---
 
-## The Grabber Class
+## Grabber Design in Ink
 
-All of the above logic lives in a single class. Here is the full implementation:
+In ink, a grabber is a small state tuple threaded through the simulation state. When the user clicks, we record the grabbed particle index and its grab position; when the user moves, we update that position and propagate constraints; when the user releases, we restore the particle to dynamic simulation.
 
-```js
-class Grabber {
-    constructor() {
-        this.raycaster = new THREE.Raycaster();
-        this.raycaster.layers.set(1);
-        this.physicsObject = null;
-        this.distance = 0.0;
-        this.prevPos = new THREE.Vector3();
-        this.vel = new THREE.Vector3();
-        this.time = 0.0;
-    }
+For a soft body the grab works by pinning one particle: its inverse mass is set to zero for the duration of the drag.
 
-    increaseTime(dt) {
-        this.time += dt;
-    }
+```k
+/ Grabber state: (grabIdx; grabPos3D; savedInvMass)
+/ -1 for grabIdx means nothing is grabbed
 
-    updateRaycaster(x, y) {
-        var rect = gRenderer.domElement.getBoundingClientRect();
-        this.mousePos = new THREE.Vector2();
-        this.mousePos.x = ((x - rect.left) / rect.width)  *  2 - 1;
-        this.mousePos.y = -((y - rect.top)  / rect.height) * 2 + 1;
-        this.raycaster.setFromCamera(this.mousePos, gCamera);
-    }
+startGrab: {[simState; particleIdx; grabPos]
+  invM: simState@`invM
+  savedM: invM@particleIdx
+  invM2: @[invM; particleIdx; :; 0.]   / pin particle (infinite mass)
+  (`grabIdx; particleIdx; `grabPos; grabPos; `savedInvMass; savedM;
+   `invM; invM2)
+}
 
-    start(x, y) {
-        this.physicsObject = null;
-        this.updateRaycaster(x, y);
-        var intersects = this.raycaster.intersectObjects(gThreeScene.children);
-        if (intersects.length > 0) {
-            var obj = intersects[0].object.userData;
-            if (obj) {
-                this.physicsObject = obj;
-                this.distance = intersects[0].distance;
-                var pos = this.raycaster.ray.origin.clone();
-                pos.addScaledVector(this.raycaster.ray.direction, this.distance);
-                this.physicsObject.startGrab(pos);
-                this.prevPos.copy(pos);
-                this.vel.set(0, 0, 0);
-                this.time = 0.0;
-                if (gPhysicsScene.paused) run();
-            }
-        }
-    }
+moveGrab: {[simState; grabPos]
+  idx: simState@`grabIdx
+  $[idx<0; simState;
+    [pos: simState@`pos
+     pos2: @[pos; idx; :; grabPos]     / teleport pinned particle
+     simState,(`pos; pos2; `grabPos; grabPos)]]
+}
 
-    move(x, y) {
-        if (this.physicsObject) {
-            this.updateRaycaster(x, y);
-            var pos = this.raycaster.ray.origin.clone();
-            pos.addScaledVector(this.raycaster.ray.direction, this.distance);
-
-            this.vel.copy(pos).sub(this.prevPos);
-            if (this.time > 0.0)
-                this.vel.divideScalar(this.time);
-            else
-                this.vel.set(0, 0, 0);
-
-            this.prevPos.copy(pos);
-            this.time = 0.0;
-            this.physicsObject.moveGrabbed(pos, this.vel);
-        }
-    }
-
-    end(x, y) {
-        if (this.physicsObject) {
-            this.physicsObject.endGrab(this.prevPos, this.vel);
-            this.physicsObject = null;
-        }
-    }
+endGrab: {[simState; throwVel]
+  idx: simState@`grabIdx
+  $[idx<0; simState;
+    [invM: simState@`invM
+     invM2: @[invM; idx; :; simState@`savedInvMass]
+     vel: simState@`vel
+     vel2: @[vel; idx; :; throwVel]
+     simState,(`grabIdx; -1; `invM; invM2; `vel; vel2)]]
 }
 ```
 
-A few details worth noting:
+---
 
-**Coordinate conversion.** The `updateRaycaster` method converts from document pixel coordinates to NDC. The `getBoundingClientRect()` call accounts for the canvas being offset within the page, and the Y axis is flipped because browser Y increases downward while NDC Y increases upward.
+## Nearest Particle Search
 
-**Velocity tracking.** The grabber maintains a running estimate of drag velocity. Each `move` call records the displacement since the last call and divides by the elapsed simulation time (tracked via `increaseTime`). This velocity is passed to `endGrab` so the object can be released with momentum — throw physics emerges naturally.
+For soft bodies, `startGrab` must first find which particle is closest to the grab point. This is a straightforward loop, vectorized in ink:
 
-**Auto-start.** If the simulation is paused when the user clicks, `start` automatically unpauses it. There is no point picking a frozen object.
-
-
-## Coordinating with the Camera
-
-A 3D scene typically has an orbit camera controlled by mouse drag. But when the user is dragging a physics object, those same mouse events should move the object, not rotate the camera. The two behaviors must be mutually exclusive.
-
-The `onPointer` function handles this by enabling and disabling camera control around the grab:
-
-```js
-function onPointer(evt) {
-    evt.preventDefault();
-    if (evt.type == "pointerdown") {
-        gGrabber.start(evt.clientX, evt.clientY);
-        gMouseDown = true;
-        if (gGrabber.physicsObject) {
-            gCameraControl.saveState();
-            gCameraControl.enabled = false;
-        }
-    }
-    else if (evt.type == "pointermove" && gMouseDown) {
-        gGrabber.move(evt.clientX, evt.clientY);
-    }
-    else if (evt.type == "pointerup") {
-        if (gGrabber.physicsObject) {
-            gGrabber.end();
-            gCameraControl.reset();
-        }
-        gMouseDown = false;
-        gCameraControl.enabled = true;
-    }
+```k
+/ Index of particle nearest to point p3
+/ pos: flat (3×n) array; p3: 3-element vector
+nearestParticle: {[pos;p3;n]
+  dx: (pos@(3*!n)) - p3@0
+  dy: (pos@(1+3*!n)) - p3@1
+  dz: (pos@(2+3*!n)) - p3@2
+  d2: (dx*dx) + (dy*dy) + dz*dz
+  d2?&/d2
 }
 ```
 
-Using `pointerdown / pointermove / pointerup` rather than their mouse equivalents gives touch support for free — pointer events unify mouse, stylus, and finger input under one API.
+This computes the squared distance from every particle to the grab point in a single vectorized pass, then returns the index of the minimum.
 
+---
 
-## Making the Ball Grabbable
+## Unprojecting the Mouse Position
 
-The physics object needs to implement three methods that the grabber calls: `startGrab`, `moveGrabbed`, and `endGrab`. For a simple rigid body the implementations are minimal:
+Mapping from a 2D mouse position to a 3D ray requires the inverse of the projection-view transformation. The projection matrix $P$ and view matrix $V$ together map world space to clip space:
 
-```js
-startGrab(pos) {
-    this.grabbed = true;
-    this.pos.copy(pos);
-    this.visMesh.position.copy(pos);
-}
+$$\mathbf{x}_{\text{clip}} = P V \mathbf{x}_{\text{world}}$$
 
-moveGrabbed(pos, vel) {
-    this.pos.copy(pos);
-    this.visMesh.position.copy(pos);
-}
+Unprojection inverts this. Starting from NDC coordinates $(u, v) \in [-1, 1]^2$:
 
-endGrab(pos, vel) {
-    this.grabbed = false;
-    this.vel.copy(vel);
-}
-```
+1. Transform $(u, v, -1, 1)$ by $(PV)^{-1}$ to get the ray origin in world space.
+2. Transform $(u, v, +1, 1)$ similarly to get the ray end.
+3. Subtract and normalize to get the ray direction $\mathbf{d}$.
 
-The `grabbed` flag tells `simulate` to skip integration for this object while it is being held:
+In ink's GPU framework, the camera matrices are available as uniforms. The unprojection matrix $(PV)^{-1}$ can be precomputed each frame and passed as a uniform. The ray construction then becomes 8 multiplications and a normalization per click.
 
-```js
-simulate() {
-    if (this.grabbed) return;
-    // ... gravity integration, collision response ...
-}
-```
+---
 
-This interface — three methods with a position and velocity — is intentionally general. For a rigid body we teleport the body to the mouse position. For a soft body we would instead find the nearest particle and pin it kinematically, moving it each frame. For a rigid body with weight feedback we would attach a zero-rest-length spring between the grab point and a local attachment position on the body. The grabber itself does not change; only the three methods change.
+## Coordinating with Camera Orbit
 
+A 3D scene typically has an orbit camera controlled by mouse drag. When the user drags a physics object, those same mouse events should move the object — not rotate the camera. The two behaviors must be mutually exclusive.
+
+The rule is simple: if `startGrab` found a physics object (`grabIdx ≥ 0`), suppress camera orbit events until `endGrab` is called. If `startGrab` found nothing, route all subsequent drag events to the camera.
+
+---
 
 ## Variations on Dragging
 
-The simple "teleport to cursor" approach works well for demonstrations, but two more physically interesting variations are worth knowing.
+**Spring dragging.** Rather than teleporting the grabbed particle to the cursor, attach a zero-rest-length spring between the cursor position and the particle. The object follows the cursor with a lag proportional to its mass. For stiff springs this is visually identical to teleporting but gives the user tactile feedback of the object's weight.
 
-**Spring dragging.** At `startGrab`, compute a local attachment point on the body in its own frame. Create a zero-rest-length spring connecting that point to a global anchor. At `moveGrabbed`, move the anchor to the cursor position. The object follows with a lag proportional to its mass and the spring stiffness, giving the user a tactile sense of the object's weight.
+```k
+/ Spring grab: add an external force pulling particle idx toward target
+springGrabForce: {[pos;idx;target;stiffness]
+  dx: (target@0) - pos@(3*idx)
+  dy: (target@1) - pos@(1+3*idx)
+  dz: (target@2) - pos@(2+3*idx)
+  stiffness * (dx;dy;dz)
+}
+```
 
-**Soft body pinning.** At `startGrab`, find the particle nearest to the grab position and mark it kinematic. At `moveGrabbed`, set that particle's position directly to the cursor. At `endGrab`, restore the particle to dynamic simulation. This is how the next chapter extends the grabber for cloth and soft bodies.
+**Velocity throw.** Track the drag velocity by recording position differences between frames. On release, inject this velocity into the grabbed particle so the object flies along the throw direction.
 
+---
 
 ## Key Takeaways
 
-- A mouse click in a 3D viewport defines a **ray**, not a point. The ray's origin is near the camera and its direction passes through the clicked pixel.
-- **Raycasting** intersects this ray with scene geometry to find what was clicked and at what depth.
-- During a drag, reusing the **stored depth** from the initial click to reproject mouse movement is simple and visually correct for typical viewing conditions.
-- A `userData` back-reference on each visual mesh bridges the gap between the renderer's scene graph and the physics simulation's object list.
-- Three methods — `startGrab`, `moveGrabbed`, `endGrab` — form a clean interface that the grabber calls without knowing anything about the underlying simulation. Rigid bodies, soft bodies, and constraints all implement the same interface differently.
-- Camera orbit control and object dragging must be **mutually exclusive**; disabling the camera control while a grab is active and restoring it on release keeps both behaviors working correctly.
+- A mouse click in a 3D viewport defines a **ray**, not a point. The ray's origin is near the camera; its direction passes through the clicked pixel.
+- **Ray-sphere intersection** is a quadratic in $t$. The minimum positive root is the nearest hit; `0w` (infinity) encodes a miss.
+- During a drag, reusing the **stored depth** $d_{\text{down}}$ from the initial click to reproject mouse movement is simple and visually correct for typical viewing conditions.
+- **Pinning a particle** by setting its inverse mass to zero is the cleanest way to grab a soft body. Constraints propagate the pin's effect through the entire mesh automatically.
+- **Nearest-particle search** is a vectorized distance computation: `d2?&/d2` finds the index in one pass.
+- Camera orbit control and object dragging must be **mutually exclusive**; suppress orbit events while a grab is active.

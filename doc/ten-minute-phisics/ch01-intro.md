@@ -4,53 +4,25 @@ Physics simulation sounds intimidating until you realize that the physics of eve
 
 ---
 
-## The Setup: One File, One Browser
+## The Setup: One Loop, One State
 
-The goal is to have something running with as little ceremony as possible. The entire simulation lives in a single HTML file — no build system, no dependencies, no installation. Drop it in a browser and it runs on any platform: desktop, tablet, or phone.
+The entire simulation lives in a single function that updates state and draws each frame. In ink, the `RunWindow` function from `lib/gpu/gpu.k` provides the event loop — it calls a user function each frame with window properties (width, height, mouse position), and the function draws the scene and updates physics.
 
-The skeleton of that file is straightforward. An HTML document has a `<canvas>` element where the scene is drawn, and a `<script>` block where the JavaScript lives. Three functions carry the simulation forward:
+The simulation's heartbeat is:
 
-- `draw()` — clears the canvas and repaints the current state.
-- `simulate()` — advances the physics by one time step.
-- `update()` — calls `simulate()`, then `draw()`, then schedules itself to be called again via `requestAnimationFrame`.
-
-The loop is started with a single call to `update()`. After that, the browser drives everything.
-
-```javascript
-function update() {
-    simulate();
-    draw();
-    requestAnimationFrame(update);
-}
-
-update();
+```k
+step: {[s] ... }         / advance physics one frame
+draw: {[props;s] ... }   / draw current state, return next state
+RunWindow[draw; 0]
 ```
 
-`requestAnimationFrame` tells the browser to call `update` before the next repaint, typically sixty times per second. This is the heartbeat of every real-time simulation in this book.
+`RunWindow` calls `draw` approximately 60 times per second. This is the equivalent of `requestAnimationFrame` in a web browser.
 
 ---
 
 ## Two Coordinate Systems
 
-The canvas coordinate system has its origin at the top-left corner, with $y$ increasing downward. Physics, on the other hand, is most naturally expressed with the origin at the bottom-left and $y$ increasing upward. Mixing these up produces upside-down behavior, so we establish a clean mapping early.
-
-The key variable is `cScale`, a pixels-per-meter factor computed so that a minimum physical width of 20 meters always fits on screen regardless of the window size:
-
-```javascript
-var simMinWidth = 20.0;
-var cScale = Math.min(canvas.width, canvas.height) / simMinWidth;
-var simWidth  = canvas.width  / cScale;
-var simHeight = canvas.height / cScale;
-```
-
-Converting a position from simulation space to canvas space then requires only scaling for $x$ and scaling-plus-flipping for $y$:
-
-```javascript
-function cX(pos) { return pos.x * cScale; }
-function cY(pos) { return canvas.height - pos.y * cScale; }
-```
-
-Everything in the physics simulation uses meters. Everything passed to the canvas API uses pixels. These two functions are the only bridge between the two worlds.
+The screen coordinate system has its origin at the top-left corner, with $y$ increasing downward. Physics is most naturally expressed with a bottom-left origin and $y$ increasing upward. In ink, the GPU shader handles this mapping. Physical coordinates in meters are converted to clip space $[-1, 1]$ in the vertex shader, so the physics code can work entirely in physical units.
 
 ---
 
@@ -60,17 +32,11 @@ Before writing any physics code, we need one equation:
 
 $$\mathbf{F} = m\mathbf{a}$$
 
-Force equals mass times acceleration. This is Newton's second law, and it is the engine of classical mechanics. Rearranged, it says:
+Force equals mass times acceleration. Rearranged:
 
 $$\mathbf{a} = \frac{\mathbf{F}}{m}$$
 
-Acceleration is the rate of change of velocity. Velocity is the rate of change of position. A force does not move an object directly — it changes the object's velocity, and the velocity changes the position. This is why every simulated object must carry both a position and a velocity.
-
-For our cannonball, the only force is gravity. Near the Earth's surface, gravity accelerates every object downward at the same rate regardless of mass. If you substitute the gravitational force $\mathbf{F} = m\mathbf{g}$ into Newton's second law, the mass $m$ cancels:
-
-$$\mathbf{a} = \frac{m\mathbf{g}}{m} = \mathbf{g}$$
-
-The gravitational acceleration $\mathbf{g}$ points straight down with a magnitude of roughly $9.8\ \text{m/s}^2$, which we round to $10\ \text{m/s}^2$ for convenience. An object in free fall that starts from rest reaches $10\ \text{m/s}$ after one second, $20\ \text{m/s}$ after two seconds, and so on.
+For our cannonball, the only force is gravity. The gravitational acceleration $\mathbf{g}$ points straight down with magnitude roughly $9.8\ \text{m/s}^2$, which we round to $10\ \text{m/s}^2$ for convenience.
 
 ---
 
@@ -78,108 +44,113 @@ The gravitational acceleration $\mathbf{g}$ points straight down with a magnitud
 
 We know the acceleration. To get the velocity and position at the next moment in time, we need a *time integration method* — a recipe for stepping the simulation forward by a small interval $\Delta t$.
 
-The simplest possible recipe says: assume the acceleration is constant over $\Delta t$, update the velocity, then use that updated velocity to move the position.
+The simplest recipe says: assume the acceleration is constant over $\Delta t$, update the velocity, then use that updated velocity to move the position.
 
 $$\mathbf{v}_{n+1} = \mathbf{v}_n + \mathbf{a}\,\Delta t$$
 $$\mathbf{x}_{n+1} = \mathbf{x}_n + \mathbf{v}_{n+1}\,\Delta t$$
 
-Notice that $\mathbf{x}_{n+1}$ uses the *new* velocity $\mathbf{v}_{n+1}$, not the old one $\mathbf{v}_n$. This is the defining feature of **symplectic Euler** integration, and it is what makes it more stable than naive (explicit) Euler, where you would use the old velocity to update the position. The difference looks small — just one line — but it determines whether energy in the simulation grows without bound or stays bounded. Symplectic Euler conserves a modified version of the total energy, which is why simulations using it do not explode.
+Notice that $\mathbf{x}_{n+1}$ uses the *new* velocity $\mathbf{v}_{n+1}$, not the old one $\mathbf{v}_n$. This is **symplectic Euler** integration. The difference looks small — just one line — but it determines whether energy in the simulation grows without bound or stays bounded.
 
-In code:
+In ink, 2D vectors are represented as two-element float lists. Velocity is updated first, then position:
 
-```javascript
-var gravity  = { x: 0.0, y: -10.0 };
-var timeStep = 1.0 / 60.0;
+```k
+g: 0. -10.          / gravity vector (x; y)
+dt: 1.%60           / time step 1/60 s
+r: 0.2              / ball radius (m)
 
-function simulate() {
-    ball.vel.x += gravity.x * timeStep;
-    ball.vel.y += gravity.y * timeStep;
-    ball.pos.x += ball.vel.x * timeStep;
-    ball.pos.y += ball.vel.y * timeStep;
-    // ...
-}
+/ Simulation bounds
+w: 20.              / world width (m)
+h: 15.              / world height (m)
 ```
-
-Velocity is updated first, then position. The order matters.
 
 ---
 
 ## The Cannonball
 
-The ball is a simple object with a radius, a position, and a velocity:
+The ball is represented as a 2-element list for position and a 2-element list for velocity. The initial velocity launches it upward and to the right:
 
-```javascript
-var ball = {
-    radius: 0.2,
-    pos: { x: 0.2, y: 0.2 },
-    vel: { x: 10.0, y: 15.0 }
-};
+```k
+pos: 0.2 0.2        / starting position (m)
+vel: 10. 15.        / initial velocity (m/s)
 ```
 
-The radius is 20 centimeters. The initial velocity launches it upward and to the right — hence the name "cannonball." Drawing it requires converting from simulation coordinates to canvas coordinates and scaling the radius by `cScale` to get the pixel radius:
+All coordinates are in meters. The radius is 20 centimeters.
 
-```javascript
-function draw() {
-    c.clearRect(0, 0, canvas.width, canvas.height);
-    c.fillStyle = "#FF0000";
-    c.beginPath();
-    c.arc(cX(ball.pos), cY(ball.pos), cScale * ball.radius, 0.0, 2.0 * Math.PI);
-    c.closePath();
-    c.fill();
-}
+---
+
+## Boundary Collisions
+
+Keeping the ball inside the window requires boundary checks after each integration step. When the ball crosses a wall, clamp its position back to the boundary and flip the corresponding velocity component. In array-programming style, we compute which components need to flip and apply the flip in a single vectorized step:
+
+```k
+/ Clamp position and reflect velocity at walls
+lo: r, r
+hi: (w-r), h-r
+flip: (pos<lo) | pos>hi
+vel: vel * 1. - 2.*flip
+pos: lo | pos & hi
 ```
 
-Keeping the ball inside the window requires boundary checks after each integration step. When the ball crosses a wall, we clamp its position back to the boundary and flip the corresponding velocity component:
-
-```javascript
-if (ball.pos.x < 0.0) {
-    ball.pos.x = 0.0;
-    ball.vel.x = -ball.vel.x;
-}
-if (ball.pos.x > simWidth) {
-    ball.pos.x = simWidth;
-    ball.vel.x = -ball.vel.x;
-}
-if (ball.pos.y < 0.0) {
-    ball.pos.y = 0.0;
-    ball.vel.y = -ball.vel.y;
-}
-```
-
-This is an elastic collision with an immovable wall: the velocity component perpendicular to the wall reverses sign, the parallel component is unchanged. There is no upper boundary check — the ball is free to fly as high as the physics allow and gravity will bring it back down.
+`lo | pos & hi` is `max(lo, min(pos, hi))` — the standard clamp. `flip` is a boolean list (1 where the ball hit a wall), and `vel * 1. - 2.*flip` flips the sign of each component that hit a boundary.
 
 ---
 
 ## Substepping
 
-Symplectic Euler introduces an error at every step because it assumes that both the force and the velocity are constant over $\Delta t$. For a constant force like gravity this assumption is fine, but the velocity is never actually constant — gravity is continuously changing it. The error per step is proportional to $\Delta t$, so the total accumulated error over a fixed simulation time is also proportional to $\Delta t$.
+Symplectic Euler introduces an error at every step because it assumes constant force and velocity over $\Delta t$. The solution is **substepping**: divide each frame into $n$ substeps, each of size $\Delta t / n$, and run the integration loop $n$ times per frame.
 
-The straightforward remedy is to use a smaller time step. But the frame rate is fixed: the browser calls `update` 60 times per second, giving $\Delta t = 1/60 \approx 0.0167\ \text{s}$. We cannot slow down the clock.
-
-The solution is **substepping**: divide each frame into $n$ substeps, each of size $\Delta t / n$, and run the integration loop $n$ times per frame.
-
-```javascript
-var numSubSteps = 10;
-
-function simulate() {
-    var sdt = timeStep / numSubSteps;
-    for (var i = 0; i < numSubSteps; i++) {
-        ball.vel.x += gravity.x * sdt;
-        ball.vel.y += gravity.y * sdt;
-        ball.pos.x += ball.vel.x * sdt;
-        ball.pos.y += ball.vel.y * sdt;
-        // boundary checks ...
-    }
+```k
+step: {[s]
+  pos: s@0; vel: s@1
+  sdt: dt%10.                          / substep size (10 substeps/frame)
+  vel: vel + g*sdt
+  pos: pos + vel*sdt
+  lo: r, r; hi: (w-r), h-r
+  flip: (pos<lo) | pos>hi
+  vel: vel * 1. - 2.*flip
+  pos: lo | pos & hi
+  (pos; vel)
 }
+
+simulate: {[s] 10 step/ s}             / 10 substeps per frame
 ```
 
-The drawing still happens once per frame. Only the physics runs faster. This technique costs proportionally more CPU time, but it is simple, predictable, and — crucially — the only reliable strategy when collisions are involved. More sophisticated integrators gain nothing over symplectic Euler the moment you add discrete collision response, because collision events break any smoothness assumptions the fancier methods depend on.
+`10 step/ s` applies `step` ten times starting from state `s`, threading the result of each call as input to the next. The drawing still happens once per frame; only the physics runs faster.
+
+---
+
+## Complete Simulation
+
+The full simulation integrates and bounces the ball across 600 frames (10 seconds at 60 Hz) with 10 substeps each:
+
+```k
+g: 0. -10.
+dt: 1.%60
+r: 0.2; w: 20.; h: 15.
+
+step: {[s]
+  pos: s@0; vel: s@1
+  sdt: dt%10.
+  vel: vel + g*sdt
+  pos: pos + vel*sdt
+  lo: r, r; hi: (w-r), h-r
+  flip: (pos<lo) | pos>hi
+  vel: vel * 1. - 2.*flip
+  pos: lo | pos & hi
+  (pos; vel)
+}
+
+/ Benchmark: 10 seconds of simulation
+\t 600 {10 step/ x}/ (0.2 0.2; 10. 15.)
+```
+
+On a typical machine this runs in under 10 ms — fast enough to run physics many times per rendered frame if needed.
 
 ---
 
 ## Why These Choices Last
 
-Throughout this book, more complex phenomena will be added: multiple bodies, constraints, joints, soft bodies, fluid. Yet the core loop — apply forces, integrate velocity, integrate position, resolve collisions, draw — will remain the same. Symplectic Euler with substepping is not a toy. It is the method underlying many production physics engines. Its virtues are exactly what a physics engine needs: it is simple to implement, hard to break, and fast enough that many substeps can be afforded even in real-time applications.
+Throughout this book, more complex phenomena will be added: multiple bodies, constraints, joints, soft bodies, fluid. Yet the core loop — apply forces, integrate velocity, integrate position, resolve collisions — will remain the same. Symplectic Euler with substepping is not a toy. It is the method underlying many production physics engines. Its virtues are exactly what a physics engine needs: it is simple to implement, hard to break, and fast enough that many substeps can be afforded even in real-time applications.
 
 The cannonball is the simplest system in which all of these ideas appear together. Everything more complicated is built on this foundation.
 
@@ -191,4 +162,4 @@ The cannonball is the simplest system in which all of these ideas appear togethe
 - **Gravity** accelerates all objects equally at $g \approx 10\ \text{m/s}^2$ downward, because the mass in $F = mg$ cancels with the mass in $F = ma$.
 - **Symplectic Euler** updates velocity first, then uses the updated velocity to advance position. This subtle ordering makes the integrator energy-stable.
 - **Substepping** runs the integration loop $n$ times per rendered frame with a time step of $\Delta t / n$. It reduces integration error proportionally to $n$ with no algorithmic complexity, and it remains effective in the presence of collisions where higher-order integrators offer no benefit.
-- **Coordinate mapping** is a practical necessity: keep physics in meters with a bottom-left origin, and convert to canvas pixels only at draw time.
+- **Array arithmetic** in ink lets boundary clamping and velocity reflection be expressed as a single vectorized operation: compute a boolean flip mask, negate the flagged components, clamp the position in one step.

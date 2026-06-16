@@ -10,31 +10,38 @@ A **3D vector** $\mathbf{v}$ packs three real numbers into a column:
 
 $$\mathbf{v} = \begin{bmatrix} v_x \\ v_y \\ v_z \end{bmatrix}$$
 
-A vector serves two distinct roles in simulation. It can represent a **position** — where a particle sits in space — or an **arrow** — a direction and magnitude, such as a velocity or a force. The same mathematical object handles both; only interpretation differs.
+In ink, a 3D vector is a 3-element float list: `1.0 2.0 3.0`. A vector serves two distinct roles in simulation. It can represent a **position** — where a particle sits in space — or an **arrow** — a direction and magnitude, such as a velocity or a force. The same mathematical object handles both; only interpretation differs.
 
-We work in a **right-handed coordinate system**: point the thumb of the right hand along $x$, the index finger along $y$, and the middle finger naturally extends along $z$. In graphics, $y$ often points upward to match the camera's screen coordinates, but the handedness stays the same.
+We work in a **right-handed coordinate system**: point the thumb of the right hand along $x$, the index finger along $y$, and the middle finger naturally extends along $z$. In ink's GPU rendering, $y$ points upward, matching the typical physics convention.
 
 ### Basic Operations
 
-**Addition** moves a point by an offset — the core of every time-integration step:
+All standard vector operations are element-wise on ink's float lists:
 
-$$\mathbf{p} + \mathbf{a} = \begin{bmatrix} p_x + a_x \\ p_y + a_y \\ p_z + a_z \end{bmatrix}$$
+```k
+/ 3D vector operations
+vadd: {x + y}              / addition
+vsub: {x - y}              / subtraction
+vscale: {x * y}            / scalar scaling (y is a scalar)
+```
 
-**Scaling** stretches or shrinks a vector without changing its direction. Multiplying a velocity $\mathbf{v}$ by a timestep $\Delta t$ converts it to a displacement:
+**Addition** advances a position by an offset — the core of every time-integration step.
 
-$$\Delta t\, \mathbf{v} = \begin{bmatrix} \Delta t\, v_x \\ \Delta t\, v_y \\ \Delta t\, v_z \end{bmatrix}$$
-
-**Subtraction** produces the arrow from one point to another. The vector *from* $\mathbf{a}$ *to* $\mathbf{b}$ is $\mathbf{b} - \mathbf{a}$, not $\mathbf{a} - \mathbf{b}$. Getting this sign wrong is a common source of sign errors in collision handling.
-
-**Length** is the familiar Euclidean norm:
+**Length** follows from the Pythagorean theorem:
 
 $$|\mathbf{v}| = \sqrt{v_x^2 + v_y^2 + v_z^2}$$
 
-A **unit vector** (or normalized vector) preserves direction while forcing length to one:
+```k
+vlen: {sqrt +/ x*x}      / sum of squares via fold, then sqrt
+```
 
-$$\hat{\mathbf{n}} = \frac{\mathbf{v}}{|\mathbf{v}|}$$
+The `+/ x*x` idiom folds addition over the element-wise square, sidesteps the right-to-left operator precedence issue completely, and works for vectors of any length.
 
-Unit vectors appear constantly — as surface normals, as rotation axes, as reference directions for projections.
+**Normalization** produces a unit vector:
+
+```k
+vnorm: {x % vlen x}
+```
 
 ---
 
@@ -42,29 +49,31 @@ Unit vectors appear constantly — as surface normals, as rotation axes, as refe
 
 $$\mathbf{a} \cdot \mathbf{b} = a_x b_x + a_y b_y + a_z b_z$$
 
-The dot product takes two vectors and returns a **scalar**. Computationally it is as cheap as it looks: three multiplications and two additions.
+```k
+dot3: {+/ x*y}             / sum of element-wise products
+```
 
-### Geometric meaning
-
-The key insight is that the dot product measures **projection**. Given a unit vector $\hat{\mathbf{n}}$ and any vector $\mathbf{v}$, the scalar
-
-$$v_n = \hat{\mathbf{n}} \cdot \mathbf{v}$$
-
-is exactly the signed length of $\mathbf{v}$'s shadow cast along $\hat{\mathbf{n}}$. This is positive when $\mathbf{v}$ points broadly in the same direction as $\hat{\mathbf{n}}$, zero when they are perpendicular, and negative when they point apart.
+The dot product takes two vectors and returns a **scalar**. The key insight is that it measures **projection**: given a unit vector $\hat{\mathbf{n}}$ and any vector $\mathbf{v}$, the scalar $v_n = \hat{\mathbf{n}} \cdot \mathbf{v}$ is exactly the signed length of $\mathbf{v}$'s shadow cast along $\hat{\mathbf{n}}$.
 
 Two immediate consequences:
-
 - $\mathbf{a} \cdot \mathbf{b} = 0$ if and only if $\mathbf{a}$ and $\mathbf{b}$ are **perpendicular**.
 - $\mathbf{v} \cdot \mathbf{v} = |\mathbf{v}|^2$, so squaring a length avoids a square root.
 
-### Decomposing a vector
+### Decomposing a Vector
 
 Simulations frequently need to split a velocity into components parallel and perpendicular to a surface. Given the surface normal $\hat{\mathbf{n}}$:
 
 $$\mathbf{v}_n = (\hat{\mathbf{n}} \cdot \mathbf{v})\, \hat{\mathbf{n}} \qquad \text{(normal component)}$$
 $$\mathbf{v}_t = \mathbf{v} - \mathbf{v}_n \qquad \text{(tangential component)}$$
 
-Restitution (bounciness) scales $\mathbf{v}_n$; friction attenuates $\mathbf{v}_t$. Every collision response in this book runs through this two-line decomposition.
+```k
+/ Decompose velocity v into normal and tangential components
+/ n must be a unit vector
+vnormal: {[v;n] (dot3[v;n]) * n}
+vtangent: {[v;n] v - vnormal[v;n]}
+```
+
+Restitution scales $\mathbf{v}_n$; friction attenuates $\mathbf{v}_t$. Every collision response in this book runs through this two-line decomposition.
 
 ---
 
@@ -72,124 +81,173 @@ Restitution (bounciness) scales $\mathbf{v}_n$; friction attenuates $\mathbf{v}_
 
 $$\mathbf{a} \times \mathbf{b} = \begin{bmatrix} a_y b_z - b_y a_z \\ a_z b_x - b_z a_x \\ a_x b_y - b_x a_y \end{bmatrix}$$
 
-Unlike the dot product, the cross product returns a **vector**. That vector is perpendicular to both $\mathbf{a}$ and $\mathbf{b}$, and its direction follows the right-hand rule: wrap the right hand from $\mathbf{a}$ toward $\mathbf{b}$ and the thumb points along $\mathbf{a} \times \mathbf{b}$.
+```k
+cross3: {[a;b]
+  (((a@1)*(b@2))-(b@1)*(a@2)
+   ((a@2)*(b@0))-(b@2)*(a@0)
+   ((a@0)*(b@1))-(b@0)*(a@1))
+}
+```
 
-### Triangle normals and mesh orientation
+**Parenthesization note:** In ink, all operators share equal precedence and evaluate right-to-left. In `A*B - C*D`, the right-to-left rule gives `A*(B - C*D)`, which is wrong. The fix is to parenthesize the LEFT product: `(A*B) - C*D` evaluates the right side `C*D` first, then subtracts from the pre-computed `(A*B)`. Each element of `cross3` follows this `((left product)) - right product` pattern.
+
+Unlike the dot product, the cross product returns a **vector** perpendicular to both $\mathbf{a}$ and $\mathbf{b}$, following the right-hand rule.
+
+### Triangle Normals and Mesh Orientation
 
 The cross product is the standard way to find a triangle's surface normal. Given vertices $\mathbf{p}_1, \mathbf{p}_2, \mathbf{p}_3$:
 
-$$\hat{\mathbf{n}} = \frac{(\mathbf{p}_2 - \mathbf{p}_1) \times (\mathbf{p}_3 - \mathbf{p}_1)}{|(\mathbf{p}_2 - \mathbf{p}_1) \times (\mathbf{p}_3 - \mathbf{p}_1)|}$$
+```k
+triNormal: {[p1;p2;p3]
+  vnorm cross3[p2-p1; p3-p1]
+}
+```
 
-The direction of this normal depends on the order of the vertices. Curling the right hand along $p_1 \to p_2 \to p_3$, the thumb points toward the normal. For a closed mesh to have all normals pointing outward, every face must be wound consistently — checking this with the right-hand rule is quicker than staring at index arrays.
+### Area from the Cross Product
 
-### Area from the cross product
-
-The length of $\mathbf{a} \times \mathbf{b}$ equals the area of the parallelogram spanned by $\mathbf{a}$ and $\mathbf{b}$:
-
-$$A_{\text{parallelogram}} = |\mathbf{a} \times \mathbf{b}|$$
-
-A triangle is half a parallelogram, so:
+The length of $\mathbf{a} \times \mathbf{b}$ equals the area of the parallelogram spanned by $\mathbf{a}$ and $\mathbf{b}$. A triangle is half a parallelogram:
 
 $$A_{\text{triangle}} = \tfrac{1}{2}\, |(\mathbf{p}_2 - \mathbf{p}_1) \times (\mathbf{p}_3 - \mathbf{p}_1)|$$
 
-### Tetrahedral volume
+```k
+triArea: {[p1;p2;p3] 0.5 * vlen cross3[p2-p1; p3-p1]}
+```
+
+### Tetrahedral Volume
 
 Combining the cross product with the dot product gives the volume of a tetrahedron with edge vectors $\mathbf{a}$, $\mathbf{b}$, $\mathbf{c}$ emanating from one vertex:
 
 $$V_{\text{tet}} = \tfrac{1}{6}\, (\mathbf{a} \times \mathbf{b}) \cdot \mathbf{c}$$
 
-Why? The cross product $\mathbf{a} \times \mathbf{b}$ has magnitude equal to the base parallelogram's area. The dot product with $\mathbf{c}$ projects $\mathbf{c}$ onto the normal of that base, yielding the parallelepiped's height. Together they give the parallelepiped volume; the tetrahedron is one-sixth of that. This formula comes up repeatedly in soft-body simulation, where preserving tetrahedral volumes is equivalent to preserving material incompressibility.
+```k
+tetVol: {[p1;p2;p3;p4]
+  (dot3[cross3[p2-p1; p3-p1]; p4-p1]) % 6.
+}
+```
+
+This formula comes up repeatedly in soft-body simulation, where preserving tetrahedral volumes is equivalent to preserving material incompressibility.
 
 ---
 
 ## Matrices and Transformations
 
-A $3 \times 3$ matrix $A$ transforms a vector $\mathbf{x}$ into a new vector $A\mathbf{x}$. The most illuminating way to read this product is column-wise:
+A $3 \times 3$ matrix $A$ transforms a vector $\mathbf{x}$ into a new vector $A\mathbf{x}$. In ink, a matrix is a list of column vectors or a flat array of 9 floats. The most illuminating way to read the matrix-vector product is column-wise:
 
 $$A\mathbf{x} = x_1\, \mathbf{a}_1 + x_2\, \mathbf{a}_2 + x_3\, \mathbf{a}_3$$
 
-where $\mathbf{a}_1, \mathbf{a}_2, \mathbf{a}_3$ are the columns of $A$. The result is a linear combination of the columns, weighted by the components of $\mathbf{x}$. Read this way, the matrix is simply **a new coordinate frame**: $\mathbf{a}_1$ is where the $x$-axis lands after the transformation, $\mathbf{a}_2$ is where the $y$-axis lands, and so on.
+The matrix is simply a new coordinate frame: $\mathbf{a}_1$ is where the $x$-axis lands after the transformation.
 
-An **affine transformation** adds a translation offset $\mathbf{b}$:
+```k
+/ 3×3 matrix-vector multiply: M is a 3-element list of column 3-vectors
+mat3x3vec: {[M;v]
+  ((M@0)*(v@0)) + ((M@1)*(v@1)) + (M@2)*(v@2)
+}
 
-$$\mathbf{v}' = A\mathbf{v} + \mathbf{b}$$
+/ 3×3 matrix-matrix multiply: apply mat3x3vec to each column of B
+mat3x3: {[A;B]
+  {mat3x3vec[A;x]} each B
+}
+```
 
-Geometrically, this maps the origin to $\mathbf{b}$ and stretches, shears, or rotates along the axes defined by the columns of $A$.
+The extra parentheses around `((M@0)*(v@0))` and `((M@1)*(v@1))` are required. Without them, the right-to-left rule evaluates `(M@0) * ((v@0) + (M@1)*(...))`, which scales the first column by an incorrect combined scalar rather than by `v@0` alone.
 
-### The determinant as volume
+### The Determinant as Volume
 
 $$\det(A) = (\mathbf{a}_1 \times \mathbf{a}_2) \cdot \mathbf{a}_3$$
 
-This is exactly the volume of the parallelepiped formed by the three column vectors — in other words, how the transformation scales volume. When $\det(A) = 1$ the transformation is volume-preserving; when $\det(A) = 0$ the three axes are coplanar, the transformation collapses 3D space into a plane or line, and no inverse exists.
+This is the volume of the parallelepiped formed by the three column vectors — how the transformation scales volume. When $\det(A) = 1$ the transformation is volume-preserving.
 
-### Transpose and the dot product
+```k
+det3x3: {[M] dot3[cross3[M@0;M@1];M@2]}
+```
 
-The **transpose** $A^T$ exchanges rows and columns. For vectors, transposing turns a column into a row, and the product $\mathbf{a}^T \mathbf{b}$ is identical to the dot product $\mathbf{a} \cdot \mathbf{b}$. In particular:
+### Transpose and the Dot Product
 
-$$\mathbf{a}^T \mathbf{a} = |\mathbf{a}|^2$$
+The **transpose** $A^T$ exchanges rows and columns. For a rotation matrix, **the inverse is the transpose**: $R^{-1} = R^T$.
 
-### Inverses
+```k
+/ Transpose of 3×3 matrix (list of column vectors)
+trans3: {[M]
+  ((M@0)@0,(M@1)@0,(M@2)@0
+   (M@0)@1,(M@1)@1,(M@2)@1
+   (M@0)@2,(M@1)@2,(M@2)@2)
+}
+```
 
-The inverse $A^{-1}$ undoes the transformation: $A^{-1} A = I$. For an affine transform with offset $\mathbf{b}$, inverting requires removing the offset first:
+### Tetrahedral Skinning
 
-$$\mathbf{v} = A^{-1}(\mathbf{v}' - \mathbf{b})$$
+A practical application is mapping a point in a rest-pose tetrahedron $Q$ to its position in the deformed tetrahedron $P$:
 
-A practical application is **tetrahedral skinning**: mapping a point in a rest-pose tetrahedron $Q$ to its position in the deformed tetrahedron $P$:
+$$\mathbf{x}' = PQ^{-1}\mathbf{x} + (\mathbf{p}_0 - PQ^{-1}\mathbf{q}_0)$$
 
-$$\mathbf{x}' = PQ^{-1}\mathbf{x} + (\mathbf{p} - PQ^{-1}\mathbf{q})$$
-
-where $Q$ is the $3 \times 3$ matrix whose columns are the edge vectors of the rest tetrahedron, and $P$ likewise for the deformed tetrahedron. This affine map lets a visual surface mesh follow a coarser tetrahedral simulation mesh — the foundation of soft-body rendering.
+where $Q$ is the $3 \times 3$ matrix whose columns are the edge vectors of the rest tetrahedron, and $P$ likewise for the deformed tetrahedron. In ink, $Q^{-1}$ can be computed using the SVD from `lib/svd.k` or the PLU solver from `lib/lin.k`.
 
 ---
 
 ## Rotation Matrices and Quaternions
 
-### Rotation matrices
+### Rotation Matrices
 
-A rotation is a special case of a linear transformation that preserves lengths and orientations. Its columns are mutually orthogonal unit vectors:
+A rotation is a special linear transformation that preserves lengths and orientations. Its columns are mutually orthogonal unit vectors:
 
-$$\mathbf{r}_i \cdot \mathbf{r}_j = 0 \text{ for } i \neq j, \qquad |\mathbf{r}_i| = 1$$
+$$R^T R = I \implies R^{-1} = R^T$$
 
-These two conditions together mean $R^T R = I$, which gives an extraordinarily useful identity: for a rotation matrix, **the inverse is the transpose**:
+The quantity $F^T F - I$ measures how far a deformation $F$ deviates from a rigid transformation. For any rotation $R$, this expression is exactly zero.
 
-$$R^{-1} = R^T$$
+### Axis-Angle Representation
 
-This identity is essentially free to compute — transposing a matrix costs nothing — and it sidesteps the general matrix inversion formula entirely.
-
-A related observation: the quantity $F^T F - I$ measures how far a deformation $F$ deviates from a rigid transformation. For any rotation $R$, this expression is exactly zero. Soft-body and cloth simulations often define an elastic energy as a function of $F^T F - I$, so that a purely rigid motion contributes no energy.
-
-### Axis-angle representation
-
-Every rotation in 3D can be described by a unit axis $\hat{\mathbf{n}}$ and an angle $\alpha$. A unit vector has two independent degrees of freedom and the angle contributes one more, giving three in total — the correct count for 3D rotations. If we stored a rotation as a matrix, we would need nine numbers for just three degrees of freedom, with six redundant constraints to maintain orthonormality.
-
-One natural compact form is a vector $\mathbf{r} = \alpha\, \hat{\mathbf{n}}$, storing only three numbers. The problem is that applying such a rotation requires computing $\cos\alpha$ and $\sin\alpha$, which are expensive. We know $\alpha = |\mathbf{r}|$, so we need $\cos(|\mathbf{r}|)$ — not cheap.
+Every rotation in 3D can be described by a unit axis $\hat{\mathbf{n}}$ and an angle $\alpha$. A unit vector has two independent degrees of freedom; the angle contributes one more — three in total.
 
 ### Quaternions
 
-A **quaternion** avoids this cost by precomputing the trigonometric values at storage time:
+A **quaternion** avoids expensive trigonometric evaluation at application time by precomputing the values at storage time:
 
 $$\mathbf{q} = \begin{bmatrix} \sin(\alpha)\, \hat{n}_x \\ \sin(\alpha)\, \hat{n}_y \\ \sin(\alpha)\, \hat{n}_z \\ \cos(\alpha) \end{bmatrix}$$
 
-Four numbers: three for the scaled axis, one for the cosine of the angle. This is not merely a storage trick — quaternions form an algebra in which:
+In ink, a quaternion is a 4-element float list `(qx; qy; qz; qw)`:
 
-- **Applying** a rotation to a vector is a direct formula involving $\mathbf{q}$.
+```k
+/ Quaternion multiply: p ⊗ q  (index order: x y z w)
+/ Each component: put all positives first, one negation last.
+/ Extra parens on each product (except last) prevent right-to-left mis-association.
+qmul: {[p;q]
+  (((p@3)*(q@0)) + ((p@0)*(q@3)) + ((p@1)*(q@2)) - (p@2)*(q@1)
+   ((p@3)*(q@1)) + ((p@1)*(q@3)) + ((p@2)*(q@0)) - (p@0)*(q@2)
+   ((p@3)*(q@2)) + ((p@0)*(q@1)) + ((p@2)*(q@3)) - (p@1)*(q@0)
+   ((p@3)*(q@3)) - (((p@0)*(q@0)) + ((p@1)*(q@1)) + (p@2)*(q@2)))
+}
+
+/ Conjugate of unit quaternion: negate vector part, keep scalar
+qconj: {(-(x@0); -(x@1); -(x@2); x@3)}
+
+/ Rotate vector v by quaternion q (sandwich product q v q*)
+qrotate: {[q;v]
+  p: v,0.
+  r: qmul[q; qmul[p; qconj q]]
+  3#r
+}
+
+/ Quaternion from axis-angle (axis must be unit vector)
+qAxisAngle: {[axis;angle]
+  s: sin 0.5*angle
+  (s*axis@0; s*axis@1; s*axis@2; cos 0.5*angle)
+}
+```
+
+The w-component of `qmul` uses `E1 - (E2 + E3 + E4)` rather than `E1 - E2 - E3 - E4`. In right-to-left k, `A - B - C - D` evaluates as `A - (B - (C - D)) = A - B + C - D`, which is wrong. Grouping all subtracted terms in a positive sum and subtracting the whole group gives the correct result.
+
+Quaternions form an algebra in which:
+- **Applying** a rotation to a vector is the sandwich product $q \mathbf{v} q^*$.
 - **Composing** two rotations is quaternion multiplication, faster than multiplying two $3 \times 3$ matrices.
-- **Inverting** a rotation requires only negating the first three components (since $\sin(-\alpha) = -\sin(\alpha)$ while $\cos(-\alpha) = \cos(\alpha)$).
-
-Quaternions also interpolate smoothly between orientations, which makes them the standard representation for rigid-body orientation in real-time simulation. In practice, use a well-tested library for quaternion arithmetic; the formulas are straightforward but sign errors are easy to introduce.
+- **Inverting** a rotation requires only negating the first three components.
 
 ---
 
 ## Key Takeaways
 
-- **Vectors** serve as both positions and directions. Subtraction gives the arrow from $\mathbf{a}$ to $\mathbf{b}$ as $\mathbf{b} - \mathbf{a}$.
-
-- **The dot product** measures projection. A zero dot product means perpendicularity. Decomposing a vector into normal and tangential components — the basis of all collision response — takes two lines.
-
-- **The cross product** builds a perpendicular vector and encodes area. Triangle normals, surface areas, and tetrahedral volumes all follow from it.
-
-- **Matrix columns are coordinate axes.** Reading matrix-vector multiplication as a weighted sum of columns reveals the geometric meaning instantly. The determinant measures volume scaling.
-
+- **Vectors** serve as both positions and directions. In ink, they are float lists; element-wise operations are built in.
+- **The dot product** measures projection: `+/ x*y`. A zero dot product means perpendicularity.
+- **The cross product** builds a perpendicular vector. Triangle normals, surface areas, and tetrahedral volumes all follow from `cross3`.
+- **Matrix columns are coordinate axes.** `mat3x3vec` reads the transform as a weighted sum of columns.
 - **Rotation matrices satisfy $R^T = R^{-1}$.** This makes undoing a rotation trivially cheap.
-
-- **Quaternions store $(\sin\alpha\, \hat{\mathbf{n}},\, \cos\alpha)$.** Four numbers represent any 3D rotation, compose efficiently, and invert by a sign flip. They are the standard rotation representation for physics simulation.
+- **Quaternions** store $(\sin\alpha\, \hat{\mathbf{n}},\, \cos\alpha)$. Four numbers represent any 3D rotation, compose efficiently, and invert by a sign flip.

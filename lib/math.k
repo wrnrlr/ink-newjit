@@ -33,6 +33,3 @@ TurbulentNoise: {x}
 
 / Apter Tree's
 ApterTree: [p: 0N 0 1 0 3; n: 15 12 9 18 2]
-
-5 = Pitagoras[3; 4] / Returns 1 (true)
-Catalan'!10         / Returns first 10 Catalan numbers: 1 1 2 5 14 42 132 429 1430 4862

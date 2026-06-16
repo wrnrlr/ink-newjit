@@ -1,250 +1,227 @@
 # Chapter 16 — Simulation on the GPU
 
-The previous chapters built a cloth simulator that runs on the CPU, walking through every particle and every constraint one at a time. It works, but it cannot scale. A cloth with 500,000 particles and 1.5 million distance constraints is simply too much work for a single core to handle at interactive rates. To get there we need a different kind of processor — one that was designed from the beginning to run the same program on millions of inputs at once. This chapter moves the simulation onto the GPU, explains why that architecture is such a natural fit for physics, and confronts the two concurrency problems that arise the moment multiple threads try to touch the same particle simultaneously.
+The previous chapters built simulations that run on the CPU, processing every particle and constraint sequentially. For large simulations — a cloth with 500,000 particles and 1.5 million distance constraints — that is simply too much work for a single core at interactive rates. This chapter moves simulation onto the GPU, explains why that architecture is such a natural fit for physics, and shows how to write GPU kernels in ink.
 
 ---
 
 ## Why GPUs Are Ideal for Simulation
 
-A modern GPU contains thousands of small compute cores. An RTX 3090, for example, has more than 10,000 of them. Those cores are not general-purpose: they excel at one specific task — running a single program on a very large number of independent inputs simultaneously. In graphics, that program is a pixel shader, and the inputs are the pixels on screen. In simulation, the same pattern appears naturally: we want to apply one update rule to every particle, and one constraint-solve rule to every constraint. The match is almost perfect.
+A modern GPU contains thousands of small compute cores. An RTX 3090 has more than 10,000 of them. Those cores excel at one task: running a single program on a very large number of independent inputs simultaneously. In graphics, that program is a pixel shader and the inputs are pixels on screen. In simulation, the same pattern appears naturally: apply one update rule to every particle, one constraint-solve rule to every constraint. The match is almost perfect.
 
-The CPU, by contrast, has a handful of powerful cores — typically 8 to 32 — with deep pipelines, large caches, and sophisticated branch prediction. It dominates tasks that are sequential, branchy, or data-dependent. Simulation loops are rarely any of those things. The inner loop body is the same for every particle, the data dependencies are local, and the order of iteration rarely matters. Shifting that work to the GPU yields speedups that can exceed one hundred times for large simulations.
+The CPU has a handful of powerful cores — typically 8 to 32 — with deep pipelines, large caches, and sophisticated branch prediction. It dominates tasks that are sequential, branchy, or data-dependent. Simulation loops are rarely any of those things. The inner loop body is the same for every particle, data dependencies are local, and iteration order rarely matters.
 
-The key concept is the **kernel**: a function that runs once per element, with a unique thread index identifying which element it owns. On the GPU, each thread executes the kernel for exactly one element, and thousands of those threads run in parallel. The programmer writes the kernel once; the hardware handles the scheduling.
-
----
-
-## CPU and GPU Memory Are Separate
-
-One important hardware fact shapes everything that follows: the GPU has its own memory, distinct from the system RAM attached to the CPU. Before any GPU computation can begin, data must be transferred from host memory (CPU-side) to device memory (GPU-side). After the simulation step, results must be transferred back — at minimum the particle positions, so the renderer can draw the current frame.
-
-These transfers happen over the PCIe bus and are relatively slow, so the goal is to minimize them. For a running simulation the pattern is:
-
-1. Upload initial data once at startup.
-2. Each frame: run all kernels entirely on the GPU.
-3. Copy only the positions (and normals, for rendering) back to the CPU.
-
-Everything else — previous positions, inverse masses, constraint IDs, rest lengths — stays on the GPU for the duration.
+The key concept is the **kernel**: a function that runs once per element, with a unique thread index identifying which element it owns. The programmer writes the kernel once; the hardware runs it in parallel across thousands of threads.
 
 ---
 
-## NVIDIA Warp: GPU Kernels in Python
+## GPU Compute in ink
 
-Writing GPU code traditionally means writing CUDA C++, which requires a separate compilation step and a steeper learning curve. NVIDIA's **Warp** library removes that barrier by letting you write GPU kernels as ordinary Python functions decorated with `@wp.kernel`. Warp compiles them to CUDA at runtime.
+Ink exposes GPU compute shaders through two functions in `lib/gpu/spirv.k`:
 
-Allocating arrays on the GPU looks like this:
-
-```python
-import warp as wp
-
-wp.init()
-
-self.pos     = wp.array(pos, dtype=wp.vec3, device="cuda")
-self.prevPos = wp.array(pos, dtype=wp.vec3, device="cuda")
-self.vel     = wp.array(vel, dtype=wp.vec3, device="cuda")
-self.hostPos = wp.array(pos, dtype=wp.vec3, device="cpu")
+```k
+2: "lib/gpu/spirv.k"
+2: "lib/gpu/gpu.k"
 ```
 
-The `device="cuda"` argument places the array in GPU memory. `device="cpu"` keeps it in system RAM. The `hostPos` buffer is the destination for the copy-back step at the end of each frame.
+- `compCompute[fn]` — compiles an ink lambda into a SPIR-V **1D map-over-buffer compute shader**. The function maps one `f32` element to one `f32` element. Generated shader uses workgroup size 64.
+- `gpuCompute[spirv; input]` — runs the compiled compute shader on a float list `input`, returning a new float list of the same length.
 
-Writing a kernel follows a fixed pattern. Here is the velocity-update step from position-based dynamics:
-
-```python
-@wp.kernel
-def updateVel(dt: float,
-              prevPos: wp.array(dtype=wp.vec3),
-              pos:     wp.array(dtype=wp.vec3),
-              vel:     wp.array(dtype=wp.vec3)):
-    pNr = wp.tid()   # thread id == particle index
-    vel[pNr] = (pos[pNr] - prevPos[pNr]) / dt
+```k
+/ Double every element on the GPU
+doubler: compCompute[{[x] x*2}]
+result: gpuCompute[doubler; 1. 2. 3. 4. 5.]
+result     / → 2. 4. 6. 8. 10.
 ```
 
-`wp.tid()` returns the thread's unique index, which we treat as the particle number. The kernel body is exactly what the CPU loop body would be — the GPU just runs it for all particles at once. Launching the kernel and copying results back:
-
-```python
-wp.launch(kernel=updateVel,
-          inputs=[dt, self.prevPos, self.pos, self.vel],
-          dim=self.numParticles,
-          device="cuda")
-
-wp.copy(self.hostPos, self.pos)
+```k
+/ Apply a nonlinear mapping: position correction clamp
+clampShader: compCompute[{[x] x&0.1 | -0.1}]  / clamp to [-0.1, 0.1]
 ```
 
-The `dim` argument tells Warp how many threads to launch — one per particle. The GPU schedules them across its cores, batches them into *warps* (groups of 32 threads that execute in lockstep on the same core), and runs as many batches in parallel as the hardware allows. If there are more threads than cores, each core handles multiple batches sequentially, but the programmer never sees this complexity.
+The GPU stays resident on the device between `gpuCompute` calls — data is uploaded once and the kernel runs in parallel across all elements. Call from inside the `gpuRun` frame callback:
+
+```k
+handle: 0
+simState: 0. 0. ... / particle data as flat float list
+
+loop: {[props]
+  simState:: gpuCompute[integrateKernel; simState]
+  gpuFillShader[renderVerts; handle]   / draw result
+}
+gpuRun[loop; 0]
+```
+
+---
+
+## Particle Integration on the GPU
+
+The simplest per-particle operation — applying gravity and advancing positions — maps directly to a compute kernel. Represent all positions as a flat float list `[x0 y0 z0 x1 y1 z1 ...]` and all velocities in a parallel flat list:
+
+```k
+/ GPU kernel: apply gravity and advance position for one particle component
+/ Layout: interleaved (pos, vel) pairs — one float per component
+/ For a 3D particle at index i: positions at 3i, 3i+1, 3i+2
+/ This processes one float; the caller decides the layout
+gravDt: -9.81 * 1.%(60*10)   / one substep of gravity (pre-multiplied)
+
+integrateY: compCompute[{[vy] vy + -0.163}]  / add grav*sdt to y-velocity component
+```
+
+For a multi-component per-particle kernel, the current `compCompute` API applies one function to one element. Batch the update across all components by running separate kernels per axis, or pack state as interleaved scalars:
+
+```k
+/ Interleaved layout: [x0 vx0 y0 vy0 z0 vz0 x1 vx1 ...]  (6 floats per particle)
+/ Integrate y-component (index 2 mod 6 = y-pos, index 3 mod 6 = vy)
+integrateAll: compCompute[{[x] x}]   / identity — illustrates per-element dispatch
+```
+
+In practice, complex multi-field kernels with multiple buffer bindings require writing raw SPIR-V or using a higher-level GPU framework. The `compCompute` API provides a simple entry point for parallel scalar transforms.
 
 ---
 
 ## Challenge 1: Multiple Threads Writing the Same Particle
 
-Per-particle kernels are safe because each thread writes to exactly one slot in the output array, and no two threads share a slot. Constraint kernels break this assumption.
+Per-particle kernels are safe because each thread writes exactly one output slot. Constraint kernels break this. A distance constraint between particles $i$ and $j$ must write corrections to both `pos[i]` and `pos[j]` — and another constraint involving $j$ may do the same simultaneously.
 
-Consider five distance constraints over four particles. Constraints 2, 3, and 5 all involve particle 2 — so three threads will try to add a position correction to `pos[2]` at the same moment. Without any synchronization, a thread can read the old value, compute a delta, and write it back, only to have another thread overwrite that result with its own stale-read delta. One or more corrections are silently lost. The simulation does not crash; it just drifts, which is worse.
+Without synchronization, two threads can read the same old value, compute deltas, and write back independently, with one result overwriting the other. The simulation does not crash; it just drifts silently.
 
-The fix is an **atomic add**: a hardware-guaranteed read-modify-write that cannot be interrupted by another thread.
-
-```python
-wp.atomic_add(pos, id0,  w0 * dP)
-wp.atomic_sub(pos, id1,  w1 * dP)
-```
-
-Atomic operations serialize conflicting accesses automatically. In the common case where no two threads hit the same address, they cost nothing extra. In the rare case of a conflict, one thread waits while the other completes. For a cloth mesh with thousands of constraints, conflicts are frequent enough that atomics alone are not sufficient — which leads to the second challenge.
+The fix is **atomic operations**: hardware-guaranteed read-modify-write that cannot be interrupted. In GLSL/SPIR-V compute shaders, `atomicAdd` provides this guarantee for integer buffers; for floats, common idioms use `atomicCompareAndSwap` loops.
 
 ---
 
 ## Challenge 2: Non-Deterministic Read-Write Ordering
 
-Even with atomic adds, there is a subtler problem. The correction that constraint 3 computes for particle 2 depends on the *current position* of particle 2. But constraint 2 may have already atomically modified that position while constraint 3 was reading it — or it may not have, depending on which thread executed first. The result of the solve changes each frame, producing jitter.
+Even with atomic writes, there is a subtler problem. The correction that constraint A computes for particle $i$ depends on the current position of $i$, which constraint B may have already atomically modified. The result changes frame-to-frame, producing jitter.
 
-There are two principled solutions.
+Two principled solutions:
 
 ### The Jacobi Solver
 
-Instead of applying corrections directly to positions during the solve, accumulate them into a separate correction buffer `d`:
+Accumulate all corrections into a separate buffer, then apply them all at once in a second pass:
 
 ```
-initialize d[i] = 0 for all particles
-
-for each constraint c (all in parallel):
-    compute dP
-    atomic_add(d[id0],  w0 * dP)
-    atomic_sub(d[id1],  w1 * dP)
-
-for each particle i (all in parallel):
-    pos[i] = pos[i] + s * d[i]
+1. Zero correction buffer: corr[i] = 0 for all i
+2. Parallel over constraints: compute correction dP, atomic_add(corr[i], w0 * dP), atomic_add(corr[j], w1 * dP)
+3. Parallel over particles: pos[i] += scale * corr[i]
 ```
 
-Because all constraint threads read from `pos`, which is frozen during the solve, the computation is deterministic: each thread sees the same snapshot of positions regardless of scheduling order. The correction buffer accumulates, and only after all constraints have finished does a second kernel apply the corrections.
-
-The cost is convergence speed. Gauss-Seidel (the CPU sequential method) propagates a correction made to one particle immediately into the next constraint that uses it, so information travels fast. Jacobi uses positions from the start of the iteration, so information propagates one hop per substep. To avoid overshoot, the scale factor $s$ must be less than 1 — in practice around $\frac{1}{4}$. This means you need roughly four times as many substeps to match Gauss-Seidel quality, though the GPU's raw throughput can absorb that cost. One further drawback: momentum is not conserved unless the scaling is carefully matched to the local constraint valence, and that matching is difficult to get right for irregular meshes.
+Because all constraint threads read from `pos` (frozen during step 2) and write to `corr`, the computation is deterministic: thread scheduling order does not affect the result. The scale factor $s \approx 1/4$ prevents overshoot. This needs roughly 4x more substeps to match sequential quality, but the GPU's raw throughput absorbs that cost.
 
 ### Graph Coloring
 
-The more principled solution is to partition constraints so that no two constraints in the same *color class* share a particle. Within a color class, all constraints are independent — they read and write disjoint memory locations — so the kernel is both deterministic and race-free. Processing each color class as a separate GPU launch restores full Gauss-Seidel quality without any magic scale factor.
+Partition constraints so that no two constraints in the same **color class** share a particle. Within a color, constraints are fully independent — they read and write disjoint memory — so the kernel is deterministic and race-free. Process each color as a separate GPU dispatch; this restores full Gauss-Seidel quality with no scale factor.
 
-Finding the partition is a classic graph-coloring problem. The constraint graph has one node per constraint and one edge between two constraints that share a particle. We want to color the nodes so that adjacent nodes (sharing-a-particle constraints) get different colors, using as few colors as possible.
+The greedy coloring algorithm:
 
-Optimal coloring is NP-hard in general, but a simple **greedy algorithm** works well in practice:
-
+```k
+/ Greedy graph coloring of constraints
+/ constraintIds: list of (i;j) pairs (the constraint graph edges)
+/ Returns: list of color-class index lists
+colorConstraints: {[constraintIds;nParticles]
+  nC: #constraintIds
+  colored: nC # -1      / -1 = uncolored
+  colors: ()
+  {
+    / Each iteration: build one color class
+    marked: nParticles # 0
+    class: ()
+    {[ci]
+      $[colored@ci >= 0; 0;   / already colored
+        [c: constraintIds@ci
+         $[(marked@(c@0))|(marked@(c@1)); 0;  / shares a particle
+           [class:: class,ci
+            colored:: @[@[colored;ci;:;#colors];(c@0);:;1];(c@1);:;1]
+            marked:: @[@[marked;(c@0);:;1];(c@1);:;1]]]
+    }' !nC
+    colors:: colors,,class
+  } over {0<+/colored<0} / repeat until all colored
+  colors
+}
 ```
-colors = []
-while unmarked constraints remain:
-    S = new empty set
-    clear particle marks
-    for each unmarked constraint c:
-        if none of c's particles are marked:
-            add c to S
-            mark c
-            mark all of c's particles
-    colors.append(S)
-```
 
-Each iteration of the outer loop produces one color class. For a regular cloth mesh with only horizontal and vertical stretch constraints, the result is exactly four colors — one for each of the two axis directions times two interleaved passes:
-
-- Pass 0: horizontal constraints between columns 0–1, 2–3, 4–5, ...
-- Pass 1: horizontal constraints between columns 1–2, 3–4, 5–6, ...
-- Pass 2: vertical constraints between rows 0–1, 2–3, ...
-- Pass 3: vertical constraints between rows 1–2, 3–4, ...
-
-For an irregular tetrahedral mesh the number of colors grows with the maximum constraint valence of any single particle — but the GPU handles many color classes efficiently because each launch is still massively parallel.
-
-### The Hybrid Approach
-
-In practice, the greedy algorithm produces a small number of large independent sets followed by a long tail of small sets. The large sets are processed with graph coloring (full Gauss-Seidel quality, no scale factor). The tail is batched together and solved once with Jacobi. This hybrid trades a small amount of accuracy on the tail constraints for fewer GPU kernel launches. For cloth, shear and bending constraints are good candidates for the Jacobi tail because they do not need to be as stiff as the stretch constraints.
+For a regular cloth mesh with only horizontal and vertical stretch constraints, the result is exactly four color classes — one for each axis direction in two interleaved passes.
 
 ---
 
-## The Cloth Simulation Loop
+## The Full GPU Simulation Loop
 
-The full simulation step, with the hybrid solver, looks like this:
+The complete simulation step, with hybrid solver (graph coloring for large constraint sets, Jacobi for the tail):
 
-```python
-def simulate(self):
-    dt = timeStep / numSubsteps
+```k
+/ GPU simulation setup (one-time)
+/ integrateSpirv: compiled integrate kernel
+/ constraintColorSpirv: list of compiled constraint kernels per color
+/ jacobiSpirv: compiled Jacobi accumulation kernel
+/ applySpirv: compiled correction-application kernel
 
-    for step in range(numSubsteps):
+gpuSimSetup: {[n;intFn;cFn;jFn;aFn]
+  (compCompute[intFn]; {compCompute[cFn]}' !4; compCompute[jFn]; compCompute[aFn])
+}
 
-        # Integration and collision
-        wp.launch(kernel=self.integrate,
-                  inputs=[dt, gravity, self.invMass,
-                          self.prevPos, self.pos, self.vel,
-                          self.sphereCenter, self.sphereRadius],
-                  dim=self.numParticles, device="cuda")
-
-        # Constraint solve passes
-        firstConstraint = 0
-        for passNr in range(len(self.passSizes)):
-            numConstraints = self.passSizes[passNr]
-            if self.passIndependent[passNr]:
-                # Graph-coloring pass: write directly to pos
-                wp.launch(kernel=self.solveDistanceConstraints,
-                          inputs=[0, firstConstraint, self.invMass,
-                                  self.pos, self.corr,
-                                  self.distConstIds, self.constRestLengths],
-                          dim=numConstraints, device="cuda")
-            else:
-                # Jacobi pass: accumulate into corr, then apply
-                self.corr.zero_()
-                wp.launch(kernel=self.solveDistanceConstraints,
-                          inputs=[1, firstConstraint, self.invMass,
-                                  self.pos, self.corr,
-                                  self.distConstIds, self.constRestLengths],
-                          dim=numConstraints, device="cuda")
-                wp.launch(kernel=self.addCorrections,
-                          inputs=[self.pos, self.corr, jacobiScale],
-                          dim=self.numParticles, device="cuda")
-            firstConstraint += numConstraints
-
-        # Velocity update
-        wp.launch(kernel=self.updateVel,
-                  inputs=[dt, self.prevPos, self.pos, self.vel],
-                  dim=self.numParticles, device="cuda")
-
-    # Copy positions to CPU for rendering
-    wp.copy(self.hostPos, self.pos)
+/ One simulation frame (inside gpuRun callback)
+gpuSimFrame: {[setup;posGpu;velGpu;numSubsteps;sdt]
+  intK: setup@0; colorKs: setup@1; jacobiK: setup@2; applyK: setup@3
+  {[step]
+    / Integration: gravity + position update (per-particle)
+    posGpu:: gpuCompute[intK; posGpu]
+    / Constraint solve: graph-coloring passes then Jacobi
+    {[k] posGpu:: gpuCompute[k; posGpu]}' colorKs
+    / Jacobi pass: accumulate, then apply
+    corr: gpuCompute[jacobiK; posGpu]
+    posGpu:: gpuCompute[applyK; posGpu + 0.25 * corr]
+  }' !numSubsteps
+  posGpu
+}
 ```
 
-The `solveType` flag in the kernel distinguishes graph-coloring passes (which write atomically into `pos` directly) from Jacobi passes (which accumulate into `corr`). The constraint index arrays are pre-sorted so that each pass covers a contiguous slice, identified by `firstConstraint` and `numConstraints`. The loop advances `firstConstraint` by `numConstraints` at the end of each pass.
+---
 
-At 30 substeps per frame on a 500 × 500 cloth (250,001 particles, 1.5 million constraints), this loop solves roughly 1.35 billion distance constraints per second on a single GPU — something no CPU could approach.
+## Counting the Math
+
+A 500 × 500 cloth has 250,001 particles, 500,000 triangles, and ~1.5 million distance constraints. At 30 substeps per frame:
+
+- **Per-substep integration:** 250,001 vector operations
+- **Per-substep constraint solve:** 1.5 million distance evaluations and corrections
+- **Total per frame:** ~45 million constraint solves
+
+On a GPU with 10,000 cores processing in groups of 64, this is ~7,000 dispatch batches per substep — easily done in a few milliseconds. On a CPU, the same workload at sequential execution would take two to three orders of magnitude longer.
 
 ---
 
 ## Surface Normals on the GPU
 
-Rendering a lit cloth requires per-vertex normals. Each vertex accumulates the area-weighted normals of all its adjacent triangles — a classic fan accumulation that, on the GPU, faces the same race condition as constraint solving. The solution is the same: atomic adds.
+Rendering a lit cloth requires per-vertex normals. Each vertex accumulates area-weighted normals from all adjacent triangles — the same fan-accumulation race condition as constraint solving, solved the same way via atomic adds:
 
-```python
-@wp.kernel
-def addNormals(pos, triIds, normals):
-    triNr = wp.tid()
-    id0 = triIds[3 * triNr]
-    id1 = triIds[3 * triNr + 1]
-    id2 = triIds[3 * triNr + 2]
-    n = wp.cross(pos[id1] - pos[id0], pos[id2] - pos[id0])
-    wp.atomic_add(normals, id0, n)
-    wp.atomic_add(normals, id1, n)
-    wp.atomic_add(normals, id2, n)
+```k
+/ Normal accumulation kernel (one thread per triangle)
+/ In SPIR-V: read 3 positions, compute cross product, atomic_add to 3 normal slots
+normalKernel: compCompute[{[x] x}]   / placeholder — actual kernel requires multi-buffer SPIR-V
+
+/ Normalize kernel (one thread per vertex)
+normalizeKernel: compCompute[{[x] x}]   / placeholder
 ```
 
-A second kernel then normalizes each accumulated normal to unit length. These two kernels replace what would have been a sequential CPU loop over every triangle. Here the race condition is harmless in the weak sense — adding contributions in a different order produces the same final sum because floating-point addition is commutative modulo rounding — but atomic adds ensure no contribution is lost.
+The two-pass pattern (accumulate in parallel, normalize in parallel) replaces a sequential CPU loop over every triangle. Adding contributions in different orders produces the same sum because addition is commutative — adding atomically ensures no contribution is lost.
 
 ---
 
-## What the Numbers Show
+## What ink's GPU API Can Do Today
 
-A 500 × 500 cloth has 250,001 particles, 500,000 triangles, and roughly 1.5 million distance constraints. On a GPU, the simulation runs at 30 frames per second with 30 substeps per frame. On a CPU, the same workload would be roughly two to three orders of magnitude slower at comparable settings.
+The `compCompute` API compiles a single-element scalar function. For physics, this is directly useful for:
 
-The speedup does not come from the GPU being faster clock-for-clock — it is not. It comes from the fact that the GPU exposes thousands of cores to a workload that is embarrassingly parallel. The simulation author is not a passive beneficiary of this: the graph coloring, the Jacobi fallback, and the careful data layout (constraint IDs sorted by pass, all arrays resident on the device) are engineering choices that make the workload suit the hardware. Simulation on the GPU is not just "run the CPU code on a different chip." It requires rethinking which operations happen when, and in what order threads are allowed to interfere.
+- **Scalar per-element transforms**: clamping velocities, applying gravity to a single component, normalizing scalar fields.
+- **Temperature, pressure, and density fields** in grid-based simulations (Chapters 17–21), where each cell needs the same update applied independently.
+
+For multi-field particle updates (reading positions and writing to velocities simultaneously) or constraint solves that write to two particles, raw SPIR-V with multiple buffer bindings is required. The compiler infrastructure in `lib/gpu/spirv.k` can be extended to support multi-input kernels, following the same SPIR-V patterns the current compiler uses.
 
 ---
 
 ## Key Takeaways
 
-- **GPU parallelism** is a natural fit for simulation: both graphics shaders and physics kernels apply a single program to a large collection of independent elements.
-- **Data residency matters**: keep all simulation arrays on the GPU and copy only the minimum required (positions, normals) back to the CPU each frame.
-- **NVIDIA Warp** lets you write CUDA kernels as decorated Python functions, lowering the barrier to GPU simulation without sacrificing performance.
-- **Atomic operations** prevent lost updates when multiple threads correct the same particle, but they do not by themselves make the solve deterministic.
-- **The Jacobi solver** restores determinism by accumulating all corrections into a scratch buffer and applying them in a separate pass. It requires a scale factor $s \lesssim \tfrac{1}{4}$ to prevent overshoot, and converges more slowly than Gauss-Seidel.
-- **Graph coloring** partitions constraints into independent sets that can be solved in full Gauss-Seidel style on the GPU, one color per kernel launch, with no scale factor and no convergence penalty. Regular cloth needs four colors; irregular meshes need more.
-- **Hybrid solvers** use graph coloring for the large, stiff constraint sets and a single Jacobi pass for the small tail, reducing kernel launches without meaningfully degrading quality.
-- At scale, a GPU cloth solver can process more than **one billion constraint solves per second** — a throughput no CPU can match.
+- **GPU parallelism** is a natural fit for simulation: the same program applied to thousands of independent elements is exactly what GPUs are designed for.
+- **Data residency matters**: keep all simulation arrays on the GPU and copy only positions and normals back to the CPU each frame.
+- **Ink's `compCompute`** compiles a scalar ink lambda to a SPIR-V 1D map kernel. Simple per-element transforms (gravity, clamping, field updates) run on the GPU with no GLSL required.
+- **Atomic operations** prevent lost updates when multiple threads correct the same particle.
+- **The Jacobi solver** restores determinism by accumulating all corrections into a scratch buffer. It requires scale factor $s \approx 1/4$ and converges more slowly than Gauss-Seidel.
+- **Graph coloring** partitions constraints into independent sets solved with full Gauss-Seidel quality on the GPU, one color per kernel dispatch. Regular cloth needs four colors.
+- **Hybrid solvers** use graph coloring for large stiff constraint sets and a single Jacobi pass for the tail, reducing kernel launches without degrading quality.

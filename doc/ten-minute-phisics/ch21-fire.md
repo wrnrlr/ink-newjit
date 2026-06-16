@@ -1,14 +1,16 @@
 # Chapter 21 — Simulating Fire
 
-Few phenomena in real-time graphics are as immediately recognizable — and as difficult to fake convincingly — as fire. Flame flickers, rises, swirls, dims to glowing embers, and fades to smoke. Each of those behaviors arises from different physics, yet they must all coexist in a single coherent simulation running at interactive frame rates. This chapter builds a fire simulator directly on top of the Eulerian fluid simulator introduced in Chapter 17. The key insight is that fire is simply a gas with a temperature field attached to it: that one extra scalar quantity, combined with buoyancy forces and injected turbulence, is sufficient to produce convincing flames in a browser.
+Few phenomena in real-time graphics are as immediately recognizable — and as difficult to fake convincingly — as fire. Flame flickers, rises, swirls, dims to glowing embers, and fades to smoke. This chapter builds a fire simulator directly on top of the Eulerian fluid simulator from Chapter 17. The key insight is that fire is simply a gas with a temperature field attached: that one extra scalar quantity, combined with buoyancy forces and injected turbulence, is sufficient to produce convincing flames.
+
+---
 
 ## From Fluid to Fire
 
-The Eulerian fluid method represents a gas as a velocity field sampled on a regular grid. Each simulation step has three phases: modify the velocity field (for external forces), enforce incompressibility (the projection step), and advect the field quantities — velocity and any scalars — along with the flow.
+The Eulerian fluid method represents a gas as a velocity field on a regular grid. Each simulation step has three phases: modify the velocity field (external forces), enforce incompressibility (projection), and advect field quantities along with the flow.
 
-For a fire simulator, the modification step changes: instead of downward gravity, hot gas rises. And instead of a passive smoke-density scalar, we track a temperature field $T$. Everything else — the staggered grid, the pressure-projection solver, the semi-Lagrangian advection — carries over unchanged.
+For a fire simulator, the modification step changes: instead of downward gravity, hot gas rises. And instead of a passive smoke-density scalar, we track a temperature field $T$. Everything else — the staggered grid, the pressure-projection solver, the semi-Lagrangian advection — carries over unchanged from Chapter 17.
 
-The full per-frame loop becomes:
+The full per-frame loop:
 
 ```
 1. Modify velocities  (buoyancy lift + swirl turbulence)
@@ -17,9 +19,11 @@ The full per-frame loop becomes:
 4. Update temperatures  (ignite sources, cool, smooth)
 ```
 
+---
+
 ## The Temperature Field
 
-Rather than maintaining separate fields for fuel concentration, combustion products, and smoke density, this simulation collapses everything into a single normalized scalar $T \in [0, 1]$. The interpretation is a simple color-coded encoding of the combustion lifecycle:
+Rather than maintaining separate fields for fuel, combustion products, and smoke density, collapse everything into a single normalized scalar $T \in [0, 1]$ encoding the combustion lifecycle:
 
 | Range | Meaning |
 |---|---|
@@ -27,175 +31,270 @@ Rather than maintaining separate fields for fuel concentration, combustion produ
 | $T \in [0.3, 0.5]$ | Glowing embers, dark red |
 | $T \in [0.0, 0.3]$ | Smoke (dark gray to black) |
 
-At every time step, fire source cells — cells inside or just outside a burning obstacle, or cells near a burning floor — have their temperature reset to $T = 1$. All other cells cool:
+At every time step, fire source cells have their temperature reset to $T = 1$. All other cells cool:
 
 $$T \leftarrow \max(T - r \cdot \Delta t,\; 0)$$
 
-where the cooling rate $r$ differs between the fire and smoke regimes. Flames cool quickly (rate 1.2 per second in the reference implementation) because the bright combustion phase is short-lived. Smoke cools more slowly (rate 0.3 per second) because dispersed particles retain heat longer. Once $T$ reaches zero the cell is simply dark background.
+Flames cool quickly (rate 1.2/s) because the bright combustion phase is short-lived. Smoke cools more slowly (rate 0.3/s) because dispersed particles retain heat longer.
 
-After cooling, the temperature is advected along the velocity field just like the velocity components themselves, using the same semi-Lagrangian back-tracing:
+```k
+/ Temperature cooling and source ignition
+/ f: fluid grid tuple (from ch17); srcCells: list of source cell indices
+/ fireRate: cooling rate in flame zone (e.g. 1.2); smokeRate: cooling rate in smoke zone (e.g. 0.3)
+gFireT: 0   / global temperature field (required for lambda access)
 
-```javascript
-advectTemperature(dt) {
-    this.newT.set(this.t);
-    var n = this.numY, h = this.h, h2 = 0.5 * h;
-
-    for (var i = 1; i < this.numX - 1; i++) {
-        for (var j = 1; j < this.numY - 1; j++) {
-            if (this.s[i*n + j] != 0.0) {
-                var u = (this.u[i*n + j] + this.u[(i+1)*n + j]) * 0.5;
-                var v = (this.v[i*n + j] + this.v[i*n + j+1]) * 0.5;
-                var x = i*h + h2 - dt*u;
-                var y = j*h + h2 - dt*v;
-                this.newT[i*n + j] = this.sampleField(x, y, T_FIELD);
-            }
-        }
-    }
-    this.t.set(this.newT);
+updateTemp: {[f;dt;srcCells;fireRate;smokeRate]
+  nx:f@1; ny:f@2; s:f@8
+  t: gFireT
+  / Cool all cells
+  t2: {[idx]
+    tc: t@idx
+    rate: $[tc>0.5; fireRate; smokeRate]
+    tc - rate*dt | 0.
+  }' !nx*(f@2)
+  / Reset source cells to T=1
+  t3: {[idx] @[t2;idx;:;1.]}/ t2, srcCells
+  gFireT:: t3
+  f
 }
 ```
 
-Each cell traces its position backward by one time step and samples the temperature at that upstream location. This is the same semi-Lagrangian scheme used for velocity advection: unconditionally stable, first-order accurate, and slightly diffusive — which actually helps, because numerical diffusion softens the temperature field in a visually plausible way.
+---
+
+## Advecting Temperature
+
+Temperature is advected just like velocity — semi-Lagrangian backward trace from Chapter 17:
+
+```k
+/ Advect temperature field (same pattern as advectSmoke in ch17)
+advectTemp: {[f;dt]
+  nx:f@1; ny:f@2; h:f@3; nC:f@4; u:f@5; v:f@6; s:f@8
+  h2: 0.5*h
+  newT: gFireT
+  {[i]
+    {[j]
+      ii: i*ny+j
+      $[(s@ii)=1.;
+        [ux: ((u@(i*ny+j)) + u@((i+1)*ny+j)) * 0.5
+         vx: ((v@(i*ny+j)) + v@(i*ny+j+1)) * 0.5
+         x2: i*h+h2 - dt*ux; y2: j*h+h2 - dt*vx
+         x2: x2&(nx-2)*h+h2 | h2; y2: y2&(ny-2)*h+h2 | h2
+         newT:: @[newT; ii; :; bilinSample[gFireT;nx;ny;h;h2;h2;x2;y2]]];
+        0]
+    }' 1+!ny-2
+  }' 1+!nx-2
+  gFireT:: newT
+  f
+}
+```
+
+---
 
 ## Buoyancy: Hot Air Rises
 
-The physical reason fire rises is buoyancy. Hot gas is less dense than cold gas; the surrounding cooler air pushes it upward. Rather than modeling density differences explicitly, the simulator converts temperature directly into an upward velocity target:
+Hot gas is less dense than cold gas; the surrounding cooler air pushes it upward. Rather than modeling density differences explicitly, convert temperature directly into an upward velocity target:
 
 $$v_{\text{target}} = v_{\text{lift}} \cdot T$$
 
-The current vertical velocity $v$ is then driven toward $v_{\text{target}}$ with a simple first-order rate:
+The current vertical velocity is driven toward $v_{\text{target}}$ with a first-order rate $a$:
 
 $$v \leftarrow v + a \cdot (v_{\text{target}} - v) \cdot \Delta t$$
 
-where $v_{\text{lift}}$ controls how fast the hottest gas rises (set to 3.0 m/s in the reference) and $a$ is an acceleration constant (6.0 per second) that governs how quickly the velocity catches up. This formulation elegantly ties the lift strength to temperature: a cell at $T = 1$ is pulled toward the full lift velocity, while a cooling cell at $T = 0.3$ generates only a gentle upward nudge, and fully cooled smoke at $T = 0$ contributes no lift at all.
-
-In code, these two lines sit inside the per-cell temperature update:
-
-```javascript
-let targetV = t * lift;
-this.v[i*n + j] += (targetV - v) * acceleration;
+```k
+/ Apply buoyancy: hot cells rise
+/ vLift: max lift velocity (e.g. 3.0 m/s); a: acceleration rate (e.g. 6.0 /s)
+applyBuoyancy: {[f;dt;vLift;a]
+  nx:f@1; ny:f@2; nC:f@4; v:f@6; s:f@8
+  v2: v
+  {[ii]
+    $[(s@ii)=1.;
+      [targetV: vLift * gFireT@ii
+       v2:: @[v2; ii; +; (targetV - v@ii) * a * dt]];
+      0]
+  }' !nC
+  @[f; 6; :; v2]
+}
 ```
 
-## The Swirl Problem
+A cell at $T = 1$ is pulled toward the full lift velocity. A cooling cell at $T = 0.3$ generates only a gentle upward nudge. Fully cooled smoke at $T = 0$ contributes no lift.
 
-A burning floor with uniform initial conditions and no external perturbation produces a flat, horizontal band of yellow-to-red. The physics are correct — the gas rises uniformly — but the result looks nothing like fire. Real flames are turbulent. Small eddies break the symmetry and produce the characteristic flickering columns and swirling tendrils.
+---
 
-Turbulence in a real gas emerges spontaneously from fluid instabilities. In a coarse simulation grid, those instabilities are suppressed because the grid cannot represent the small velocity variations that seed them. The solution is to inject turbulence artificially using **swirl particles**.
+## Swirl Particles: Injecting Turbulence
 
-A swirl particle is a lightweight vortex descriptor:
+A burning floor with uniform initial conditions produces a flat, horizontal band of yellow-to-red. The physics are correct but the result looks nothing like fire. Real flames are turbulent — small eddies break the symmetry and produce flickering columns and swirling tendrils.
 
+Turbulence in a real gas emerges spontaneously from fluid instabilities. On a coarse simulation grid, those instabilities are suppressed. The solution: inject turbulence artificially using **swirl particles**.
+
+A swirl particle has:
 - **position** $(x, y)$ — advected with the fluid each step
-- **radius** $r$ — the region of influence
+- **radius** $r$ — region of influence
 - **angular velocity** $\omega$ — positive for counter-clockwise rotation
-- **remaining lifetime** — decremented each step; the swirl is deleted when it expires
+- **remaining lifetime** — decremented each step; deleted when it expires
 
-Swirls are spawned stochastically at fire-source cells each frame. The probability scales with the cell area $h^2$, so the number of new swirls per frame stays roughly constant as the grid resolution changes. Each new swirl is assigned a random angular velocity $\omega$ drawn uniformly from $[-\omega_{\max}, +\omega_{\max}]$, which gives the fire a mix of left-spinning and right-spinning vortices.
+Swirls are spawned stochastically at fire-source cells each frame.
 
-## Swirl Velocity Influence
-
-Each active swirl modifies the velocity field of nearby grid nodes. Let $\mathbf{d} = \mathbf{x}_{\text{grid}} - \mathbf{x}_{\text{swirl}}$ be the displacement from the swirl center to a grid node, and $d = |\mathbf{d}|$. The swirl imposes a tangential velocity at that node — perpendicular to $\mathbf{d}$ — with magnitude $\omega \cdot d$. Written component-wise, the target velocity at the grid node is the swirl's own advected velocity plus the rotational component:
-
-$$u_{\text{target}} = u_{\text{swirl}} + \omega \cdot d_y$$
-$$v_{\text{target}} = v_{\text{swirl}} - \omega \cdot d_x$$
-
-The current grid velocity is pulled toward this target, scaled by a kernel $k(d)$ that falls off with distance:
-
-$$k(d) = \begin{cases} 1 & d < 0.8\,r \\ \frac{r - d}{0.2\,r} & 0.8\,r \le d < r \\ 0 & d \ge r \end{cases}$$
-
-The flat top of the kernel (full strength out to 80% of the radius, then a linear ramp to zero) means the swirl applies uniform rotation near its center and a smooth rolloff at the edge, avoiding velocity discontinuities in the grid.
-
-```javascript
-if (dim == 0) {
-    let target = ry * omega + swirlU;
-    let u = this.u[n*i + j];
-    this.u[n*i + j] += (target - u) * s;
+```k
+/ Swirl state: list of (x; y; r; omega; ttl) tuples
+/ Spawn new swirls at source cells with probability p
+spawnSwirls: {[swirls;srcCells;nx;ny;h;spawnProb;maxOmega;ttl]
+  newS: ,/ {[idx]
+    $[(rand 1.)@0 < spawnProb;
+      ,((idx div ny) * h + 0.5*h;    / x position
+        (idx mod ny) * h + 0.5*h;    / y position
+        h * (1. + (rand 1.)@0);      / radius: 1-2 cells
+        maxOmega * (2.*(rand 1.)@0 - 1.);  / random sign
+        ttl);
+      ()]
+  }' srcCells
+  swirls, newS
 }
-else {
-    let target = -rx * omega + swirlV;
-    let v = this.v[n*i + j];
-    this.v[n*i + j] += (target - v) * s;
+
+/ Update swirl positions (advect with fluid) and decrement lifetime
+updateSwirls: {[swirls;f;dt;swirlDamp]
+  nx:f@1; ny:f@2; h:f@3; u:f@5; v:f@6
+  {[sw]
+    x:sw@0; y:sw@1; r:sw@2; omega:sw@3; ttl:sw@4
+    / Sample fluid velocity at swirl position
+    su: (1.-swirlDamp) * bilinSample[u;nx;ny;h;0.;0.5*h;x;y]
+    sv: (1.-swirlDamp) * bilinSample[v;nx;ny;h;0.5*h;0.;x;y]
+    (x+su*dt; y+sv*dt; r; omega; ttl-dt)
+  }' {sw@4>0.}# swirls    / remove expired swirls
 }
 ```
 
-Here `s` is the kernel value, `swirlU` and `swirlV` are the swirl's own velocity (sampled from the fluid field), and `rx`, `ry` are the components of $\mathbf{d}$.
+### Swirl Velocity Influence
 
-Swirls are advected each step by sampling the velocity field at their current position. A small damping factor is applied to keep them from accelerating indefinitely:
+Each active swirl modifies nearby grid velocities. For a swirl at $(sx, sy)$ with angular velocity $\omega$ and radius $r$, the influence on a grid node at displacement $(dx, dy)$ from the swirl center:
 
-```javascript
-let swirlU = (1.0 - swirlDamping) * this.sampleField(x, y, U_FIELD);
-let swirlV = (1.0 - swirlDamping) * this.sampleField(x, y, V_FIELD);
-x += swirlU * dt;
-y += swirlV * dt;
+$$u_{\text{target}} = u_{\text{swirl}} + \omega \cdot dy, \quad v_{\text{target}} = v_{\text{swirl}} - \omega \cdot dx$$
+
+The kernel falls off with distance: full strength within 80% of $r$, linear ramp to zero at $r$, zero beyond.
+
+```k
+/ Apply swirl influence to grid velocities
+applySwirls: {[f;swirls;dt]
+  nx:f@1; ny:f@2; h:f@3; u:f@5; v:f@6
+  h2: 0.5*h
+  u2: u; v2: v
+  {[sw]
+    sx:sw@0; sy:sw@1; r:sw@2; omega:sw@3
+    / Compute swirl velocity at its own position
+    su: bilinSample[u;nx;ny;h;0.;h2;sx;sy]
+    sv: bilinSample[v;nx;ny;h;h2;0.;sx;sy]
+    / Find affected grid nodes (bounding box of influence radius)
+    i0: 0|_((sx-r)%h); i1: (nx-1)&_((sx+r)%h)
+    j0: 0|_((sy-r)%h); j1: (ny-1)&_((sy+r)%h)
+    {[i]
+      {[j]
+        / u-face at (i*h, j*h+0.5h)
+        dx: i*h - sx; dy: j*h+h2 - sy
+        d: sqrt (dx*dx)+dy*dy
+        $[d<r;
+          [k: $[d<0.8*r; 1.; (r-d)%(0.2*r)]
+           tgt: su + omega*dy
+           u2:: @[u2; i*ny+j; +; (tgt - u@(i*ny+j)) * k]];
+          0]
+        / v-face at (i*h+0.5h, j*h)
+        dx2: i*h+h2 - sx; dy2: j*h - sy
+        d2: sqrt (dx2*dx2)+dy2*dy2
+        $[d2<r;
+          [k2: $[d2<0.8*r; 1.; (r-d2)%(0.2*r)]
+           tgt2: sv - omega*dx2
+           v2:: @[v2; i*ny+j; +; (tgt2 - v@(i*ny+j)) * k2]];
+          0]
+      }' j0+!j1-j0+1
+    }' i0+!i1-i0+1
+  }' swirls
+  @[@[f;5;:;u2];6;:;v2]
+}
 ```
 
-This way each swirl drifts upward through the flame, injecting its rotational pattern as it goes, then eventually expires. A probability slider in the interactive demo controls how frequently new swirls are born; at high probability the fire is visibly more turbulent and chaotic.
+---
 
 ## Temperature Smoothing
 
-One subtle artifact of resetting source cells to $T = 1$ every frame is that the boundary of the source region creates a sharp edge in the temperature field. When those cells are advected they produce a hard seam. The simulation addresses this by running a single smoothing pass over cells that are at the source temperature: each such cell is replaced by the average of its four diagonal neighbors. This is applied once per step and costs very little, but visibly softens the base of the flame.
+Resetting source cells to $T = 1$ every frame creates a sharp edge in the temperature field. A single smoothing pass over those cells (replace with diagonal neighbor average) softens the base of the flame:
 
-```javascript
-for (let i = 1; i < this.numX - 1; i++) {
-    for (let j = 1; j < this.numY - 1; j++) {
-        if (this.t[i * n + j] == 1.0) {
-            let avg = (
-                this.t[(i-1)*n + (j-1)] + this.t[(i+1)*n + (j-1)] +
-                this.t[(i+1)*n + (j+1)] + this.t[(i-1)*n + (j+1)]) * 0.25;
-            this.t[i * n + j] = avg;
-        }
-    }
+```k
+/ Smooth temperature at source cells using diagonal neighbor average
+smoothTempAtSrc: {[srcCells;nx;ny]
+  {[idx]
+    i: idx div ny; j: idx mod ny
+    $[(gFireT@idx)=1. & i>0 & i<nx-1 & j>0 & j<ny-1;
+      [avg: ((gFireT@((i-1)*ny+j-1)) + (gFireT@((i+1)*ny+j-1))) + ((gFireT@((i+1)*ny+j+1)) + gFireT@((i-1)*ny+j+1))
+       gFireT:: @[gFireT; idx; :; avg*0.25]];
+      0]
+  }' srcCells
 }
 ```
 
-## Rendering
+---
 
-Color mapping is straightforward once the temperature field exists. Three piecewise-linear gradients cover the full range:
+## Temperature-to-Color Mapping
 
-```javascript
-function getFireColor(val) {
-    val = Math.min(Math.max(val, 0.0), 1.0);
-    var r, g, b;
-    if (val < 0.3) {
-        let s = val / 0.3;
-        r = 0.2*s; g = 0.2*s; b = 0.2*s;           // black → dark gray
-    } else if (val < 0.5) {
-        let s = (val - 0.3) / 0.2;
-        r = 0.2 + 0.8*s; g = 0.1; b = 0.1;          // dark gray → red
-    } else {
-        let s = (val - 0.5) / 0.48;
-        r = 1.0; g = s; b = 0.0;                     // red → yellow
-    }
-    return [255*r, 255*g, 255*b, 255];
+Color mapping uses three piecewise-linear gradients:
+
+```k
+/ Map temperature T in [0,1] to (r;g;b) in [0,1]
+fireColor: {[T]
+  t: 0.|T&1.
+  $[t<0.3;
+    [s: t%0.3; (0.2*s; 0.2*s; 0.2*s)];       / black → dark gray (smoke)
+    $[t<0.5;
+      [s: (t-0.3)%0.2; (0.2+0.8*s; 0.1; 0.1)]; / dark gray → red (embers)
+      [s: (t-0.5)%0.48; (1.; s; 0.)]]]         / red → yellow (flame)
+}
+
+/ Map grid to pixel colors
+gridColors: {[nx;ny] {[ii] fireColor[gFireT@ii]}' !nx*ny}
+```
+
+---
+
+## The Full Fire Simulation Step
+
+```k
+/ Complete fire step: buoyancy + swirls → project → advect → update temps
+/ swirls: current swirl list; srcCells: source cell indices; gFireT must be initialized
+fireStep: {[f;swirls;dt;srcCells;vLift;a;numIters;omega;maxOmega;ttl;spawnProb;fireRate;smokeRate;swirlDamp]
+  nx:f@1; ny:f@2
+
+  / 1. Apply buoyancy
+  f2: applyBuoyancy[f;dt;vLift;a]
+
+  / 2. Spawn and update swirls
+  swirls2: spawnSwirls[swirls;srcCells;nx;ny;f@3;spawnProb;maxOmega;ttl]
+  f3: applySwirls[f2;swirls2;dt]
+  swirls3: updateSwirls[swirls2;f3;dt;swirlDamp]
+
+  / 3. Project (enforce incompressibility)
+  f4: @[f3;7;:;(f3@4)#0.]
+  f5: fluidProject[f4;numIters;dt;1.9]    / from ch17
+
+  / 4. Extrapolate, advect velocity
+  f6: fluidExtrapolate[f5]
+  f7: fluidAdvectVel[f6;dt]
+
+  / 5. Advect temperature
+  advectTemp[f7;dt]
+
+  / 6. Cool, ignite sources, smooth
+  updateTemp[f7;dt;srcCells;fireRate;smokeRate]
+  smoothTempAtSrc[srcCells;nx;ny]
+
+  (f7; swirls3)
 }
 ```
 
-Each grid cell is mapped to a rectangular region of pixels using direct pixel-buffer writes — the `ImageData` API. This avoids the overhead of canvas `fillRect` calls for each cell and is fast enough to run at 60 fps even on grids with 100,000 cells.
-
-## Putting the Loop Together
-
-The full simulation step is:
-
-```javascript
-simulate(dt, gravity, numIters) {
-    this.integrate(dt, gravity);          // apply lift forces
-    this.solveIncompressibility(numIters, dt);
-    this.extrapolate();
-    this.advectVel(dt);
-    this.advectTemperature(dt);
-    this.updateFire(dt);                  // cool, ignite, spawn swirls
-}
-```
-
-The `integrate` call here applies buoyancy rather than gravity — the gravity parameter is set to zero in the fire scene. Buoyancy is applied per-cell inside `updateFire` alongside cooling and swirl spawning. The projection step (`solveIncompressibility`) and advection are unchanged from the base fluid simulator.
-
-One design detail worth noting: swirl velocity updates happen before projection. This means the incompressibility solver immediately removes any divergence introduced by the swirls. The rotational component of a swirl is inherently divergence-free (it is a pure vortex), but the interaction between the swirl target velocity and the existing grid velocity can produce small divergence errors. Projecting afterward cleans those up.
+---
 
 ## Key Takeaways
 
 - Fire in a fluid simulator is achieved with a single additional scalar field — a normalized **temperature** $T \in [0, 1]$ — that encodes the full combustion lifecycle from burning gas to cooling smoke.
-- **Buoyancy** is modeled as a direct upward force proportional to $T$: hot cells are pulled toward a target lift velocity, cold cells feel nothing.
-- Without additional perturbation, a uniform heat source produces visually flat, banded output. **Swirl particles** — lightweight vortex descriptors advected through the fluid — inject turbulence and break the symmetry, producing the irregular flickering of real flame.
-- Swirls influence nearby grid velocities through a **flat-topped kernel**: full influence within 80% of the swirl radius, linear falloff to the edge, zero outside. This avoids velocity discontinuities.
-- Two different **cooling rates** (one for fire, one for smoke) reproduce the observed behavior that a flame extinguishes quickly while the smoke it leaves behind persists.
+- **Buoyancy** is modeled as a direct upward force proportional to $T$: hot cells are pulled toward a target lift velocity; cold cells feel nothing.
+- Without perturbation, a uniform heat source produces visually flat output. **Swirl particles** — lightweight vortex descriptors advected through the fluid — inject turbulence and produce the irregular flickering of real flame.
+- Swirls influence nearby grid velocities through a **flat-topped kernel**: full influence within 80% of the swirl radius, linear falloff to the edge, zero outside.
+- **Two cooling rates** (one for fire, one for smoke) reproduce the observed behavior that a flame extinguishes quickly while the smoke it leaves behind persists.
 - The rendering is a direct **temperature-to-color mapping** through three piecewise-linear gradients: black smoke, red embers, and yellow-white flame.
-- The approach is deliberately approximate — fuel concentration, oxygen depletion, and combustion chemistry are all collapsed into a single field — but the result is visually convincing at interactive frame rates with no additional data structures beyond those already present in the base fluid solver.
+- The approach is deliberately approximate — fuel, oxygen, and combustion chemistry collapse into one field — but the result is visually convincing at interactive frame rates.

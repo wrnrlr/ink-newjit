@@ -1,286 +1,135 @@
 # Chapter 2 — From 2D to 3D: Building Your First 3D Physics Scene
 
-The cannonball simulation from Chapter 1 captured the essential mechanics of physics programming — an integration loop, Newtonian kinematics, and boundary collisions — but it lived on a flat canvas. This chapter lifts that simulation into three dimensions. Along the way we introduce Three.js as a rendering layer, build out a pair of UI controls for run/pause and restart, organize the code into a reusable class structure, and end with something genuinely surprising: turning the whole demo into a VR experience with only three extra lines.
+The cannonball simulation from Chapter 1 captured the essential mechanics of physics programming — an integration loop, Newtonian kinematics, and boundary collisions — but it lived on a flat canvas. This chapter lifts that simulation into three dimensions. Along the way we introduce the ink GPU library for 3D rendering, organize the physics into a clean array-programming style, and end with something genuinely interesting: a fully interactive 3D scene where multiple bouncing balls can be watched from any camera angle.
 
 ---
 
-## Why Three.js?
+## Rendering in 3D with ink
 
-Writing a 3D renderer from scratch is a months-long project. Fortunately, the web platform ships with WebGL — a low-level GPU API — and Three.js is a mature JavaScript library that wraps WebGL in a sensible, high-level scene graph. It runs in any modern browser, requires no installation, and has a large library of examples to borrow from. For physics simulations, this is the right tradeoff: we want to spend our time on the physics, not on matrix math and shader programs.
+Writing a 3D renderer from scratch is a months-long project. ink's GPU library (`lib/gpu/gpu.k`) provides the foundation: it wraps the system GPU API in a handful of functions that compile shader programs, upload mesh data, and run the render loop. A 3D scene requires:
 
-Adding Three.js to a standalone HTML file takes two `<script>` tags: one for the core library and one for `OrbitControls`, a helper that lets the user drag and zoom the camera with the mouse.
-
-```html
-<script src="https://unpkg.com/three@0.139.2/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.139.2/examples/js/controls/OrbitControls.js"></script>
+```k
+2: "lib/gpu/gpu.k"
+2: "lib/gpu/spirv.k"
 ```
 
-That is literally everything needed to have access to a full 3D renderer. The rest is our own code.
+The main rendering primitives are:
+
+- `RunWindow[loop_fn; config]` — starts the event loop, calls `loop_fn` each frame with window props
+- `CompileMesh[vtx_shader; frag_shader]` — compiles a vertex+fragment pipeline
+- `DrawMesh[verts; handle]` — draws a triangle mesh with stride-6 `[x y z nx ny nz]` layout
+
+A vertex shader receives per-vertex position and normal, applies the camera transform, and outputs clip-space coordinates. A fragment shader computes the final pixel colour from the interpolated normal and lighting.
 
 ---
 
-## Setting Up the 3D Scene
+## The 3D Scene
 
-Before the physics runs, we need a scene to render into. The `initThreeScene` function creates the visual world: lights, a ground plane, a renderer, and a camera. This is mostly boilerplate assembled from Three.js examples, but a few decisions are worth understanding.
+Setting up a 3D scene requires a camera transform. The vertex shader applies a view-projection matrix. For simplicity, we can hard-code a perspective projection with a fixed camera position:
 
-### The Scene Graph
+```k
+/ Vertex shader: isometric camera at 45° Y + 35° X tilt, scale 0.5
+vert: VertexShader[[pos:`v3; nor:`v3]; [vNor:`v3]; {[pos;nor]
+  c45: 0.7071; s45: 0.7071; c30: 0.8165; s30: 0.5774; sc: 0.5
+  py0: (c45*pos[0]) + s45*pos[2]
+  py2: (c45*pos[2]) - s45*pos[0]
+  px1: (c30*pos[1]) - s30*py2
+  px2: (s30*pos[1]) + c30*py2
+  ((sc*py0; sc*px1; 0.5-px2*sc*0.5; 1.0); nor)
+}]
 
-Three.js organizes everything in a scene graph — a hierarchy of objects. You create a root `THREE.Scene`, then `.add()` things to it: lights, meshes, the camera itself. The renderer walks this graph each frame and draws everything it finds.
-
-```js
-threeScene = new THREE.Scene();
+/ Fragment shader: Phong lighting with fixed light direction
+frag: FragmentShader[[nor:`v3; out:`v4]; {[nor]
+  ld: normalize[(0.5; 1.0; 0.3)]
+  diff: max[0.0; dot[nor; ld]]
+  (0.8*diff + 0.05; 0.5*diff + 0.05; 0.3*diff + 0.05; 1.0)
+}]
 ```
 
-### Lighting
-
-Without lights, Phong-shaded meshes appear completely black. The scene uses two light sources: an ambient light that brightens everything uniformly (so nothing is ever pure black), and a spot light plus a directional light to cast shadows and give the scene depth.
-
-```js
-threeScene.add(new THREE.AmbientLight(0x505050));
-
-var spotLight = new THREE.SpotLight(0xffffff);
-spotLight.position.set(2, 3, 3);
-spotLight.castShadow = true;
-threeScene.add(spotLight);
-```
-
-The hex values are RGB colors — `0x505050` is a dim gray, `0xffffff` is white. Shadow maps are configured on the light objects, and `renderer.shadowMap.enabled = true` turns on shadow rendering globally.
-
-### The Ground Plane
-
-A `PlaneBufferGeometry` is a flat rectangle. By default it lies in the X/Y plane (facing up the Z axis), which is not where we want a floor. Rotating it by -90 degrees around X tips it flat into the X/Z plane, making Y the vertical axis — the standard convention in Three.js.
-
-```js
-var ground = new THREE.Mesh(
-    new THREE.PlaneBufferGeometry(20, 20, 1, 1),
-    new THREE.MeshPhongMaterial({ color: 0xa0adaf, shininess: 150 })
-);
-ground.rotation.x = -Math.PI / 2;  // rotate X/Y plane into X/Z
-ground.receiveShadow = true;
-threeScene.add(ground);
-```
-
-This rotation is easy to forget the first time. Remember it: Y is up, and a default plane needs a 90-degree X rotation to become a floor.
-
-### The Renderer and Camera
-
-The `WebGLRenderer` owns the `<canvas>` element. It is appended to the DOM container div, and its size is set to 80% of the window so there is room for the buttons above it.
-
-```js
-renderer = new THREE.WebGLRenderer();
-renderer.setSize(0.8 * window.innerWidth, 0.8 * window.innerHeight);
-container.appendChild(renderer.domElement);
-```
-
-The camera is a `PerspectiveCamera`. Its first argument is the vertical field of view in degrees, then the aspect ratio, then the near and far clipping planes. Anything closer than the near plane or farther than the far plane is invisible — set these reasonably to avoid floating-point precision artifacts.
-
-```js
-camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
-camera.position.set(0, 1, 4);
-threeScene.add(camera);
-```
-
-Note that the camera is added to the scene graph just like any other object. The `OrbitControls` object is then wired to the camera so the user can navigate:
-
-```js
-cameraControl = new THREE.OrbitControls(camera, renderer.domElement);
-```
-
-When the window is resized, the camera aspect ratio and renderer dimensions both need to be updated — a detail that is easy to overlook and causes a stretched image if missed.
+This is the same shader pattern used in `test/sphere.k` and `test/planes.k` in the ink test suite.
 
 ---
 
-## Run/Pause and Restart Controls
+## Coordinate System
 
-Before looking at the physics, it is worth covering two buttons that make interactive development much easier: Run and Restart.
-
-The HTML buttons are wired to JavaScript functions via the `onclick` attribute. The Run button is given an `id` so the JavaScript can update its label.
-
-```html
-<button id="buttonRun" onclick="run()">Run</button>
-<button onclick="restart()">Restart</button>
-```
-
-The Restart function is intentionally trivial:
-
-```js
-function restart() {
-    location.reload();
-}
-```
-
-Reloading the page is the simplest possible reset — it re-runs all initialization code and brings everything back to its initial state. For more complex simulations you might want a true reset that avoids the page flicker, but for quick iteration this is perfectly fine.
-
-The Run function is slightly more interesting because it needs to toggle between two states and update the button label to reflect the current state:
-
-```js
-function run() {
-    var button = document.getElementById('buttonRun');
-    if (physicsScene.paused) {
-        button.innerHTML = "Stop";
-    } else {
-        button.innerHTML = "Run";
-    }
-    physicsScene.paused = !physicsScene.paused;
-}
-```
-
-The simulation starts paused (`paused: true` in the physics scene), so the user must explicitly press Run to begin. This gives time to inspect the initial configuration before anything moves.
+We use a right-handed coordinate system with Y up. Gravity points in the negative Y direction at $10\ \text{m/s}^2$. The floor is the X/Z plane.
 
 ---
 
-## Organizing Physics: The Scene Object and Ball Class
+## Organizing Physics: Parallel Arrays
 
-The code makes a clean separation between physics state and rendering. A plain JavaScript object called `physicsScene` holds the parameters that govern the simulation:
+In 3D, each ball has a 3D position and 3D velocity. Rather than using objects, we store all balls as parallel flat arrays — one array per coordinate component. For $n$ balls:
 
-```js
-var physicsScene = {
-    gravity: new THREE.Vector3(0.0, -10.0, 0.0),
-    dt: 1.0 / 60.0,
-    worldSize: { x: 1.5, z: 2.5 },
-    paused: true,
-    objects: [],
-};
+```k
+/ n balls in 3D, parallel arrays
+n: 5
+px: n # 0.; py: n # 0.5; pz: n # 0.     / positions
+vx: n # 0.; vy: n # 0.; vz: n # 0.      / velocities
+r: n # 0.2                               / radii
 ```
 
-`THREE.Vector3` is used here not because it is a rendering concept, but because it is a convenient 3D vector type that ships with Three.js and supports the arithmetic methods we need. Gravity points in the negative Y direction — down — at 10 m/s², a good approximation of Earth's surface gravity. The time step is a fixed 1/60th of a second, matching a typical 60 Hz display.
-
-### The Ball Class
-
-Each simulated object is an instance of the `Ball` class. The constructor takes a starting position, radius, initial velocity, and the Three.js scene. It stores the physics quantities as member variables and immediately creates the visual representation:
-
-```js
-constructor(pos, radius, vel, scene) {
-    this.pos = pos;
-    this.radius = radius;
-    this.vel = vel;
-
-    var geometry = new THREE.SphereGeometry(radius, 32, 32);
-    var material = new THREE.MeshPhongMaterial({ color: 0xff0000 });
-    this.visMesh = new THREE.Mesh(geometry, material);
-    this.visMesh.position.copy(pos);
-    threeScene.add(this.visMesh);
-}
-```
-
-The `32, 32` arguments to `SphereGeometry` are the horizontal and vertical segment counts for the sphere mesh. More segments means a rounder-looking ball at the cost of more geometry to render. 32 is a reasonable default — smooth enough to read as a sphere, cheap enough to run in real time.
-
-The key insight here is the pairing: every physics object carries its own visual mesh. When the physics position updates, the mesh position follows. This keeps the connection between simulation and rendering local to the object rather than scattered across the code.
-
-### The Simulation Step
-
-The `simulate` method on `Ball` does the physics update for one time step. It is structurally identical to the 2D version from Chapter 1, now extended to three dimensions:
-
-```js
-simulate() {
-    this.vel.addScaledVector(physicsScene.gravity, physicsScene.dt);
-    this.pos.addScaledVector(this.vel, physicsScene.dt);
-
-    // Boundary collisions on X and Z
-    if (this.pos.x < -physicsScene.worldSize.x) {
-        this.pos.x = -physicsScene.worldSize.x; this.vel.x = -this.vel.x;
-    }
-    if (this.pos.x >  physicsScene.worldSize.x) {
-        this.pos.x =  physicsScene.worldSize.x; this.vel.x = -this.vel.x;
-    }
-    // ... same for Z axis ...
-    if (this.pos.y < this.radius) {
-        this.pos.y = this.radius; this.vel.y = -this.vel.y;
-    }
-
-    this.visMesh.position.copy(this.pos);
-}
-```
-
-`addScaledVector(v, s)` is equivalent to `this += v * s` — it adds a vector multiplied by a scalar in one call. The two lines that use it implement explicit Euler integration: first accumulate velocity from gravity, then move the position by velocity. Both of those steps are multiplied by `dt` to convert rates (m/s, m/s²) into per-frame increments.
-
-The boundary conditions are the same elastic reflection used in 2D: when the ball would leave a wall, clamp the position to the boundary and flip the velocity component perpendicular to that wall. The floor check uses `this.radius` rather than zero so the ball rests on its surface, not with its center at ground level.
-
-The last line syncs the Three.js mesh position with the physics position. Without this call, the ball would move in the physics simulation but the rendered sphere would never move.
-
-### Initialization and the Main Loop
-
-Two functions wire everything together:
-
-```js
-function initPhysics() {
-    var radius = 0.2;
-    var pos = new THREE.Vector3(radius, radius, radius);
-    var vel = new THREE.Vector3(2.0, 5.0, 3.0);
-    physicsScene.objects.push(new Ball(pos, radius, vel));
-}
-
-function simulate() {
-    if (physicsScene.paused) return;
-    for (var i = 0; i < physicsScene.objects.length; i++)
-        physicsScene.objects[i].simulate();
-}
-```
-
-The `simulate` function checks the paused flag and, if the simulation is running, calls `simulate()` on every object. This loop over `physicsScene.objects` is the pattern that will scale to dozens or hundreds of objects in later chapters.
-
-The render loop calls both simulate and the Three.js renderer each frame:
-
-```js
-function update() {
-    simulate();
-    renderer.render(threeScene, camera);
-    cameraControl.update();
-    requestAnimationFrame(update);
-}
-```
-
-`requestAnimationFrame` asks the browser to call `update` before the next display refresh — typically at 60 Hz. This is the standard animation loop pattern on the web. `cameraControl.update()` must be called each frame for the orbit controls to apply any inertia or smooth motion they accumulate.
-
-The startup sequence calls the three initialization functions in order, then kicks off the loop:
-
-```js
-initThreeScene();
-initPhysics();
-update();
-```
+This layout is cache-friendly and allows vectorized operations over all balls simultaneously.
 
 ---
 
-## Adding VR Support
+## The Simulation Step
 
-This is where the chapter earns its "cool part" label. Three.js has built-in support for WebXR, the browser API for VR and AR headsets. Converting the 3D demo to a VR demo requires exactly three changes inside `initThreeScene`:
+Gravity, integration, and boundary reflection are all applied to all $n$ balls at once with array operations:
 
-```js
-// 1. Add the VR button to the page
-document.body.appendChild(VRButton.createButton(renderer));
+```k
+g: -10.             / gravity (y-direction)
+dt: 1.%60
+wx: 1.5; wz: 2.5   / world half-extents
 
-// 2. Enable XR on the renderer
-renderer.xr.enabled = true;
-
-// 3. Hand animation control to the renderer
-renderer.setAnimationLoop(update);
+step3D: {[s]
+  px:s@0; py:s@1; pz:s@2
+  vx:s@3; vy:s@4; vz:s@5; r:s@6
+  sdt: dt%10.
+  / Gravity
+  vy: vy + g*sdt
+  / Integrate
+  px: px + vx*sdt; py: py + vy*sdt; pz: pz + vz*sdt
+  / Boundary reflection
+  fx: (px<r) | px>wx-r; fy: py<r; fz: (pz<r) | pz>wz-r
+  vx: vx*1.-2.*fx; vy: vy*1.-2.*fy; vz: vz*1.-2.*fz
+  px: r|px&(wx-r); py: r|py; pz: r|pz&(wz-r)
+  (px;py;pz;vx;vy;vz;r)
+}
 ```
 
-The third change replaces `requestAnimationFrame` — because in VR mode, the browser (or headset runtime) controls the timing, not the page's animation frame scheduler. Calling `renderer.setAnimationLoop(update)` registers `update` as the callback, and Three.js will call it at the appropriate rate for both desktop and VR sessions.
+All $n$ balls are updated in one pass through array broadcasting.
 
-The `VRButton` class itself is a small utility that probes the browser for WebXR support and creates an "ENTER VR" button if a headset is available, or a "VR NOT SUPPORTED" message if not. When the user clicks the button, it initiates a WebXR immersive-vr session:
+---
 
-```js
-navigator.xr.requestSession('immersive-vr', {
-    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
-}).then(onSessionStarted);
+## Building the Mesh for Rendering
+
+Each ball is a sphere mesh. For rendering, we represent each sphere as a small icosphere (subdivided icosahedron) scaled by the ball's radius and translated to its position. The `test/sphere.k` example shows how to build a sphere mesh. For multiple balls, the mesh is simply the concatenation of per-ball sphere meshes, rebuilt each frame.
+
+A simpler alternative for many balls is to render each as a single billboard (two triangles facing the camera), using a fragment shader with a circle SDF to draw the circular silhouette. This avoids rebuilding mesh data each frame.
+
+---
+
+## Run/Pause Control
+
+An ink simulation can be paused by simply skipping the `step` call:
+
+```k
+paused:: 0
+
+run: {[props]
+  $[~paused; state:: 10 step3D/ state; 0]
+  / draw state ...
+}
 ```
 
-The optional features request floor tracking and hand tracking if the headset supports them, without requiring them. In VR mode, the camera is driven entirely by the headset's head tracking rather than `OrbitControls`, so the camera control is simply removed. The physics and rendering code is otherwise unchanged — the same simulation that works on desktop drops directly into a headset.
+The `::` operator assigns to the global `state` variable. `~paused` is "not paused."
 
 ---
 
 ## Key Takeaways
 
-- **Three.js as an accelerator.** Adding a full 3D renderer takes two script tags and roughly 50 lines of setup code. The investment is small and the payoff is large: shadows, camera controls, and an interactive viewport come for free.
-
-- **Y is up.** Three.js uses a Y-up coordinate system. Gravity points in the negative Y direction, the floor is the X/Z plane, and planes need a -90 degree X rotation to lie flat.
-
-- **Keep physics and rendering coupled at the object level.** Storing both `pos` (physics) and `visMesh` (rendering) on the same `Ball` instance — and syncing them at the end of each `simulate()` — keeps the code localized and easy to reason about.
-
-- **Explicit Euler integration extends naturally to 3D.** The integration step from Chapter 1 is identical in 3D; only the types change from scalar to `Vector3`.
-
-- **VR is three lines away.** If the physics runs in 3D with Three.js, WebXR support is almost free. The only real change is handing animation control to the renderer with `setAnimationLoop`.
-
-- **Start paused.** Initializing `paused: true` and requiring the user to press Run is a small UX choice that makes a big difference during development — you can inspect the initial state before anything moves.
+- **ink's GPU library** provides `RunWindow`, `CompileMesh`, and `DrawMesh` for 3D rendering. Vertex and fragment shaders are written as ink lambdas compiled to SPIR-V.
+- **Y is up.** Gravity points in the negative Y direction. The floor is the X/Z plane.
+- **Parallel arrays** for physics state — one array per coordinate component — allow vectorized updates over all particles simultaneously with no loops.
+- **Symplectic Euler extends naturally to 3D.** The integration step from Chapter 1 is identical in 3D; only the array shapes change.
+- **Array operations** eliminate the need for per-ball loops: one line updates all ball positions, one line checks all boundaries.
