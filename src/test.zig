@@ -692,6 +692,7 @@ test "I#y reshape" {
   try t.check("2 1#\"a\"", "(,\"a\";,\"a\")");
   try t.check("3 3 2 # 1", "((1 1;1 1;1 1);(1 1;1 1;1 1);(1 1;1 1;1 1))");
   try t.check("3 3 2 # 1 2", "((1 2;1 2;1 2);(1 2;1 2;1 2);(1 2;1 2;1 2))");
+  try t.check("0N 3#!6", "(0 1 2;3 4 5)");
 }
 
 test "m,m merge dictionaries" {
