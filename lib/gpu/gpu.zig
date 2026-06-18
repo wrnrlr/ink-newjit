@@ -66,6 +66,29 @@ fn k_make_dict(n: i32, keys: [*]const [*:0]const u8, vals: [*]const ?K) ?K {
 
 var g_renderer: ?*Renderer = null;
 
+// ── Input state (written by GLFW callbacks, read each frame) ──────────────────
+
+var g_key_w: bool = false;
+var g_key_a: bool = false;
+var g_key_s: bool = false;
+var g_key_d: bool = false;
+var g_scroll: f64 = 0.0;
+
+fn keyCb(_: *zglfw.Window, key: c_int, _: c_int, action: c_int, _: c_int) callconv(.c) void {
+  const down = (action != zglfw.Release);
+  switch (key) {
+    zglfw.KeyW => g_key_w = down,
+    zglfw.KeyA => g_key_a = down,
+    zglfw.KeyS => g_key_s = down,
+    zglfw.KeyD => g_key_d = down,
+    else => {},
+  }
+}
+
+fn scrollCb(_: *zglfw.Window, _: f64, yoffset: f64) callconv(.c) void {
+  g_scroll += yoffset;
+}
+
 // ── gpu_fill ──────────────────────────────────────────────────────────────────
 //
 // verts_F: flat f32 array, stride 4 [x, y, u, v] — must be multiple of 4
@@ -220,6 +243,8 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
 
   const window = zglfw.createWindow(win_w, win_h, "ink", null, null) catch return ki(-1);
   defer zglfw.destroyWindow(window);
+  _ = zglfw.setKeyCallback(window, keyCb);
+  _ = zglfw.setScrollCallback(window, scrollCb);
 
   const gctx = zgpu.GraphicsContext.create(alloc, .{
   .window              = window,
@@ -322,18 +347,27 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   const t: f32 = @floatCast(zglfw.getTime() - start_time);
 
   // Build props dict and call loop_fn
-  const keys = [5][*:0]const u8{ "width", "height", "mx", "my", "time" };
+  const prop_keys = [11][*:0]const u8{ "width", "height", "mx", "my", "time", "kw", "ka", "ks", "kd", "scroll", "rmb" };
   const v_w = kf(fw); const v_h = kf(fh);
   const v_mx = kf(@floatCast(mx * dpr_x)); const v_my = kf(@floatCast(my * dpr_y));
   const v_t = kf(t);
-  const vals = [5]?K{ v_w, v_h, v_mx, v_my, v_t };
+  const v_kw = kf(if (g_key_w) 1.0 else 0.0);
+  const v_ka = kf(if (g_key_a) 1.0 else 0.0);
+  const v_ks = kf(if (g_key_s) 1.0 else 0.0);
+  const v_kd = kf(if (g_key_d) 1.0 else 0.0);
+  const v_sc = kf(@floatCast(g_scroll));
+  g_scroll = 0.0;
+  const rmb_state = zglfw.getMouseButton(window, zglfw.MouseButtonRight);
+  const v_rmb = kf(if (rmb_state == zglfw.Press) 1.0 else 0.0);
+  const prop_vals = [11]?K{ v_w, v_h, v_mx, v_my, v_t, v_kw, v_ka, v_ks, v_kd, v_sc, v_rmb };
 
-  if (k_make_dict(5, &keys, &vals)) |pk| {
+  if (k_make_dict(11, &prop_keys, &prop_vals)) |pk| {
     const result = k_call(loop_fn, pk);
     ku(result);
     ku(pk);
   }
   ku(v_w); ku(v_h); ku(v_mx); ku(v_my); ku(v_t);
+  ku(v_kw); ku(v_ka); ku(v_ks); ku(v_kd); ku(v_sc); ku(v_rmb);
 
   renderer.flush(pass, fw, fh, t) catch {};
   pass.release();

@@ -152,11 +152,11 @@ The IO system is organized around file descriptors (filename, port number, etc.)
 - Open File `` <"file.txt" `` or `` <"/path/to/file.txt" ``
 - Open Connection `` <":port" `` or `` <"host:port" ``
 - Close handle `` >s ``
-- Read line `` 0:x `` - read lines from stdin
-- Write line `` x 0:y `` - write text. `` `0 0:"Hi" ``
-- Read bytes `` 1:x ``
-- Write bytes `` x 1:y ``
-- Load code `` 2:y `` used for importing other files
+- Read line `` 0: x `` - read lines from stdin
+- Write line `` x 0: y `` - write text. `` `0 0:"Hi" ``
+- Read bytes `` 1: x ``
+- Write bytes `` x 1: y ``
+- Load code `` 2: y `` used for importing other files
 
 ### Special Forms
 - Amend3 `` @[x;y;f] `` - `` @["ABC";1;_:] `` → `"AbC"`
@@ -166,6 +166,9 @@ The IO system is organized around file descriptors (filename, port number, etc.)
 - Splice `` ?[C;I;C] `` - `` ?["abcd";1 3;"xyz"] -> "axyzd" ``
 
 ## Adverbs
+An adverb is one of the glyphs: `` ' / \ ': /: \: `` when it is used as a modifier 
+of how the verb on the right-hand side is applied to the verb on the left hand argument.
+The verb can be a operator, partial or lambda.
 - Each `f'` - apply f to each item. `` #'("abc";3 4 5 6) `` → `3 4`
 - Zip `x F'` - elementwise dyad. `` 2 3#'"ab" `` → `("aa";"bbb")`
 - Fold `F/` - left fold. `+/1 2 3` → `6`
@@ -189,9 +192,9 @@ The IO system is organized around file descriptors (filename, port number, etc.)
 - Eachright `x F/:` - fixed right arg to each left item. `1 2*/:3 4` → `(3 6;4 8)`
 - Eachleft `x F\:` - fixed left arg to each right item. `1 2*\:3 4` → `(3 4;6 8)`
 
-Adverb glyphs: `` ' / \ ': /: \: ``
-
-Adverbs are polysemic based on operand types:
+Adverbs are polysemic and have a different behaviour based on operand types.
+Monadic and dyadic verbs influence how a adverb is interpreted.
+For example the `\` can be either a fold with a dyadic verb `F` or a converge with a monadic verb `f`.
 - `'`: Each, Zip
 - `/`: Fold, Decode, Join, N-do, While, Converge
 - `\`: Scan, Encode, Split, N-dos, Whiles, Converges
@@ -287,6 +290,8 @@ The parser, compiler, and runtime are all written in Zig 0.16.
 - Flatten list `` ,/(1 0 0; 0 1 0) `` -> `1 0 0 0 1 0`.
 - No `<=`/`>=` operators `x <= y` parses as `x < (= y)`, use `~(x > y)` and `~(x < y)`.
 - Reshape array into 2 columns and infer size of rows `0N 2#x`
+- Connect to server `` h: > "127.0.0.1:5001" ``
+- Write text to stdout `` `0 0: "hello" ``
 
 ## Useful Commands
 - Build debug: `time zig build`

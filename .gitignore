@@ -11,3 +11,6 @@ patches/**/zig-pkg/
 bench/ink
 bench/ink-*
 bench/report.csv
+*.ttf
+*.otf
+*.ttc
