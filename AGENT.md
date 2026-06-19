@@ -304,6 +304,18 @@ The parser, compiler, and runtime are all written in Zig 0.16.
 
 # Open Problems
 
+## Auto-loading
+Public identifiers (starting with an uppercase letter) defined in `lib/*.k` are auto-loaded on first use — no manual `2:` import needed. For example, just write `ReadCsv "data.csv"` and the CSV library loads automatically.
+
+The loader (`src/modules.zig`) scans `lib/*.k` at startup, indexes all `[A-Z][A-Za-z0-9]*:` definitions, and calls `vm.load` for the relevant file the first time a matching identifier appears in source.
+
+Available auto-loaded libraries:
+- `lib/csv.k` — `ReadCsv`
+- `lib/gpu.k` — `RunWindow`, `FillFrame`, `Tessellate`, `CompileSpirV`, `DrawShader`, `RunShader`, `CompileWgsl`, `CompileMesh`, `DrawMesh`
+- `lib/spirv.k` — `FragmentShader`, `VertexShader`
+- `lib/font.k` — font functions
+- `lib/json.k` — JSON functions
+
 ## Module system is incomplete
 `\l file.k` loads a file but namespace access from ngn/k doesn't work: `\d mod`, `mod.A`, `.mod`, etc. Current code uses `2:"code.k"` for file loading. A proper module system requires names to support dots.
 
