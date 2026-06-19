@@ -1,32 +1,8 @@
-/// Font extension for ink.
+/// Font extension for ink — core C-ABI layer.
 ///
-/// Loads TrueType/OpenType fonts via tatfi and exposes metrics and glyph
-/// outline data that K code can tessellate into triangles for rendering.
-///
-/// ── K API (once wired into the runtime) ──────────────────────────────────────
-///
-///   h: (font`load) "/path/to/font.ttf"
-///     Load a font file.  Returns an integer handle, or -1 on failure.
-///
-///   m: (font`metrics) (h; size)
-///     Font metrics at the given pixel size.
-///     Returns a 3-element float list: (ascent; descent; line_gap)
-///
-///   ids: (font`shape) (h; text)
-///     Map UTF-8 text to a list of glyph IDs (integers).
-///     Basic codepoint→glyph mapping; no ligature shaping.
-///
-///   pts: (font`outline) (h; glyph_id; size)
-///     Outline for one glyph at the given pixel size.
-///     Returns a list of contours; each contour is an Nx2 float matrix [x,y].
-///     Pass the result to (gpu`tess) to triangulate.
-///
-/// ── Example: render "Hi" at 48px ─────────────────────────────────────────────
-///
-///   h:    (font`load) "/System/Library/Fonts/Helvetica.ttc"
-///   ids:  (font`shape) (h; "Hi")
-///   tris: {(gpu`tess) x}'(font`outline)'[(h; ids; 48.)]
-///   / Then draw tris with (gpu`tri) and a solidFrag
+/// Loads TrueType/OpenType/TTC fonts via tatfi and exposes glyph outline data.
+/// All metadata (metrics, names, advances) is exposed via pub Zig functions
+/// called by lib/font/src/main.zig to build K dicts.
 
 const std = @import("std");
 const Alloc = std.mem.Allocator;
@@ -46,65 +22,218 @@ const FontEntry = struct {
 var fonts: [MAX_FONTS]?FontEntry = [_]?FontEntry{null} ** MAX_FONTS;
 var n_fonts: usize = 0;
 
-// ── C-ABI exports ─────────────────────────────────────────────────────────────
+// ── Internal helpers ──────────────────────────────────────────────────────────
 
-/// Load a font file.  `path` is a null-terminated UTF-8 path.
-/// Returns a non-negative handle on success, -1 on failure.
-pub export fn font_load(path: [*:0]const u8) i32 {
-  if (n_fonts >= MAX_FONTS) return -1;
-  const alloc = gpa.allocator();
-
+/// Read an entire file into a heap-allocated slice. Caller frees.
+pub fn readFileData(path: [*:0]const u8, alloc: Alloc) ![]u8 {
   const FILE = std.c.FILE;
   const fseek_fn: *const fn (*FILE, c_long, c_int) callconv(.c) c_int =
     @extern(*const fn (*FILE, c_long, c_int) callconv(.c) c_int, .{ .name = "fseek" });
   const ftell_fn: *const fn (*FILE) callconv(.c) c_long =
     @extern(*const fn (*FILE) callconv(.c) c_long, .{ .name = "ftell" });
 
-  const cfile = std.c.fopen(path, "rb") orelse return -1;
+  const cfile = std.c.fopen(path, "rb") orelse return error.FileNotFound;
   defer _ = std.c.fclose(cfile);
   _ = fseek_fn(cfile, 0, 2);
   const file_size: usize = @intCast(ftell_fn(cfile));
   _ = fseek_fn(cfile, 0, 0);
-  if (file_size == 0) return -1;
+  if (file_size == 0) return error.EmptyFile;
 
-  const data = alloc.alloc(u8, file_size) catch return -1;
+  const data = try alloc.alloc(u8, file_size);
   errdefer alloc.free(data);
-  if (std.c.fread(data.ptr, 1, file_size, cfile) != file_size) {
-    alloc.free(data);
-    return -1;
-  }
+  if (std.c.fread(data.ptr, 1, file_size, cfile) != file_size) return error.ReadFail;
+  return data;
+}
 
-  const face = tatfi.Face.parse(data, 0) catch {
-    alloc.free(data);
-    return -1;
-  };
+/// How many faces are in raw font data (>1 only for TTC collections).
+pub fn faceCount(data: []const u8) u32 {
+  return tatfi.fonts_in_collection(data) orelse 1;
+}
 
+/// Parse a face from data and register it; return the handle.
+pub fn storeFace(data: []u8, face_index: u32) !i32 {
+  if (n_fonts >= MAX_FONTS) return error.TooManyFonts;
+  const face = try tatfi.Face.parse(data, face_index);
   const handle: i32 = @intCast(n_fonts);
   fonts[n_fonts] = .{ .face = face, .data = data };
   n_fonts += 1;
   return handle;
 }
 
+fn getEntry(handle: i32) ?*FontEntry {
+  if (handle < 0 or handle >= @as(i32, @intCast(n_fonts))) return null;
+  return if (fonts[@intCast(handle)]) |*e| e else null;
+}
+
+// ── Metadata accessors (called by src/main.zig) ───────────────────────────────
+
+pub fn faceUnitsPerEm(handle: i32) i32 {
+  const e = getEntry(handle) orelse return 0;
+  return @intCast(e.face.units_per_em());
+}
+
+pub fn faceNumGlyphs(handle: i32) i32 {
+  const e = getEntry(handle) orelse return 0;
+  return @intCast(e.face.number_of_glyphs());
+}
+
+pub fn faceAscender(handle: i32) i32 {
+  const e = getEntry(handle) orelse return 0;
+  return @intCast(e.face.ascender());
+}
+
+pub fn faceDescender(handle: i32) i32 {
+  const e = getEntry(handle) orelse return 0;
+  return @intCast(e.face.descender());
+}
+
+pub fn faceLineGap(handle: i32) i32 {
+  const e = getEntry(handle) orelse return 0;
+  return @intCast(e.face.line_gap());
+}
+
+pub fn faceXHeight(handle: i32) i32 {
+  const e = getEntry(handle) orelse return 0;
+  return @intCast(e.face.x_height() orelse 0);
+}
+
+pub fn faceCapHeight(handle: i32) i32 {
+  const e = getEntry(handle) orelse return 0;
+  return @intCast(e.face.capital_height() orelse 0);
+}
+
+pub fn faceWeight(handle: i32) i32 {
+  const e = getEntry(handle) orelse return 400;
+  return @intCast(e.face.weight().to_number());
+}
+
+pub fn faceWidth(handle: i32) i32 {
+  const e = getEntry(handle) orelse return 5;
+  return @intCast(e.face.width().to_number());
+}
+
+/// Returns flags: bit0=bold, bit1=italic, bit2=monospaced, bit3=variable
+pub fn faceFlags(handle: i32) i32 {
+  const e = getEntry(handle) orelse return 0;
+  var f: i32 = 0;
+  if (e.face.is_bold())       f |= 1;
+  if (e.face.is_italic())     f |= 2;
+  if (e.face.is_monospaced()) f |= 4;
+  if (e.face.is_variable())   f |= 8;
+  return f;
+}
+
+/// Get a name string from the name table. Writes UTF-8 into buf; returns slice.
+/// Prefers typographic name (id 16/17) over basic name (id 1/2).
+pub fn faceName(
+  handle: i32,
+  basic_id: tatfi.tables.name.NameId,
+  typo_id: tatfi.tables.name.NameId,
+  buf: []u8,
+) []u8 {
+  const e = getEntry(handle) orelse return buf[0..0];
+  const ns = e.face.names();
+
+  var best: []const u8 = &.{};
+  var best_is_unicode = false;
+
+  var it = ns.iterator();
+  while (it.next()) |rec| {
+    const match = rec.name_id == basic_id or rec.name_id == typo_id;
+    if (!match) continue;
+    const prefer = rec.name_id == typo_id;
+    const is_uni = rec.is_unicode();
+    if (best.len > 0 and !prefer and best_is_unicode == is_uni) continue;
+    if (best.len > 0 and !prefer and best_is_unicode) continue;
+    best = rec.name;
+    best_is_unicode = is_uni;
+    if (prefer and is_uni) break; // can't do better
+  }
+
+  if (best.len == 0) return buf[0..0];
+
+  if (best_is_unicode) {
+    // UTF-16BE: decode BMP codepoints into UTF-8
+    var j: usize = 0;
+    var i: usize = 0;
+    while (i + 1 < best.len) : (i += 2) {
+      const hi: u16 = best[i];
+      const lo: u16 = best[i + 1];
+      const cp: u21 = @intCast((hi << 8) | lo);
+      if (cp < 0x80) {
+        if (j < buf.len) { buf[j] = @intCast(cp); j += 1; }
+      } else if (cp < 0x800) {
+        if (j + 1 < buf.len) {
+          buf[j]   = @intCast(0xC0 | (cp >> 6));
+          buf[j+1] = @intCast(0x80 | (cp & 0x3F));
+          j += 2;
+        }
+      } else {
+        if (j + 2 < buf.len) {
+          buf[j]   = @intCast(0xE0 | (cp >> 12));
+          buf[j+1] = @intCast(0x80 | ((cp >> 6) & 0x3F));
+          buf[j+2] = @intCast(0x80 | (cp & 0x3F));
+          j += 3;
+        }
+      }
+    }
+    return buf[0..j];
+  } else {
+    // Latin-1 / ASCII
+    const n = @min(best.len, buf.len);
+    @memcpy(buf[0..n], best[0..n]);
+    return buf[0..n];
+  }
+}
+
+/// Horizontal advance for a glyph (in em units). Returns 0 for missing.
+pub fn glyphAdvance(handle: i32, glyph_id: u16) i32 {
+  const e = getEntry(handle) orelse return 0;
+  return @intCast(e.face.glyph_hor_advance(gpa.allocator(), .{glyph_id}) orelse 0);
+}
+
+/// Left side bearing for a glyph (in em units). Returns 0 for missing.
+pub fn glyphLsb(handle: i32, glyph_id: u16) i32 {
+  const e = getEntry(handle) orelse return 0;
+  return @intCast(e.face.glyph_hor_side_bearing(.{glyph_id}) orelse 0);
+}
+
+// ── C-ABI exports ─────────────────────────────────────────────────────────────
+
+/// Load face 0 from a font file. Returns handle or -1 on failure.
+pub export fn font_load(path: [*:0]const u8) i32 {
+  return font_load_face(path, 0);
+}
+
+/// Load a specific face from a font file. Returns handle or -1 on failure.
+pub export fn font_load_face(path: [*:0]const u8, face_index: u32) i32 {
+  const alloc = gpa.allocator();
+  const data = readFileData(path, alloc) catch return -1;
+  return storeFace(data, face_index) catch { alloc.free(data); return -1; };
+}
+
+/// Returns the number of faces in a font file (1 for TTF/OTF, N for TTC).
+pub export fn font_face_count_at_path(path: [*:0]const u8) i32 {
+  const alloc = gpa.allocator();
+  const data = readFileData(path, alloc) catch return 1;
+  defer alloc.free(data);
+  return @intCast(faceCount(data));
+}
+
 /// Write font metrics at `size` pixels into `out[0..3]`:
-///   out[0] = ascent  (positive, pixels above baseline)
-///   out[1] = descent (negative, pixels below baseline)
-///   out[2] = line_gap
-/// Returns 0 on success, -1 on bad handle.
+///   out[0] = ascent, out[1] = descent, out[2] = line_gap
 pub export fn font_metrics(handle: i32, size: f32, out: *[3]f32) i32 {
-  if (handle < 0 or handle >= @as(i32, @intCast(n_fonts))) return -1;
-  const entry = fonts[@intCast(handle)] orelse return -1;
-  const upm: f32 = @floatFromInt(entry.face.units_per_em());
+  const e = getEntry(handle) orelse return -1;
+  const upm: f32 = @floatFromInt(e.face.units_per_em());
   const scale = size / upm;
-  out[0] = @as(f32, @floatFromInt(entry.face.ascender())) * scale;
-  out[1] = @as(f32, @floatFromInt(entry.face.descender())) * scale;
-  out[2] = @as(f32, @floatFromInt(entry.face.line_gap())) * scale;
+  out[0] = @as(f32, @floatFromInt(e.face.ascender())) * scale;
+  out[1] = @as(f32, @floatFromInt(e.face.descender())) * scale;
+  out[2] = @as(f32, @floatFromInt(e.face.line_gap())) * scale;
   return 0;
 }
 
-/// Map UTF-8 text to glyph IDs using basic codepoint→glyph lookup (no shaping).
-/// `text` points to `text_len` bytes of UTF-8.
-/// Writes glyph IDs (u16) into `out`; returns glyph count, or -1 on error.
-/// Missing glyphs map to glyph ID 0 (usually .notdef).
+/// Map UTF-8 text to glyph IDs (basic codepoint→glyph, no ligature shaping).
+/// Returns glyph count or -1 on error.
 pub export fn font_shape(
   handle: i32,
   text: [*]const u8,
@@ -112,23 +241,16 @@ pub export fn font_shape(
   out: [*]u16,
   out_cap: usize,
 ) i32 {
-  if (handle < 0 or handle >= @as(i32, @intCast(n_fonts))) return -1;
-  const entry = fonts[@intCast(handle)] orelse return -1;
+  const e = getEntry(handle) orelse return -1;
 
   var count: usize = 0;
   const bytes = text[0..text_len];
   var i: usize = 0;
   while (i < bytes.len and count < out_cap) {
-    const len = std.unicode.utf8ByteSequenceLength(bytes[i]) catch {
-      i += 1;
-      continue;
-    };
+    const len = std.unicode.utf8ByteSequenceLength(bytes[i]) catch { i += 1; continue; };
     if (i + len > bytes.len) break;
-    const cp = std.unicode.utf8Decode(bytes[i .. i + len]) catch {
-      i += len;
-      continue;
-    };
-    const gid = entry.face.glyph_index(@intCast(cp));
+    const cp = std.unicode.utf8Decode(bytes[i .. i + len]) catch { i += len; continue; };
+    const gid = e.face.glyph_index(@intCast(cp));
     out[count] = if (gid) |g| g.@"0" else 0;
     count += 1;
     i += len;
@@ -245,18 +367,17 @@ pub export fn font_glyph_outline(
   handle: i32,
   glyph_id: u16,
   size: f32,
-  out_pts: ?[*]f32,     // x0 y0 x1 y1 ... (all contours concatenated)
-  out_counts: ?[*]u32,  // point count per contour
+  out_pts: ?[*]f32,
+  out_counts: ?[*]u32,
   out_n_contours: *u32,
-  pts_cap: usize,       // capacity of out_pts in number of [x,y] pairs
+  pts_cap: usize,
 ) i32 {
-  if (handle < 0 or handle >= @as(i32, @intCast(n_fonts))) return -1;
-  const entry = fonts[@intCast(handle)] orelse return -1;
+  const e = getEntry(handle) orelse return -1;
   const alloc = gpa.allocator();
 
-  const upm: f32 = @floatFromInt(entry.face.units_per_em());
+  const upm: f32 = @floatFromInt(e.face.units_per_em());
   var contours_init = std.ArrayList(std.ArrayList([2]f32)).initCapacity(alloc, 4) catch return -1;
-  const current_init  = std.ArrayList([2]f32).initCapacity(alloc, 32) catch {
+  const current_init = std.ArrayList([2]f32).initCapacity(alloc, 32) catch {
     contours_init.deinit(alloc); return -1;
   };
   var collector = OutlineCollector{
@@ -271,8 +392,7 @@ pub export fn font_glyph_outline(
     collector.current.deinit(alloc);
   }
 
-  _ = entry.face.outline_glyph(alloc, .{glyph_id}, collector.builder());
-
+  _ = e.face.outline_glyph(alloc, .{glyph_id}, collector.builder());
   collector.flushCurrent();
 
   out_n_contours.* = @intCast(collector.contours.items.len);
@@ -295,4 +415,3 @@ pub export fn font_glyph_outline(
   }
   return @intCast(written);
 }
-
