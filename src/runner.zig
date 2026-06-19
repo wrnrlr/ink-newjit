@@ -5,6 +5,7 @@ const Repl = @import("repl.zig").Repl;
 const disasm = @import("runtime/disasm.zig");
 const serve = @import("runtime/serve.zig");
 const ffi = @import("ffi.zig");
+const modules = @import("modules.zig");
 
 /// Called by C extensions (e.g. GPU) to process pending IPC messages from
 /// within their own event loop.  No-ops when current_vm is not set.
@@ -19,7 +20,7 @@ const V = @import("noun/value.zig").V;
 const K = @import("noun/class.zig").K;
 const N = @import("noun/array.zig").N;
 
-fn runRepl(allocator: std.mem.Allocator, vm: *VM) !void {
+fn runRepl(allocator: std.mem.Allocator, vm: *VM, loader: *modules.ModuleLoader) !void {
   var repl = Repl.init(allocator, vm);
   var buf = try std.ArrayList(u8).initCapacity(allocator, 64);
   defer buf.deinit(allocator);
@@ -40,6 +41,7 @@ fn runRepl(allocator: std.mem.Allocator, vm: *VM) !void {
     const line = std.mem.trim(u8, buf.items, " \t\r\n");
     if (std.mem.eql(u8, line, "\\q") or std.mem.eql(u8, line, "exit")) break;
     if (line.len > 0) {
+      loader.autoLoad(vm, line) catch {};
       const res = repl.eval(line) catch |err| {
         std.debug.print("Error: {s}\n", .{@errorName(err)});
         continue;
@@ -52,7 +54,7 @@ fn runRepl(allocator: std.mem.Allocator, vm: *VM) !void {
   }
 }
 
-fn evalStdin(allocator: std.mem.Allocator, vm: *VM) !void {
+fn evalStdin(allocator: std.mem.Allocator, vm: *VM, loader: *modules.ModuleLoader) !void {
   const io = std.Io.Threaded.global_single_threaded.io();
   var read_buf: [4096]u8 = undefined;
   var reader = std.Io.File.stdin().reader(io, &read_buf);
@@ -60,11 +62,13 @@ fn evalStdin(allocator: std.mem.Allocator, vm: *VM) !void {
   defer content_list.deinit(allocator);
   try reader.interface.appendRemainingUnlimited(allocator, &content_list);
   const content = content_list.items;
+  const trimmed = std.mem.trim(u8, content, " \t\r\n");
+  loader.autoLoad(vm, trimmed) catch {};
   var stdout_buf: [4096]u8 = undefined;
   var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
   vm.out = &stdout_writer.interface;
   var repl = Repl.init(allocator, vm);
-  _ = try repl.evalStream(std.mem.trim(u8, content, " \t\r\n"), &stdout_writer.interface);
+  _ = try repl.evalStream(trimmed, &stdout_writer.interface);
 }
 
 pub fn main(init: std.process.Init.Minimal) !void {
@@ -95,6 +99,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
   const vm = try VM.create(allocator);
   defer vm.deinit();
+
+  var loader = modules.ModuleLoader.init(allocator);
+  defer loader.deinit();
+  loader.scan("lib") catch {};
 
   // Disassemble mode: compile without running, print bytecode, exit.
   if (disasm_mode and script_path != null) {
@@ -140,8 +148,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
     vm.globals[idx] = V{ .L = x_n };
   }
 
-  if (script_path == null and stdin_is_tty) return runRepl(allocator, vm);
-  if (script_path == null) return evalStdin(allocator, vm);
+  if (script_path == null and stdin_is_tty) return runRepl(allocator, vm, &loader);
+  if (script_path == null) return evalStdin(allocator, vm, &loader);
 
   var stdout_buf: [4096]u8 = undefined;
   var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
@@ -156,8 +164,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
   };
   defer allocator.free(text);
 
+  const script_src = std.mem.trim(u8, text, " \t\r\n");
+  loader.autoLoad(vm, script_src) catch {};
   var repl = Repl.init(allocator, vm);
-  _ = repl.evalStream(std.mem.trim(u8, text, " \t\r\n"), &stdout_writer.interface) catch |err| {
+  _ = repl.evalStream(script_src, &stdout_writer.interface) catch |err| {
     std.debug.print("error in {s}: {}\n", .{ script_path.?, err });
     std.process.exit(1);
   };
