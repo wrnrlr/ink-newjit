@@ -16,11 +16,11 @@ The key concept is the **kernel**: a function that runs once per element, with a
 
 ## GPU Compute in ink
 
-Ink exposes GPU compute shaders through two functions in `lib/gpu/spirv.k`:
+Ink exposes GPU compute shaders through two functions in `lib/spirv.k`:
 
 ```k
-2: "lib/gpu/spirv.k"
-2: "lib/gpu/gpu.k"
+2: "lib/spirv.k"
+2: "lib/gpu.k"
 ```
 
 - `compCompute[fn]` — compiles an ink lambda into a SPIR-V **1D map-over-buffer compute shader**. The function maps one `f32` element to one `f32` element. Generated shader uses workgroup size 64.
@@ -212,7 +212,7 @@ The `compCompute` API compiles a single-element scalar function. For physics, th
 - **Scalar per-element transforms**: clamping velocities, applying gravity to a single component, normalizing scalar fields.
 - **Temperature, pressure, and density fields** in grid-based simulations (Chapters 17–21), where each cell needs the same update applied independently.
 
-For multi-field particle updates (reading positions and writing to velocities simultaneously) or constraint solves that write to two particles, raw SPIR-V with multiple buffer bindings is required. The compiler infrastructure in `lib/gpu/spirv.k` can be extended to support multi-input kernels, following the same SPIR-V patterns the current compiler uses.
+For multi-field particle updates (reading positions and writing to velocities simultaneously) or constraint solves that write to two particles, raw SPIR-V with multiple buffer bindings is required. The compiler infrastructure in `lib/spirv.k` can be extended to support multi-input kernels, following the same SPIR-V patterns the current compiler uses.
 
 ---
 

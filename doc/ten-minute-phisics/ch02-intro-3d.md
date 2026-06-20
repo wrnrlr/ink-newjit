@@ -6,11 +6,11 @@ The cannonball simulation from Chapter 1 captured the essential mechanics of phy
 
 ## Rendering in 3D with ink
 
-Writing a 3D renderer from scratch is a months-long project. ink's GPU library (`lib/gpu/gpu.k`) provides the foundation: it wraps the system GPU API in a handful of functions that compile shader programs, upload mesh data, and run the render loop. A 3D scene requires:
+Writing a 3D renderer from scratch is a months-long project. ink's GPU library (`lib/gpu.k`) provides the foundation: it wraps the system GPU API in a handful of functions that compile shader programs, upload mesh data, and run the render loop. A 3D scene requires:
 
 ```k
-2: "lib/gpu/gpu.k"
-2: "lib/gpu/spirv.k"
+2: "lib/gpu.k"
+2: "lib/spirv.k"
 ```
 
 The main rendering primitives are:

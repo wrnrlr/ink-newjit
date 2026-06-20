@@ -6,7 +6,7 @@ Physics simulation sounds intimidating until you realize that the physics of eve
 
 ## The Setup: One Loop, One State
 
-The entire simulation lives in a single function that updates state and draws each frame. In ink, the `RunWindow` function from `lib/gpu/gpu.k` provides the event loop — it calls a user function each frame with window properties (width, height, mouse position), and the function draws the scene and updates physics.
+The entire simulation lives in a single function that updates state and draws each frame. In ink, the `RunWindow` function from `lib/gpu.k` provides the event loop — it calls a user function each frame with window properties (width, height, mouse position), and the function draws the scene and updates physics.
 
 The simulation's heartbeat is:
 
