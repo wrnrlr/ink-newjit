@@ -63,20 +63,21 @@ phongFrag: FragmentShader[[nor:`v3; out:`v4]; {[nor]
   spec: pow[max[0.0;dot[nor;h]];64.0]
   base: (0.25;0.55;0.9)
   lit: 0.08+diff
-  (base[0]*lit+spec; base[1]*lit+spec; base[2]*lit+spec; 1.0)
+  dc0: base[0]*lit; dc1: base[1]*lit; dc2: base[2]*lit
+  (dc0+spec; dc1+spec; dc2+spec; 1.0)
 }]
 
 / Vertex shader: 45° Y + isometric X tilt; rotate normals by the same matrix
 phongVtx: VertexShader[[pos:`v3;nor:`v3]; [vNor:`v3]; {[pos;nor]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.8
-  py0: c45*pos[0]+s45*pos[2]
-  py2: c45*pos[2]-s45*pos[0]
-  px1: c30*pos[1]-s30*py2
-  px2: s30*pos[1]+c30*py2
-  ny0: c45*nor[0]+s45*nor[2]
-  ny2: c45*nor[2]-s45*nor[0]
-  nx1: c30*nor[1]-s30*ny2
-  nx2: s30*nor[1]+c30*ny2
+  py0: (c45*pos[0])+(s45*pos[2])
+  py2: (c45*pos[2])-(s45*pos[0])
+  px1: (c30*pos[1])-(s30*py2)
+  px2: (s30*pos[1])+(c30*py2)
+  ny0: (c45*nor[0])+(s45*nor[2])
+  ny2: (c45*nor[2])-(s45*nor[0])
+  nx1: (c30*nor[1])-(s30*ny2)
+  nx2: (s30*nor[1])+(c30*ny2)
   ((sc*py0; sc*px1; 0.5-px2*sc*0.5; 1.0); (ny0;nx1;nx2))
 }]
 

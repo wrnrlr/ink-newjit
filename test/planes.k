@@ -31,17 +31,18 @@ verts: ,/ mkPlane'1.0*=3
 frag: FragmentShader[[nor:`v3; out:`v4]; {[nor]
   amb: 0.15
   ld: normalize[(0.6; 0.8; 0.4)]
-  (nor*amb+smoothstep[0.0; 0.1; dot[nor; ld]]),1.0
+  br: amb+smoothstep[0.0;0.1;dot[nor;ld]]
+  (nor[0]*br; nor[1]*br; nor[2]*br; 1.0)
 }]
 
 / Vertex shader: 45° Y-rotation then isometric X-tilt, scale by 0.5.
 / c30=cos(35.26°)=√(2/3), s30=sin(35.26°)=1/√3 — equal rhombuses for all planes.
 vert: VertexShader[[pos:`v3;nor:`v3]; [vNor:`v3]; {[pos;nor]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.5
-  py0: c45*pos[0]+s45*pos[2]
-  py2: c45*pos[2]-s45*pos[0]
-  px1: c30*pos[1]-s30*py2
-  px2: s30*pos[1]+c30*py2
+  py0: (c45*pos[0])+(s45*pos[2])
+  py2: (c45*pos[2])-(s45*pos[0])
+  px1: (c30*pos[1])-(s30*py2)
+  px2: (s30*pos[1])+(c30*py2)
   ((sc*py0; sc*px1; 0.5-px2*sc*0.5; 1.0); nor)
 }]
 
