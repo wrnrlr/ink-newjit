@@ -133,28 +133,25 @@ fn buildFaceDict(handle: i32) ?K {
 // x = C (file path)  →  dict (TTF/OTF) or L of dicts (TTC)
 
 export fn ReadFont(path_k: ?K) callconv(.c) ?K {
-  const cp = kcp(path_k) orelse return ki(-1);
+  const cp = kcp(path_k) orelse return null;
   const n: usize = @intCast(@max(0, kn(path_k)));
   var buf: [1024]u8 = undefined;
-  if (n >= buf.len) return ki(-1);
+  if (n >= buf.len) return null;
   @memcpy(buf[0..n], cp[0..n]);
   buf[n] = 0;
   const path: [*:0]const u8 = @ptrCast(&buf);
 
-  const nfaces: u32 = @intCast(@max(1, font.font_face_count_at_path(path)));
+  // Load all faces in one file-read pass.
+  var handles: [64]i32 = undefined;
+  const nfaces = font.font_load_all_faces(path, &handles, 64);
+  if (nfaces <= 0) return null;
 
-  if (nfaces == 1) {
-    const handle = font.font_load_face(path, 0);
-    if (handle < 0) return ki(-1);
-    return buildFaceDict(handle) orelse ki(-1);
-  }
+  if (nfaces == 1) return buildFaceDict(handles[0]);
 
   // TTC: return L of dicts
-  const result = KL(@intCast(nfaces)) orelse return ki(-1);
-  for (0..nfaces) |fi| {
-    const handle = font.font_load_face(path, @intCast(fi));
-    const d = if (handle >= 0) buildFaceDict(handle) orelse ki(-1) else ki(-1);
-    _ = k_list_set(result, @intCast(fi), d);
+  const result = KL(nfaces) orelse return null;
+  for (0..@intCast(nfaces)) |fi| {
+    _ = k_list_set(result, @intCast(fi), buildFaceDict(handles[fi]));
   }
   return result;
 }
@@ -171,18 +168,15 @@ export fn FontShape(handle_k: ?K, text_k: ?K) callconv(.c) ?K {
   const n  = kn(text_k);
   if (n <= 0) return KI(0);
 
-  var da = std.heap.DebugAllocator(.{}).init;
-  defer _ = da.deinit();
-  const dalloc = da.allocator();
-
-  const ids_buf = dalloc.alloc(u16, @intCast(n)) catch return ki(-1);
+  const dalloc = std.heap.c_allocator;
+  const ids_buf = dalloc.alloc(u16, @intCast(n)) catch return null;
   defer dalloc.free(ids_buf);
 
   const count = font.font_shape(handle, cp, @intCast(n), ids_buf.ptr, @intCast(n));
   if (count < 0) return KI(0);
 
-  const result = KI(count) orelse return ki(-1);
-  const rp = kip(result) orelse { ku(result); return ki(-1); };
+  const result = KI(count) orelse return null;
+  const rp = kip(result) orelse { ku(result); return null; };
   for (0..@intCast(count)) |i| rp[i] = ids_buf[i];
   return result;
 }
@@ -192,8 +186,8 @@ export fn FontShape(handle_k: ?K, text_k: ?K) callconv(.c) ?K {
 // x = F[3] = [handle_f; glyph_id_f; size_px_f]  →  L of F contours
 
 export fn FontOutline(args_k: ?K) callconv(.c) ?K {
-  const ff = kfp(args_k) orelse return ki(-1);
-  if (kn(args_k) < 3) return ki(-1);
+  const ff = kfp(args_k) orelse return null;
+  if (kn(args_k) < 3) return null;
 
   const handle:   i32  = @intFromFloat(ff[0]);
   const glyph_id: u16  = @intCast(@as(i32, @intFromFloat(ff[1])));
@@ -201,22 +195,19 @@ export fn FontOutline(args_k: ?K) callconv(.c) ?K {
 
   var n_contours: u32 = 0;
   const total = font.font_glyph_outline(handle, glyph_id, size, null, null, &n_contours, 0);
-  if (total < 0) return ki(-1);
+  if (total < 0) return null;
   if (total == 0 or n_contours == 0) return KL(0);
 
-  var da = std.heap.DebugAllocator(.{}).init;
-  defer _ = da.deinit();
-  const dalloc = da.allocator();
-
+  const dalloc = std.heap.c_allocator;
   const n_pts: usize = @intCast(total);
-  const pts_buf = dalloc.alloc(f32, n_pts * 2) catch return ki(-1);
+  const pts_buf = dalloc.alloc(f32, n_pts * 2) catch return null;
   defer dalloc.free(pts_buf);
-  const cnt_buf = dalloc.alloc(u32, n_contours) catch return ki(-1);
+  const cnt_buf = dalloc.alloc(u32, n_contours) catch return null;
   defer dalloc.free(cnt_buf);
 
   _ = font.font_glyph_outline(handle, glyph_id, size, pts_buf.ptr, cnt_buf.ptr, &n_contours, n_pts);
 
-  const result_k = KL(@intCast(n_contours)) orelse return ki(-1);
+  const result_k = KL(@intCast(n_contours)) orelse return null;
 
   var pt_off: usize = 0;
   for (0..n_contours) |ci| {

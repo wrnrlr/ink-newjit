@@ -5,10 +5,9 @@
 /// called by lib/font/src/main.zig to build K dicts.
 
 const std = @import("std");
-const Alloc = std.mem.Allocator;
 const tatfi = @import("tatfi");
 
-var gpa = std.heap.DebugAllocator(.{}){};
+const alloc = std.heap.c_allocator;
 
 // ── Font table ────────────────────────────────────────────────────────────────
 
@@ -24,25 +23,11 @@ var n_fonts: usize = 0;
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-/// Read an entire file into a heap-allocated slice. Caller frees.
-pub fn readFileData(path: [*:0]const u8, alloc: Alloc) ![]u8 {
-  const FILE = std.c.FILE;
-  const fseek_fn: *const fn (*FILE, c_long, c_int) callconv(.c) c_int =
-    @extern(*const fn (*FILE, c_long, c_int) callconv(.c) c_int, .{ .name = "fseek" });
-  const ftell_fn: *const fn (*FILE) callconv(.c) c_long =
-    @extern(*const fn (*FILE) callconv(.c) c_long, .{ .name = "ftell" });
-
-  const cfile = std.c.fopen(path, "rb") orelse return error.FileNotFound;
-  defer _ = std.c.fclose(cfile);
-  _ = fseek_fn(cfile, 0, 2);
-  const file_size: usize = @intCast(ftell_fn(cfile));
-  _ = fseek_fn(cfile, 0, 0);
-  if (file_size == 0) return error.EmptyFile;
-
-  const data = try alloc.alloc(u8, file_size);
-  errdefer alloc.free(data);
-  if (std.c.fread(data.ptr, 1, file_size, cfile) != file_size) return error.ReadFail;
-  return data;
+/// Read an entire file into a heap-allocated slice (c_allocator). Caller frees.
+pub fn readFileData(path: [*:0]const u8) ![]u8 {
+  const io = std.Io.Threaded.global_single_threaded.io();
+  return std.Io.Dir.cwd().readFileAlloc(io, std.mem.span(path), alloc,
+    std.Io.Limit.limited(256 << 20));
 }
 
 /// How many faces are in raw font data (>1 only for TTC collections).
@@ -189,7 +174,7 @@ pub fn faceName(
 /// Horizontal advance for a glyph (in em units). Returns 0 for missing.
 pub fn glyphAdvance(handle: i32, glyph_id: u16) i32 {
   const e = getEntry(handle) orelse return 0;
-  return @intCast(e.face.glyph_hor_advance(gpa.allocator(), .{glyph_id}) orelse 0);
+  return @intCast(e.face.glyph_hor_advance(alloc, .{glyph_id}) orelse 0);
 }
 
 /// Left side bearing for a glyph (in em units). Returns 0 for missing.
@@ -200,24 +185,38 @@ pub fn glyphLsb(handle: i32, glyph_id: u16) i32 {
 
 // ── C-ABI exports ─────────────────────────────────────────────────────────────
 
+/// Load all faces from a font file in one pass.
+/// Writes handles into out[0..nfaces]. Returns face count or -1 on failure.
+pub export fn font_load_all_faces(path: [*:0]const u8, out: [*]i32, out_cap: u32) i32 {
+  const data = readFileData(path) catch return -1;
+  const n = faceCount(data);
+  if (n > out_cap) { alloc.free(data); return -1; }
+  // All faces share the same data buffer; only the first handle owns the data.
+  for (0..n) |fi| {
+    // storeFace takes ownership of data for face 0; subsequent faces get a ref but
+    // we keep one data slice alive per entry so free it on failure.
+    const face = tatfi.Face.parse(data, @intCast(fi)) catch {
+      alloc.free(data);
+      return -1;
+    };
+    if (n_fonts >= MAX_FONTS) { alloc.free(data); return -1; }
+    fonts[n_fonts] = .{ .face = face, .data = if (fi == 0) data else &.{} };
+    out[fi] = @intCast(n_fonts);
+    n_fonts += 1;
+  }
+  return @intCast(n);
+}
+
 /// Load face 0 from a font file. Returns handle or -1 on failure.
 pub export fn font_load(path: [*:0]const u8) i32 {
-  return font_load_face(path, 0);
+  var h: [1]i32 = .{0};
+  return if (font_load_all_faces(path, &h, 1) > 0) h[0] else -1;
 }
 
 /// Load a specific face from a font file. Returns handle or -1 on failure.
 pub export fn font_load_face(path: [*:0]const u8, face_index: u32) i32 {
-  const alloc = gpa.allocator();
-  const data = readFileData(path, alloc) catch return -1;
+  const data = readFileData(path) catch return -1;
   return storeFace(data, face_index) catch { alloc.free(data); return -1; };
-}
-
-/// Returns the number of faces in a font file (1 for TTF/OTF, N for TTC).
-pub export fn font_face_count_at_path(path: [*:0]const u8) i32 {
-  const alloc = gpa.allocator();
-  const data = readFileData(path, alloc) catch return 1;
-  defer alloc.free(data);
-  return @intCast(faceCount(data));
 }
 
 /// Write font metrics at `size` pixels into `out[0..3]`:
@@ -261,7 +260,7 @@ pub export fn font_shape(
 // ── Glyph outline collection ──────────────────────────────────────────────────
 
 const OutlineCollector = struct {
-  alloc: Alloc,
+  alloc: std.mem.Allocator,
   contours: std.ArrayList(std.ArrayList([2]f32)),
   current: std.ArrayList([2]f32),
   scale: f32,
@@ -373,7 +372,6 @@ pub export fn font_glyph_outline(
   pts_cap: usize,
 ) i32 {
   const e = getEntry(handle) orelse return -1;
-  const alloc = gpa.allocator();
 
   const upm: f32 = @floatFromInt(e.face.units_per_em());
   var contours_init = std.ArrayList(std.ArrayList([2]f32)).initCapacity(alloc, 4) catch return -1;
