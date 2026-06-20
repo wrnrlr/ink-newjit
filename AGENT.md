@@ -32,8 +32,10 @@ Expressions are evaluated right-to-left. There are no special precedence rules f
 Integers: -2 1 0 0N
 Types: `i`f`s`c`m`I`F`S`C`M`L
 List: (1;2.3;`c)
-Lambda: {x}
+Lambda: {[a;b]@a+b}
 Dict: [id:1;name:"Bob"]
+Train: *|
+Sum: +/
 ```
 
 
