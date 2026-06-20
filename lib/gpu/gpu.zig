@@ -617,6 +617,62 @@ export fn gpuCompute(words_k: ?K, input_k: ?K) callconv(.c) ?K {
   return result_k;
 }
 
+// Derive a mesh vertex-buffer layout from a SPIR-V vertex shader by scanning its
+// Input variables. Relies on the fixed input-pointer type IDs assigned in
+// lib/gpu/spirv.k (PinF32=10, PinV2=14, PinV4=12, PinV3=18) and on input
+// Locations being contiguous from 0. Fills `out` and returns count + stride.
+const MeshLayout = struct { count: usize, stride_floats: usize };
+fn meshVtxLayout(words: []const u32, out: *[16]wgpu.VertexAttribute) MeshLayout {
+  var dec_id: [16]u32 = undefined;
+  var dec_loc: [16]u32 = undefined;
+  var ndec: usize = 0;
+  var in_id: [16]u32 = undefined;
+  var in_comp: [16]u32 = undefined;
+  var nin: usize = 0;
+
+  var i: usize = 5; // skip 5-word header
+  while (i < words.len) {
+    const w0 = words[i];
+    const wc: usize = w0 >> 16;
+    const op: u32 = w0 & 0xffff;
+    if (wc == 0) break;
+    if (op == 71 and i + 3 < words.len and words[i + 2] == 30) { // OpDecorate Location
+      if (ndec < 16) { dec_id[ndec] = words[i + 1]; dec_loc[ndec] = words[i + 3]; ndec += 1; }
+    } else if (op == 59 and i + 3 < words.len and words[i + 3] == 1) { // OpVariable, storage Input
+      const comp: u32 = switch (words[i + 1]) { 10 => 1, 14 => 2, 18 => 3, 12 => 4, else => 0 };
+      if (comp > 0 and nin < 16) { in_id[nin] = words[i + 2]; in_comp[nin] = comp; nin += 1; }
+    }
+    i += wc;
+  }
+
+  // Order inputs by their Location, then assign packed offsets.
+  var offset: u32 = 0;
+  var count: usize = 0;
+  var loc: u32 = 0;
+  while (loc < nin) : (loc += 1) {
+    // find the input variable decorated with this location
+    var idx: usize = nin;
+    var k: usize = 0;
+    while (k < nin) : (k += 1) {
+      var d: usize = 0;
+      while (d < ndec) : (d += 1) {
+        if (dec_id[d] == in_id[k] and dec_loc[d] == loc) { idx = k; break; }
+      }
+      if (idx != nin) break;
+    }
+    if (idx == nin) break;
+    const comp = in_comp[idx];
+    out[count] = .{
+      .format = switch (comp) { 1 => .float32, 2 => .float32x2, 3 => .float32x3, else => .float32x4 },
+      .offset = offset,
+      .shader_location = loc,
+    };
+    offset += comp * @sizeOf(f32);
+    count += 1;
+  }
+  return .{ .count = count, .stride_floats = offset / @sizeOf(f32) };
+}
+
 // ── gpuMesh ───────────────────────────────────────────────────────────────────
 //
 // vtx_k: int list — SPIR-V vertex shader binary (output of VertexShader in spirv.k)
@@ -650,13 +706,15 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
   const frg_mod = r.device.createShaderModule(.{ .next_in_chain = @ptrCast(&spirv_f) });
   defer frg_mod.release();
 
-  const vtx_attrs = [_]wgpu.VertexAttribute{
-    .{ .format = .float32x3, .offset = 0,  .shader_location = 0 },
-    .{ .format = .float32x3, .offset = 12, .shader_location = 1 },
-  };
+  // Derive the vertex attribute layout from the shader's declared inputs, so a
+  // mesh can use any vertex format (stride-6 [x y z nx ny nz], the PBR
+  // stride-11, …) without a fixed vertex struct.
+  var attr_buf: [16]wgpu.VertexAttribute = undefined;
+  const layout_info = meshVtxLayout(vtx_words[0..@intCast(vn)], &attr_buf);
+  if (layout_info.count == 0) return ki(0);
   const vtx_bufs = [_]wgpu.VertexBufferLayout{.{
-    .array_stride = @sizeOf(render.MeshVertex),
-    .attribute_count = vtx_attrs.len, .attributes = &vtx_attrs,
+    .array_stride = layout_info.stride_floats * @sizeOf(f32),
+    .attribute_count = layout_info.count, .attributes = &attr_buf,
   }};
   const color_targets = [_]wgpu.ColorTargetState{.{
     .format     = zgpu.GraphicsContext.swapchain_format,
@@ -691,12 +749,14 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
   });
   if (@intFromPtr(pipeline) == 0) return ki(0);
   r.mesh_pipelines.append(r.allocator, pipeline) catch return ki(0);
+  r.mesh_strides.append(r.allocator, layout_info.stride_floats) catch return ki(0);
   return ki(@intCast(r.mesh_pipelines.items.len));
 }
 
 // ── gpuDrawMesh ───────────────────────────────────────────────────────────────
 //
-// verts_k: flat f32 array [x,y,z,nx,ny,nz,...] — stride 6, multiple of 6
+// verts_k: flat f32 array matching the pipeline's vertex layout (the per-vertex
+//   stride is whatever the mesh's vertex shader declares; see gpuMesh).
 // handle_k: int scalar — handle returned by gpuMesh
 
 export fn gpuDrawMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
@@ -704,11 +764,13 @@ export fn gpuDrawMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
   const vf = kfp(verts_k) orelse return ki(0);
   const vn = kn(verts_k);
   const handle = ki_val(handle_k);
-  if (handle <= 0 or vn < 6) return ki(0);
+  if (handle <= 0 or handle > r.mesh_strides.items.len) return ki(0);
+  const stride = r.mesh_strides.items[@intCast(handle - 1)];
+  if (stride == 0 or vn < @as(i32, @intCast(stride))) return ki(0);
 
-  const n_verts: usize = @intCast(@divTrunc(vn, 6));
-  const verts_slice = @as([*]const render.MeshVertex, @ptrCast(@alignCast(vf)))[0..n_verts];
-  r.drawMesh(verts_slice, @intCast(handle - 1)) catch {};
+  const n_floats: usize = @intCast(@divTrunc(vn, @as(i32, @intCast(stride))) * @as(i32, @intCast(stride)));
+  const floats = vf[0..n_floats];
+  r.drawMesh(floats, stride, @intCast(handle - 1)) catch {};
   return ki(0);
 }
 

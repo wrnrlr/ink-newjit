@@ -8,14 +8,17 @@ pub const Vertex = extern struct {
   x: f32, y: f32, u: f32, v: f32,
 };
 
-pub const MeshVertex = extern struct {
-  x: f32, y: f32, z: f32,
-  nx: f32, ny: f32, nz: f32,
-};
+// Capacity of the shared mesh vertex buffer, in f32s (~3M floats ≈ 12 MB).
+pub const MESH_BUFFER_FLOATS: usize = 3_000_000;
 
+// Mesh vertices are stored as raw f32. The per-vertex layout (stride and
+// attributes) is whatever the mesh pipeline's vertex shader declares — see
+// gpuMesh, which derives it from the SPIR-V — so meshes are not tied to one
+// fixed vertex struct.
 pub const MeshCall = struct {
-  offset: usize,
-  count: usize,
+  offset: usize, // f32 offset into mesh_verts
+  count: usize,  // vertex count
+  stride: usize, // f32s per vertex
   pipeline_idx: usize,
 };
 
@@ -79,9 +82,10 @@ pub const Renderer = struct {
   spirv_pipelines: ArrayList(wgpu.RenderPipeline),
   // 3-D mesh rendering
   mesh_vertex_buffer: wgpu.Buffer,
-  mesh_verts: ArrayList(MeshVertex),
+  mesh_verts: ArrayList(f32),
   mesh_calls: ArrayList(MeshCall),
   mesh_pipelines: ArrayList(wgpu.RenderPipeline),
+  mesh_strides: ArrayList(usize), // f32s per vertex, parallel to mesh_pipelines
 
   pub fn init(
   allocator: Alloc,
@@ -102,13 +106,14 @@ pub const Renderer = struct {
     .draw_calls = try ArrayList(DrawCall).initCapacity(allocator, 64),
     .custom_pipelines = try ArrayList(wgpu.RenderPipeline).initCapacity(allocator, 4),
     .spirv_pipelines = try ArrayList(wgpu.RenderPipeline).initCapacity(allocator, 4),
-    .mesh_verts = try ArrayList(MeshVertex).initCapacity(allocator, 4096),
+    .mesh_verts = try ArrayList(f32).initCapacity(allocator, 4096),
     .mesh_calls = try ArrayList(MeshCall).initCapacity(allocator, 16),
     .mesh_pipelines = try ArrayList(wgpu.RenderPipeline).initCapacity(allocator, 4),
+    .mesh_strides = try ArrayList(usize).initCapacity(allocator, 4),
     .mesh_vertex_buffer = device.createBuffer(.{
     .label = "mesh vertex buffer",
     .usage = .{ .vertex = true, .copy_dst = true },
-    .size = 500_000 * @sizeOf(MeshVertex),
+    .size = MESH_BUFFER_FLOATS * @sizeOf(f32),
     .mapped_at_creation = .false,
     }),
     .view_buffer = device.createBuffer(.{
@@ -158,6 +163,7 @@ pub const Renderer = struct {
   self.spirv_pipelines.deinit(self.allocator);
   for (self.mesh_pipelines.items) |p| { if (@intFromPtr(p) != 0) p.release(); }
   self.mesh_pipelines.deinit(self.allocator);
+  self.mesh_strides.deinit(self.allocator);
   self.mesh_vertex_buffer.release();
   self.mesh_calls.deinit(self.allocator);
   self.mesh_verts.deinit(self.allocator);
@@ -241,12 +247,14 @@ pub const Renderer = struct {
   }
   }
 
-  // Queue a 3-D mesh draw call (stride-6 vertices [x y z nx ny nz]).
-  pub fn drawMesh(self: *Renderer, verts: []const MeshVertex, pipeline_idx: usize) !void {
+  // Queue a 3-D mesh draw call. `verts` is raw f32 vertex data; `stride` is the
+  // number of f32s per vertex (pipeline-specific, see gpuMesh).
+  pub fn drawMesh(self: *Renderer, verts: []const f32, stride: usize, pipeline_idx: usize) !void {
+  if (stride == 0) return;
   const offset = self.mesh_verts.items.len;
   try self.mesh_verts.appendSlice(self.allocator, verts);
   try self.mesh_calls.append(self.allocator, .{
-    .offset = offset, .count = verts.len, .pipeline_idx = pipeline_idx,
+    .offset = offset, .count = verts.len / stride, .stride = stride, .pipeline_idx = pipeline_idx,
   });
   }
 
@@ -265,8 +273,8 @@ pub const Renderer = struct {
   if (self.mesh_verts.items.len == 0) return;
 
   const verts = self.mesh_verts.items;
-  const write_count = @min(verts.len, 500_000);
-  self.queue.writeBuffer(self.mesh_vertex_buffer, 0, MeshVertex, verts[0..write_count]);
+  const write_count = @min(verts.len, MESH_BUFFER_FLOATS);
+  self.queue.writeBuffer(self.mesh_vertex_buffer, 0, f32, verts[0..write_count]);
 
   const depth_att = wgpu.RenderPassDepthStencilAttachment{
     .view             = depth_view,
@@ -288,11 +296,15 @@ pub const Renderer = struct {
   defer pass.release();
   defer pass.end();
 
-  pass.setVertexBuffer(0, self.mesh_vertex_buffer, 0, write_count * @sizeOf(MeshVertex));
+  // Each call may use a different vertex stride, so bind the buffer slice
+  // per-call (byte offset/size) and draw from vertex 0 of that slice.
   for (self.mesh_calls.items) |mc| {
     if (mc.pipeline_idx >= self.mesh_pipelines.items.len) continue;
+    const end = mc.offset + (mc.count * mc.stride);
+    if (end > write_count) continue;
     pass.setPipeline(self.mesh_pipelines.items[mc.pipeline_idx]);
-    pass.draw(@intCast(mc.count), 1, @intCast(mc.offset), 0);
+    pass.setVertexBuffer(0, self.mesh_vertex_buffer, mc.offset * @sizeOf(f32), mc.count * mc.stride * @sizeOf(f32));
+    pass.draw(@intCast(mc.count), 1, 0, 0);
   }
   }
 
