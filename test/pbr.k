@@ -23,20 +23,21 @@ skyWds: FragmentShader[[uv:`v2; out:`v4]; {[uv]
   t: uv[1]
   sr: mix[0.22; 0.88; t]; sg: mix[0.45; 0.68; t]; sb: mix[0.92; 0.35; t]
   px: uv[0]*10.0; py: uv[1]*5.0
-  pi0: floor[px]; pi1: floor[py]; pf0: fract[px]; pf1: fract[py]
+  pi0: floor px; pi1: floor py; pf0: fract px; pf1: fract py
   p00: (pi0; pi1)
-  h00: fract[sin[dot[p00; (127.1;311.7)]]*43758.5]
-  h10: fract[sin[dot[p00+(1.;0.); (127.1;311.7)]]*43758.5]
-  h01: fract[sin[dot[p00+(0.;1.); (127.1;311.7)]]*43758.5]
-  h11: fract[sin[dot[p00+(1.;1.); (127.1;311.7)]]*43758.5]
+  h00: fract[sin[dot[p00; 127.1 311.7]]*43758.5]
+  h10: fract[sin[dot[p00+1. 0.; 127.1 311.7]]*43758.5]
+  h01: fract[sin[dot[p00+0. 1.; 127.1 311.7]]*43758.5]
+  h11: fract[sin[dot[p00+1. 1.; 127.1 311.7]]*43758.5]
   ux: pf0*pf0*(3.0-(2.0*pf0)); uy: pf1*pf1*(3.0-(2.0*pf1))
   noise: mix[mix[h00;h10;ux]; mix[h01;h11;ux]; uy]
   cloudThr: 0.52+(t*0.25)
   cloudAmt: max[0.0; noise-cloudThr]*(1.0%(1.0-cloudThr))
   cld: cloudAmt*cloudAmt
-  r: clamp[sr+(cld*(1.0-sr)); 0.; 1.]
-  g: clamp[sg+(cld*(1.0-sg)); 0.; 1.]
-  b: clamp[sb+(cld*(1.0-sb)); 0.; 1.]
+  / mix[a;1;t] = a+t*(1-a); evaluation is right-to-left so no parens needed
+  r: clamp[mix[sr; 1.0; cld]; 0.; 1.]
+  g: clamp[mix[sg; 1.0; cld]; 0.; 1.]
+  b: clamp[mix[sb; 1.0; cld]; 0.; 1.]
   (r; g; b; 1.0)
 }]
 

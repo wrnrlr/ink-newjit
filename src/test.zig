@@ -68,6 +68,17 @@ test "basic syntax" {
   try t.check("[[]n:`b`c;i:2 3]", "[[]n:`b`c;i:2 3]");
   // try t.check("[[n:`b`c]i:2 3]", "[[n:`b`c]i:2 3]");
 }
+
+test "parse preserves vector literal values" {
+  var t = try Tester.init(); defer t.deinit();
+  // Vector literals must keep their values in the AST node (node[2]); the
+  // SPIR-V shader compiler reads them from there. Regression for parse.zig
+  // dropping .F/.I/.B/.S/.C literal payloads via the `else => {}` branch.
+  try t.check("(parse \"1.0 2.0 3.0\")[1][2]", "1.0 2.0 3.0");
+  try t.check("(parse \"1 2 3\")[1][2]", "1 2 3");
+  try t.check("(parse \"127.1 311.7\")[1][0]", "`literal");
+  try t.check("(parse \"127.1 311.7\")[1][1]", "`floats");
+}
 test "string" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("\"\"", "\"\"");

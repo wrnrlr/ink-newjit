@@ -76,7 +76,15 @@ fn nodeToV(vm: *VM, node: *Node) anyerror!V {
         .b      => |b| try list.append(alloc, V{ .b = b }),
         .s      => |s| try list.append(alloc, try sym(vm, s)),
         .c      => |c| try list.append(alloc, try sym(vm, c)),
-        else    => {},
+        .F      => |f| try list.append(alloc, try V.Floats(alloc, f)),
+        .I      => |i| try list.append(alloc, try V.Ints(alloc, i)),
+        .B      => |b| try list.append(alloc, .{ .B = try N(bool).n1(alloc, b) }),
+        .S      => |s| {
+          const arr = try N(u32).init(alloc, s.len);
+          for (s, arr.slice()) |str, *dst| dst.* = try vm.intern(str);
+          try list.append(alloc, V{ .S = arr });
+        },
+        .C      => |c| try list.append(alloc, try V.Chars(alloc, c)),
       }
       return transfer(alloc, &list);
     },

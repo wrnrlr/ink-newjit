@@ -327,7 +327,20 @@ compFnCall: {[name; argsSeq; env; oty]
 
 / ── Layer 3: expression compilers ─────────────────────────────────────────
 
-compLit: {[node; oty]
+/ Vector literal `127.1 311.7` → OpConstantComposite (v2/v3/v4 of f32).
+/ Each component is emitted as its own f32 OpConstant first, then referenced.
+/ This lets shaders write `dot[p; 127.1 311.7]` instead of `dot[p; (127.1;311.7)]`.
+compVecLit: {[node]
+  vals: 0.+node[2]
+  n:    #vals
+  ids:  {[v] r: newId[]; emitCon opConst[Tf32;r;v]; r}' vals
+  rty:  $[n=2;`v2; n=3;`v3; `v4]
+  r:    newId[]
+  emitCon (0x2C+(0x10000*(3+n)); Tid[rty]; r),ids   / OpConstantComposite 44
+  (r; rty)
+}
+
+compScalarLit: {[node; oty]
   litTy: node[1]
   useTy: $[(litTy~`int) & (oty~`f32); `float; litTy]
   t:   LitTid[useTy]
@@ -335,6 +348,10 @@ compLit: {[node; oty]
   r: newId[]
   emitCon opConst[t;r;val]
   (r; LitSym[useTy])
+}
+
+compLit: {[node; oty]
+  $[node[1] in `floats`ints; compVecLit[node]; compScalarLit[node;oty]]
 }
 
 compVar: {[node; env] env[node[2]]}
@@ -352,11 +369,18 @@ compTrans: {[node; env; oty]
   (r; rty)
 }
 
+/ Monadic application written as juxtaposition: `floor px`, `sin px`, `-x`.
+/ The op slot is a bare symbol for built-in verbs (`sin`-x) but a var node
+/ (`literal;`var;`floor) for math names that aren't ink keywords — normalise
+/ both to the bare symbol so dispUn matches (else floor/fract/sign/length/
+/ normalize silently fall through to negate).
 compAppos: {[node; env; oty]
+  fn: node[1]
+  op: $[(fn[0]~`literal) & (fn[1]~`var); fn[2]; fn]
   ap: compNode[node[2]; env; oty]
   r: newId[]
-  emitBuf dispUn[node[1]; ap[1]; r; ap[0]]
-  rty: $[node[1]~`length; `f32; node[1]~`~; `bool; ap[1]]
+  emitBuf dispUn[op; ap[1]; r; ap[0]]
+  rty: $[op~`length; `f32; op~`~; `bool; ap[1]]
   (r; rty)
 }
 
