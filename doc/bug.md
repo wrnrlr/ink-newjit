@@ -39,3 +39,19 @@ The correct form (used in `momentum.k` and `arbitrage.k`) is:
  `I$"10000000000"
 0N
 ```
+
+---
+
+## 5. DebugAllocator alignment mismatch when building list values
+
+Compiling a SPIR-V shader (`FragmentShader[...]` in `lib/spirv.k`) prints
+several `DebugAllocator: Allocation alignment 8 does not match free alignment 4`
+warnings on teardown. Reproduces with shader source using *only* plain list
+syntax (no vector literals), so it is unrelated to the parser/compiler.
+
+Traces point at `promote`/`promoteAs` (`src/primitive/promote.zig`) and
+`V.Values`/`N(V).n1` via `doMakeList` (`src/runtime/vm.zig:573-577`): a value
+array is allocated at alignment 8 (the `Rc`/pointer alignment for `N(V)`) but
+freed through a path that computes alignment 4. Debug-build only; output is
+still correct. Likely a mismatch between `alignedAlloc` alignment and the
+`alignment` used in `N(T).deinit`'s `free`.

@@ -1,6 +1,6 @@
 / lib/draw.k — 2D immediate-mode drawing
 /
-/ Requires:  2: "lib/gpu/gpu.k"   (gpuFill, gpuTess, gpuSolid)
+/ Requires:  2: "lib/gpu.k"   (gpuFill, gpuTess, gpuSolid)
 /            2: "lib/font/font.k"  (fontOutline)
 
 / ── Shapes ───────────────────────────────────────────────────────────────────

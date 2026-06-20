@@ -9,8 +9,8 @@
 /
 / Run: zig build gpu && ink test/planes.k
 
-2: "lib/gpu/spirv.k"
-2: "lib/gpu/gpu.k"
+2: "lib/spirv.k"
+2: "lib/gpu.k"
 
 / Generate a unit square for a plane with given unit normal n=(n0;n1;n2).
 / Corners are ±t1 ± t2, each vertex = [px py pz nx ny nz].
@@ -30,7 +30,7 @@ verts: ,/ mkPlane'1.0*=3
 / Fragment shader: color by world-space normal (R=YZ, G=XZ, B=XY).
 frag: FragmentShader[[nor:`v3; out:`v4]; {[nor]
   amb: 0.15
-  ld: normalize[(0.6; 0.8; 0.4)]
+  ld: normalize 0.6 0.8 0.4
   br: amb+smoothstep[0.0;0.1;dot[nor;ld]]
   (nor[0]*br; nor[1]*br; nor[2]*br; 1.0)
 }]

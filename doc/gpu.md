@@ -1,6 +1,6 @@
 # GPU Shader Compilation in ink
 
-Write vertex, fragment, and compute shaders in ink lambdas and run them on the GPU via Dawn/WebGPU. A restricted subset of the language compiles to SPIR-V — the binary IR Dawn accepts — without going through WGSL. The compiler lives entirely in `lib/gpu/spirv.k`.
+Write vertex, fragment, and compute shaders in ink lambdas and run them on the GPU via Dawn/WebGPU. A restricted subset of the language compiles to SPIR-V — the binary IR Dawn accepts — without going through WGSL. The compiler lives entirely in `lib/spirv.k`.
 
 ---
 
@@ -8,8 +8,8 @@ Write vertex, fragment, and compute shaders in ink lambdas and run them on the G
 
 ```k
 / Build the GPU library first: zig build gpu
-2: "lib/gpu/spirv.k"
-2: "lib/gpu/gpu.k"
+2: "lib/spirv.k"
+2: "lib/gpu.k"
 
 / Fragment shader: maps UV coordinates to RGBA color
 spirvWds: compShader[{[uv] (uv[0]; uv[1]; 0.5; 1.0)}; [`uv:`v2; `out:`v4]]
@@ -34,9 +34,9 @@ gpuRun[loop; 0]
 
 ## API reference
 
-### `lib/gpu/gpu.k` — runtime bindings
+### `lib/gpu.k` — runtime bindings
 
-Load with `2: "lib/gpu/gpu.k"` (requires `zig build gpu` first).
+Load with `2: "lib/gpu.k"` (requires `zig build gpu` first).
 
 | Function | Signature | Description |
 |---|---|---|
@@ -60,9 +60,9 @@ Load with `2: "lib/gpu/gpu.k"` (requires `zig build gpu` first).
 
 ---
 
-## Shader compiler API (`lib/gpu/spirv.k`)
+## Shader compiler API (`lib/spirv.k`)
 
-Load with `2: "lib/gpu/spirv.k"`.
+Load with `2: "lib/spirv.k"`.
 
 ### `compShader[fn; ioTypes]` → SPIR-V word list
 

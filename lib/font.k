@@ -35,7 +35,7 @@ FontShape: {[f;t] fontShape0[f`h; t]}
 / Get glyph outline at a pixel size.
 / f: font dict.  g: glyph ID (int).  sz: size in pixels (float).
 / → L of F contours — pass each to Tessellate for triangles
-FontOutline: {[f;g;sz] fontOutline0(f`h,g,sz)}
+FontOutline: {[f;g;sz] fontOutline0((0.+f`h),(0.+g),(0.+sz))}
 
 / ── Metric utilities ─────────────────────────────────────────────────────────
 

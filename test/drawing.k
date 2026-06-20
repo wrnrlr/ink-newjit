@@ -11,8 +11,8 @@
 /
 / Run: zig build gpu && ink test/fill_demo.k
 
-2: "lib/gpu/spirv.k"
-2: "lib/gpu/gpu.k"
+2: "lib/spirv.k"
+2: "lib/gpu.k"
 
 / ── SPIR-V rounded-rect SDF shader ──────────────────────────────────────────
 / uv in [0,1]x[0,1], draws a soft white rounded rectangle in the centre.
@@ -25,7 +25,7 @@ rrSdf: FragmentShader[`uv`out!`v2`v4; {[uv]
   qy: (abs[py]-0.7)+0.15
   mx: max[qx;0.0]
   my: max[qy;0.0]
-  d: (sqrt[(mx*mx)+(my*my)] + min[max[qx;qy]; 0.0]) - 0.15
+  d: (sqrt[(sqr mx)+(sqr my)] + min[max[qx;qy]; 0.0]) - 0.15
   c: smoothstep[0.02; -0.02; d]
   (c; c*0.9; c*0.7; c)}]
 

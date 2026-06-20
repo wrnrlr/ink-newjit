@@ -6,6 +6,7 @@ const disasm = @import("runtime/disasm.zig");
 const serve = @import("runtime/serve.zig");
 const ffi = @import("ffi.zig");
 const modules = @import("modules.zig");
+const lsp = @import("lsp.zig");
 
 /// Called by C extensions (e.g. GPU) to process pending IPC messages from
 /// within their own event loop.  No-ops when current_vm is not set.
@@ -93,6 +94,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
       try extra_args.append(allocator, arg);
     }
   }
+
+  // `ink lsp` — run the language server over stdio (JSON-RPC).  No VM needed.
+  if (script_path) |sp| if (std.mem.eql(u8, sp, "lsp")) return lsp.run(allocator);
 
   const io = std.Io.Threaded.global_single_threaded.io();
   const stdin_is_tty = (std.Io.File.stdin().isTty(io) catch false);

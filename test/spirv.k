@@ -8,7 +8,7 @@
 / Run: ink test/spirv.k
 /      zig build && ink test/spirv.k   (to rebuild after cast.zig change)
 
-2: "lib/gpu/spirv.k"
+2: "lib/spirv.k"
 
 chk: {[e;a;n] (("FAIL";"ok  ") e~a)," ",n}
 
@@ -274,3 +274,31 @@ chk[1b; |/cwds=0x0003001D; "OpTypeRuntimeArray present"]
 chk[1b; |/cwds=0x0003001E; "OpTypeStruct present"]
 chk[1b; |/cwds=0x00060041; "OpAccessChain present"]
 chk[1b; |/cwds=0x00050085; "OpFMul present (x*2 body)"]
+
+/ ══ 8. Surface-syntax sugar ══════════════════════════════════════════════════
+/
+/ Three conveniences let shader source read like ordinary ink:
+/   - vector literals          dot[p; 127.1 311.7]  (not (127.1;311.7))
+/   - monadic math names       floor px             (not floor[px])
+/   - <= / >= peephole         a<=b → ~(a>b)         (ink has no <= token)
+
+/ Vector literal → OpConstantComposite (opword 0x2C, word-count 5 for v2)
+wvec: FragmentShader[[uv:`v2; out:`f32]; {[uv] dot[uv; 127.1 311.7]}]
+chk[1b; |/wvec=0x0005002C;   "vector literal emits OpConstantComposite"]
+chk[1b; |/wvec=`I$127.1;     "127.1 constant present in module"]
+chk[1b; |/wvec=0x00050094;   "OpDot present (dot of vector literal)"]
+
+/ Monadic `floor px` must emit Floor (GLSL 8), NOT FNegate (0x7F)
+wflr: FragmentShader[[x:`f32; out:`f32]; {[x] floor x}]
+chk[1b; |/wflr=8;            "floor px emits GLSL Floor (ext-inst 8)"]
+chk[0b; |/wflr=0x0004007F;   "floor px does NOT emit OpFNegate"]
+
+/ a<=b → ~(a>b): expect OpFOrdGreaterThan (0xBA) + OpLogicalNot (0xA8)
+wle: FragmentShader[[uv:`v2; out:`f32]; {[uv] $[uv[0]<=uv[1]; 1.0; 0.0]}]
+chk[1b; |/wle=0x000500BA;    "a<=b emits OpFOrdGreaterThan"]
+chk[1b; |/wle=0x000400A8;    "a<=b emits OpLogicalNot"]
+
+/ a>=b → ~(a<b): expect OpFOrdLessThan (0xB8) + OpLogicalNot (0xA8)
+wge: FragmentShader[[uv:`v2; out:`f32]; {[uv] $[uv[0]>=uv[1]; 1.0; 0.0]}]
+chk[1b; |/wge=0x000500B8;    "a>=b emits OpFOrdLessThan"]
+chk[1b; |/wge=0x000400A8;    "a>=b emits OpLogicalNot"]

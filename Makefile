@@ -6,6 +6,9 @@ INK  := zig-out/bin/ink
 
 test:
 	time zig build test
+	$(INK) lib/stats.k
+	$(INK) test/font.k
+	sh test/ipc.sh
 
 build:
 	time zig build -Doptimize=ReleaseFast
@@ -28,8 +31,6 @@ qa:
 	$(INK) test/circle.k
 	$(INK) test/walk.k
 	$(INK) test/eyes.k
-	$(INK) lib/stats.k
-	sh test/ipc.sh
 
 info:
 	@echo "Total lines:" && find src -name '*.zig' | xargs wc -l | tail -n 1

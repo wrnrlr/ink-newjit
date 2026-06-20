@@ -8,8 +8,8 @@
 /
 / Run: zig build gpu && ink test/circle.k
 
-2: "lib/gpu/spirv.k"
-2: "lib/gpu/gpu.k"
+2: "lib/spirv.k"
+2: "lib/gpu.k"
 
 / Circle SDF fragment shader.
 / uv in [0,1]x[0,1] from fill.wgsl vertex stage.

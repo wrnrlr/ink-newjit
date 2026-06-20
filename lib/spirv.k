@@ -1,11 +1,11 @@
-/ lib/gpu/spirv.k — SPIR-V copy-and-patch compiler for ink shaders
+/ lib/spirv.k — SPIR-V copy-and-patch compiler for ink shaders
 / Tiramisu 4-layer model applied to ink→SPIR-V:
 /   Layer 1 (Abstract Algorithm)  : ink lambda AST via `parse`
 /   Layer 2 (Computation Mgmt)    : type-annotate, schedule (trivial for shaders)
 /   Layer 3 (Data Mgmt)           : assign SPIR-V IDs, emit typed sections
 /   Layer 4 (Communication Mgmt)  : assemble SPIR-V binary in spec order
 /
-/ Load with:  2: "lib/gpu/spirv.k"
+/ Load with:  2: "lib/spirv.k"
 / Compile:    compShader[fn; ioTypes] → int list (SPIR-V words)
 / Example:    compShader[{[uv] smoothstep[0.02;-0.02; sqrt[(uv[0]-0.5)*(uv[0]-0.5)+(uv[1]-0.5)*(uv[1]-0.5)]-0.3]}; [`uv:`v2; `out:`f32]]
 
@@ -216,8 +216,6 @@ opCons4:{[t;r;a;b;c;d] (0x00070050;t;r;a;b;c;d)}    / OpCompositeConstruct vec4
 / Float comparison → always produce bool result type
 opFOlt: {[t;r;a;b] (0x000500B8;Tbool;r;a;b)}  / OpFOrdLessThan 184
 opFOgt: {[t;r;a;b] (0x000500BA;Tbool;r;a;b)}  / OpFOrdGreaterThan 186
-opFOle: {[t;r;a;b] (0x000500BC;Tbool;r;a;b)}  / OpFOrdLessThanEqual 188
-opFOge: {[t;r;a;b] (0x000500BE;Tbool;r;a;b)}  / OpFOrdGreaterThanEqual 190
 opFOeq: {[t;r;a;b] (0x000500B4;Tbool;r;a;b)}  / OpFOrdEqual 180
 opFOne: {[t;r;a;b] (0x000500B6;Tbool;r;a;b)}  / OpFOrdNotEqual 182
 opLAnd: {[t;r;a;b] (0x000500A7;Tbool;r;a;b)}  / OpLogicalAnd 167
@@ -254,10 +252,8 @@ dispBin: {[op;rty;r;aty;a;bty;b]
                isVecTy[bty] & ~isVecTy[aty]; opVTS[rt;r;b;a]
                opFmul[rt;r;a;b]]
     op~`,;   (0x00050050;rt;r;a;b)   / OpCompositeConstruct, 2 constituents: v2+f32→v3, v3+f32→v4, etc.
-    op~`<;   opFOlt[at;r;a;b]
+    op~`<;   opFOlt[at;r;a;b]   / <= / >= are handled by the compTrans peephole
     op~`>;   opFOgt[at;r;a;b]
-    op~`<=;  opFOle[at;r;a;b]
-    op~`>=;  opFOge[at;r;a;b]
     op~`=;   opFOeq[at;r;a;b]
     op~`~;   opFOne[at;r;a;b]
     op~`&;   opLAnd[at;r;a;b]
@@ -356,7 +352,19 @@ compLit: {[node; oty]
 
 compVar: {[node; env] env[node[2]]}
 
-compTrans: {[node; env; oty]
+/ x<=y → ~(x>y),  x>=y → ~(x<y).  `flip` is the strict comparison to negate;
+/ node[3] is the apposit(`=; .) wrapper, so node[3][2] is the real operand.
+compLeGe: {[node; env; flip]
+  ap: compNode[node[1];    env; `f32]
+  bp: compNode[node[3][2]; env; `f32]
+  rc: newId[]
+  emitBuf dispBin[flip; `bool; rc; ap[1]; ap[0]; bp[1]; bp[0]]
+  r:  newId[]
+  emitBuf opLNot[Tbool; r; rc]
+  (r; `bool)
+}
+
+compTransNorm: {[node; env; oty]
   op: node[2]
   / Feed the right hint to operands: numeric comparisons want f32, bool ops want bool
   opTy: $[op in `<`>`=`~; `f32; op in (`&;`|); `bool; oty]
@@ -367,6 +375,18 @@ compTrans: {[node; env; oty]
   r: newId[]
   emitBuf dispBin[op; rty; r; aty; ap[0]; bty; bp[0]]
   (r; rty)
+}
+
+/ Peephole for the missing <= / >= operators.  ink has no such tokens: `x<=y`
+/ lexes as `x < (=y)` and `x>=y` as `x > (=y)` (monadic `=` on the right).
+/ Detect that shape and emit the De Morgan equivalent so shaders can write
+/ `a<=b` / `a>=b` directly instead of `~(a>b)` / `~(a<b)`.
+compTrans: {[node; env; oty]
+  op: node[2]; b: node[3]
+  isEq: (b[0]~`apposit) & (b[1]~`=)
+  $[(op~`<) & isEq; compLeGe[node; env; `>]
+    (op~`>) & isEq; compLeGe[node; env; `<]
+    compTransNorm[node; env; oty]]
 }
 
 / Monadic application written as juxtaposition: `floor px`, `sin px`, `-x`.

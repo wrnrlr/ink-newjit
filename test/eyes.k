@@ -2,7 +2,7 @@
 / Build GPU lib first:  zig build gpu
 / Run:                  ink test/gpu_eyes.k
 
-2: "lib/gpu/gpu.k"
+2: "lib/gpu.k"
 
 pi: 3.14159265359
 

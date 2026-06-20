@@ -11,8 +11,8 @@
 /
 / Run: zig build gpu && ink test/cloth.k
 
-2: "lib/gpu/spirv.k"
-2: "lib/gpu/gpu.k"
+2: "lib/spirv.k"
+2: "lib/gpu.k"
 
 / ── Math helpers ──────────────────────────────────────────────────────────────
 vlen3: {[x;y;z] sqrt[(x*x)+(y*y)+(z*z)]}
@@ -167,17 +167,17 @@ clothVtx: VertexShader[[pos:`v3;nor:`v3]; [wPos:`v3;wNor:`v3]; {[pos;nor]
 
 clothFrag: FragmentShader[[wPos:`v3;wNor:`v3; out:`v4]; {[wPos;wNor]
   ar:0.18; ag:0.28; ab:0.62; rough:0.75
-  V:normalize[(0.5774;0.5774;0.5774)]
-  L:normalize[(0.5;1.5;0.3)]
-  H:normalize[V+L]
+  V:normalize 0.5774 0.5774 0.5774
+  L:normalize 0.5 1.5 0.3
+  H:normalize V+L
   NdotL:max[0.0;dot[wNor;L]]
   NdotV:max[0.0001;dot[wNor;V]]
   NdotH:max[0.0;dot[wNor;H]]
   VdotH:max[0.0;dot[V;H]]
-  a:rough*rough; a2:a*a
-  dn:(NdotH*NdotH*(a2-1.0))+1.0
+  a:sqr rough; a2:sqr a
+  dn:(sqr[NdotH]*(a2-1.0))+1.0
   D:a2%(3.14159*dn*dn)
-  k:(rough+1.0)*(rough+1.0)%8.0
+  k:sqr[rough+1.0]%8.0
   Gl:NdotL%((NdotL*(1.0-k))+k)
   Gv:NdotV%((NdotV*(1.0-k))+k)
   G:Gl*Gv

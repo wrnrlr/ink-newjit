@@ -9,8 +9,8 @@
 /
 / Run:  zig build gpu && ink test/demo.k
 
-2: "lib/gpu/spirv.k"
-2: "lib/gpu/gpu.k"
+2: "lib/spirv.k"
+2: "lib/gpu.k"
 
 / ── Compile SPIR-V shaders ──────────────────────────────────────────────────
 spirvWds:   FragmentShader[[uv:`v2; out:`v4]; {[uv] (uv[0]; uv[1]; 0.5; 1.0)}]

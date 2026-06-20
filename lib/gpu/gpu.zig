@@ -112,7 +112,10 @@ export fn gpuFill(verts_k: ?K, frag_k: ?K) callconv(.c) ?K {
 
 // ── gpu_tess ──────────────────────────────────────────────────────────────────
 //
-// pts_F: flat f32 [x0,y0,x1,y1,...] polygon
+// pts_F: flat f32 [x0,y0,x1,y1,...] polygon. Multiple contours (e.g. a glyph
+// outline with counters) may be packed into one array separated by a NaN x/y
+// pair; holes are then resolved by signed area. A single contour with no NaN
+// behaves exactly as before, so existing callers are unaffected.
 // Returns flat f32 [x,y,u,v,...] triangle vertices (u=0.5, v=1.0)
 
 export fn gpuTess(pts_k: ?K) callconv(.c) ?K {
@@ -120,20 +123,41 @@ export fn gpuTess(pts_k: ?K) callconv(.c) ?K {
   const pn = kn(pts_k);
   if (pn < 6) return ki(0);
 
-  const n: usize = @as(usize, @intCast(pn)) / 2;
+  const npair: usize = @as(usize, @intCast(pn)) / 2;
   var da = std.heap.DebugAllocator(.{}).init;
   defer _ = da.deinit();
   const alloc = da.allocator();
 
-  const contour = alloc.alloc(tri.Pt, n) catch return ki(0);
-  defer alloc.free(contour);
-  for (0..n) |i| contour[i] = .{ .x = pf[i * 2], .y = pf[i * 2 + 1] };
+  // Split the flat point stream into contours on NaN-pair separators.
+  var contours = std.ArrayList(tri.Contour).initCapacity(alloc, 4) catch return ki(0);
+  defer {
+    for (contours.items) |c| alloc.free(c.pts);
+    contours.deinit(alloc);
+  }
+  var cur = std.ArrayList(tri.Pt).initCapacity(alloc, 32) catch return ki(0);
+  defer cur.deinit(alloc);
+  for (0..npair) |i| {
+    const x = pf[i * 2];
+    const y = pf[i * 2 + 1];
+    if (std.math.isNan(x) or std.math.isNan(y)) {
+      if (cur.items.len >= 3) {
+        const slice = alloc.dupe(tri.Pt, cur.items) catch return ki(0);
+        contours.append(alloc, .{ .pts = slice }) catch return ki(0);
+      }
+      cur.clearRetainingCapacity();
+    } else {
+      cur.append(alloc, .{ .x = x, .y = y }) catch return ki(0);
+    }
+  }
+  if (cur.items.len >= 3) {
+    const slice = alloc.dupe(tri.Pt, cur.items) catch return ki(0);
+    contours.append(alloc, .{ .pts = slice }) catch return ki(0);
+  }
 
   var out = std.ArrayList(tri.Pt).initCapacity(alloc, 64) catch return ki(0);
   defer out.deinit(alloc);
 
-  const contours = [1]tri.Contour{.{ .pts = contour }};
-  tri.triangulate(alloc, &contours, &out) catch return ki(0);
+  tri.triangulate(alloc, contours.items, &out) catch return ki(0);
 
   const n_out = out.items.len;
   const result_k = KF(@intCast(n_out * 4)) orelse return ki(0);

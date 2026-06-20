@@ -6,8 +6,8 @@
 /
 / Run: zig build gpu && ink test/sphere.k
 
-2: "lib/gpu/spirv.k"
-2: "lib/gpu/gpu.k"
+2: "lib/spirv.k"
+2: "lib/gpu.k"
 
 / Golden ratio — icosahedron edge lengths are 1 and φ
 F: 1.618034
@@ -57,11 +57,11 @@ icoMesh: ,/ sphVert' icoTris
 / Light direction ld and half-vector h are constants (safe, no NaN risk).
 / h = normalize(ld + viewDir) where viewDir=(0,0,1) in rotated screen space.
 phongFrag: FragmentShader[[nor:`v3; out:`v4]; {[nor]
-  ld: normalize[(0.5;1.0;0.3)]
-  h: normalize[(0.5;1.0;1.3)]
+  ld: normalize 0.5 1.0 0.3
+  h: normalize 0.5 1.0 1.3
   diff: max[0.0;dot[nor;ld]]
   spec: pow[max[0.0;dot[nor;h]];64.0]
-  base: (0.25;0.55;0.9)
+  base: 0.25 0.55 0.9
   lit: 0.08+diff
   dc0: base[0]*lit; dc1: base[1]*lit; dc2: base[2]*lit
   (dc0+spec; dc1+spec; dc2+spec; 1.0)
