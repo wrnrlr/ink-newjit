@@ -53,7 +53,7 @@ GlyphPx: {[f;sz;g] (FontScale[f;sz]) * f[`adv][g]}
 
 / Total pixel width of a glyph-ID list (no kerning).
 / f: font dict.  sz: pixel size.  gs: I glyph IDs.  → float
-TextWidth: {[f;sz;gs] +/ GlyphPx[f;sz]'gs}
+TextWidth: {[f;sz;gs] sc:FontScale[f;sz]; +/ sc * f[`adv][gs]}
 
 / ── Query helpers ────────────────────────────────────────────────────────────
 
