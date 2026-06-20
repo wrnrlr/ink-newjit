@@ -2,8 +2,10 @@ const std = @import("std");
 const Alloc = std.mem.Allocator;
 const VM = @import("runtime/vm.zig").VM;
 
-/// Automatic module loader: scans lib/*.k files for public (Uppercase) identifiers
-/// and auto-loads the corresponding file when that identifier appears in source.
+/// Automatic module loader: scans lib/*.k files for public identifiers — those
+/// starting with an Uppercase letter, plus dotted names namespaced under the
+/// file's stem (e.g. `regex.match` in regex.k) — and auto-loads the
+/// corresponding file when that identifier appears in source.
 pub const ModuleLoader = struct {
   alloc:  Alloc,
   /// identifier name → lib file path (owned slices)
@@ -21,14 +23,14 @@ pub const ModuleLoader = struct {
 
   pub fn deinit(self: *ModuleLoader) void {
     var it = self.index.iterator();
-    while (it.next()) |entry| {
-      self.alloc.free(entry.key_ptr.*);
-      self.alloc.free(entry.value_ptr.*);
+    while (it.next()) |e| {
+      self.alloc.free(e.key_ptr.*);
+      self.alloc.free(e.value_ptr.*);
     }
     self.index.deinit();
     var lt = self.loaded.iterator();
-    while (lt.next()) |entry| {
-      self.alloc.free(entry.key_ptr.*);
+    while (lt.next()) |e| {
+      self.alloc.free(e.key_ptr.*);
     }
     self.loaded.deinit();
   }
@@ -54,6 +56,9 @@ pub const ModuleLoader = struct {
       };
       defer self.alloc.free(text);
 
+      // Module name = file stem (the name minus the ".k" extension).
+      const stem = entry.name[0 .. entry.name.len - 2];
+
       var found_any = false;
       var lines = std.mem.splitScalar(u8, text, '\n');
       while (lines.next()) |line| {
@@ -62,12 +67,17 @@ pub const ModuleLoader = struct {
         const trimmed = line[skip..];
         // Skip comments
         if (trimmed.len == 0 or trimmed[0] == '/') continue;
-        // Must start with uppercase
-        if (!std.ascii.isUpper(trimmed[0])) continue;
+        // Must start with a letter
+        if (!std.ascii.isAlphabetic(trimmed[0])) continue;
 
-        // Find the identifier: [A-Z][A-Za-z0-9]*
+        // Find the (possibly dotted) identifier:
+        //   [A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)*
         var end: usize = 1;
         while (end < trimmed.len and std.ascii.isAlphanumeric(trimmed[end])) end += 1;
+        while (end + 1 < trimmed.len and trimmed[end] == '.' and std.ascii.isAlphabetic(trimmed[end + 1])) {
+          end += 1; // consume '.'
+          while (end < trimmed.len and std.ascii.isAlphanumeric(trimmed[end])) end += 1;
+        }
         const ident = trimmed[0..end];
 
         // Next non-space must be ':'
@@ -75,6 +85,14 @@ pub const ModuleLoader = struct {
         while (after < trimmed.len and (trimmed[after] == ' ' or trimmed[after] == '\t')) after += 1;
         if (after >= trimmed.len or trimmed[after] != ':') continue;
         // Must not be '::' (global assignment uses '::') — allow both
+
+        // Public if it starts with an uppercase letter, or is a dotted name
+        // namespaced under this file's stem (e.g. `regex.match` in regex.k).
+        const is_upper = std.ascii.isUpper(ident[0]);
+        const is_module = ident.len > stem.len + 1 and
+          std.mem.startsWith(u8, ident, stem) and ident[stem.len] == '.';
+        if (!is_upper and !is_module) continue;
+
         // Register if not already in index
         if (self.index.contains(ident)) continue;
 
@@ -89,7 +107,8 @@ pub const ModuleLoader = struct {
     }
   }
 
-  /// Scan source for [A-Z][A-Za-z0-9]+ tokens (skipping comments and strings).
+  /// Scan source for identifier tokens (skipping comments and strings),
+  /// including dotted module names like `regex.match`.
   /// For each token found in self.index that hasn't been loaded yet:
   ///   mark as loaded (before vm.load, prevents recursion), then call vm.load.
   pub fn autoLoad(self: *ModuleLoader, vm: *VM, source: []const u8) !void {
@@ -116,10 +135,14 @@ pub const ModuleLoader = struct {
         continue;
       }
 
-      // Uppercase identifier
-      if (std.ascii.isUpper(c)) {
+      // Identifier (uppercase, or a dotted module name like `regex.match`).
+      if (std.ascii.isAlphabetic(c)) {
         var end = i + 1;
         while (end < source.len and std.ascii.isAlphanumeric(source[end])) end += 1;
+        while (end + 1 < source.len and source[end] == '.' and std.ascii.isAlphabetic(source[end + 1])) {
+          end += 1; // consume '.'
+          while (end < source.len and std.ascii.isAlphanumeric(source[end])) end += 1;
+        }
         const ident = source[i..end];
         i = end;
 

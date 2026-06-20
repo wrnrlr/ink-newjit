@@ -266,11 +266,21 @@ pub const Lexer = struct {
       return .{ .tt = .op, .start = start, .end = self.i };
     }
 
-    // Identifiers: must start with a letter (grammar: var = /[a-zA-Z][a-zA-Z\d]*/)
-    // '_' is always an op, never a var start.
+    // Identifiers: must start with a letter (grammar:
+    //   var = /[a-zA-Z][a-zA-Z\d]*(\.[a-zA-Z][a-zA-Z\d]*)*/ )
+    // '_' is always an op, never a var character.
+    // A '.' extends the name only when immediately followed by a letter, so
+    // `a.b` and `ab1.ed4` are single names while `a.1` and `a. b` keep '.' as
+    // the dot (index/apply) operator.
     if (isAlphabetic(c)) {
       while (self.i < self.src.len and isAlphanumeric(self.CR())) {
         self.adv();
+      }
+      while (self.ch(0) == '.') {
+        const nxt = self.ch(1) orelse break;
+        if (!isAlphabetic(nxt)) break;
+        self.adv(); // consume '.'
+        while (self.i < self.src.len and isAlphanumeric(self.CR())) self.adv();
       }
       const word = self.src[start..self.i];
       if (isKeywordOp(word)) {

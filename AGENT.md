@@ -87,7 +87,7 @@ A composition is a sequence of variadics applied in succession.
 Blanks are used for empty assignment and defining partials.
 
 ## Variables
-A variable is a name associated with a value, a name is an aphanumeric identifier starting with a alphametic character. Underscores are not permitted in a variable name.
+A variable is a name associated with a value, a name is an alphanumeric identifier starting with an alphabetic character. A name may contain dots to separate segments (e.g. `a.b`, `ab1.ed4`), but a dot is only part of the name when immediately followed by a letter — `a.1` and `a. b` keep the dot as the index/apply operator. Underscores are not permitted in a variable name (`_` is always the Drop verb).
 A variable declared at the top level of a fileis a global variable and a variable declared inside a lambda is a local variable. 
 Assignmet of globals and locals at the top level happens with the singe colon `:`,
 while assigment of globals in a lambda happen with a double colon `::`
@@ -305,9 +305,9 @@ The parser, compiler, and runtime are all written in Zig 0.16.
 # Open Problems
 
 ## Auto-loading
-Public identifiers (starting with an uppercase letter) defined in `lib/*.k` are auto-loaded on first use — no manual `2:` import needed. For example, just write `ReadCsv "data.csv"` and the CSV library loads automatically.
+Public identifiers defined in `lib/*.k` are auto-loaded on first use — no manual `2:` import needed. A definition is public when it either starts with an uppercase letter (e.g. `ReadCsv`) or is a dotted name namespaced under the file's stem (e.g. `regex.match` in `regex.k`). For example, just write `ReadCsv "data.csv"` and the CSV library loads automatically.
 
-The loader (`src/modules.zig`) scans `lib/*.k` at startup, indexes all `[A-Z][A-Za-z0-9]*:` definitions, and calls `vm.load` for the relevant file the first time a matching identifier appears in source.
+The loader (`src/modules.zig`) scans `lib/*.k` at startup, indexes all public definitions (uppercase `[A-Z][A-Za-z0-9]*:` and dotted `<stem>.…:`), and calls `vm.load` for the relevant file the first time a matching identifier appears in source.
 
 Available auto-loaded libraries:
 - `lib/csv.k` — `ReadCsv`
