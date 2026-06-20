@@ -20,6 +20,19 @@ reFindCond: {(~x>rfN)&~#rfResult}
 raAllCond: {~x>raN}
 reSplice: {[str;s;l;rep] (s#str),rep,((s+l)_str)}
 
+rmMatchCond: {(x@2)<rmSlen}
+
+ReMatchAt: {[prog;str;start]
+  rmOps::prog`ops; rmA1::prog`a1; rmA2::prog`a2
+  rmCls::prog`cls; rmStr::"",str; rmSlen::#rmStr
+  initPcs: $[start>rmSlen; !0; rmEpsClosure[,prog`start;start]]
+  lm: $[rmHasMatch[initPcs]; start; -1]
+  st: (initPcs;lm;start)
+  r: rmMatchCond{rmAdvance[x]}/st
+  r@1
+}
+
+
 reFindStep: {[pos]
   r: ReMatchAt[rfProg;rfStr;pos]
   $[~r=-1; rfResult::(pos;r-pos); 0]
@@ -292,15 +305,4 @@ rmStepAndUpdate: {[pcs;pos;prevLm]
 
 rmAdvance: {[st]
   $[#st@0; rmStepAndUpdate[st@0;st@2;st@1]; (st@0;st@1;rmSlen)]
-}
-
-rmMatchCond: {(x@2)<rmSlen}
-ReMatchAt: {[prog;str;start]
-  rmOps::prog`ops; rmA1::prog`a1; rmA2::prog`a2
-  rmCls::prog`cls; rmStr::"",str; rmSlen::#rmStr
-  initPcs: $[start>rmSlen; !0; rmEpsClosure[,prog`start;start]]
-  lm: $[rmHasMatch[initPcs]; start; -1]
-  st: (initPcs;lm;start)
-  r: rmMatchCond{rmAdvance[x]}/st
-  r@1
 }
