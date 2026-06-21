@@ -109,17 +109,22 @@ fn buildFaceDict(handle: i32) ?K {
   if (kcp(nm_k))  |p| @memcpy(p[0..family.len], family);
   if (kcp(sty_k)) |p| @memcpy(p[0..style.len],  style);
 
+  // BMP codepoint→glyph map: cmap[cp] = glyphID (0 = unmapped), I vector of 65536
+  const CMAP_SIZE: i32 = 65536;
+  const cmap_k = KI(CMAP_SIZE) orelse { ku(adv_k); ku(lsb_k); ku(nm_k); ku(sty_k); return null; };
+  if (kip(cmap_k)) |p| _ = font.buildCmapBmp(handle, p[0..@intCast(CMAP_SIZE)]);
+
   const knames = [_][*:0]const u8{
     "h",       "name",  "style",  "upm",    "nGlyphs",
     "ascent",  "descent", "lineGap", "xHeight", "capHeight",
     "weight",  "width",   "bold",   "italic", "mono",   "variable",
-    "adv",     "lsb",
+    "adv",     "lsb",    "cmap",
   };
   const kvals = [_]?K{
     ki(handle),          nm_k,             sty_k,            ki(upm),         ki(ng),
     ki(asc),             ki(desc),         ki(lgap),         ki(xht),         ki(caph),
     ki(wgt),             ki(wid),          ki(flags & 1),    ki((flags>>1)&1), ki((flags>>2)&1), ki((flags>>3)&1),
-    adv_k,               lsb_k,
+    adv_k,               lsb_k,           cmap_k,
   };
 
   const result = k_make_dict(knames.len, &knames, &kvals);

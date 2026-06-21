@@ -183,6 +183,39 @@ pub fn glyphLsb(handle: i32, glyph_id: u16) i32 {
   return @intCast(e.face.glyph_hor_side_bearing(.{glyph_id}) orelse 0);
 }
 
+/// Fill out[cp] = glyphID for BMP codepoints using tatfi's codepoints iterator.
+/// out must have capacity >= 65536. Unmapped codepoints get 0. Returns count.
+pub fn buildCmapBmp(handle: i32, out: []i32) i32 {
+  const e = getEntry(handle) orelse return -1;
+  const limit = @min(65536, out.len);
+  @memset(out[0..limit], 0);
+
+  const cmap = e.face.tables.cmap orelse return 0;
+  var it = cmap.subtables.iterator();
+  while (it.next()) |subtable| {
+    if (!subtable.is_unicode()) continue;
+    // Skip full-Unicode subtables (format 12/13 cover U+0000..U+10FFFF = 1.1M codepoints).
+    // We only want BMP-range subtables (format 4, format 6) for our 65536-element output.
+    switch (subtable.format) {
+      .segmented_coverage, .many_to_one_range_mappings => continue,
+      else => {},
+    }
+    const Ctx = struct { sub: @TypeOf(subtable), out: []i32 };
+    const ctx = Ctx{ .sub = subtable, .out = out };
+    subtable.codepoints(ctx, struct {
+      fn cb(cp: u21, c: Ctx) void {
+        if (cp >= 65536) return;
+        if (c.sub.glyph_index(cp)) |g| c.out[cp] = @intCast(g.@"0");
+      }
+    }.cb);
+    break;
+  }
+
+  var mapped: i32 = 0;
+  for (out[0..limit]) |v| mapped += if (v != 0) 1 else 0;
+  return mapped;
+}
+
 // ── C-ABI exports ─────────────────────────────────────────────────────────────
 
 /// Load all faces from a font file in one pass.
