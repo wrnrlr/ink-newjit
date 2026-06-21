@@ -63,6 +63,31 @@ fn verbDoc(name: []const u8) ?[]const u8 {
   return null;
 }
 
+// Adverbs are polysemic; list every sense (the actual meaning depends on operand
+// type/arity — including the digram forms While/Stencil — which syntax can't
+// disambiguate, so hover surfaces all of them).
+const ADVERB_DOCS = [_]Doc{
+  .{ .k = "'", .v = "**Each** `f'x` · **Zip** `x F'y` — apply per item / elementwise pairs" },
+  .{ .k = "/", .v = "**Fold** `F/` · **Decode** `I/` · **Join** `C/` · **N-do** `i f/` · **While** `f f/` (digram) · **Converge** `f/`" },
+  .{ .k = "\\", .v = "**Scan** `F\\` · **Encode** `I\\` · **Split** `C\\` · **N-dos** `i f\\` · **Whiles** `f f\\` (digram) · **Converges** `f\\`" },
+  .{ .k = "':", .v = "**Eachprior** `F':x` · **Window** `i':x` · **Stencil** `i f':x` (digram) — adjacent pairs / sliding windows" },
+  .{ .k = "/:", .v = "**Eachright** `x F/:y` — fix the left arg, map over the right" },
+  .{ .k = "\\:", .v = "**Eachleft** `x F\\:y` — fix the right arg, map over the left" },
+};
+fn adverbDoc(name: []const u8) ?[]const u8 {
+  for (ADVERB_DOCS) |d| if (std.mem.eql(u8, d.k, name)) return d.v;
+  return null;
+}
+
+// Fused reduce idioms — verb immediately followed by `/` (see fuse.zig).
+fn fusedReduceDoc(op: []const u8) ?[]const u8 {
+  if (std.mem.eql(u8, op, "+")) return "**Sum** `+/x` — total of x *(fused reduce)*";
+  if (std.mem.eql(u8, op, "*")) return "**Product** `*/x` — product of x *(fused reduce)*";
+  if (std.mem.eql(u8, op, "&")) return "**Minimum / All** `&/x` — least element; logical all *(fused reduce)*";
+  if (std.mem.eql(u8, op, "|")) return "**Maximum / Any** `|/x` — greatest element; logical any *(fused reduce)*";
+  return null;
+}
+
 // ── Server state ────────────────────────────────────────────────────────────
 // A definition discovered in some workspace file (line/col precomputed).
 const Loc = struct { uri: []u8, sl: u32, sc: u32, el: u32, ec: u32, kind: DefKind };
@@ -75,6 +100,7 @@ const Server = struct {
   parser: Parser,
   // Workspace-wide top-level definitions: name → locations across all .k files.
   windex: std.StringHashMap(std.ArrayList(Loc)),
+  root: ?[]u8 = null, // absolute workspace root path (for reference scans)
   indexed: bool = false,
   shutdown: bool = false,
 
@@ -226,6 +252,21 @@ fn tokenAt(src: []const u8, off: usize) ?lex.Token {
   }
 }
 
+// The token under `off` plus its immediate neighbours (used to read fused
+// verb+adverb pairs like `+/`).
+const Tri = struct { prev: ?lex.Token = null, cur: ?lex.Token = null, next: ?lex.Token = null };
+fn neighbors(src: []const u8, off: usize) Tri {
+  var l = Lexer.init(src);
+  var prev: ?lex.Token = null;
+  while (true) {
+    const t = l.next();
+    if (t.tt == .eof) return .{ .prev = prev };
+    if (off >= t.start and off < t.end) return .{ .prev = prev, .cur = t, .next = l.peekNext() };
+    if (t.start > off) return .{ .prev = prev };
+    prev = t;
+  }
+}
+
 const DefKind = enum { variable, function };
 const Def = struct { name: []const u8, start: usize, end: usize, kind: DefKind, toplevel: bool };
 
@@ -339,8 +380,46 @@ fn buildWorkspaceIndex(s: *Server, root_uri: ?[]const u8) void {
   s.indexed = true;
   const uri = root_uri orelse return;
   const path = uriToPath(s.gpa, uri) catch return;
-  defer s.gpa.free(path);
+  s.root = path; // keep ownership for later reference scans
   indexDir(s, path, 0);
+}
+
+// Append every reference (any `iden` matching `word`) in `src` to `out`.
+fn collectRefsInText(s: *Server, src: []const u8, word: []const u8, uri: []const u8, out: *std.ArrayList(Loc)) void {
+  var l = Lexer.init(src);
+  while (true) {
+    const t = l.next();
+    if (t.tt == .eof) break;
+    if (t.tt == .iden and std.mem.eql(u8, t.slice(src), word)) {
+      const a = offsetToPos(src, t.start);
+      const b = offsetToPos(src, t.end);
+      const u = s.gpa.dupe(u8, uri) catch return;
+      out.append(s.gpa, .{ .uri = u, .sl = a.line, .sc = a.col, .el = b.line, .ec = b.col, .kind = .variable }) catch s.gpa.free(u);
+    }
+  }
+}
+
+fn collectRefsDir(s: *Server, abs_dir: []const u8, word: []const u8, skip_path: ?[]const u8, out: *std.ArrayList(Loc), depth: u8) void {
+  if (depth > 8) return;
+  const io = std.Io.Threaded.global_single_threaded.io();
+  var dir = std.Io.Dir.openDir(std.Io.Dir.cwd(), io, abs_dir, .{ .iterate = true }) catch return;
+  defer dir.close(io);
+  var it = dir.iterate();
+  while (it.next(io) catch null) |entry| {
+    const child = std.fmt.allocPrint(s.gpa, "{s}/{s}", .{ abs_dir, entry.name }) catch continue;
+    defer s.gpa.free(child);
+    if (entry.kind == .directory) {
+      if (shouldSkipDir(entry.name)) continue;
+      collectRefsDir(s, child, word, skip_path, out, depth + 1);
+    } else if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".k")) {
+      if (skip_path != null and std.mem.eql(u8, child, skip_path.?)) continue; // current doc: use live text
+      const text = std.Io.Dir.cwd().readFileAlloc(io, child, s.gpa, std.Io.Limit.limited(4 * 1024 * 1024)) catch continue;
+      defer s.gpa.free(text);
+      const uri = std.fmt.allocPrint(s.gpa, "file://{s}", .{child}) catch continue;
+      defer s.gpa.free(uri);
+      collectRefsInText(s, text, word, uri, out);
+    }
+  }
 }
 
 // ── request handlers ────────────────────────────────────────────────────────
@@ -362,7 +441,7 @@ fn handleInitialize(s: *Server, id: ?json.Value, params: ?json.Value) !void {
   }
   buildWorkspaceIndex(s, root);
   try replyResult(s, id,
-    \\{{"capabilities":{{"textDocumentSync":1,"hoverProvider":true,"definitionProvider":true,"documentSymbolProvider":true}},"serverInfo":{{"name":"ink-lsp","version":"0.1.0"}}}}
+    \\{{"capabilities":{{"textDocumentSync":1,"hoverProvider":true,"definitionProvider":true,"documentSymbolProvider":true,"referencesProvider":true,"workspaceSymbolProvider":true}},"serverInfo":{{"name":"ink-lsp","version":"0.1.0"}}}}
   , .{});
 }
 
@@ -403,17 +482,37 @@ fn handleHover(s: *Server, id: ?json.Value, params: ?json.Value) !void {
   const src = docText(s, uri) orelse return replyResult(s, id, "null", .{});
   const pos = obj(params, "position");
   const off = posToOffset(src, int(obj(pos, "line")) orelse 0, int(obj(pos, "character")) orelse 0);
-  const t = tokenAt(src, off) orelse return replyResult(s, id, "null", .{});
+  const tri = neighbors(src, off);
+  const t = tri.cur orelse return replyResult(s, id, "null", .{});
   const word = t.slice(src);
+
+  // Adverb: show every sense, and the fused-reduce idiom if it's `verb/`.
+  if (t.tt == .adverb) {
+    const base = adverbDoc(word) orelse return replyResult(s, id, "null", .{});
+    if (std.mem.eql(u8, word, "/")) if (tri.prev) |pv| if (pv.tt == .op) {
+      if (fusedReduceDoc(pv.slice(src))) |fr| {
+        const md = try std.fmt.allocPrint(s.gpa, "{s}\n\n---\n{s}", .{ fr, base });
+        defer s.gpa.free(md);
+        return replyHoverMd(s, id, md);
+      }
+    };
+    return replyHoverMd(s, id, base);
+  }
+
   if (t.tt == .op or t.tt == .keyword) {
-    if (verbDoc(word)) |md| {
-      try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
-      try writeId(s, id);
-      try s.out.appendSlice(s.gpa, ",\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":\"");
-      try escapeInto(&s.out, s.gpa, md);
-      try s.out.appendSlice(s.gpa, "\"}}}");
-      return flush(s);
-    }
+    const vd = verbDoc(word);
+    // If this verb is immediately followed by `/`, lead with the fused idiom.
+    if (tri.next) |nx| if (nx.tt == .adverb and std.mem.eql(u8, nx.slice(src), "/")) {
+      if (fusedReduceDoc(word)) |fr| {
+        const md = if (vd) |d|
+          try std.fmt.allocPrint(s.gpa, "{s}\n\n---\n{s}", .{ fr, d })
+        else
+          try s.gpa.dupe(u8, fr);
+        defer s.gpa.free(md);
+        return replyHoverMd(s, id, md);
+      }
+    };
+    if (vd) |md| return replyHoverMd(s, id, md);
   }
   if (t.tt == .iden) {
     var defs = try collectDefs(s.gpa, src);
@@ -514,6 +613,72 @@ fn handleDocumentSymbol(s: *Server, id: ?json.Value, params: ?json.Value) !void 
   try flush(s);
 }
 
+fn handleReferences(s: *Server, id: ?json.Value, params: ?json.Value) !void {
+  const uri = str(obj(obj(params, "textDocument"), "uri")) orelse return replyResult(s, id, "[]", .{});
+  const src = docText(s, uri) orelse return replyResult(s, id, "[]", .{});
+  const pos = obj(params, "position");
+  const off = posToOffset(src, int(obj(pos, "line")) orelse 0, int(obj(pos, "character")) orelse 0);
+  const t = tokenAt(src, off) orelse return replyResult(s, id, "[]", .{});
+  if (t.tt != .iden) return replyResult(s, id, "[]", .{});
+  const word = t.slice(src);
+
+  var out: std.ArrayList(Loc) = .empty;
+  defer {
+    for (out.items) |l| s.gpa.free(l.uri);
+    out.deinit(s.gpa);
+  }
+  // Current document uses live (unsaved) text…
+  collectRefsInText(s, src, word, uri, &out);
+  // …every other .k file is scanned from disk.
+  if (s.root) |root| {
+    const cur = uriToPath(s.gpa, uri) catch null;
+    defer if (cur) |c| s.gpa.free(c);
+    collectRefsDir(s, root, word, cur, &out, 0);
+  }
+
+  try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
+  try writeId(s, id);
+  try s.out.appendSlice(s.gpa, ",\"result\":[");
+  for (out.items, 0..) |l, idx| {
+    if (idx > 0) try s.out.append(s.gpa, ',');
+    try s.out.appendSlice(s.gpa, "{\"uri\":\"");
+    try escapeInto(&s.out, s.gpa, l.uri);
+    try p(s, "\",\"range\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}}}}",
+      .{ l.sl, l.sc, l.el, l.ec });
+  }
+  try s.out.appendSlice(s.gpa, "]}");
+  try flush(s);
+}
+
+fn handleWorkspaceSymbol(s: *Server, id: ?json.Value, params: ?json.Value) !void {
+  const query = str(obj(params, "query")) orelse "";
+  try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
+  try writeId(s, id);
+  try s.out.appendSlice(s.gpa, ",\"result\":[");
+  var first = true;
+  var count: usize = 0;
+  var it = s.windex.iterator();
+  outer: while (it.next()) |e| {
+    const name = e.key_ptr.*;
+    if (query.len > 0 and std.ascii.indexOfIgnoreCase(name, query) == null) continue;
+    for (e.value_ptr.items) |l| {
+      if (count >= 500) break :outer; // keep the response bounded
+      count += 1;
+      if (!first) try s.out.append(s.gpa, ',');
+      first = false;
+      const kind: u8 = if (l.kind == .function) 12 else 13;
+      try s.out.appendSlice(s.gpa, "{\"name\":\"");
+      try escapeInto(&s.out, s.gpa, name);
+      try p(s, "\",\"kind\":{d},\"location\":{{\"uri\":\"", .{kind});
+      try escapeInto(&s.out, s.gpa, l.uri);
+      try p(s, "\",\"range\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}}}}}}",
+        .{ l.sl, l.sc, l.el, l.ec });
+    }
+  }
+  try s.out.appendSlice(s.gpa, "]}");
+  try flush(s);
+}
+
 fn handle(s: *Server, root: json.Value) !void {
   const method = str(obj(root, "method")) orelse return;
   const id = obj(root, "id");
@@ -557,6 +722,10 @@ fn handle(s: *Server, root: json.Value) !void {
     try handleDefinition(s, id, params);
   } else if (std.mem.eql(u8, method, "textDocument/documentSymbol")) {
     try handleDocumentSymbol(s, id, params);
+  } else if (std.mem.eql(u8, method, "textDocument/references")) {
+    try handleReferences(s, id, params);
+  } else if (std.mem.eql(u8, method, "workspace/symbol")) {
+    try handleWorkspaceSymbol(s, id, params);
   } else if (id != null) {
     // Unknown request — reply null so the client doesn't hang.
     try replyResult(s, id, "null", .{});

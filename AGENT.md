@@ -31,11 +31,11 @@ Expressions are evaluated right-to-left. There are no special precedence rules f
 ```k
 Integers: -2 1 0 0N
 Types: `i`f`s`c`m`I`F`S`C`M`L
-List: (1;2.3;`c)
-Lambda: {[a;b]@a+b}
+List: (0b;1;2.3;`c)
+Lambda: {[a;b]#a,b}
 Dict: [id:1;name:"Bob"]
 Train: *|
-Sum: +/
+Sum: +/;
 ```
 
 
@@ -54,8 +54,14 @@ Sum: +/
   - type symbol `` `F ``
 - Symbols - array of symbols, type symbol `` `S ``.
 - Chars - string of characters (`[]u8`), type symbol `` `C ``.
-- List - heterogeneous list; empty list is `` ,() ``, type symbol `` `L ``.
-- Table - e.g. `` [[]a:1 2] ``, type symbol `` `M ``.
+- List - heterogeneous list; empty list is `` () ``, type symbol `` `L ``.
+- Dict
+  - The syntax `` [a:1; b:2; c: 3] `` is equivalent to `` `a`b`c!1 2 3 ``
+  - Empty dict `` [] ``
+  - Type symbol `` `m ``
+- Table
+  - The syntax `` [[]a:1 2; b:3 4] `` is equivalent to `` `a`b`c!1 2 3 ``
+  - Type symbol `` `M ``.
 
 Types are organized into classes:
 - Atoms: Integer, Float, Symbol, Char
@@ -203,6 +209,7 @@ For example the `\` can be either a fold with a dyadic verb `F` or a converge wi
 - `':`: Eachprior, Window, Stencil
 - `/:`: Eachright
 - `\:`: Eachleft
+Some adverbs are digrams, like While `f f/` and Stencil `i f'`, they have 2 left-hand arguments.
 
 ## Special Symbols
 - Arguments `` `argv[] `` - list of cmd-line args (also in global `x`)

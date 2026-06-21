@@ -7,6 +7,7 @@ INK  := zig-out/bin/ink
 test:
 	time zig build test
 	$(INK) lib/stats.k
+	$(INK) test/regex.k
 	$(INK) test/font.k
 	sh test/ipc.sh
 

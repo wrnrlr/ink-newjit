@@ -55,3 +55,18 @@ array is allocated at alignment 8 (the `Rc`/pointer alignment for `N(V)`) but
 freed through a path that computes alignment 4. Debug-build only; output is
 still correct. Likely a mismatch between `alignedAlloc` alignment and the
 `alignment` used in `N(T).deinit`'s `free`.
+
+---
+
+## 6. Index-assign into a dict crashes (stack underflow)
+
+```k-repl
+ d:[a:1]
+ d[`b]:2
+thread panic: integer overflow  (vm.zig pop on empty stack)
+```
+
+Amend-assigning a dict element via `d[`k]:v` leaves no value on the stack, so
+the final `interpret` pop underflows. Reproduces on any dict (empty or not), so
+it is unrelated to the empty-dict literal fix. Likely the bracket-index
+assignment path does not push its result.

@@ -11,7 +11,7 @@ Expressions are evaluated from right-to-left. There are no special priority rule
 - Floats - Vector of floats, type symbol `` `F ``.
 - Symbols - Array of symbols, type symbol `` `S ``.
 - Chars - String of characters encoding text in `[]u8`, type symbol `` `C ``.
-- List - Empty list is written as `` ,() ``, type symbol `` `L ``.
+- List - Empty list is written as `` () ``, type symbol `` `L ``.
 - Table Ex. `` [[]a:1 2] ``
 The types are organized in different classes.
 - Atoms: Integer, Float, Symbol, Char;

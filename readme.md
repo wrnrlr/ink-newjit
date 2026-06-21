@@ -22,3 +22,9 @@ Functional programming with APL2
 ```
 watchexec -r -e k -- ./zig-out/bin/ink test/planes.k
 ```
+
+Problems:
+
+a:!9; a[2]:9
+
+d: []
