@@ -322,9 +322,17 @@ Available auto-loaded libraries:
 `\l file.k` loads a file but namespace access from ngn/k doesn't work: `\d mod`, `mod.A`, `.mod`, etc. Current code uses `2:"code.k"` for file loading. A proper module system requires names to support dots.
 
 ## Language gotchas
-- 
 - **Underscores in names:** `_` is always Drop/WeedOut. `foo_bar` parses as `foo _ bar`. Use camelCase.
 - **Newlines in list literals:** a newline inside `(a;b;\n c)` injects a null element. Keep list literals on one line.
 - **Fold over empty list:** `,/()` returns a unit value, not an empty list. Use `$[#x;,/x;!0]`.
 - **Multi-char operator symbols:** `` `<= `` is the symbol `<=` (lexer greedily consumes op chars). Operator-char and alnum modes don't mix: `` `<abc `` is symbol `` `< `` then identifier `abc`.
 - **`list in symlist`:** returns a boolean list (element-wise), not a scalar - always truthy. Use `~` for scalar match or check a specific element.
+- **`$[cond; a; [stmt;stmt;…]]` hangs the parser:** a bracketed multi-statement block used as a `$[…]` branch makes the whole-file parse loop forever (no output, times out — the file is fully parsed before any statement runs, so nothing prints). Keep `$[]` branches as single expressions; move multi-statement work into a helper function.
+- **`each` over a bare name errors:** `f ' xs` (named function, space, `'`) can return an error (`` `! ``). Wrap it: `{f x}' xs`. Related: `'` binds to the term on its left, so `f g' x` is `(f g)' x`, never `f (g' x)` — inline lambdas/verbs absorb the adverb. Pre-compute the each into a variable, or parenthesize.
+- **`verb ,/expr` misparses:** e.g. `Tessellate ,/{…}'cs` binds the `,/` to the verb on its left and yields the wrong result/length. Parenthesize the argument: `Tessellate (,/{…}'cs)`.
+- **Mixed int/float join does NOT promote to `F`:** `0,1,200.` → general list `(0;1;200.0)`, not `0. 1. 200.`. FFI marshalling (e.g. `kfp`) then rejects it as not-a-float-vector. Coerce each item: `(0.+a),(0.+b),c`.
+- **`` dict`key `` before an operator misparses:** `` f`h,g `` is read as `f` indexed by the symbol-list `` `h,g `` , not `` (f`h),g ``. Safe only as a standalone term; otherwise parenthesize `` (f`h) ``. (This plus the int/float-join item above were why `FontOutline` silently returned an error for every glyph until fixed in `lib/font.k`.)
+
+## GPU drawing gotchas (`lib/gpu.k`)
+- **Adverbs don't run draw side effects:** a `FillFrame[…]` issued from inside an each/over (`'` `/`) draws nothing — adverb results are treated as pure and the draw is eliminated. The same call works fine as an explicit statement. Use adverbs only to *compute* vertices (Tessellate/FontOutline via `'` return correct values), build all triangles into one `F` buffer with `,/{…}'idx`, then issue ONE explicit `FillFrame[buffer; col]` per color layer (also faster than per-shape draws).
+- **`Tessellate` resolves glyph counters via NaN separators:** pack multiple contours into one flat array separated by a NaN x/y pair (`,/{x,0n,0n}'cs`) and `Tessellate` subtracts holes (the counters in `0 8 @ a b e …`). A single contour with no NaN behaves exactly as before. See `test/typeset.k` for the full ASCII-glyph example.

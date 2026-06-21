@@ -17,6 +17,7 @@ R3: `+++
 G2: `++0
 G3: `+++0
 
+/ Good ol' run length
 RunLength: {
   start: & x> 0, -1_x
   end: & x> 1_ x,0

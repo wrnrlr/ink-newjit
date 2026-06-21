@@ -9,9 +9,6 @@
 /
 / Run: zig build gpu && ink test/planes.k
 
-2: "lib/spirv.k"
-2: "lib/gpu.k"
-
 / Generate a unit square for a plane with given unit normal n=(n0;n1;n2).
 / Corners are ±t1 ± t2, each vertex = [px py pz nx ny nz].
 / Returns 36-element float list (6 vertices × 6 floats, two triangles).

@@ -64,12 +64,18 @@ fn verbDoc(name: []const u8) ?[]const u8 {
 }
 
 // ── Server state ────────────────────────────────────────────────────────────
+// A definition discovered in some workspace file (line/col precomputed).
+const Loc = struct { uri: []u8, sl: u32, sc: u32, el: u32, ec: u32, kind: DefKind };
+
 const Server = struct {
   gpa: Alloc,
   docs: std.StringHashMap([]u8),
   inbuf: std.ArrayList(u8),
   out: std.ArrayList(u8),
   parser: Parser,
+  // Workspace-wide top-level definitions: name → locations across all .k files.
+  windex: std.StringHashMap(std.ArrayList(Loc)),
+  indexed: bool = false,
   shutdown: bool = false,
 
   fn init(gpa: Alloc) Server {
@@ -79,6 +85,7 @@ const Server = struct {
       .inbuf = .empty,
       .out = .empty,
       .parser = Parser.init(gpa),
+      .windex = std.StringHashMap(std.ArrayList(Loc)).init(gpa),
     };
   }
 };
@@ -261,6 +268,81 @@ fn collectDefs(gpa: Alloc, src: []const u8) !std.ArrayList(Def) {
   return defs;
 }
 
+// ── workspace definition index ──────────────────────────────────────────────
+// Decode a file:// URI to a filesystem path (minimal percent-decoding).
+fn uriToPath(gpa: Alloc, uri: []const u8) ![]u8 {
+  var raw = uri;
+  if (std.mem.startsWith(u8, raw, "file://")) raw = raw[7..];
+  var out: std.ArrayList(u8) = .empty;
+  var i: usize = 0;
+  while (i < raw.len) : (i += 1) {
+    if (raw[i] == '%' and i + 2 < raw.len) {
+      const hi = std.fmt.charToDigit(raw[i + 1], 16) catch { try out.append(gpa, raw[i]); continue; };
+      const lo = std.fmt.charToDigit(raw[i + 2], 16) catch { try out.append(gpa, raw[i]); continue; };
+      try out.append(gpa, hi * 16 + lo);
+      i += 2;
+    } else try out.append(gpa, raw[i]);
+  }
+  return out.toOwnedSlice(gpa);
+}
+
+fn shouldSkipDir(name: []const u8) bool {
+  const skip = [_][]const u8{ ".git", "zig-cache", ".zig-cache", "zig-out", "node_modules", "target", ".jj" };
+  for (skip) |sd| if (std.mem.eql(u8, name, sd)) return true;
+  return name.len > 0 and name[0] == '.';
+}
+
+fn indexFile(s: *Server, abs_path: []const u8) void {
+  const io = std.Io.Threaded.global_single_threaded.io();
+  const text = std.Io.Dir.cwd().readFileAlloc(io, abs_path, s.gpa, std.Io.Limit.limited(4 * 1024 * 1024)) catch return;
+  defer s.gpa.free(text);
+  var defs = collectDefs(s.gpa, text) catch return;
+  defer defs.deinit(s.gpa);
+  const uri = std.fmt.allocPrint(s.gpa, "file://{s}", .{abs_path}) catch return;
+  var uri_used = false;
+  defer if (!uri_used) s.gpa.free(uri);
+  for (defs.items) |d| {
+    if (!d.toplevel) continue;
+    const gop = s.windex.getOrPut(d.name) catch continue;
+    if (!gop.found_existing) {
+      gop.key_ptr.* = s.gpa.dupe(u8, d.name) catch continue;
+      gop.value_ptr.* = .empty;
+    }
+    const loc_uri = if (uri_used) (s.gpa.dupe(u8, uri) catch continue) else uri;
+    uri_used = true;
+    const a = offsetToPos(text, d.start);
+    const b = offsetToPos(text, d.end);
+    gop.value_ptr.append(s.gpa, .{ .uri = loc_uri, .sl = a.line, .sc = a.col, .el = b.line, .ec = b.col, .kind = d.kind }) catch {};
+  }
+}
+
+fn indexDir(s: *Server, abs_dir: []const u8, depth: u8) void {
+  if (depth > 8) return;
+  const io = std.Io.Threaded.global_single_threaded.io();
+  var dir = std.Io.Dir.openDir(std.Io.Dir.cwd(), io, abs_dir, .{ .iterate = true }) catch return;
+  defer dir.close(io);
+  var it = dir.iterate();
+  while (it.next(io) catch null) |entry| {
+    const child = std.fmt.allocPrint(s.gpa, "{s}/{s}", .{ abs_dir, entry.name }) catch continue;
+    defer s.gpa.free(child);
+    if (entry.kind == .directory) {
+      if (shouldSkipDir(entry.name)) continue;
+      indexDir(s, child, depth + 1);
+    } else if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".k")) {
+      indexFile(s, child);
+    }
+  }
+}
+
+fn buildWorkspaceIndex(s: *Server, root_uri: ?[]const u8) void {
+  if (s.indexed) return;
+  s.indexed = true;
+  const uri = root_uri orelse return;
+  const path = uriToPath(s.gpa, uri) catch return;
+  defer s.gpa.free(path);
+  indexDir(s, path, 0);
+}
+
 // ── request handlers ────────────────────────────────────────────────────────
 fn replyResult(s: *Server, id: ?json.Value, comptime result_fmt: []const u8, args: anytype) !void {
   try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
@@ -271,7 +353,14 @@ fn replyResult(s: *Server, id: ?json.Value, comptime result_fmt: []const u8, arg
   try flush(s);
 }
 
-fn handleInitialize(s: *Server, id: ?json.Value) !void {
+fn handleInitialize(s: *Server, id: ?json.Value, params: ?json.Value) !void {
+  // Build the cross-file definition index from the workspace root.
+  var root = str(obj(params, "rootUri"));
+  if (root == null) {
+    if (obj(params, "workspaceFolders")) |wf| if (wf == .array and wf.array.items.len > 0)
+      { root = str(obj(wf.array.items[0], "uri")); };
+  }
+  buildWorkspaceIndex(s, root);
   try replyResult(s, id,
     \\{{"capabilities":{{"textDocumentSync":1,"hoverProvider":true,"definitionProvider":true,"documentSymbolProvider":true}},"serverInfo":{{"name":"ink-lsp","version":"0.1.0"}}}}
   , .{});
@@ -331,18 +420,39 @@ fn handleHover(s: *Server, id: ?json.Value, params: ?json.Value) !void {
     defer defs.deinit(s.gpa);
     for (defs.items) |d| if (std.mem.eql(u8, d.name, word)) {
       const ln = offsetToPos(src, d.start).line;
-      try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
-      try writeId(s, id);
-      try s.out.appendSlice(s.gpa, ",\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":\"");
       const kindstr = if (d.kind == .function) "function" else "variable";
       var b: [256]u8 = undefined;
-      const hdr = try std.fmt.bufPrint(&b, "**{s}** `{s}` — defined at line {d}", .{ kindstr, d.name, ln + 1 });
-      try escapeInto(&s.out, s.gpa, hdr);
-      try s.out.appendSlice(s.gpa, "\"}}}");
-      return flush(s);
+      return replyHoverMd(s, id, try std.fmt.bufPrint(&b, "**{s}** `{s}` — defined at line {d}", .{ kindstr, d.name, ln + 1 }));
+    };
+    // Cross-file: report where the workspace index found it.
+    if (s.windex.get(word)) |locs| if (locs.items.len > 0) {
+      const l0 = locs.items[0];
+      const file = std.fs.path.basename(l0.uri);
+      const kindstr = if (l0.kind == .function) "function" else "variable";
+      var b: [512]u8 = undefined;
+      return replyHoverMd(s, id, try std.fmt.bufPrint(&b, "**{s}** `{s}` — defined in `{s}` (line {d})", .{ kindstr, word, file, l0.sl + 1 }));
     };
   }
   return replyResult(s, id, "null", .{});
+}
+
+fn replyHoverMd(s: *Server, id: ?json.Value, md: []const u8) !void {
+  try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
+  try writeId(s, id);
+  try s.out.appendSlice(s.gpa, ",\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":\"");
+  try escapeInto(&s.out, s.gpa, md);
+  try s.out.appendSlice(s.gpa, "\"}}}");
+  try flush(s);
+}
+
+fn replyLocation(s: *Server, id: ?json.Value, uri: []const u8, sl: u32, sc: u32, el: u32, ec: u32) !void {
+  try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
+  try writeId(s, id);
+  try s.out.appendSlice(s.gpa, ",\"result\":{\"uri\":\"");
+  try escapeInto(&s.out, s.gpa, uri);
+  try p(s, "\",\"range\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}}}}}}",
+    .{ sl, sc, el, ec });
+  try flush(s);
 }
 
 fn handleDefinition(s: *Server, id: ?json.Value, params: ?json.Value) !void {
@@ -353,25 +463,29 @@ fn handleDefinition(s: *Server, id: ?json.Value, params: ?json.Value) !void {
   const t = tokenAt(src, off) orelse return replyResult(s, id, "null", .{});
   if (t.tt != .iden) return replyResult(s, id, "null", .{});
   const word = t.slice(src);
+
+  // 1. In-file: prefer the nearest definition at or before the cursor.
   var defs = try collectDefs(s.gpa, src);
   defer defs.deinit(s.gpa);
-  // Prefer the nearest definition at or before the cursor, else the first.
   var best: ?Def = null;
   for (defs.items) |d| {
     if (!std.mem.eql(u8, d.name, word)) continue;
-    if (best == null) best = d;
-    if (d.start <= t.start) best = d;
+    if (best == null or d.start <= t.start) best = d;
   }
-  const d = best orelse return replyResult(s, id, "null", .{});
-  const a = offsetToPos(src, d.start);
-  const b = offsetToPos(src, d.end);
-  try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
-  try writeId(s, id);
-  try s.out.appendSlice(s.gpa, ",\"result\":{\"uri\":\"");
-  try escapeInto(&s.out, s.gpa, uri);
-  try p(s, "\",\"range\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}}}}}}",
-    .{ a.line, a.col, b.line, b.col });
-  try flush(s);
+  if (best) |d| {
+    const a = offsetToPos(src, d.start);
+    const b = offsetToPos(src, d.end);
+    return replyLocation(s, id, uri, a.line, a.col, b.line, b.col);
+  }
+
+  // 2. Cross-file: consult the workspace index (modules, libs, other files).
+  if (s.windex.get(word)) |locs| {
+    if (locs.items.len > 0) {
+      const l0 = locs.items[0];
+      return replyLocation(s, id, l0.uri, l0.sl, l0.sc, l0.el, l0.ec);
+    }
+  }
+  return replyResult(s, id, "null", .{});
 }
 
 fn handleDocumentSymbol(s: *Server, id: ?json.Value, params: ?json.Value) !void {
@@ -406,7 +520,7 @@ fn handle(s: *Server, root: json.Value) !void {
   const params = obj(root, "params");
 
   if (std.mem.eql(u8, method, "initialize")) {
-    try handleInitialize(s, id);
+    try handleInitialize(s, id, params);
   } else if (std.mem.eql(u8, method, "initialized")) {
     // no-op
   } else if (std.mem.eql(u8, method, "shutdown")) {
