@@ -110,6 +110,17 @@ test "dict syntax" {
   try t.check("[a:,1]", "[a:,1]");
   try t.check("[a:1 2 3]", "[a:1 2 3]");
   try t.check("i:!3; [a:i]", "[a:0 1 2]");
+  // Empty dict literal: [] is a proper type-`m` dict with no keys/values,
+  // and round-trips to its [] literal form.
+  try t.check("[]", "[]");
+  try t.check("d:[]; @d", "`m");
+  try t.check("d:[]; #d", "0");
+  try t.check("d:[]; !d", "()");   // keys: empty list prints ()
+  try t.check("d:[]; .d", "()");   // values: empty list prints ()
+  try t.check("[],[a:1;b:2]", "[a:1;b:2]");
+  // Empty list round-trips as () (not ,() which is a one-element list).
+  try t.check("()", "()");
+  try t.check(",()", ",()");
 }
 
 // Arithmetic

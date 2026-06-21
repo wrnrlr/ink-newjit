@@ -154,10 +154,27 @@ pub const Compiler = struct {
   // n==1 keeps the key/value scalar (matching `s!v`); n>1 builds the key and
   // value lists with MakeList so they promote exactly as the old opcode did.
   fn compileDict(self: *Compiler, d: ast.Dict, is_table: bool) anyerror!ir.ValueId {
-    const items = d.items orelse return ir.NO_VALUE;
-    const n = items.len;
-    if (n == 0) return ir.NO_VALUE;
+    const n = if (d.items) |items| items.len else 0;
 
+    var dict_id: ir.ValueId = undefined;
+    if (n == 0) {
+      // [] → ()!() : empty keys keyed to empty values.
+      const keys_id = try self.emitOpWithArg(.MakeList, 0, &.{});
+      const vals_id = try self.emitOpWithArg(.MakeList, 0, &.{});
+      var pair = [_]ir.ValueId{ keys_id, vals_id };
+      dict_id = try self.emitOpWithArg(.Apply2, @intFromEnum(Op2.@"!"), &pair);
+    } else {
+      dict_id = try self.compileDictItems(d.items.?, n);
+    }
+
+    if (is_table) {
+      var finputs = [_]ir.ValueId{dict_id};
+      return try self.emitOpWithArg(.Apply1, @intFromEnum(Op1.@"+"), &finputs);
+    }
+    return dict_id;
+  }
+
+  fn compileDictItems(self: *Compiler, items: ast.Items, n: usize) anyerror!ir.ValueId {
     var dict_id: ir.ValueId = undefined;
     if (n == 1) {
       const key_id = try self.emitConst(.{ .s = try self.symbols.intern(items[0].k) });
@@ -179,11 +196,6 @@ pub const Compiler = struct {
 
       var pair = [_]ir.ValueId{ keys_id, vals_id };
       dict_id = try self.emitOpWithArg(.Apply2, @intFromEnum(Op2.@"!"), &pair);
-    }
-
-    if (is_table) {
-      var finputs = [_]ir.ValueId{dict_id};
-      return try self.emitOpWithArg(.Apply1, @intFromEnum(Op1.@"+"), &finputs);
     }
     return dict_id;
   }

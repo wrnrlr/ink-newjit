@@ -274,7 +274,9 @@ pub const TerseFormatter = struct {
     const keys = d.av();
     const vals = d.bv();
     const n = keys.len();
-    const can_use_syntax = (keys.tag() == .S) or (keys.tag() == .s) or (keys.tag() == .L and self.allSymbols(keys.L.slice()));
+    // Empty dict prints as [] (its literal form); otherwise only symbol keys
+    // can use the bracket syntax.
+    const can_use_syntax = (n == 0) or (keys.tag() == .S) or (keys.tag() == .s) or (keys.tag() == .L and self.allSymbols(keys.L.slice()));
     if (!can_use_syntax) {
       try self.formatValue(keys, w);
       try w.writeAll("!");
