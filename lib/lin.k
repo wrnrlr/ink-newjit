@@ -9,22 +9,10 @@
 /   L — lower triangular, 1s on diagonal (implicit; multipliers stored below)
 /   U — upper triangular (Gaussian elimination result; on and above diagonal)
 / P is a permutation vector: P[i] = original row index now at row i.
-/
-/ FORMAT: A is a list of row vectors (row-major), b is a flat float vector.
-/ CONTRAST: svd.k (column-major, iterative Jacobi) suits rank-deficient or
-/           overdetermined systems; LU is direct O(n³), best for square A.
-/
-/ kyte→ink translation notes:
-/   kyte `while[cond;body]`    → N-do `n f/init` carrying step index in state
-/   kyte `A[k;i]` (column i)  → `(+(A@k))@i`  (transpose, then index)
-/   kyte in-place `%:` `-:`   → global helpers with full state (no closures in ink)
-/   kyte heterogeneous folds   → N-do avoids mixed-type fold list issues
-
-/ ── helpers (all global — ink lambdas don't close over parent locals) ─────────
 
 / Divide element at column `col` of row `k1[j]` by `piv`. State: (A;col;piv;k1;j).
 luDivRow:{[st]
-  A:st@0; col:st@1; piv:st@2; k1:st@3; j:st@4 r:k1@j
+  A:st 0; col:st 1; piv:st 2; k1:st 3; j:st@4 r:k1@j
   (@[A;r;:;@[A@r;col;%;piv]]; col; piv; k1; 1+j)
 }
 

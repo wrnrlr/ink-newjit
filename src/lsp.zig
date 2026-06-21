@@ -19,54 +19,88 @@ const json = std.json;
 // ── Verb documentation ──────────────────────────────────────────────────────
 // Concise markdown for each primitive, distilled from AGENT.md.  Looked up by
 // the operator glyph or keyword name under the cursor.
-const Doc = struct { k: []const u8, v: []const u8 };
+// `m` is the monadic sense, `d` the dyadic sense; either may be absent when the
+// verb only has one valence.  Hover picks the one matching the syntactic arity
+// at the cursor (see `dyadicHere`), so it never shows both at once.
+const Doc = struct { k: []const u8, m: ?[]const u8 = null, d: ?[]const u8 = null };
 const VERB_DOCS = [_]Doc{
-  .{ .k = ":", .v = "**Identity / Return** `:x` — return x  \n**Right** `x:y` — return y (also assignment: `n:v`)" },
-  .{ .k = "+", .v = "**Flip** `+x` — transpose  \n**Add** `x+y`" },
-  .{ .k = "-", .v = "**Negate** `-x`  \n**Subtract** `x-y`" },
-  .{ .k = "*", .v = "**First** `*x` — first item  \n**Multiply** `x*y`" },
-  .{ .k = "%", .v = "**Divide** `x%y` — float division" },
-  .{ .k = "!", .v = "**Iota** `!i` — 0..i-1; **Odometer** `!I`  \n**Key** `x!y` — make dictionary; **Mod** via `mod`" },
-  .{ .k = "&", .v = "**Where** `&I` — counts → indices  \n**Min/And** `x&y`" },
-  .{ .k = "|", .v = "**Reverse** `|x`  \n**Max/Or** `x|y`" },
-  .{ .k = "<", .v = "**Ascend** `<X` — grade-up indices  \n**Less** `x<y`" },
-  .{ .k = ">", .v = "**Descend** `>X` — grade-down indices  \n**Greater** `x>y`" },
-  .{ .k = "=", .v = "**Group** `=X`; **Unit** `=i` — identity matrix  \n**Equal** `x=y`" },
-  .{ .k = "~", .v = "**Not** `~x` — logical negation  \n**Match** `x~y` — identity check" },
-  .{ .k = ",", .v = "**Enlist** `,x` — wrap in list  \n**Join** `x,y` — concatenate / merge dicts" },
-  .{ .k = "^", .v = "**Null** `^x` — null mask  \n**Fill** `x^y` — replace nulls; **Without** `X^y`" },
-  .{ .k = "#", .v = "**Tally** `#x` — count  \n**Take** `x#y` — reshape/cycle; **Reshape** `I#y`" },
-  .{ .k = "_", .v = "**Floor** `_x`  \n**Drop** `i_Y`; **Cut** `I_Y`; **WeedOut** `f_Y`; **Delete** `X_i`" },
-  .{ .k = "$", .v = "**String** `$x`  \n**Pad** `i$C`; **Cast** `` s$y `` (e.g. `` `I$\"12\" ``)" },
-  .{ .k = "?", .v = "**Distinct** `?X`; **Uniform** `?i` — random floats  \n**Find** `x?y`; **Roll/Deal** `i?x`" },
-  .{ .k = "@", .v = "**Type** `@x`  \n**At/Apply** `x@y` — index / apply" },
-  .{ .k = ".", .v = "**Value/Get** `.x`  \n**Dot/ApplyN** `x.y` — deep index / multi-arg apply" },
-  .{ .k = "sqrt", .v = "**Square root** `sqrt n`" },
-  .{ .k = "sqr", .v = "**Square** `sqr n`" },
-  .{ .k = "exp", .v = "**Exponential** `exp n`" },
-  .{ .k = "log", .v = "**Natural log** `log n`" },
-  .{ .k = "sin", .v = "**Sine** `sin n`" },
-  .{ .k = "cos", .v = "**Cosine** `cos n`" },
-  .{ .k = "abs", .v = "**Absolute value** `abs n`" },
-  .{ .k = "first", .v = "**First** `first x`" },
-  .{ .k = "last", .v = "**Last** `last x`" },
-  .{ .k = "count", .v = "**Count** `count x`" },
-  .{ .k = "in", .v = "**In** `x in Y` — membership" },
-  .{ .k = "has", .v = "**Has** `Y has x` — membership" },
-  .{ .k = "mod", .v = "**Modulo** `x mod y` — remainder" },
-  .{ .k = "div", .v = "**Integer division** `x div y` — floor(x÷y)" },
-  .{ .k = "parse", .v = "**Parse** `parse s` — source → value" },
-  .{ .k = "exec", .v = "**Exec** `exec s` — evaluate source" },
+  .{ .k = ":", .m = "**Identity / Return** `:x` — return x", .d = "**Right** `x:y` — return y (also assignment: `n:v`)" },
+  .{ .k = "+", .m = "**Flip** `+x` — transpose", .d = "**Add** `x+y`" },
+  .{ .k = "-", .m = "**Negate** `-x`", .d = "**Subtract** `x-y`" },
+  .{ .k = "*", .m = "**First** `*x` — first item", .d = "**Multiply** `x*y`" },
+  .{ .k = "%", .d = "**Divide** `x%y` — float division" },
+  .{ .k = "!", .m = "**Iota** `!i` — 0..i-1; **Odometer** `!I`", .d = "**Key** `x!y` — make dictionary; **Mod** via `mod`" },
+  .{ .k = "&", .m = "**Where** `&I` — counts → indices", .d = "**Min/And** `x&y`" },
+  .{ .k = "|", .m = "**Reverse** `|x`", .d = "**Max/Or** `x|y`" },
+  .{ .k = "<", .m = "**Ascend** `<X` — grade-up indices", .d = "**Less** `x<y`" },
+  .{ .k = ">", .m = "**Descend** `>X` — grade-down indices", .d = "**Greater** `x>y`" },
+  .{ .k = "=", .m = "**Group** `=X`; **Unit** `=i` — identity matrix", .d = "**Equal** `x=y`" },
+  .{ .k = "~", .m = "**Not** `~x` — logical negation", .d = "**Match** `x~y` — identity check" },
+  .{ .k = ",", .m = "**Enlist** `,x` — wrap in list", .d = "**Join** `x,y` — concatenate / merge dicts" },
+  .{ .k = "^", .m = "**Null** `^x` — null mask", .d = "**Fill** `x^y` — replace nulls; **Without** `X^y`" },
+  .{ .k = "#", .m = "**Tally** `#x` — count", .d = "**Take** `x#y` — reshape/cycle; **Reshape** `I#y`" },
+  .{ .k = "_", .m = "**Floor** `_x`", .d = "**Drop** `i_Y`; **Cut** `I_Y`; **WeedOut** `f_Y`; **Delete** `X_i`" },
+  .{ .k = "$", .m = "**String** `$x`", .d = "**Pad** `i$C`; **Cast** `` s$y `` (e.g. `` `I$\"12\" ``)" },
+  .{ .k = "?", .m = "**Distinct** `?X`; **Uniform** `?i` — random floats", .d = "**Find** `x?y`; **Roll/Deal** `i?x`" },
+  .{ .k = "@", .m = "**Type** `@x`", .d = "**At/Apply** `x@y` — index / apply" },
+  .{ .k = ".", .m = "**Value/Get** `.x`", .d = "**Dot/ApplyN** `x.y` — deep index / multi-arg apply" },
+  .{ .k = "sqrt", .m = "**Square root** `sqrt n`" },
+  .{ .k = "sqr", .m = "**Square** `sqr n`" },
+  .{ .k = "exp", .m = "**Exponential** `exp n`" },
+  .{ .k = "log", .m = "**Natural log** `log n`" },
+  .{ .k = "sin", .m = "**Sine** `sin n`" },
+  .{ .k = "cos", .m = "**Cosine** `cos n`" },
+  .{ .k = "abs", .m = "**Absolute value** `abs n`" },
+  .{ .k = "first", .m = "**First** `first x`" },
+  .{ .k = "last", .m = "**Last** `last x`" },
+  .{ .k = "count", .m = "**Count** `count x`" },
+  .{ .k = "in", .d = "**In** `x in Y` — membership" },
+  .{ .k = "has", .d = "**Has** `Y has x` — membership" },
+  .{ .k = "mod", .d = "**Modulo** `x mod y` — remainder" },
+  .{ .k = "div", .d = "**Integer division** `x div y` — floor(x÷y)" },
+  .{ .k = "parse", .m = "**Parse** `parse s` — source → value" },
+  .{ .k = "exec", .m = "**Exec** `exec s` — evaluate source" },
 };
-fn verbDoc(name: []const u8) ?[]const u8 {
-  for (VERB_DOCS) |d| if (std.mem.eql(u8, d.k, name)) return d.v;
+
+// I/O verbs (`0:` `1:` `2:`…) — lexed as a single `.io` token.  Monadic reads,
+// dyadic writes (see AGENT.md “IO Verbs”).
+const IO_DOCS = [_]Doc{
+  .{ .k = "0:", .m = "**Read line** `0:x` — read lines from stdin / a file", .d = "**Write line** `x 0:y` — write text (`` `0 0:\"Hi\" ``)" },
+  .{ .k = "1:", .m = "**Read bytes** `1:x`", .d = "**Write bytes** `x 1:y`" },
+  .{ .k = "2:", .m = "**Load code** `2:y` — import another file", .d = "**Load code** `2:y` — import another file" },
+};
+
+fn verbDoc(name: []const u8) ?Doc {
+  for (VERB_DOCS) |d| if (std.mem.eql(u8, d.k, name)) return d;
   return null;
+}
+fn ioDoc(name: []const u8) ?Doc {
+  for (IO_DOCS) |d| if (std.mem.eql(u8, d.k, name)) return d;
+  return null;
+}
+
+// Pick the sense matching the syntactic arity, falling back to the other valence
+// when the verb only documents one (e.g. monadic `sqrt`, dyadic `mod`).
+fn senseFor(d: Doc, dyadic: bool) ?[]const u8 {
+  return if (dyadic) (d.d orelse d.m) else (d.m orelse d.d);
+}
+
+// A verb is dyadic iff a noun value sits immediately to its left — exactly the
+// lexer's `tag == .noun` rule (these token kinds terminate a noun phrase).
+fn dyadicHere(prev: ?lex.Token) bool {
+  const pt = prev orelse return false;
+  return switch (pt.tt) {
+    .int, .float, .bit, .bits, .string, .symbol, .iden,
+    .@")", .@"}", .@"]", .adverb_val => true,
+    else => false,
+  };
 }
 
 // Adverbs are polysemic; list every sense (the actual meaning depends on operand
 // type/arity — including the digram forms While/Stencil — which syntax can't
 // disambiguate, so hover surfaces all of them).
-const ADVERB_DOCS = [_]Doc{
+const Sense = struct { k: []const u8, v: []const u8 };
+const ADVERB_DOCS = [_]Sense{
   .{ .k = "'", .v = "**Each** `f'x` · **Zip** `x F'y` — apply per item / elementwise pairs" },
   .{ .k = "/", .v = "**Fold** `F/` · **Decode** `I/` · **Join** `C/` · **N-do** `i f/` · **While** `f f/` (digram) · **Converge** `f/`" },
   .{ .k = "\\", .v = "**Scan** `F\\` · **Encode** `I\\` · **Split** `C\\` · **N-dos** `i f\\` · **Whiles** `f f\\` (digram) · **Converges** `f\\`" },
@@ -88,6 +122,74 @@ fn fusedReduceDoc(op: []const u8) ?[]const u8 {
   return null;
 }
 
+// ── builtin glyph reference ─────────────────────────────────────────────────
+// Primitives have no source definition, so `workspace/symbol` (Zed's cmd-t)
+// can't find them by scanning files.  We list them here with a one-line gloss
+// and, on `initialize`, write them to a generated reference file so each glyph
+// resolves to a real location the editor can open.  `doc` is matched by the
+// query too, so the user can search by meaning ("last" → `*|`, "sum" → `+/`).
+// The gloss is a single line: it becomes a `/`-comment in the reference file.
+const Builtin = struct { sym: []const u8, doc: []const u8 };
+const BUILTINS = [_]Builtin{
+  // Operators (monadic · dyadic — arity is only known at a call site).
+  .{ .sym = ":",  .doc = "Identity/Return :x · Right/Assign x:y" },
+  .{ .sym = "+",  .doc = "Flip +x (transpose) · Add x+y" },
+  .{ .sym = "-",  .doc = "Negate -x · Subtract x-y" },
+  .{ .sym = "*",  .doc = "First *x · Multiply x*y" },
+  .{ .sym = "%",  .doc = "Divide x%y (float division)" },
+  .{ .sym = "!",  .doc = "Iota/Odometer !x · Key (dict) x!y" },
+  .{ .sym = "&",  .doc = "Where &x · Min/And x&y" },
+  .{ .sym = "|",  .doc = "Reverse |x · Max/Or x|y" },
+  .{ .sym = "<",  .doc = "Ascend (grade up) <x · Less x<y" },
+  .{ .sym = ">",  .doc = "Descend (grade down) >x · Greater x>y" },
+  .{ .sym = "=",  .doc = "Group/Unit =x · Equal x=y" },
+  .{ .sym = "~",  .doc = "Not ~x · Match x~y" },
+  .{ .sym = ",",  .doc = "Enlist ,x · Join x,y" },
+  .{ .sym = "^",  .doc = "Null ^x · Fill/Without x^y" },
+  .{ .sym = "#",  .doc = "Tally #x · Take/Reshape x#y" },
+  .{ .sym = "_",  .doc = "Floor _x · Drop/Cut/WeedOut/Delete x_y" },
+  .{ .sym = "$",  .doc = "String $x · Pad/Cast x$y" },
+  .{ .sym = "?",  .doc = "Distinct/Uniform ?x · Find/Roll x?y" },
+  .{ .sym = "@",  .doc = "Type @x · At/Apply (index) x@y" },
+  .{ .sym = ".",  .doc = "Value/Get .x · Dot/ApplyN (deep index) x.y" },
+  // Keyword verbs.
+  .{ .sym = "sqrt",  .doc = "Square root  sqrt n" },
+  .{ .sym = "sqr",   .doc = "Square  sqr n" },
+  .{ .sym = "exp",   .doc = "Exponential  exp n" },
+  .{ .sym = "log",   .doc = "Natural log  log n" },
+  .{ .sym = "sin",   .doc = "Sine  sin n" },
+  .{ .sym = "cos",   .doc = "Cosine  cos n" },
+  .{ .sym = "abs",   .doc = "Absolute value  abs n" },
+  .{ .sym = "first", .doc = "First  first x" },
+  .{ .sym = "last",  .doc = "Last  last x" },
+  .{ .sym = "count", .doc = "Count  count x" },
+  .{ .sym = "in",    .doc = "In (membership)  x in Y" },
+  .{ .sym = "has",   .doc = "Has (membership)  Y has x" },
+  .{ .sym = "mod",   .doc = "Modulo  x mod y" },
+  .{ .sym = "div",   .doc = "Integer division  x div y" },
+  .{ .sym = "parse", .doc = "Parse source → value  parse s" },
+  .{ .sym = "exec",  .doc = "Evaluate source  exec s" },
+  // Adverbs.
+  .{ .sym = "'",  .doc = "Each f'x · Zip x F'y" },
+  .{ .sym = "/",  .doc = "Fold/Decode/Join/N-do/While/Converge  F/" },
+  .{ .sym = "\\", .doc = "Scan/Encode/Split/N-dos/Whiles/Converges  F\\" },
+  .{ .sym = "':", .doc = "Eachprior/Window/Stencil  F':x" },
+  .{ .sym = "/:", .doc = "Eachright (fix left, map right)  x F/:y" },
+  .{ .sym = "\\:", .doc = "Eachleft (fix right, map left)  x F\\:y" },
+  // I/O verbs.
+  .{ .sym = "0:", .doc = "Read line 0:x · Write line x 0:y" },
+  .{ .sym = "1:", .doc = "Read bytes 1:x · Write bytes x 1:y" },
+  .{ .sym = "2:", .doc = "Load code (import file)  2:y" },
+  // Fused reductions (verb glued to /, see fuse.zig).
+  .{ .sym = "+/", .doc = "Sum +/x (fused reduce)" },
+  .{ .sym = "*/", .doc = "Product */x (fused reduce)" },
+  .{ .sym = "&/", .doc = "Minimum / All &/x (fused reduce)" },
+  .{ .sym = "|/", .doc = "Maximum / Any |/x (fused reduce)" },
+  // Idioms / trains.
+  .{ .sym = "*|", .doc = "Last *|x — last element (first of reverse)" },
+  .{ .sym = ",/", .doc = "Raze ,/x — flatten one level / join a list of lists" },
+};
+
 // ── Server state ────────────────────────────────────────────────────────────
 // A definition discovered in some workspace file (line/col precomputed).
 const Loc = struct { uri: []u8, sl: u32, sc: u32, el: u32, ec: u32, kind: DefKind };
@@ -103,6 +205,7 @@ const Server = struct {
   root: ?[]u8 = null, // absolute workspace root path (for reference scans)
   indexed: bool = false,
   shutdown: bool = false,
+  bdoc_uri: ?[]u8 = null, // file:// uri of the generated builtin reference
 
   fn init(gpa: Alloc) Server {
     return .{
@@ -384,6 +487,32 @@ fn buildWorkspaceIndex(s: *Server, root_uri: ?[]const u8) void {
   indexDir(s, path, 0);
 }
 
+// Generate the builtin reference file (one `/`-comment line per glyph) in the
+// temp dir and remember its uri.  `workspace/symbol` points each builtin at its
+// line here, so cmd-t can open a real, readable location for primitives.
+// Layout: line 0 is the header; BUILTINS[i] lives on line i+1, glyph at col 2.
+const BUILTIN_COL: u32 = 2; // length of the `/ ` comment prefix
+fn buildBuiltinsDoc(s: *Server) void {
+  const tmp: []const u8 = if (std.c.getenv("TMPDIR")) |t| std.mem.span(t) else "/tmp";
+  const path = std.fmt.allocPrint(s.gpa, "{s}/ink-builtins.k", .{std.mem.trimEnd(u8, tmp, "/")}) catch return;
+  defer s.gpa.free(path);
+
+  var text: std.ArrayList(u8) = .empty;
+  defer text.deinit(s.gpa);
+  text.appendSlice(s.gpa, "/ Ink builtin reference — operators, adverbs & idioms (generated by `ink lsp`)\n") catch return;
+  for (BUILTINS) |b| {
+    const line = std.fmt.allocPrint(s.gpa, "/ {s}  — {s}\n", .{ b.sym, b.doc }) catch return;
+    defer s.gpa.free(line);
+    text.appendSlice(s.gpa, line) catch return;
+  }
+
+  const io = std.Io.Threaded.global_single_threaded.io();
+  const file = std.Io.Dir.cwd().createFile(io, path, .{}) catch return;
+  defer file.close(io);
+  file.writePositionalAll(io, text.items, 0) catch return;
+  s.bdoc_uri = std.fmt.allocPrint(s.gpa, "file://{s}", .{path}) catch return;
+}
+
 // Append every reference (any `iden` matching `word`) in `src` to `out`.
 fn collectRefsInText(s: *Server, src: []const u8, word: []const u8, uri: []const u8, out: *std.ArrayList(Loc)) void {
   var l = Lexer.init(src);
@@ -440,6 +569,7 @@ fn handleInitialize(s: *Server, id: ?json.Value, params: ?json.Value) !void {
       { root = str(obj(wf.array.items[0], "uri")); };
   }
   buildWorkspaceIndex(s, root);
+  buildBuiltinsDoc(s);
   try replyResult(s, id,
     \\{{"capabilities":{{"textDocumentSync":1,"hoverProvider":true,"definitionProvider":true,"documentSymbolProvider":true,"referencesProvider":true,"workspaceSymbolProvider":true}},"serverInfo":{{"name":"ink-lsp","version":"0.1.0"}}}}
   , .{});
@@ -499,20 +629,23 @@ fn handleHover(s: *Server, id: ?json.Value, params: ?json.Value) !void {
     return replyHoverMd(s, id, base);
   }
 
-  if (t.tt == .op or t.tt == .keyword) {
-    const vd = verbDoc(word);
+  if (t.tt == .op or t.tt == .keyword or t.tt == .io) {
+    const dyadic = dyadicHere(tri.prev);
+    const vd: ?Doc = if (t.tt == .io) ioDoc(word) else verbDoc(word);
     // If this verb is immediately followed by `/`, lead with the fused idiom.
+    // The reduced verb applies dyadically, so show its dyadic sense after it.
     if (tri.next) |nx| if (nx.tt == .adverb and std.mem.eql(u8, nx.slice(src), "/")) {
       if (fusedReduceDoc(word)) |fr| {
-        const md = if (vd) |d|
-          try std.fmt.allocPrint(s.gpa, "{s}\n\n---\n{s}", .{ fr, d })
+        const sense = if (vd) |d| senseFor(d, true) else null;
+        const md = if (sense) |sv|
+          try std.fmt.allocPrint(s.gpa, "{s}\n\n---\n{s}", .{ fr, sv })
         else
           try s.gpa.dupe(u8, fr);
         defer s.gpa.free(md);
         return replyHoverMd(s, id, md);
       }
     };
-    if (vd) |md| return replyHoverMd(s, id, md);
+    if (vd) |d| if (senseFor(d, dyadic)) |md| return replyHoverMd(s, id, md);
   }
   if (t.tt == .iden) {
     var defs = try collectDefs(s.gpa, src);
@@ -673,6 +806,27 @@ fn handleWorkspaceSymbol(s: *Server, id: ?json.Value, params: ?json.Value) !void
       try escapeInto(&s.out, s.gpa, l.uri);
       try p(s, "\",\"range\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}}}}}}",
         .{ l.sl, l.sc, l.el, l.ec });
+    }
+  }
+  // Builtins: glyphs/idioms from the generated reference file.  Match the query
+  // against the symbol *and* its gloss, so a search by meaning works too.
+  if (s.bdoc_uri) |buri| {
+    for (BUILTINS, 0..) |b, i| {
+      if (count >= 500) break;
+      if (query.len > 0 and
+          std.ascii.indexOfIgnoreCase(b.sym, query) == null and
+          std.ascii.indexOfIgnoreCase(b.doc, query) == null) continue;
+      count += 1;
+      if (!first) try s.out.append(s.gpa, ',');
+      first = false;
+      const line: u32 = @intCast(i + 1); // line 0 is the header
+      const endc: u32 = BUILTIN_COL + @as(u32, @intCast(b.sym.len));
+      try s.out.appendSlice(s.gpa, "{\"name\":\"");
+      try escapeInto(&s.out, s.gpa, b.sym);
+      try s.out.appendSlice(s.gpa, "\",\"kind\":25,\"location\":{\"uri\":\""); // SymbolKind.Operator
+      try escapeInto(&s.out, s.gpa, buri);
+      try p(s, "\",\"range\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}}}}}}",
+        .{ line, BUILTIN_COL, line, endc });
     }
   }
   try s.out.appendSlice(s.gpa, "]}");
