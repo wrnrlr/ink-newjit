@@ -629,6 +629,22 @@ fn handleHover(s: *Server, id: ?json.Value, params: ?json.Value) !void {
     return replyHoverMd(s, id, base);
   }
 
+  // `:\`  `:'` — the Zig lexer splits `:` then makes `\`/`'` an `.adverb_val`
+  // (because `:` resets the lexer tag to `.phrase`).  Detect the pair and show
+  // the adverb's doc.  Also handle hovering over the `:` half of the pair.
+  if (t.tt == .adverb_val) if (tri.prev) |pv| if (pv.tt == .@":" and pv.end == t.start) {
+    const ch = word[0];
+    const adv_key: []const u8 = if (ch == '\\') "\\" else if (ch == '\'') "'" else return replyResult(s, id, "null", .{});
+    const base = adverbDoc(adv_key) orelse return replyResult(s, id, "null", .{});
+    return replyHoverMd(s, id, base);
+  };
+  if (t.tt == .@":") if (tri.next) |nx| if (nx.tt == .adverb_val and nx.start == t.end) {
+    const ch = src[nx.start];
+    const adv_key: []const u8 = if (ch == '\\') "\\" else if (ch == '\'') "'" else return replyResult(s, id, "null", .{});
+    const base = adverbDoc(adv_key) orelse return replyResult(s, id, "null", .{});
+    return replyHoverMd(s, id, base);
+  };
+
   if (t.tt == .op or t.tt == .keyword or t.tt == .io) {
     const dyadic = dyadicHere(tri.prev);
     const vd: ?Doc = if (t.tt == .io) ioDoc(word) else verbDoc(word);
@@ -693,6 +709,32 @@ fn handleDefinition(s: *Server, id: ?json.Value, params: ?json.Value) !void {
   const pos = obj(params, "position");
   const off = posToOffset(src, int(obj(pos, "line")) orelse 0, int(obj(pos, "character")) orelse 0);
   const t = tokenAt(src, off) orelse return replyResult(s, id, "null", .{});
+
+  // Operators, adverbs and io verbs — jump to the generated builtin reference.
+  if (t.tt == .op or t.tt == .io or t.tt == .adverb or t.tt == .keyword) {
+    const word = t.slice(src);
+    if (s.bdoc_uri) |buri| {
+      for (BUILTINS, 0..) |b, i| {
+        if (std.mem.eql(u8, b.sym, word)) {
+          const line: u32 = @intCast(i + 1);
+          const endc: u32 = BUILTIN_COL + @as(u32, @intCast(b.sym.len));
+          return replyLocation(s, id, buri, line, BUILTIN_COL, line, endc);
+        }
+      }
+    }
+  }
+  // `:\` / `:'` — hovering the adverb_val half: resolve via the base adverb char.
+  if (t.tt == .adverb_val) if (s.bdoc_uri) |buri| {
+    const ch = src[t.start];
+    const adv_key: []const u8 = if (ch == '\\') "\\" else if (ch == '\'') "'" else return replyResult(s, id, "null", .{});
+    for (BUILTINS, 0..) |b, i| {
+      if (std.mem.eql(u8, b.sym, adv_key)) {
+        const line: u32 = @intCast(i + 1);
+        return replyLocation(s, id, buri, line, BUILTIN_COL, line, BUILTIN_COL + @as(u32, @intCast(b.sym.len)));
+      }
+    }
+  };
+
   if (t.tt != .iden) return replyResult(s, id, "null", .{});
   const word = t.slice(src);
 
