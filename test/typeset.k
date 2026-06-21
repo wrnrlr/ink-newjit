@@ -64,6 +64,8 @@ GLYPHS: ,/{cellVerts x}' IDX
 
 / ── Frame ────────────────────────────────────────────────────────────────────
 
+Multiplane: FillFrame@'
+
 run: {[props]
   w: props`width; h: props`height
   FillFrame[quad[0.;0.;w;h]; BG]      / background
