@@ -156,4 +156,17 @@ pub fn build(b: *std.Build) !void {
   b.installArtifact(csv_lib);
   const csv_step = b.step("csv", "Build the CSV extension shared library");
   csv_step.dependOn(&b.addInstallArtifact(csv_lib, .{}).step);
+
+  // --- Unicode binary data (lib/data.kb) ---
+  const data_gen_mod = b.createModule(.{
+    .root_source_file = b.path("lib/data_gen.zig"),
+    .target = target, .optimize = optimize,
+  });
+  const data_gen_exe = b.addExecutable(.{
+    .name = "data_gen",
+    .root_module = data_gen_mod,
+  });
+  const run_data_gen = b.addRunArtifact(data_gen_exe);
+  const data_step = b.step("data", "Regenerate lib/data.kb from unicode tables");
+  data_step.dependOn(&run_data_gen.step);
 }
