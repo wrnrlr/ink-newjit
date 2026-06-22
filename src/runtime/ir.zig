@@ -2,6 +2,7 @@ const std = @import("std");
 const V = @import("../noun/value.zig").V;
 const ArrayFlags = @import("../noun/array.zig").ArrayFlags;
 const OpCode = @import("tape.zig").OpCode;
+const Ty = @import("infer/type.zig").Ty;
 
 pub const ValueId = u32;
 pub const NO_VALUE: ValueId = 0xffffffff;
@@ -16,6 +17,8 @@ pub const IRInst = struct {
   is_dead: bool = false,
   is_pure: bool = false,
   is_last: bool = false,      // last use of this local variable slot
+  ty: Ty = .{},               // inferred type (annotation only, never read by lower)
+  stencil: u16 = 0xffff,      // selected JIT stencil id (0xffff = none / dynamic dispatch)
 
   pub fn deinit(self: IRInst, alloc: std.mem.Allocator) void {
     if (self.val) |v| v.deinit(alloc);

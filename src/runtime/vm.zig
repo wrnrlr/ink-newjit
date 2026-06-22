@@ -294,7 +294,10 @@ pub const VM = struct {
         },
         .Apply1    => try vm.doApply(1, call1),
         .Apply2    => try vm.doApply(2, call2),
+        .Apply1T   => try vm.doApplyTyped(1),
+        .Apply2T   => try vm.doApplyTyped(2),
         .ReduceZip => try vm.doApply(2, reduceZip),
+        .ZipChain  => try vm.doApply(3, zipChain),
         .Apply3    => try vm.doApply(3, call3),
         .Apply4    => try vm.doApply(4, call4),
         .Return => try vm.doReturn(),
@@ -477,6 +480,12 @@ pub const VM = struct {
     const bin: opmod.Op2 = @enumFromInt(vm.readByte());
     return fuse.reduceZip(vm, @enumFromInt(op), bin, a[0], a[1]);
   }
+  // Fused elementwise chain: reads inner-op and side bytes after the outer op.
+  fn zipChain(vm: *VM, op: u8, a: []V) V {
+    const in: opmod.Op2 = @enumFromInt(vm.readByte());
+    const side = vm.readByte();
+    return fuse.zipChain(vm, @enumFromInt(op), in, side, a[0], a[1], a[2]);
+  }
 
   // Generic apply: reads opcode, takes top N args, calls F, cleans up, pushes result.
   fn doApply(vm: *VM, comptime arity: usize, comptime F: anytype) !void {
@@ -489,6 +498,37 @@ pub const VM = struct {
     try vm.push(r);
   }
   
+  // Type-specialized apply: the operands' classes were inferred at compile time
+  // and encoded inline. Guard the actual runtime tags against the expected
+  // classes; on a match call the resolved kernel directly, otherwise fall back
+  // to fully generic dispatch. The guard keeps this sound no matter what — an
+  // err value, or any inference imprecision, simply takes the dynamic path.
+  fn doApplyTyped(vm: *VM, comptime arity: usize) !void {
+    const op = vm.readByte();
+    const xkc = vm.readByte();
+    const ykc = if (arity == 2) vm.readByte() else 0;
+    const s = vm.size();
+    const a = vm.cut(arity);
+    const r = blk: {
+      if (arity == 2) {
+        if (a[0].tag().code() == xkc and a[1].tag().code() == ykc) {
+          const key = @as(usize, op) * K.COUNT * K.COUNT + @as(usize, xkc) * K.COUNT + ykc;
+          break :blk dispatch.dispatch2At(vm, key, a[0], a[1]);
+        }
+        break :blk dispatch.dispatch2(vm, @enumFromInt(op), a[0], a[1]);
+      } else {
+        if (a[0].tag().code() == xkc) {
+          const key = @as(usize, op) * K.COUNT + xkc;
+          break :blk dispatch.dispatch1At(vm, key, a[0]);
+        }
+        break :blk dispatch.dispatch1(vm, @enumFromInt(op), a[0]);
+      }
+    };
+    for (a) |*v| v.deinit(vm.alloc);
+    vm.stack_len = s - arity;
+    try vm.push(r);
+  }
+
   fn doMakePartial(vm: *VM) !void {
     const argc = vm.readByte();
     const mask = vm.readByte();

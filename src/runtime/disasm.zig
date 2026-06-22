@@ -161,10 +161,27 @@ fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, o
         const verb: Op2 = @enumFromInt(code[ip]); ip += 1;
         try out.print("Apply2      {s}\n", .{verb.toString()});
       },
+      .Apply1T => {
+        const verb: Op1 = @enumFromInt(code[ip]); ip += 1;
+        const xk = code[ip]; ip += 1;
+        try out.print("Apply1T     {s} [{d}]\n", .{ verb.toString(), xk });
+      },
+      .Apply2T => {
+        const verb: Op2 = @enumFromInt(code[ip]); ip += 1;
+        const xk = code[ip]; ip += 1;
+        const yk = code[ip]; ip += 1;
+        try out.print("Apply2T     {s} [{d},{d}]\n", .{ verb.toString(), xk, yk });
+      },
       .ReduceZip => {
         const red: Op1 = @enumFromInt(code[ip]); ip += 1;
         const bin: Op2 = @enumFromInt(code[ip]); ip += 1;
         try out.print("ReduceZip   {s} {s}\n", .{ red.toString(), bin.toString() });
+      },
+      .ZipChain => {
+        const out_op: Op2 = @enumFromInt(code[ip]); ip += 1;
+        const in_op: Op2 = @enumFromInt(code[ip]); ip += 1;
+        const side = code[ip]; ip += 1;
+        try out.print("ZipChain    {s} {s} side={d}\n", .{ out_op.toString(), in_op.toString(), side });
       },
       .Call     => { const n = code[ip]; ip += 1; try out.print("Call        {d}\n", .{n}); },
       .TailCall => { const n = code[ip]; ip += 1; try out.print("TailCall    {d}\n", .{n}); },
