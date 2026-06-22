@@ -18,14 +18,6 @@ const OpCode = @import("tape.zig").OpCode;
 const Pool = @import("../noun/symbol.zig").Pool;
 const Fs = @import("registry.zig").Fs;
 const fold_mod = @import("../primitive/adverb/fold.zig");
-const infer = @import("infer/infer.zig");
-const stencil = @import("../jit/stencil.zig");
-
-/// Run type inference + stencil selection to annotate the IR. Both passes only
-/// write `IRInst.ty` / `IRInst.stencil` (never read by `lower`), so enabling
-/// them is behavior-preserving — emitted bytecode is byte-identical. Flip to
-/// false for a zero-cost build.
-const ENABLE_INFER = true;
 
 pub const Compiler = struct {
   alloc: Alloc,
@@ -802,11 +794,8 @@ pub const Compiler = struct {
         return 3;
       },
       .Global => return 2,
-      // Typed dispatch carries the expected operand classes inline.
-      .Apply2 => return if (inst.stencil != stencil.NONE) 4 else 2,
-      .Apply1 => return if (inst.stencil != stencil.NONE) 3 else 2,
       .Local, .AssignLocal, .AssignGlobal,
-      .Call, .TailCall, .Apply3, .Apply4, .Apply,
+      .Call, .TailCall, .Apply1, .Apply2, .Apply3, .Apply4, .Apply,
       .MakeList, .Derive,
       .ListAssignLocal, .ListAssignGlobal => return 2,
       .Drop => {
@@ -815,7 +804,6 @@ pub const Compiler = struct {
       },
       .Jump, .JumpFalse, .JumpTrue => return 3,
       .MakePartial, .ReduceZip => return 3,
-      .ZipChain => return 4,
       else => return 1,
     }
   }
@@ -847,24 +835,6 @@ pub const Compiler = struct {
       return;
     }
 
-    // Type-specialized dispatch: when inference selected a stencil, emit the
-    // typed opcode carrying the expected operand classes for the runtime guard.
-    if (inst.stencil != stencil.NONE) {
-      if (inst.op == .Apply2) {
-        const sten = stencil.dyad(inst.stencil);
-        try chunk.writeOp(.Apply2T);
-        try chunk.write(@as(u8, @intCast(inst.arg1)));
-        try chunk.write(@as(u8, @intCast(sten.x.code())));
-        try chunk.write(@as(u8, @intCast(sten.y.code())));
-        return;
-      } else if (inst.op == .Apply1) {
-        const sten = stencil.monad(inst.stencil);
-        try chunk.writeOp(.Apply1T);
-        try chunk.write(@as(u8, @intCast(inst.arg1)));
-        try chunk.write(@as(u8, @intCast(sten.x.code())));
-        return;
-      }
-    }
 
     // Last-use local: emit LocalLast so the VM can steal the slot.
     const effective_op: OpCode = if (inst.is_last and inst.op == .Local) .LocalLast else inst.op;
@@ -887,11 +857,6 @@ pub const Compiler = struct {
         try chunk.write(@as(u8, @intCast(inst.arg1)));
         try chunk.write(@as(u8, @intCast(inst.arg2)));
       },
-      .ZipChain => {
-        try chunk.write(@as(u8, @intCast(inst.arg1))); // outer op
-        try chunk.write(@as(u8, @intCast(inst.arg2))); // inner op
-        try chunk.write(@as(u8, @intCast(inst.arg3))); // side (0=left nested, 1=right)
-      },
       else => {},
     }
   }
@@ -900,10 +865,6 @@ pub const Compiler = struct {
     try optimize(self.alloc, scope_ir, root_id);
     _ = try inlineLambdas(self.alloc, scope_ir, self.fn_tables);
     try optimize(self.alloc, scope_ir, root_id);
-    if (ENABLE_INFER) {
-      infer.inferTypes(scope_ir);
-      infer.selectStencils(scope_ir);
-    }
     try livenessLocals(self.alloc, scope_ir);
   }
 };
@@ -1002,21 +963,6 @@ fn isFusableBin(op: Op2) bool {
   };
 }
 
-// Arithmetic ops eligible for elementwise *chain* fusion. Comparisons are
-// excluded: they produce a bool mid-chain, breaking the same-type fast path.
-fn isFusableArith(op: Op2) bool {
-  return switch (op) {
-    .@"+", .@"-", .@"*", .@"&", .@"|" => true,
-    else => false,
-  };
-}
-
-fn isNestedArith(scope_ir: *ir.IR, id: ir.ValueId) bool {
-  if (id == ir.NO_VALUE) return false;
-  const p = scope_ir.get(id);
-  return p.op == .Apply2 and p.inputs.len == 2 and isFusableArith(@enumFromInt(@as(u8, @intCast(p.arg1))));
-}
-
 fn isBuiltinDyad(inst: *const ir.IRInst, op: Op2) bool {
   if (inst.op != .Const) return false;
   const v = inst.val orelse return false;
@@ -1044,64 +990,9 @@ fn peepholeIdioms(alloc: Alloc, scope_ir: *ir.IR) !bool {
     }
   }
 
-  // Producers a fusable reducer will claim via ReduceZip — don't let chain
-  // fusion preempt that (ReduceZip yields a scalar with no allocation, which
-  // beats materialising a fused vector then reducing it).
-  const feeds_reducer = try alloc.alloc(bool, insts.len);
-  defer alloc.free(feeds_reducer);
-  @memset(feeds_reducer, false);
-  for (insts) |inst| {
-    if (inst.is_dead) continue;
-    if (inst.op == .Apply1 and inst.inputs.len == 1 and isFusableReducer(@enumFromInt(@as(u8, @intCast(inst.arg1))))) {
-      const pid = inst.inputs[0];
-      if (pid != ir.NO_VALUE and pid < use_count.len and use_count[pid] == 1) feeds_reducer[pid] = true;
-    }
-  }
-
   var changed = false;
-  for (insts, 0..) |*inst, self_id| {
+  for (insts) |*inst| {
     if (inst.is_dead) continue;
-
-    // Fuse an elementwise arithmetic chain: Apply2(out, Apply2(in,x,y), z) with
-    // a single-use nested op → one-pass ZipChain. `side` records whether the
-    // nested op was the left (0) or right (1) operand of the outer op.
-    if (inst.op == .Apply2 and inst.inputs.len == 2 and
-        isFusableArith(@enumFromInt(@as(u8, @intCast(inst.arg1)))) and
-        !(self_id < feeds_reducer.len and feeds_reducer[self_id])) zc: {
-      const li = inst.inputs[0];
-      const ri = inst.inputs[1];
-      var nested_id: ir.ValueId = ir.NO_VALUE;
-      var other_id: ir.ValueId = ir.NO_VALUE;
-      var side: u32 = 0;
-      if (li != ir.NO_VALUE and li < use_count.len and use_count[li] == 1 and isNestedArith(scope_ir, li)) {
-        nested_id = li; other_id = ri; side = 0;
-      } else if (ri != ir.NO_VALUE and ri < use_count.len and use_count[ri] == 1 and isNestedArith(scope_ir, ri)) {
-        nested_id = ri; other_id = li; side = 1;
-      } else break :zc;
-      const nested = scope_ir.get(nested_id);
-      const x = nested.inputs[0];
-      const y = nested.inputs[1];
-      if (x == ir.NO_VALUE or y == ir.NO_VALUE or other_id == ir.NO_VALUE) break :zc;
-      const old_inputs = inst.inputs;
-      const new_inputs = try scope_ir.alloc.alloc(ir.ValueId, 3);
-      // Operands reach the VM stack in IR-emission order, so the input list must
-      // match it: for left-nested (side 0) the inner pair is emitted first
-      // ([x,y,z]); for right-nested (side 1) the other operand comes first
-      // ([z,x,y]). The fused kernel groups (s0,s1) for side 0 and (s1,s2) for side 1.
-      if (side == 0) {
-        new_inputs[0] = x; new_inputs[1] = y; new_inputs[2] = other_id;
-      } else {
-        new_inputs[0] = other_id; new_inputs[1] = x; new_inputs[2] = y;
-      }
-      inst.inputs = new_inputs;
-      inst.arg2 = nested.arg1; // inner op (arg1 stays = outer op)
-      inst.arg3 = side;
-      inst.op = .ZipChain;
-      scope_ir.alloc.free(old_inputs);
-      scope_ir.instructions.items[nested_id].is_dead = true;
-      changed = true;
-      continue;
-    }
 
     if (inst.op == .Apply1 and inst.inputs.len == 1) {
       const red: Op1 = @enumFromInt(inst.arg1);

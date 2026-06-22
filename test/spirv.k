@@ -246,6 +246,13 @@ chk[1b; |/wds3=0x3F800000; "1.0 constant in v2→v4 shader"]
 chk[1b; |/wds3=0x00070050; "opCons4 opword in v2→v4 shader"]
 chk[1b; |/wds3=0x00050051; "opXtract opword in v2→v4 shader"]
 
+/ ══ 6b. vector ⊕ scalar broadcast (bug fix) ═════════════════════════════════
+/ `uv + 0.5` is v2 + scalar: the scalar must be splatted to v2 (OpCompositeConstruct)
+/ so OpFAdd sees two v2 operands — otherwise the module is invalid SPIR-V.
+wbc: FragmentShader[[uv:`v2; out:`v2]; {[uv] uv+0.5}]
+chk[1b; |/wbc=0x00050050; "v2+scalar splats scalar via OpCompositeConstruct"]
+chk[1b; |/wbc=0x00050081; "v2+scalar adds two v2 via OpFAdd"]
+
 / The Hasse diagram (face lattice) of the tiling hierarchy as a ranked poset:
 /
 /  rank 3: module (the whole 8x8 iteration space)

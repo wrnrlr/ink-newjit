@@ -22,16 +22,6 @@ pub fn dispatch2(vm: *VM, op: Op2, x: V, y: V) V {
   return verbs.dyad_table[key](vm, x, y);
 }
 
-/// Type-specialized dispatch: call a dispatch-table slot by precomputed key,
-/// skipping the tag-read + key arithmetic. The caller (typed Apply opcodes) is
-/// responsible for verifying the operand classes match `key` first.
-pub fn dispatch1At(vm: *VM, key: usize, x: V) V {
-  return verbs.monad_table[key](vm, x);
-}
-pub fn dispatch2At(vm: *VM, key: usize, x: V, y: V) V {
-  return verbs.dyad_table[key](vm, x, y);
-}
-
 pub fn dispatch3(vm: *VM, op: Op3, x: V, y: V, z: V) V {
   var args = [_]V{ x, y, z };
   return switch (op) {

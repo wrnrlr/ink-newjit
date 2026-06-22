@@ -116,7 +116,7 @@ fn unitary(vm: *VM, x: V) V {
 
 const r = @import("../derived/reduce.zig");
 
-pub const Monads = struct {
+const Monads = struct {
   // Monadic Primitives
   pub const @"+x" = @import("flip.zig").Flip;
   pub const @"-N" = _N(.@"-", calc.NegOp);
@@ -166,7 +166,7 @@ pub const Monads = struct {
   pub const @"max x"     = r.Max;
 };
 
-pub const Dyads = struct {
+const Dyads = struct {
   pub const @"N+N" = _N_N(.@"+", calc.AddOp);
   pub const @"N-N" = _N_N(.@"-", calc.SubOp);
   pub const @"N*N" = _N_N(.@"*", calc.MulOp);
@@ -221,7 +221,7 @@ pub const Dyads = struct {
 fn typeError1(_: *VM, _:V) V { return .{ .err = .@"type" }; }
 fn typeError2(_: *VM, _:V, _:V) V { return .{ .err = .@"type" }; }
 
-pub fn opOf(comptime Verb: type, comptime EnumT: type) ?EnumT {
+fn opOf(comptime Verb: type, comptime EnumT: type) ?EnumT {
   if (@hasDecl(Verb, "op")) return @as(EnumT, @field(Verb, "op"));
   for (std.meta.fields(Verb)) |f|
     if (comptime std.mem.eql(u8, f.name, "op"))
@@ -263,7 +263,7 @@ fn makeDyadArray(comptime Defs: type) [Op2.COUNT * K.COUNT * K.COUNT]VM.Dyad {
   return table;
 }
 
-pub fn parseSig(comptime name: []const u8) []const K {
+fn parseSig(comptime name: []const u8) []const K {
   if (name.len < 2 or name[0] != '_') return &.{};
   comptime var tags: []const K = &.{};
   comptime var start: usize = 1;

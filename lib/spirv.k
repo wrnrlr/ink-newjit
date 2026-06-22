@@ -286,6 +286,17 @@ emitCon: {[ws] Con,:: ,ws}
 emitBuf: {[ws] Buf,:: ,ws}
 emitW:   emitBuf
 
+/ Bug fix: splat a scalar id `sid` to vector type `vty` via OpCompositeConstruct.
+/ SPIR-V OpFAdd/Sub/Div require both operands to share the exact type, so a
+/ vector ⊕ scalar arithmetic op (e.g. `uv + 0.5`) must widen the scalar first —
+/ otherwise the emitted module is invalid SPIR-V.
+splat: {[vty; sid]
+  n: ncVec[vty]; rt: Tid[vty]; r: newId[]
+  $[n=2; emitBuf opCons2[rt;r;sid;sid]
+    n=3; emitBuf opCons3[rt;r;sid;sid;sid]
+    emitBuf opCons4[rt;r;sid;sid;sid;sid]]
+  r}
+
 / ── Layer 3: math function call compiler ───────────────────────────────────
 / Compile f[a; b; c] where f is a known GLSL built-in.
 / argsSeq = (`seq; arg0; `div; arg1; ...)
@@ -372,8 +383,15 @@ compTransNorm: {[node; env; oty]
   bp: compNode[node[3]; env; opTy]
   aty: ap[1]; bty: bp[1]
   rty: binRty[op; aty; bty; oty]
+  / Bug fix: for +,-,% on vector ⊕ scalar, splat the scalar up to the vector type
+  / so OpFAdd/Sub/Div see matching operands (* uses OpVectorTimesScalar already).
+  bcast: (op in `+`-`%) & isVecTy[rty] & ~(isVecTy[aty] & isVecTy[bty])
+  aId: $[bcast & ~isVecTy[aty]; splat[rty; ap[0]]; ap[0]]
+  bId: $[bcast & ~isVecTy[bty]; splat[rty; bp[0]]; bp[0]]
+  da:  $[bcast & ~isVecTy[aty]; rty; aty]
+  db:  $[bcast & ~isVecTy[bty]; rty; bty]
   r: newId[]
-  emitBuf dispBin[op; rty; r; aty; ap[0]; bty; bp[0]]
+  emitBuf dispBin[op; rty; r; da; aId; db; bId]
   (r; rty)
 }
 

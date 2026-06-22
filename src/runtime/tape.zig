@@ -15,8 +15,6 @@ pub const OpCode = enum(u8) {
 	Return, Call, TailCall, Apply,
 	MakeList, MakePartial,
 	Derive, Command,
-	Apply1T, Apply2T,   // type-specialized dispatch: carry expected operand classes
-	ZipChain,           // fused elementwise chain: (x in y) out z
 
 	pub const COUNT = @typeInfo(OpCode).@"enum".fields.len;
 };
@@ -133,8 +131,7 @@ pub const Chunk = struct {
     const op: OpCode = @enumFromInt(code[ip]);
     return switch (op) {
       .Nop, .Gap, .Drop, .Return, .Command => 1,
-      .Const, .Int, .Jump, .JumpFalse, .JumpTrue, .MakePartial, .ReduceZip, .Apply1T => 3,
-      .Apply2T, .ZipChain => 4,
+      .Const, .Int, .Jump, .JumpFalse, .JumpTrue, .MakePartial, .ReduceZip => 3,
       .ListAssignGlobal, .ListAssignLocal => 2 + code[ip + 1],
       else => 2,
     };
