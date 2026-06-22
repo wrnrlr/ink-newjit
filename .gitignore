@@ -14,3 +14,4 @@ bench/report.csv
 *.ttf
 *.otf
 *.ttc
+*.kb
