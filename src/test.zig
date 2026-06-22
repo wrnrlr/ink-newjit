@@ -5,6 +5,14 @@ const N = @import("noun/value.zig").N;
 const TerseFormatter = @import("noun/format.zig").TerseFormatter;
 const MockWriter = @import("./util.zig").MockWriter;
 
+// Pull in tests from sibling files that aren't otherwise reached as test roots.
+comptime {
+  _ = @import("runtime/infer/type.zig");
+  _ = @import("runtime/infer/infer_test.zig");
+  _ = @import("jit/stencil.zig");
+  _ = @import("jit/native.zig");
+}
+
 const testing = std.testing;
 
 pub const Tester = struct {
@@ -52,6 +60,35 @@ const TestTxt = struct {
   const Self = @This();
   fn fromFile() Self {}
 };
+
+test "typed dispatch (Apply2T) preserves results" {
+  var t = try Tester.init(); defer t.deinit();
+  // Inside a lambda, locals are type-threaded so these compile to Apply2T;
+  // results must match the generic dispatch path exactly.
+  try t.check("{a:1 2 3;a+a}[0]", "2 4 6");
+  try t.check("{a:5;a+a}[0]", "10");
+  try t.check("{a:1 2 3;a*a}[0]", "1 4 9");
+  try t.check("{a:1.0 2.0;a%a}[0]", "1.0 1.0");
+  try t.check("{a:1 2 3;a<a}[0]", "000b");
+  // Guard falls back correctly when a kernel error flows through the typed op.
+  try t.check("{a:1 2 3;a+1 2}[0]", "!length");
+}
+
+test "fused elementwise chains (ZipChain) match unfused semantics" {
+  var t = try Tester.init(); defer t.deinit();
+  // side 0 (left-nested): (a+b)*c
+  try t.check("{[a;b;c](a+b)*c}[1 2 3;4 5 6;7 8 9]", "35 56 81");
+  // side 1 (right-nested): a+b*c  ==  a+(b*c), strictly right-to-left
+  try t.check("{[a;b;c]a+b*c}[1 2 3;4 5 6;7 8 9]", "29 42 57");
+  // floats
+  try t.check("{[a;b;c](a+b)*c}[1.0 2.0;0.5 0.5;2.0 2.0]", "3.0 5.0");
+  // longer chain folds pairwise: ((a+b)*c)-a
+  try t.check("{[a;b;c]((a+b)*c)-a}[1 2 3;4 5 6;7 8 9]", "34 54 78");
+  // scalar operand forces the fallback path (still correct)
+  try t.check("{[a;b](a+b)*2}[1 2 3;4 5 6]", "10 14 18");
+  // length error in the inner op propagates through the fused op
+  try t.check("{[a;b;c](a+b)*c}[1 2 3;4 5;7 8 9]", "!length");
+}
 
 test "basic syntax" {
   var t = try Tester.init(); defer t.deinit();
