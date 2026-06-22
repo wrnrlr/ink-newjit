@@ -571,7 +571,7 @@ fn handleInitialize(s: *Server, id: ?json.Value, params: ?json.Value) !void {
   buildWorkspaceIndex(s, root);
   buildBuiltinsDoc(s);
   try replyResult(s, id,
-    \\{{"capabilities":{{"textDocumentSync":1,"hoverProvider":true,"definitionProvider":true,"documentSymbolProvider":true,"referencesProvider":true,"workspaceSymbolProvider":true}},"serverInfo":{{"name":"ink-lsp","version":"0.1.0"}}}}
+    \\{{"capabilities":{{"textDocumentSync":1,"hoverProvider":true,"definitionProvider":true,"documentSymbolProvider":true,"referencesProvider":true,"workspaceSymbolProvider":true,"renameProvider":{{"prepareProvider":true}}}},"serverInfo":{{"name":"ink-lsp","version":"0.1.0"}}}}
   , .{});
 }
 
@@ -875,6 +875,86 @@ fn handleWorkspaceSymbol(s: *Server, id: ?json.Value, params: ?json.Value) !void
   try flush(s);
 }
 
+fn handlePrepareRename(s: *Server, id: ?json.Value, params: ?json.Value) !void {
+  const uri = str(obj(obj(params, "textDocument"), "uri")) orelse return replyResult(s, id, "null", .{});
+  const src = docText(s, uri) orelse return replyResult(s, id, "null", .{});
+  const pos = obj(params, "position");
+  const off = posToOffset(src, int(obj(pos, "line")) orelse 0, int(obj(pos, "character")) orelse 0);
+  const t = tokenAt(src, off) orelse return replyResult(s, id, "null", .{});
+  if (t.tt != .iden) return replyResult(s, id, "null", .{});
+  const a = offsetToPos(src, t.start);
+  const b = offsetToPos(src, t.end);
+  const word = t.slice(src);
+  try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
+  try writeId(s, id);
+  try s.out.appendSlice(s.gpa, ",\"result\":{\"range\":{\"start\":{\"line\":");
+  try p(s, "{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"placeholder\":\"",
+    .{ a.line, a.col, b.line, b.col });
+  try escapeInto(&s.out, s.gpa, word);
+  try s.out.appendSlice(s.gpa, "\"}}");
+  try flush(s);
+}
+
+fn handleRename(s: *Server, id: ?json.Value, params: ?json.Value) !void {
+  const uri = str(obj(obj(params, "textDocument"), "uri")) orelse return replyResult(s, id, "null", .{});
+  const src = docText(s, uri) orelse return replyResult(s, id, "null", .{});
+  const pos = obj(params, "position");
+  const off = posToOffset(src, int(obj(pos, "line")) orelse 0, int(obj(pos, "character")) orelse 0);
+  const t = tokenAt(src, off) orelse return replyResult(s, id, "null", .{});
+  if (t.tt != .iden) return replyResult(s, id, "null", .{});
+  const word = t.slice(src);
+  const new_name = str(obj(params, "newName")) orelse return replyResult(s, id, "null", .{});
+
+  var locs: std.ArrayList(Loc) = .empty;
+  defer {
+    for (locs.items) |l| s.gpa.free(l.uri);
+    locs.deinit(s.gpa);
+  }
+  collectRefsInText(s, src, word, uri, &locs);
+  if (s.root) |root| {
+    const cur = uriToPath(s.gpa, uri) catch null;
+    defer if (cur) |c| s.gpa.free(c);
+    collectRefsDir(s, root, word, cur, &locs, 0);
+  }
+
+  // Group locations by URI so we can emit one array of edits per file.
+  var groups = std.StringHashMap(std.ArrayList(usize)).init(s.gpa);
+  defer {
+    var it = groups.valueIterator();
+    while (it.next()) |v| v.deinit(s.gpa);
+    groups.deinit();
+  }
+  for (locs.items, 0..) |l, i| {
+    const gop = try groups.getOrPut(l.uri);
+    if (!gop.found_existing) gop.value_ptr.* = .empty;
+    try gop.value_ptr.append(s.gpa, i);
+  }
+
+  try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
+  try writeId(s, id);
+  try s.out.appendSlice(s.gpa, ",\"result\":{\"changes\":{");
+  var first_file = true;
+  var git = groups.iterator();
+  while (git.next()) |e| {
+    if (!first_file) try s.out.append(s.gpa, ',');
+    first_file = false;
+    try s.out.append(s.gpa, '"');
+    try escapeInto(&s.out, s.gpa, e.key_ptr.*);
+    try s.out.appendSlice(s.gpa, "\":[");
+    for (e.value_ptr.items, 0..) |li, idx| {
+      const l = locs.items[li];
+      if (idx > 0) try s.out.append(s.gpa, ',');
+      try p(s, "{{\"range\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"newText\":\"",
+        .{ l.sl, l.sc, l.el, l.ec });
+      try escapeInto(&s.out, s.gpa, new_name);
+      try s.out.appendSlice(s.gpa, "\"}");
+    }
+    try s.out.append(s.gpa, ']');
+  }
+  try s.out.appendSlice(s.gpa, "}}}");
+  try flush(s);
+}
+
 fn handle(s: *Server, root: json.Value) !void {
   const method = str(obj(root, "method")) orelse return;
   const id = obj(root, "id");
@@ -922,6 +1002,10 @@ fn handle(s: *Server, root: json.Value) !void {
     try handleReferences(s, id, params);
   } else if (std.mem.eql(u8, method, "workspace/symbol")) {
     try handleWorkspaceSymbol(s, id, params);
+  } else if (std.mem.eql(u8, method, "textDocument/prepareRename")) {
+    try handlePrepareRename(s, id, params);
+  } else if (std.mem.eql(u8, method, "textDocument/rename")) {
+    try handleRename(s, id, params);
   } else if (id != null) {
     // Unknown request — reply null so the client doesn't hang.
     try replyResult(s, id, "null", .{});
