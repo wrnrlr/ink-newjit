@@ -5,26 +5,19 @@ Fact: {*/1+!x}                   / Factorial: product of 1 to x
 Comb: {(Fact x)%(Fact[y]*Fact[x-y])} / Combination: nCr
 Catalan: {(Comb[2*x;x])%1+x}     / Nth Catalan number
 
+
 Greycode: { +! (#x) #2 }
 Lexicograph: *| +@/ 1<:\ (|1#:\)'
 Powerset: { Lexicograph x@ &'Greycode x }
 
-R1: `+
-Cl: `+-
-R2: `++
-R1: `+-0
-R3: `+++
-G2: `++0
-G3: `+++0
-
-/ Good ol' run length
 RunLength: {
-  start: & x> 0, -1_x
-  end: & x> 1_ x,0
+  start: & x>  0b,-1_x
+  end:   & x> 1_x,0b
   start+ !' 1+ end-start
 }
 
 SimpleTokenizer: { x@ RunLength[~" "=x] }
+
 
 MortonCode: { ,/r+/:2*r:4/2\!x }
 

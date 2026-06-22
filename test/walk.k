@@ -19,7 +19,7 @@ N: 100; h: N div 2
 (r;c): 1+!2#N-2; I: c+N*r
 W: ((-N),N,1,-1)+/:I
 f: {@[x;I;:;1.+.25*+/x@W]}
-\t m: (f/(N*N)#0.0)@h+N*h
+m: (f/(N*N)#0.0)@h+N*h
  
 / Up-down & left-right symmetry (4-fold): Q×Q quadrant, ~N^2/4 cells
 / Full N=7 grid — each cell labelled with its quadrant flat index:
