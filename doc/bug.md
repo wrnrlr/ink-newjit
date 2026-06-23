@@ -70,3 +70,44 @@ Amend-assigning a dict element via `d[`k]:v` leaves no value on the stack, so
 the final `interpret` pop underflows. Reproduces on any dict (empty or not), so
 it is unrelated to the empty-dict literal fix. Likely the bracket-index
 assignment path does not push its result.
+
+---
+
+## 7. Use-after-free: projection capturing a heap array, mapped with `'`
+
+A projection (partial) that captures a **heap array value** (a vector, a list,
+or a dict whose values include a list) and is then mapped with each (`'`)
+corrupts memory. In Debug it surfaces as
+`error(DebugAllocator): Allocation alignment 8 does not match free alignment 4`
+(thousands of times for large captures). Results still print correctly, and
+Release is clean (`c_allocator.free` ignores alignment/size), so it is a latent
+use-after-free that the Debug allocator catches.
+
+Minimal repro (1 line, Debug build) — exactly **one** alignment error:
+
+```k
+{[a;t] a+t}[(1.;1.)]'(0.1 0.2 0.3)
+```
+
+The captured `a` is a 2-element F vector. Variants that pin the trigger:
+- capture a SCALAR → clean: `{[a;t] a+t}[5.]'((1.;1.);(2.;2.))`
+- plain lambda each (no capture) → clean: `{[t] (1.;1.)*t}'(0.1 0.2 0.3)`
+- capture a LIST → triggers: `{[lst;i] lst i}[((1.;1.);(2.;2.))]'(0 1 0)`
+- capture a dict of I-vectors → clean; dict whose values are LISTS → triggers.
+Error count scales with the captured array's size (e.g. capturing a face dict
+that holds the 2030-element `glyf` list → ~10k errors), i.e. it fires while
+freeing the captured value, but as a wrong-alignment free of a *recycled*
+address — a stale pointer, not a plain double-free (std's `retain_metadata` +
+`never_unmap` still reports alignment-mismatch, not double-free).
+
+Stack traces: alloc = `promote.zig:49` (`promoteAs`, building the captured
+literal) ← `doMakeList`; free = `partial.zig:20` (`p.args[i].deinit`) ←
+`value.zig:64` union deinit ← `fntable.zig:32` (derived-function teardown).
+The captured arg's buffer is freed at the wrong alignment because its address
+was reused by an align-8 `N(V)` between a premature free and the partial's
+teardown free. Refcounting in `doMakePartial`/`applyPartial`/`callLambdaAndRun`
+*looks* balanced on inspection; refing the borrowed args in `applyPartial` did
+NOT fix it. Needs an lldb watchpoint on the captured buffer to catch the
+premature free. NOTE: `lib/font.k` is written to avoid this pattern entirely
+(scalar/dict captures, `_`-cut splitting, vectorized arithmetic), so the font
+outline path is clean — but the underlying VM bug remains.
