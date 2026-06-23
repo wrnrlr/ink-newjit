@@ -13,7 +13,7 @@
 
 / ── Font ─────────────────────────────────────────────────────────────────────
 
-FONT:  ReadFont "font/FiraCode-Regular.ttf"
+FONT:  (ReadFont "font/FiraCode-Regular.ttf") 0   / ReadFont → list of faces; take face 0
 
 SZ:    28.                / glyph size in pixels
 CODES: 32+!95             / printable ASCII: space (32) .. '~' (126)

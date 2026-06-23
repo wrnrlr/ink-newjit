@@ -58,6 +58,9 @@ pub const KRegistry = extern struct {
     k_call:      *const fn (?*KBox, ?*KBox)              callconv(.c) ?*KBox,
     k_call2:     *const fn (?*KBox, ?*KBox, ?*KBox)      callconv(.c) ?*KBox,
     k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?*KBox) callconv(.c) ?*KBox,
+    // Appended after k_make_dict so existing extensions' (shorter) mirrors stay
+    // aligned — they read a prefix and ignore this field.
+    k_list_get: *const fn (?*KBox, i32) callconv(.c) ?*KBox,
 };
 
 export const k_registry: KRegistry = .{
@@ -86,6 +89,7 @@ export const k_registry: KRegistry = .{
     .k_call      = &k_call,
     .k_call2     = &k_call2,
     .k_make_dict = &k_make_dict,
+    .k_list_get  = &k_list_get,
 };
 
 const c_alloc = std.heap.c_allocator;
@@ -202,7 +206,17 @@ export fn kcp(x: ?*KBox) ?[*]u8 {
 }
 export fn klp(x: ?*KBox) ?[*]?*KBox {
   _ = x;
-  return null; // list element access through KBox* not supported; use k_list_set
+  return null; // list element access through KBox* not supported; use k_list_get
+}
+
+// Get list element at index as a fresh ref'd box (caller must ku() it).
+// Returns null on error / out of range.
+export fn k_list_get(list_k: ?*KBox, index: i32) ?*KBox {
+  const lb = list_k orelse return null;
+  if (lb.v.tag() != .L) return null;
+  const sl = lb.v.L.slice();
+  if (index < 0 or index >= @as(i32, @intCast(sl.len))) return null;
+  return box(sl[@intCast(index)].ref()) catch null;
 }
 
 // Set list element at index to val (val is consumed — caller must not ku() it).

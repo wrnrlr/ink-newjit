@@ -1,145 +1,81 @@
-/ test/font.k — font module tests
-/ Run: timeout 10s ./zig-out/bin/ink test/font.k
+/ test/font.k — native sfnt font reader tests
+/
+/ Build first:  zig build font
+/ Run:          ink test/font.k
 
 2: "lib/font.k"
 
-/ ── Load font ────────────────────────────────────────────────────────────────
+/ ── ReadFont always returns a LIST of face dicts ──────────────────────────────
 
-f: ReadFont "font/FiraCode-Regular.ttf"
+faces: ReadFont "font/FiraCode-Regular.ttf"
+`L ~ @faces
+1 = #faces
+`m ~ @faces 0
+"ReadFont returns list-of-dicts ok"
 
-/ Basic structure checks
-`m ~ @f
-`h`name`style`upm`nGlyphs`ascent`descent`lineGap`xHeight`capHeight`weight`width`bold`italic`mono`variable`adv`lsb`cmap ~ !f
+f: faces 0
 
-/ Handle is a non-negative int
-~(0 > f[`h])
-"handle ok"
+/ Single TTF → one-element list; keys are normalized table names.
+`head`maxp`hhea`hmtx`loca`post`name`OS2`cmap in !f
+"table keys present ok"
 
-/ Name checks — FiraCode Regular
-"Fira Code Regular" ~ FontDisplayName f
+/ ── head (scalar dict) ───────────────────────────────────────────────────────
+
+`m ~ @f`head
+1950 = f[`head]`upm
+0 < f[`head]`xMax
+"head ok"
+
+/ ── maxp / hhea ──────────────────────────────────────────────────────────────
+
+2030 = f[`maxp]`numGlyphs
+0 < f[`hhea]`ascent
+0 > f[`hhea]`descent
+"maxp / hhea ok"
+
+/ ── hmtx (per-glyph columns, length numGlyphs) ───────────────────────────────
+
+(f[`maxp]`numGlyphs) = #f[`hmtx]`adv
+(f[`maxp]`numGlyphs) = #f[`hmtx]`lsb
+0 < (f[`hmtx]`adv) 0
+"hmtx ok"
+
+/ ── loca (offsets, numGlyphs+1) ──────────────────────────────────────────────
+
+(1 + f[`maxp]`numGlyphs) = #f`loca
+"loca ok"
+
+/ ── name (records → columns + decoded strings) ───────────────────────────────
+
+"Fira Code"  ~ FontFamily f
+"Regular"    ~ FontSubfamily f
+"Fira Code Regular" ~ FontFullName f
 "name ok"
 
-/ Em metrics — ascent positive, descent negative
-0 < f[`ascent]
-0 > f[`descent]
-0 <: f[`upm]
-"em metrics ok"
+/ ── OS/2 ─────────────────────────────────────────────────────────────────────
 
-/ Per-glyph arrays are length nGlyphs
-(f[`nGlyphs]) = #f[`adv]
-(f[`nGlyphs]) = #f[`lsb]
-"glyph array lengths ok"
+400 = f[`OS2]`weightClass
+10 = #f[`OS2]`panose
+"OS2 ok"
 
-/ Glyph 0 (.notdef) advance > 0 in most fonts
-0 < f[`adv][0]
-"notdef advance ok"
+/ ── cmap (best Unicode subtable → cp/gid) ────────────────────────────────────
 
-/ Pixel metrics at 48px
-m: FontMetrics[f;48.]
-3 = #m
-0. < m[0]
-0. > m[1]
-"pixel metrics ok"
+0 < #(f`cmap)`cp
+1 = FontGlyph[f;65]        / 'A'
+0 = FontGlyph[f;0xFFFF]    / unmapped
+"cmap ok"
 
-/ FontScale
-s: FontScale[f;48.]
-s ~ 48.%f[`upm]
-"scale ok"
+/ ── metric helpers ───────────────────────────────────────────────────────────
 
-/ Shape text → glyph IDs (use 2+ chars; single-char string is an atom in ink)
-ids: FontShape[f;"Hi"]
-2 = #ids
-"shape count ok"
-0 < ids[0]         / H is not .notdef
-0 < ids[1]         / i is not .notdef
-"glyph IDs ok"
+1950 = FontUpm f
+(FontScale[f;48.]) ~ 48. % 1950
+"metrics ok"
 
-/ GlyphPx — advance for 'H' glyph
-w: GlyphPx[f;48.;ids[0]]
-0. < w
-"glyph pixel advance ok"
+/ ── TTC → multiple faces ─────────────────────────────────────────────────────
 
-/ TextWidth
-tw: TextWidth[f;48.;ids]
-tw ~ w + GlyphPx[f;48.;ids[1]]
-"text width ok"
-
-/ Outline for 'H'
-ol: FontOutline[f;ids[0];48.]
-0 < #ol              / at least one contour
-0 < #ol[0]           / at least one point
-"outline ok"
-
-/ Flags — FiraCode Regular: not bold, not italic, is mono
-0 = IsBold f
-0 = IsItalic f
-1 = IsMono f
-"flags ok"
-
-/ ── cmap tests ───────────────────────────────────────────────────────────────
-
-/ cmap is an I vector of 65536 elements
-`I ~ @f[`cmap]
-65536 = #f[`cmap]
-"cmap type ok"
-
-/ ASCII 'A' (codepoint 65) must map to a non-zero glyph
-0 < f[`cmap][65]
-"cmap A ok"
-
-/ Cmap lookup matches FontShape for ASCII (use 2-char string to get C vector)
-idA: FontShape[f;"A "]   / "A " avoids single-char atom issue
-idA[0] = FontCmapLookup[f;65]
-"cmap lookup matches shape"
-
-/ Unmapped codepoints give 0 (most fonts don't map 0xFFFF)
-0 = f[`cmap][0xFFFF]
-"cmap unmapped ok"
-
-/ ── table constructors ───────────────────────────────────────────────────────
-
-hhea: FontHhea f
-`m ~ @hhea
-3 = #!hhea
-`ascent`descent`lineGap ~ !hhea
-"FontHhea ok"
-
-os2: FontOs2 f
-`m ~ @os2
-8 = #!os2
-"FontOs2 ok"
-
-hmtx: +FontHmtx f
-`M ~ @hmtx
-3 = #!hmtx
-(f`nGlyphs) = #hmtx[`adv]
-"FontHmtx ok"
-
-/ ── ECS registry tests ───────────────────────────────────────────────────────
-
-0 < #Fonts
-`m ~ @Fonts[0]
-"Fonts registry ok"
-
-found: FontByName "Fira Code"
-0 < #found
-"Fira Code" ~ (found[0])[`name]
-"FontByName ok"
-
-/ ── unicode data test ────────────────────────────────────────────────────────
-
-LoadUnicode[]
-`m ~ @UnicodeData
-0 < #!UnicodeData
-`UnicodeParentDeltas in !UnicodeData
-1679 = #UnicodeData[`UnicodeParentDeltas]
-"unicode data ok"
-
-/ ── TTC test ─────────────────────────────────────────────────────────────────
-
-faces: ReadFont "font/NotoSansCJK-Regular.ttc"
-1 < #faces           / TTC has multiple faces
-`m ~ @faces[0]
+ttc: ReadFont "font/NotoSansCJK-Regular.ttc"
+1 < #ttc
+`m ~ @ttc 0
 "ttc ok"
 
 "all tests passed"
