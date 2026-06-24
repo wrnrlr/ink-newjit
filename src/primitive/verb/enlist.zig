@@ -22,10 +22,9 @@ pub const Enlist = struct {
   _L: VM.Monad = enlistListFn,
   _m: VM.Monad = enlistListFn,
   _M: VM.Monad = enlistListFn,
-  _y: VM.Monad = enlistListFn,
+  _o: VM.Monad = enlistListFn,
   _p: VM.Monad = enlistListFn,
-  _q: VM.Monad = enlistListFn,
-  _v: VM.Monad = enlistListFn,
+  _x: VM.Monad = enlistListFn,
 };
 
 fn enlistAtom(comptime k: K) VM.Monad {
