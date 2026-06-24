@@ -16,10 +16,6 @@
             .url = "https://github.com/michal-z/webgpu_dawn-aarch64-macos/archive/d2360cdfff0cf4a780cb77aa47c57aca03cc6dfe.tar.gz",
             .hash = "N-V-__8AALVIRAIf5nfpx8-4mEo2RGsynVryPQPcHk95qFM5",
         },
-        .tatfi = .{
-            .url = "https://git.sr.ht/~asibahi/tatfi/archive/0.1.1.tar.gz",
-            .hash = "tatfi-0.1.0-PJjJTOU6DgCLg3fXiVtVliYaukhvFUKgIqfDsU42mnCe",
-        },
     },
     .paths = .{
         "build.zig",

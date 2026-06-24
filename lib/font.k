@@ -18,15 +18,9 @@
 / Outline extraction and text shaping are rebuilt on top of this in a later
 / step (the old tatfi-backed FontShape/FontOutline/FontMetrics are retired).
 
-so: "./zig-out/lib/libfont.dylib"
-
-/ "path" → L of face dicts
-ReadFont: so 2: (`ReadFont; 1)
-
-/ (charstring_C; gsubrs_L; lsubrs_L; scale_f) → L of flat F contours (CFF outlines)
-cffOutline0: so 2: (`cffOutline; 1)
-
-/ ── name table helpers ────────────────────────────────────────────────────────
+so:"./zig-out/lib/libfont.dylib"
+ReadFont:so 2:(`ReadFont;1)      / "path" → L of face dicts
+cffOutline0:so 2:(`cffOutline;1) / (charstring_C; gsubrs_L; lsubrs_L; scale_f) → L of flat F contours (CFF outlines)
 
 / First string for a given nameID (1=family, 2=subfamily, 4=full, 6=postscript),
 / or "" if absent.  f: face dict.
@@ -35,13 +29,9 @@ FontFamily:    {[f] FontNameID[f;1]}
 FontSubfamily: {[f] FontNameID[f;2]}
 FontFullName:  {[f] FontNameID[f;4]}
 
-/ ── cmap helpers ──────────────────────────────────────────────────────────────
-
 / Codepoint → glyph id via the best Unicode cmap subtable (0 if unmapped).
 / f: face dict.  cp: int codepoint.
 FontGlyph: {[f;cp] c: f`cmap; cps: c`cp; $[cp in cps; (c`gid) cps?cp; 0]}
-
-/ ── metric helpers ────────────────────────────────────────────────────────────
 
 / Units per em (em-square size).
 FontUpm: {[f] f[`head]`upm}
@@ -130,9 +120,7 @@ FontOutline: {[f;gid;sz] FpFont:: f; $[`CFF in !f; cffOutG[FontScale[f;sz];gid];
 / Use this to render a string: it threads the face dict via the FpFont global so
 / nothing captures the (list-bearing) face dict in a mapped projection (which
 / would hit the runtime bug). f: face. sz: px. gids: I glyph ids.
-FontOutlines: {[f;sz;gids] FpFont:: f; $[`CFF in !f; cffOutG[FontScale[f;sz]]'gids; fpOutG[FontScale[f;sz]]'gids]}
-
-/ ── shaping helpers ───────────────────────────────────────────────────────────
+FontOutlines:{[f;sz;gids] FpFont::f; $[`CFF in !f; cffOutG[FontScale[f;sz]]'gids; fpOutG[FontScale[f;sz]]'gids]}
 
 / Map a char string to glyph ids via the cmap (no ligatures/kerning).
 / Vectorized: find every codepoint in the cmap at once (capturing the face dict

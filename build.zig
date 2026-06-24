@@ -96,20 +96,11 @@ pub fn build(b: *std.Build) !void {
   const gpu_step = b.step("gpu", "Build the GPU extension shared library");
   gpu_step.dependOn(&b.addInstallArtifact(gpu_lib, .{}).step);
 
-  // --- Font extension shared library ---
-  const tatfi_dep = b.dependency("tatfi", .{});
-
-  const font_ext_impl_mod = b.createModule(.{
-    .root_source_file = b.path("lib/font/font_ext.zig"),
-    .target = target, .optimize = optimize, .link_libc = true,
-  });
-  font_ext_impl_mod.addImport("tatfi", tatfi_dep.module("tatfi"));
-
+  // --- Font extension shared library (native sfnt parser, no tatfi) ---
   const font_ext_mod = b.createModule(.{
-    .root_source_file = b.path("lib/font/src/main.zig"),
+    .root_source_file = b.path("lib/font/ext.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
-  font_ext_mod.addImport("font_ext", font_ext_impl_mod);
 
   const font_lib = b.addLibrary(.{
     .name     = "font",

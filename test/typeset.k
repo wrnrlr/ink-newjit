@@ -11,8 +11,6 @@
 2: "lib/font.k"
 2: "lib/gpu.k"
 
-/ ── Font ─────────────────────────────────────────────────────────────────────
-
 FONT:  (ReadFont "font/FiraCode-Regular.ttf") 0   / ReadFont → list of faces; take face 0
 
 SZ:    28.                / glyph size in pixels
@@ -21,7 +19,6 @@ IDS:   FontShape[FONT; `c$CODES]   / glyph IDs, one per char
 IDX:   !#IDS
 
 / ── Layout ───────────────────────────────────────────────────────────────────
-
 COLS:   16
 MARGIN: 40.
 CELLW:  44.
