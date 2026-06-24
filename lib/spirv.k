@@ -626,6 +626,89 @@ compCompute: {[fn]
 / map): compile once, then RunShader the column each frame inside a gpuRun frame.
 ComputeShader: compCompute
 
+/ ── compCompute2: two-input element-wise compute shader ──────────────────────────
+/ Kernel {[x;y] ...} reads input1 at binding 0 and input2 at binding 2, writes the
+/ result to output at binding 1. Run with RunShader2[ComputeShader2[fn]; in1; in2].
+/ Enables real systems that combine two columns, e.g. {[px;vx] px+vx*dt}.
+compCompute2: {[fn]
+  Nid::Nfixed; Buf::(); Con::()
+
+  Tu32:    newId[]
+  Tv3u32:  newId[]
+  Trta:    newId[]
+  Tbuf:    newId[]
+  Pbufs:   newId[]
+  Pf32s:   newId[]
+  Pv3u32i: newId[]
+
+  gidVar: newId[]
+  inBuf:  newId[]
+  outBuf: newId[]
+  in2Buf: newId[]
+
+  Ku32z: newId[]
+  emitCon (0x0004002B; Tu32; Ku32z; 0)
+
+  lam: last parse $fn
+  argNames: lam[1]@&~lam[1] in `args`div
+
+  gidId:    newId[]; emitBuf opLoad[Tv3u32; gidId; gidVar]
+  gidXId:   newId[]; emitBuf opXtract[Tu32; gidXId; gidId; 0]
+  inPtrId:  newId[]; emitBuf opAccChain[Pf32s; inPtrId; inBuf; Ku32z; gidXId]
+  xId:      newId[]; emitBuf opLoad[Tf32; xId; inPtrId]
+  in2PtrId: newId[]; emitBuf opAccChain[Pf32s; in2PtrId; in2Buf; Ku32z; gidXId]
+  yId:      newId[]; emitBuf opLoad[Tf32; yId; in2PtrId]
+  env:      argNames!((xId; `f32); (yId; `f32))
+  bodySeq:  lam[2]
+  stmts:    bodySeq@&~bodySeq in `seq`div
+  rp:       compSeq[stmts; env; `f32]
+  outPtrId: newId[]; emitBuf opAccChain[Pf32s; outPtrId; outBuf; Ku32z; gidXId]
+  emitBuf opStore[outPtrId; rp[0]]
+
+  bnd: Nid+1
+  iface: (,gidVar)
+
+  hdr: (0x07230203; 0x00010300; 0; bnd; 0)
+  cap: (0x00020011; 1)
+  ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
+  mem: (0x0003000E; 0; 1)
+  ep:  (0x000F+(0x10000*(5+#iface)); 5; Fmain; 0x6E69616D; 0), iface
+  exm: (0x00060010; Fmain; 17; 64; 1; 1)
+
+  decGid:    (0x00040047; gidVar; 11; 28)
+  decStride: (0x00040047; Trta; 6; 4)
+  decMem:    (0x00050048; Tbuf; 0; 35; 0)
+  decBlk:    (0x00030047; Tbuf; 2)
+  decInDs:   (0x00040047; inBuf; 34; 0)
+  decInBnd:  (0x00040047; inBuf; 33; 0)
+  decOutDs:  (0x00040047; outBuf; 34; 0)
+  decOutBnd: (0x00040047; outBuf; 33; 1)
+  decIn2Ds:  (0x00040047; in2Buf; 34; 0)
+  decIn2Bnd: (0x00040047; in2Buf; 33; 2)
+
+  / shared base types + Tv3 (one line — ink newline bug)
+  sTypes: (0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid)
+  cTypes: (0x00040015;Tu32;32;0;0x00040017;Tv3u32;Tu32;3;0x0003001D;Trta;Tf32;0x0003001E;Tbuf;Trta;0x00040020;Pbufs;12;Tbuf;0x00040020;Pf32s;12;Tf32;0x00040020;Pv3u32i;1;Tv3u32)
+
+  varGid: (0x0004003B; Pv3u32i; gidVar; 1)
+  varIn:  (0x0004003B; Pbufs;   inBuf;  12)
+  varOut: (0x0004003B; Pbufs;   outBuf; 12)
+  varIn2: (0x0004003B; Pbufs;   in2Buf; 12)
+
+  label: newId[]
+  fnh: (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
+  ret: (0x000100FD; 0x00010038)
+
+  conWds: $[#Con; ,/Con; !0]
+  bodWds: $[#Buf; ,/Buf; !0]
+
+  decs: decGid,decStride,decMem,decBlk,decInDs,decInBnd,decOutDs,decOutBnd,decIn2Ds,decIn2Bnd
+  vars: varGid,varIn,varOut,varIn2
+
+  ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
+
+ComputeShader2: compCompute2
+
 / ── Vertex shader stencils ────────────────────────────────────────────────────
 opAccChain1: {[t;r;base;i] (0x00050041;t;r;base;i)}  / OpAccessChain single index
 varOutOne:   {[ptr;vid]    (0x0004003B;ptr;vid;3)}    / OpVariable Output storage class

@@ -148,3 +148,26 @@ function (`$[e=old; skip; rebuild[e]]`) fixes it. Workaround: never put `[...]` 
 parser an error/terminate path for an unexpected `[`. (Companion footgun: a
 `keys!vals` length mismatch inside a frame callback throws and silently aborts the
 rest of the callback — looks like "nothing renders / prints".)
+
+## 9. DebugAllocator "alignment 4 vs 8" on a compiled symbol-vector literal
+
+`test/ecs_query.k` trips, at teardown only, a DebugAllocator assertion:
+`Allocation alignment 4 does not match free alignment 8`, alloc'd at
+`compiler.zig:276` (`N(u32).init` for a symbol-vector literal in `compileLiteral`),
+i.e. a u32 symbol array (align 4) freed as if align 8. This is the **allocator-
+ordering-trap class** (see the [[ink-vm-allocator-ordering-trap]] memory / earlier
+"Recently fixed" entry): a value allocated by one allocator is freed by another with
+a different alignment. RESULTS ARE CORRECT — the query output is right; the assertion
+fires during cleanup. It is **layout-dependent / latent**: the same source was clean
+on the prior binary and surfaced only after an unrelated rebuild (the 3-arg FFI work
+below shifted code addresses); a trivial symbol-vector-in-a-lambda does NOT reproduce
+it — it needs ecs_query's larger allocation pattern. Debug-only (the c_allocator in
+Release ignores free alignment). Fix: ensure the compiler allocates literal constants
+with the same allocator that frees the chunk's values (the vm.alloc/slab), as was done
+for FnTables. Not chased here — it's pre-existing, correctness-neutral, and orthogonal
+to the feature work; logged so it isn't mistaken for a regression.
+
+Context: surfaced while adding 3-argument FFI support (`ffi_vtable_3`/`call3_fn`) for
+two-input GPU compute (`gpuCompute2`/`RunShader2`). That feature works and is verified
+(`test/ecs_compute2.k`: `px += vx*dt` on the GPU matches CPU); the alignment assertion
+is unrelated to it beyond the rebuild shifting memory layout.

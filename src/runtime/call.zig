@@ -39,6 +39,7 @@ pub const Call = struct {
     return switch (args.len) {
       1 => if (obj.vtable.call1_fn) |f| f(obj.data, args[0]) else V{ .err = .@"type" },
       2 => if (obj.vtable.call2_fn) |f| f(obj.data, args[0], args[1]) else V{ .err = .@"type" },
+      3 => if (obj.vtable.call3_fn) |f| f(obj.data, args[0], args[1], args[2]) else V{ .err = .@"type" },
       else => V{ .err = .rank },
     };
   }

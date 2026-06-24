@@ -15,6 +15,7 @@ pub const ExtVTable = struct {
   // Returning V{.err = .nyi} falls back to a type error.
   call1_fn:   ?*const fn (data: *anyopaque, x: V) V  = null,
   call2_fn:   ?*const fn (data: *anyopaque, x: V, y: V) V = null,
+  call3_fn:   ?*const fn (data: *anyopaque, x: V, y: V, z: V) V = null,
 };
 
 // Heap-allocated wrapper owned by V.x.  The VM manages this struct's lifetime

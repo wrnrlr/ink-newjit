@@ -65,8 +65,6 @@ pub const VM = struct {
   
   pub fn create(alloc: Alloc) !*VM {
     const vm = try alloc.create(VM);
-    const chunk = try alloc.create(Chunk);
-    chunk.* = try Chunk.init(alloc);
     const parser = try alloc.create(Parser);
     parser.* = Parser.init(alloc);
     const symbols = Pool.init(alloc);
@@ -74,9 +72,9 @@ pub const VM = struct {
       .alloc        = alloc,           // replaced below once slab is in place
       .slab         = SlabAlloc.init(alloc),
       .parser       = parser,
-      .compiler     = try alloc.create(Compiler),
-      .chunk        = chunk,
-      .current_chunk = chunk,
+      .compiler     = undefined,       // created below, via the slab
+      .chunk        = undefined,
+      .current_chunk = undefined,
       .partials  = .empty,
       .symbols       = symbols,
       .names = std.StringHashMap(u8).init(alloc),
@@ -89,8 +87,19 @@ pub const VM = struct {
     vm.alloc = vm.slab.allocator();
     // Derived bases are slab-allocated runtime values; free them via the slab.
     vm.fn_tables.value_alloc = vm.alloc;
+    // The main chunk, lambda chunks, and every literal constant the compiler emits
+    // hold values that can escape into runtime values freed via the slab. Create
+    // the chunk and the compiler with the slab (now that it's in place) so each
+    // value is allocated AND freed by the same allocator — otherwise a const
+    // alloc'd raw but freed via the slab (or vice versa) trips a DebugAllocator
+    // alignment mismatch (the allocator-ordering trap; see fn_tables above).
+    const chunk = try vm.alloc.create(Chunk);
+    chunk.* = try Chunk.init(vm.alloc);
+    vm.chunk = chunk;
+    vm.current_chunk = chunk;
+    vm.compiler = try vm.alloc.create(Compiler);
     try vm.symbols.prefill();
-    vm.compiler.* = try Compiler.init(alloc, chunk, &vm.names, &vm.symbols, &vm.fs, &vm.fn_tables);
+    vm.compiler.* = try Compiler.init(vm.alloc, chunk, &vm.names, &vm.symbols, &vm.fs, &vm.fn_tables);
     @memset(&vm.globals, .blank);
     std.Io.Threaded.global_single_threaded.allocator = alloc;
     vm.pushFrame(.{ .base = 0, .result_slot = 0, .lambda_idx = NO_LAMBDA });

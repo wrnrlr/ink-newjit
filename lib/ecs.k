@@ -210,6 +210,12 @@ ecsOffload: {[a;col;shader] @[a;col;:;RunShader[shader; a col]]}
 / `cols and `shaders are parallel lists. Returns the updated archetype.
 ecsOffloadAll: {[a;cols;shaders] a{[cols;shaders;acc;k]ecsOffload[acc;cols k;shaders k]}[cols;shaders]/!#cols}
 
+/ ecsOffload2[a;out;c1;c2;shader] — run a two-input element-wise compute `shader (from
+/ ComputeShader2[{[x;y]...}]) on columns c1 and c2, writing the result into column `out.
+/ This is true multi-column integration on the GPU, e.g. px += vx*dt:
+/   ecsOffload2[a; `px; `px; `vx; ComputeShader2[{[px;vx] px+vx*0.016}]]
+ecsOffload2: {[a;out;c1;c2;shader] @[a;out;:;RunShader2[shader; a c1; a c2]]}
+
 / ── hierarchy (apter tree) ──────────────────────────────────────────────────────
 / ecsPropagate[par;local] — additive transform propagation over a parent-index
 / column. `par has self-loop roots (par[r]=r); `local is the per-node local value.

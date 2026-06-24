@@ -324,6 +324,7 @@ export fn k_make_dict(n: i32, keys: [*]const [*:0]const u8, vals: [*]const ?*KBo
 
 const FfiFn1 = *const fn (?*KBox) callconv(.c) ?*KBox;
 const FfiFn2 = *const fn (?*KBox, ?*KBox) callconv(.c) ?*KBox;
+const FfiFn3 = *const fn (?*KBox, ?*KBox, ?*KBox) callconv(.c) ?*KBox;
 
 const FfiData = struct {
   lib:    std.DynLib,
@@ -412,8 +413,27 @@ fn ffiCall2(data: *anyopaque, x: V, y: V) V {
   return reallocV(unbox(result, c_alloc), vm.alloc);
 }
 
+fn ffiCall3(data: *anyopaque, x: V, y: V, z: V) V {
+  const d: *FfiData = @ptrCast(@alignCast(data));
+  const VM = @import("runtime/vm.zig").VM;
+  const vm: *VM = @ptrCast(@alignCast(d.vm));
+  const prev_vm = current_vm;
+  setCurrentVm(d.vm);
+  defer current_vm = prev_vm;
+  const f: FfiFn3 = @ptrCast(@alignCast(d.fn_ptr));
+  const bx = box(x) catch return .{ .err = .memory };
+  defer { bx.v = .blank; c_alloc.destroy(bx); }
+  const by = box(y) catch return .{ .err = .memory };
+  defer { by.v = .blank; c_alloc.destroy(by); }
+  const bz = box(z) catch return .{ .err = .memory };
+  defer { bz.v = .blank; c_alloc.destroy(bz); }
+  const result = f(bx, by, bz) orelse return .{ .err = .domain };
+  return reallocV(unbox(result, c_alloc), vm.alloc);
+}
+
 const ffi_vtable_1 = ExtVTable{ .name = "ffi1", .deinit_fn = ffiDeinit, .call1_fn = ffiCall1 };
 const ffi_vtable_2 = ExtVTable{ .name = "ffi2", .deinit_fn = ffiDeinit, .call1_fn = ffiCall1, .call2_fn = ffiCall2 };
+const ffi_vtable_3 = ExtVTable{ .name = "ffi3", .deinit_fn = ffiDeinit, .call1_fn = ffiCall1, .call2_fn = ffiCall2, .call3_fn = ffiCall3 };
 
 // ── 2: FFI load ───────────────────────────────────────────────────────────────
 
@@ -448,7 +468,7 @@ pub fn ffiLoad(vm: *anyopaque, lib_path: []const u8, sym_name: []const u8, arity
   data.* = .{ .lib = lib, .fn_ptr = fn_ptr, .arity = arity, .vm = vm };
 
   const obj = the_vm.alloc.create(ExtObj) catch { ffiDeinit(data); return .{ .err = .memory }; };
-  const vtable = if (arity >= 2) &ffi_vtable_2 else &ffi_vtable_1;
+  const vtable = if (arity >= 3) &ffi_vtable_3 else if (arity >= 2) &ffi_vtable_2 else &ffi_vtable_1;
   obj.* = .{ .rc = 1, .type_id = 0, .vtable = vtable, .data = data };
   return .{ .x = obj };
 }

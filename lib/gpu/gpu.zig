@@ -641,6 +641,93 @@ export fn gpuCompute(words_k: ?K, input_k: ?K) callconv(.c) ?K {
   return result_k;
 }
 
+// ── gpuCompute2 ─────────────────────────────────────────────────────────────────
+//
+// Two-input element-wise compute (output of compCompute2 in spirv.k):
+//   binding 0 = input1 (StorageBuffer), binding 2 = input2, binding 1 = output.
+// in1_k, in2_k: equal-length float lists. Returns a float list of per-element results.
+export fn gpuCompute2(words_k: ?K, in1_k: ?K, in2_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const ip = kip(words_k) orelse return ki(0);
+  const n_words = kn(words_k);
+  if (n_words < 5) return ki(0);
+  const fp1 = kfp(in1_k) orelse return ki(0);
+  const fp2 = kfp(in2_k) orelse return ki(0);
+  const n_input = kn(in1_k);
+  if (n_input <= 0) return ki(0);
+  if (kn(in2_k) != n_input) return ki(0); // both inputs must be the same length
+  const n: usize = @intCast(n_input);
+  const words: [*]const u32 = @ptrCast(@alignCast(ip));
+  const byte_size: u64 = @intCast(n * @sizeOf(f32));
+
+  const spirv_desc = ShaderModuleSPIRVDescriptor{
+    .chain = .{ .next = null, .struct_type = .shader_module_spirv_descriptor },
+    .code_size = @intCast(n_words),
+    .code = words,
+  };
+  const cs_module = r.device.createShaderModule(.{ .next_in_chain = @ptrCast(&spirv_desc) });
+  defer cs_module.release();
+
+  // binding 0 = input1, binding 1 = output, binding 2 = input2
+  const bgl_entries = [_]wgpu.BindGroupLayoutEntry{
+    .{ .binding = 0, .visibility = .{ .compute = true }, .buffer = .{ .binding_type = .storage } },
+    .{ .binding = 1, .visibility = .{ .compute = true }, .buffer = .{ .binding_type = .storage } },
+    .{ .binding = 2, .visibility = .{ .compute = true }, .buffer = .{ .binding_type = .storage } },
+  };
+  const bgl = r.device.createBindGroupLayout(.{ .entry_count = bgl_entries.len, .entries = &bgl_entries });
+  defer bgl.release();
+  const pl_layout = r.device.createPipelineLayout(.{ .bind_group_layout_count = 1, .bind_group_layouts = &[_]wgpu.BindGroupLayout{bgl} });
+  defer pl_layout.release();
+  const pipeline = r.device.createComputePipeline(.{ .layout = pl_layout, .compute = .{ .module = cs_module, .entry_point = "main" } });
+  defer pipeline.release();
+
+  const in1_buf = r.device.createBuffer(.{ .label = "compute2_in1", .usage = .{ .storage = true, .copy_dst = true }, .size = byte_size, .mapped_at_creation = .false });
+  defer in1_buf.release();
+  const in2_buf = r.device.createBuffer(.{ .label = "compute2_in2", .usage = .{ .storage = true, .copy_dst = true }, .size = byte_size, .mapped_at_creation = .false });
+  defer in2_buf.release();
+  const output_buf = r.device.createBuffer(.{ .label = "compute2_out", .usage = .{ .storage = true, .copy_src = true }, .size = byte_size, .mapped_at_creation = .false });
+  defer output_buf.release();
+  const staging_buf = r.device.createBuffer(.{ .label = "compute2_stage", .usage = .{ .map_read = true, .copy_dst = true }, .size = byte_size, .mapped_at_creation = .false });
+  defer staging_buf.release();
+
+  r.queue.writeBuffer(in1_buf, 0, f32, fp1[0..n]);
+  r.queue.writeBuffer(in2_buf, 0, f32, fp2[0..n]);
+
+  const bg_entries = [_]wgpu.BindGroupEntry{
+    .{ .binding = 0, .buffer = in1_buf, .size = byte_size },
+    .{ .binding = 1, .buffer = output_buf, .size = byte_size },
+    .{ .binding = 2, .buffer = in2_buf, .size = byte_size },
+  };
+  const bg = r.device.createBindGroup(.{ .layout = bgl, .entry_count = bg_entries.len, .entries = &bg_entries });
+  defer bg.release();
+
+  const encoder = r.device.createCommandEncoder(.{ .label = "compute2" });
+  defer encoder.release();
+  {
+    const pass = encoder.beginComputePass(null);
+    defer pass.release();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bg, null);
+    const workgroups: u32 = @intCast((n + 63) / 64);
+    pass.dispatchWorkgroups(workgroups, 1, 1);
+    pass.end();
+  }
+  encoder.copyBufferToBuffer(output_buf, 0, staging_buf, 0, byte_size);
+  const cmd = encoder.finish(.{});
+  defer cmd.release();
+  r.queue.submit(&[_]wgpu.CommandBuffer{cmd});
+
+  var done: bool = false;
+  staging_buf.mapAsync(.{ .read = true }, 0, byte_size, computeMapCallback, &done);
+  while (!done) r.device.tick();
+
+  const result_k = KF(@intCast(n)) orelse { staging_buf.unmap(); return ki(0); };
+  const rf = kfp(result_k) orelse { ku(result_k); staging_buf.unmap(); return ki(0); };
+  if (staging_buf.getConstMappedRange(f32, 0, n)) |data| @memcpy(rf[0..n], data);
+  staging_buf.unmap();
+  return result_k;
+}
+
 // Derive a mesh vertex-buffer layout from a SPIR-V vertex shader by scanning its
 // Input variables. Relies on the fixed input-pointer type IDs assigned in
 // lib/gpu/spirv.k (PinF32=10, PinV2=14, PinV4=12, PinV3=18) and on input
