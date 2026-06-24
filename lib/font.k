@@ -22,6 +22,8 @@ so:"./zig-out/lib/libfont.dylib"
 ReadFont:so 2:(`ReadFont;1)      / "path" → L of face dicts
 cffOutline0:so 2:(`cffOutline;1) / (charstring_C; gsubrs_L; lsubrs_L; scale_f) → L of flat F contours (CFF outlines)
 
+FontFace:`a`b`c
+
 / First string for a given nameID (1=family, 2=subfamily, 4=full, 6=postscript),
 / or "" if absent.  f: face dict.
 FontNameID: {[f;id] nm: f`name; v: (nm`value)@&id=nm`nameID; $[#v; *v; ""]}

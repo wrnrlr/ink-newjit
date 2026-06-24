@@ -14,6 +14,8 @@ const std = @import("std");
 
 pub const K = *anyopaque;
 
+// TODO maybe this should just ba part ok the k ABI.
+
 /// Mirror of KRegistry in src/ffi.zig — field order MUST match exactly.
 pub const Registry = extern struct {
   ki: *const fn (i32) callconv(.c) ?K,
