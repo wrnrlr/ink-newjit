@@ -87,6 +87,8 @@ pub const VM = struct {
       .prng          = std.Random.DefaultPrng.init(0),
     };
     vm.alloc = vm.slab.allocator();
+    // Derived bases are slab-allocated runtime values; free them via the slab.
+    vm.fn_tables.value_alloc = vm.alloc;
     try vm.symbols.prefill();
     vm.compiler.* = try Compiler.init(alloc, chunk, &vm.names, &vm.symbols, &vm.fs, &vm.fn_tables);
     @memset(&vm.globals, .blank);

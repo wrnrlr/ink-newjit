@@ -18,18 +18,25 @@ pub const DerivedEntry = struct {
 };
 
 pub const FnTables = struct {
-  alloc:   Alloc,
+  // `alloc` owns bookkeeping (the ArrayLists) and the lambda chunks, which the
+  // compiler creates with the raw backing allocator. `value_alloc` frees the
+  // derived bases, which are runtime V values built through the VM's slab
+  // allocator (like globals and the stack) and must be freed the same way —
+  // freeing them through the raw allocator trips a Debug alignment mismatch
+  // (the slab hands out align-8 blocks; the value's natural alignment is 4).
+  alloc:       Alloc,
+  value_alloc: Alloc,
   lambdas: std.ArrayList(LambdaEntry) = .empty,
   derived: std.ArrayList(DerivedEntry) = .empty,
 
   pub fn init(alloc: Alloc) FnTables {
-    return .{ .alloc = alloc };
+    return .{ .alloc = alloc, .value_alloc = alloc };
   }
 
   pub fn deinit(self: *FnTables) void {
     for (self.lambdas.items) |e| { e.chunk.deinit(); self.alloc.destroy(e.chunk); }
     self.lambdas.deinit(self.alloc);
-    for (self.derived.items) |e| e.base.deinit(self.alloc);
+    for (self.derived.items) |e| e.base.deinit(self.value_alloc);
     self.derived.deinit(self.alloc);
   }
 

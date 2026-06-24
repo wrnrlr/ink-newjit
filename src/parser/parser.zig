@@ -497,6 +497,8 @@ pub const Parser = struct {
 
   fn parseIntLit(s: []const u8) ParseError!i32 {
     if (eql(u8, s, "0N") or eql(u8, s, "-0N")) return std.math.minInt(i32);
+    if (eql(u8, s, "0W")) return std.math.maxInt(i32);
+    if (eql(u8, s, "-0W")) return std.math.minInt(i32) + 1;
     return std.fmt.parseInt(i32, s, 0) catch error.InvalidCharacter;
   }
   fn parseFloatLit(s: []const u8) ParseError!f32 {

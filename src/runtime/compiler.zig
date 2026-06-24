@@ -314,6 +314,31 @@ pub const Compiler = struct {
       return try self.emitOpWithArg(.Apply2, @intFromEnum(Op2.@"0:"), &inputs);
     }
 
+    // Indexed-lvalue assignment is sugar for amend:
+    //   d[i]:v      →  d : @[d;i;:;v]
+    //   d[i]+:v     →  d : @[d;i;+;v]   (compound op folds into the amend verb)
+    //   d[i;j]:v    →  d : .[d;(i;j);:;v]   (multi-index → drill)
+    // Works for any indexable: dicts (adds/replaces a key), lists and vectors.
+    if (b.v.* == .apply and b.a != null) {
+      const ap = b.v.apply;
+      // Only `name[idx...]:v` (target is a plain variable) is assignable.
+      if (ap.f.* != .literal or ap.f.literal != .@"var") return error.UnsupportedAssignment;
+      const seq: ast.Seq = ap.a orelse &.{};
+      if (seq.len == 0) {
+        // `d[]:v` / `d[]op:v` → whole-value (re)assign `d:v` / `d:d op v`.
+        return try self.compileBind(.{ .v = ap.f, .f = b.f, .a = b.a });
+      }
+      const amend_fn: ast.Op = if (b.f) |op| (if (std.mem.eql(u8, op, ":")) ":" else op) else ":";
+      const verb_str: ast.Op = if (seq.len == 1) "@" else ".";
+      var amend_verb = ast.Node{ .op = verb_str };
+      var fn_node = ast.Node{ .op = amend_fn };
+      var list_node = ast.Node{ .list = .{ .seq = seq } };
+      const index_node: *ast.Node = if (seq.len == 1) seq[0] else &list_node;
+      var apply_seq = [_]*ast.Node{ ap.f, index_node, &fn_node, b.a.? };
+      var apply_node = ast.Node{ .apply = .{ .f = &amend_verb, .a = apply_seq[0..] } };
+      return try self.compileBind(.{ .v = ap.f, .f = null, .a = &apply_node });
+    }
+
     const rhs_id: ir.ValueId = if (b.a) |rhs| blk: {
       if (b.f) |op| {
         if (std.mem.eql(u8, op, ":")) {

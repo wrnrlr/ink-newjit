@@ -56,6 +56,8 @@ pub const TerseFormatter = struct {
     switch (v) {
       .i => |a| {
         if (a == std.math.minInt(i32)) try w.writeAll("0N")
+        else if (a == std.math.maxInt(i32)) try w.writeAll("0W")
+        else if (a == std.math.minInt(i32) + 1) try w.writeAll("-0W")
         else try w.print("{d}", .{a});
       },
       .f => |a| {
