@@ -182,6 +182,34 @@ worldQuery: {[w;comps;sys]
 / (acc seeded with the 2nd-to-last arg). Use for cross-archetype aggregates/counts.
 worldEach: {[w;comps;seed;f] csig:ecsCanon comps; m:{[csig;s]worldMatch[csig;s]}[csig]'w`sigs; seed{[w;f;acc;i] f[acc;(w`archs)i]}[w;f]/&m}
 
+/ ── change-filtered query (Bevy's Changed<T>) ───────────────────────────────────
+/ worldQueryChanged[w;filt;comps;watch;sys] — like worldQuery, but runs `sys only on
+/ matching archetypes whose `watch column changed since this filter last ran them,
+/ skipping the rest. `filt is per-query state: an int-keyed dict archetypeIndex ->
+/ last-seen epoch of `watch (start with ()!()). Returns (w2; filt2) — thread both.
+/ Use for consumers (build a render buffer, derive world transforms) that should
+/ only re-run when their input dirtied. (epoch is never 0, so 0 = "never seen".)
+wcRun: {[w;filt;i;arch;watch;sys] arch2:ecsRun[arch;sys]; w2:@[w;`archs;:;@[w`archs;i;:;arch2]]; filt2:@[filt;i;:;epoch arch2 watch]; (w2;filt2)}
+wcStep: {[acc;i;watch;sys] w:acc 0; filt:acc 1; arch:(w`archs)i; cur:epoch arch watch; prev:$[i in !filt; dget[filt;i]; 0]; $[cur=prev; acc; wcRun[w;filt;i;arch;watch;sys]]}
+worldQueryChanged: {[w;filt;comps;watch;sys]
+  csig: ecsCanon comps
+  m:    {[csig;s]worldMatch[csig;s]}[csig]'w`sigs
+  (w;filt){[watch;sys;acc;i] wcStep[acc;i;watch;sys]}[watch;sys]/&m}
+
+/ ── GPU compute offload of archetype columns ────────────────────────────────────
+/ Requires lib/gpu.k + lib/spirv.k loaded, and must run inside a gpuRun frame
+/ (RunShader needs the active renderer). An archetype column is a flat f32 vector —
+/ exactly a compute-shader buffer — so an element-wise system can run on the GPU.
+/
+/ ecsOffload[a;col;shader] — run a compiled element-wise compute `shader (the SPIR-V
+/ from ComputeShader[{[x] ...}]) on column `col of archetype a, writing the result
+/ back. Compile the shader ONCE and reuse it; this is just the per-frame dispatch.
+ecsOffload: {[a;col;shader] @[a;col;:;RunShader[shader; a col]]}
+
+/ ecsOffloadAll[a;cols;shaders] — offload several columns, each with its own shader.
+/ `cols and `shaders are parallel lists. Returns the updated archetype.
+ecsOffloadAll: {[a;cols;shaders] a{[cols;shaders;acc;k]ecsOffload[acc;cols k;shaders k]}[cols;shaders]/!#cols}
+
 / ── hierarchy (apter tree) ──────────────────────────────────────────────────────
 / ecsPropagate[par;local] — additive transform propagation over a parent-index
 / column. `par has self-loop roots (par[r]=r); `local is the per-node local value.
