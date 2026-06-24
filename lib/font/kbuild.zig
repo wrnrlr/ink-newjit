@@ -14,37 +14,10 @@ const std = @import("std");
 
 pub const K = *anyopaque;
 
-// TODO maybe this should just ba part ok the k ABI.
-
-/// Mirror of KRegistry in src/ffi.zig — field order MUST match exactly.
-pub const Registry = extern struct {
-  ki: *const fn (i32) callconv(.c) ?K,
-  kf: *const fn (f32) callconv(.c) ?K,
-  kc: *const fn (u8) callconv(.c) ?K,
-  kb: *const fn (c_int) callconv(.c) ?K,
-  ks: *const fn ([*:0]const u8) callconv(.c) ?K,
-  kerr: *const fn () callconv(.c) ?K,
-  KC: *const fn (i32) callconv(.c) ?K,
-  KI: *const fn (i32) callconv(.c) ?K,
-  KF: *const fn (i32) callconv(.c) ?K,
-  KL: *const fn (i32) callconv(.c) ?K,
-  kt: *const fn (?K) callconv(.c) i8,
-  kn: *const fn (?K) callconv(.c) i32,
-  ki_val: *const fn (?K) callconv(.c) i32,
-  kf_val: *const fn (?K) callconv(.c) f32,
-  kc_val: *const fn (?K) callconv(.c) u8,
-  kb_val: *const fn (?K) callconv(.c) c_int,
-  kip: *const fn (?K) callconv(.c) ?[*]i32,
-  kfp: *const fn (?K) callconv(.c) ?[*]f32,
-  kcp: *const fn (?K) callconv(.c) ?[*]u8,
-  klp: *const fn (?K) callconv(.c) ?[*]?K,
-  ku: *const fn (?K) callconv(.c) void,
-  k_list_set: *const fn (?K, i32, ?K) callconv(.c) i32,
-  k_call: *const fn (?K, ?K) callconv(.c) ?K,
-  k_call2: *const fn (?K, ?K, ?K) callconv(.c) ?K,
-  k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?K) callconv(.c) ?K,
-  k_list_get: *const fn (?K, i32) callconv(.c) ?K,
-};
+/// The host's k-ABI function-pointer table, from the canonical src/kabi.zig
+/// (wired in as the "kabi" module by build.zig) — no hand-maintained mirror.
+/// Instantiated with our opaque K handle; layout matches the host's *KBox.
+pub const Registry = @import("kabi").KRegistry(K);
 
 pub var reg: ?*const Registry = null;
 

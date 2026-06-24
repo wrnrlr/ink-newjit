@@ -28,7 +28,13 @@ fn insert(vm: *VM, t: V, d: V) V {
     const col_name = t_cols.at(ci);
     const col = t_data.at(ci);
     defer col.deinit(vm.alloc);
-    const dv = findDictVal(d.m, col_name) orelse return .{ .err = .length };
+    const dv = findDictVal(d.m, col_name) orelse {
+      // Shape mismatch: free the rows already built (slots [0,ci)) plus the
+      // remaining .blank slots and the N(V) shell, so the partial result
+      // doesn't leak. (col itself is freed by the defer above.)
+      new_data.deinit(vm.alloc);
+      return .{ .err = .length };
+    };
     defer dv.deinit(vm.alloc);
     new_data.slice()[ci] = appendToCol(vm.alloc, col, dv);
   }

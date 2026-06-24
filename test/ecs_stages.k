@@ -12,9 +12,9 @@ World:: ecsSpawn[World; `id`px`vx!(ecsId[]; 0.; 1.)]   / id 3
 
 / a RARE component "Boost" on just entities 1 and 3 — stored sparse, not in the
 / archetype (so the other entities don't carry a dead column).
-Boost:: ssetNew[]
-Boost:: ssetSet[Boost; 1; 5.]
-Boost:: ssetSet[Boost; 3; 10.]
+Boost:: []
+Boost[1]::5.
+Boost[3]::10.
 
 / ── systems ─────────────────────────────────────────────────────────────────────
 sysMove:  {[a] @[a;`px;:;(a`px)+a`vx]}                       / dense: px += vx

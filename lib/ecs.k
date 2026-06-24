@@ -65,7 +65,7 @@ ecsRemoveComp: {[src;dst;eid] ecsMove[src;dst;eid;()!()]}
 / between archetypes, so use this for components that few entities have, or whose
 / membership changes often (Selected, Hovered, a timer…). Note: an int-keyed dict
 / indexes positionally with @, so lookups go through find: (.s)@(!s)?id.
-ssetNew: {[] ()!()}                           / empty sparse set
+SparseSet: {;[]}                           / empty sparse set
 ssetSet: {[s;eid;v] @[s;eid;:;v]}             / add or update entity eid's value
 ssetDel: {[s;eid] eid _ s}                    / remove entity eid (no-op if absent)
 ssetHas: {[s;eid] eid in !s}                  / does entity eid have the component?
@@ -85,9 +85,9 @@ ssetAlign: {[a;s;dflt]
 / ── systems ─────────────────────────────────────────────────────────────────────
 / ecsRun[a;systems] — apply system(s), archetype -> archetype, left to right.
 / Pass a SINGLE system bare (ecsRun[a; sysMove]) or several as a list
-/ (ecsRun[a; (sysMove;sysGrav;sysClamp)]). Do NOT enlist a single system with `,`
-/ — `,fn corrupts the function to type `! (an ink bug, see doc/bug.md #7); pass it
-/ bare instead, which this detects via `@.
+/ (ecsRun[a; (sysMove;sysGrav;sysClamp)]). A 1-element enlist (,sysMove) also
+/ works. The bare-vs-list dispatch (via `@) just keeps the common single-system
+/ call ergonomic — it is not a workaround.
 ecsRun: {[a;systems] $[(@systems)~`func; systems a; a{[acc;s]s acc}/systems]}
 
 / ── command buffer ──────────────────────────────────────────────────────────────
@@ -115,6 +115,22 @@ ecsFlush: {[a]
 / command buffer at the stage boundary — so a stage's deferred spawns/despawns are
 / visible to later stages (and applied before the frame ends).
 schedRun: {[sched; a] a{[sched;acc;st] ecsFlush[ecsRun[acc; sched st]]}[sched]/!sched}
+
+/ ── intra-stage ordering by dependencies (topological sort) ─────────────────────
+/ A system spec is (name; fn; after): a `name symbol, the system `fn, and `after — a
+/ symbol vector of system names this one must run AFTER (() or 0#`sym for none).
+/ ecsRunDeps topologically sorts the specs by their `after constraints and runs the
+/ systems in that order, so you declare WHAT must precede WHAT, not the list order.
+/ A dependency cycle is unsatisfiable: the systems in it are dropped (use ecsDepOrder
+/ to inspect — a short result vs the spec count means a cycle).
+ecsReady: {[deps;pn;i] d:deps i; (#d)=+/d in pn}      / are entity i's prereqs all placed yet?
+ecsGrow:  {[names;deps;placed] pn:names@placed; idx:!#names; rem:idx@&~idx in placed; m:ecsReady[deps;pn]'rem; placed,rem@&m}
+ecsTopo:  {[names;deps] (#names) ecsGrow[names;deps]/(0#0)}   / topological order (indices)
+
+/ ecsDepOrder[specs] — the system NAMES in resolved dependency order (for inspection).
+ecsDepOrder: {[specs] nm:{[s]s 0}'specs; nm@ecsTopo[nm; {[s]s 2}'specs]}
+/ ecsRunDeps[a;specs] — run the systems on archetype a in dependency order.
+ecsRunDeps:  {[a;specs] fns:{[s]s 1}'specs; ecsRun[a; fns@ecsTopo[{[s]s 0}'specs; {[s]s 2}'specs]]}
 
 / ── world: auto-routing archetype registry ──────────────────────────────────────
 / A "world" routes component add/remove by component-set SIGNATURE, so callers

@@ -19,6 +19,51 @@
   the raw allocator. `FnTables` now frees derived bases via a `value_alloc`
   pointed at the slab (`src/runtime/fntable.zig`, `src/runtime/vm.zig`), the
   same allocator that frees globals and the stack.
+- **`klp`/`kbuild` duplication — k-ABI unified into a single source of truth.**
+  Every native extension used to hand-maintain a copy of the host's `KRegistry`
+  layout (`lib/font/kbuild.zig` `Registry`, the inline structs in md5/json/csv),
+  which could silently drift from `src/ffi.zig`. The canonical layout now lives
+  in `src/kabi.zig` as a single generic `KRegistry(comptime KH)` — the host
+  instantiates it with its concrete `*KBox`, extensions with an opaque
+  `*anyopaque` (identical `extern`/C layout, since a K handle is just a nullable
+  pointer). `src/ffi.zig` and `lib/font/kbuild.zig` both import it (the latter
+  via the `kabi` build module wired in `build.zig`), so the font mirror is gone.
+  `klp` is kept as a null stub (superseded by `k_list_get`): removing it would
+  shift every following field's offset and break already-built extensions, so
+  the append-only ABI rule is documented in `kabi.zig`. (`include/k.h` remains
+  the matching mirror for C-language extensions; md5/json/csv still carry inline
+  prefix mirrors and can migrate to the `kabi` module the same way when touched.)
+- **`table , dict` (Insert) leaked on shape mismatch.** When the row dict didn't
+  conform to the table's columns, `insert.zig` returned `!length` but leaked the
+  partially-built `new_data` array (the columns already appended plus the `N(V)`
+  shell). The error path now `new_data.deinit`s before returning
+  (`src/primitive/verb/insert.zig`). (There is still no table-aware *column*
+  merge — `M,m` is row-insert only — but `dict , dict` column-merge works, so
+  dict-of-columns archetypes don't need it.)
+- **`,fn` (enlist of a function) corrupted the function.** Fixed in
+  `src/primitive/verb/enlist.zig`: the `Enlist` monadic jump-table was missing
+  the `_o` (lambda) and `_x` (object) signature fields, so enlisting fell through
+  to `typeError1`. Now `@,f` → `` `L `` and the element stays callable
+  (`((,f)@0) 5` and `5 {[a;s]s a}/,f` both work). `lib/ecs.k`'s `ecsRun` keeps its
+  bare-or-list dispatch (`$[(@systems)~`func; …]`) — that is an ergonomic API
+  used by `worldApply`/`worldQuery`/tests, not a bug workaround; the comments and
+  `doc/ecs.md` no longer warn against `,sysMove`.
+- **A `[...]` block (or any stray closer) as a `$[...]` branch hung the parser.**
+  `parseCond` and `parseSeq` call `parseStmt`, which yields a `.blank` *without
+  consuming a token* on something it can't start a statement from (a stray `)`,
+  `}`, or a `[...]` block left mid-stream). The loops only terminate on their end
+  token or eof, so they spun forever (`$[1; ); 0]`, `$[1)`, `(])`, …, and the
+  `$[e=old; skip; [rebuild; stamp]]` case from `test/ecs_demo.k`). Both loops now
+  break on no forward progress (token start unchanged after `parseStmt`)
+  (`src/parser/parser.zig`). Malformed input terminates instead of hanging;
+  valid `$[]`/list parsing is unaffected.
+- **DebugAllocator "alignment 4 vs 8" on a compiled symbol-vector literal**
+  (`test/ecs_query.k`, teardown only). The main chunk and compiler were created
+  with the raw backing allocator before the `vm.alloc → slab` swap, but their
+  literal constants are freed via the slab at teardown — alloc raw (align 4) /
+  free slab (align 8). `VM.create` now builds the chunk and compiler *after* the
+  slab swap (`src/runtime/vm.zig`), same principle as the `FnTables` fix. Verified
+  clean: all ECS tests run with 0 alignment/leak errors.
 
 ---
 
@@ -64,123 +109,28 @@ could also point at a lighter collection.
 
 ---
 
-## 4. `klp` (FFI list-element pointer) is stubbed; `k_list_get` added instead
+## 4. Slab free-size fragility — `Rc` header must stay 16 bytes (design note)
 
-`src/ffi.zig` `klp` returns null ("not supported"). The font CFF-outline FFI
-needs to read list elements (the global/local subr lists), so a
-`k_list_get(list, index) → ref'd KBox` export was appended to `KRegistry`
-(after `k_make_dict`, so existing extensions' shorter mirrors stay aligned).
-`klp` could now either be implemented properly or removed in favour of
-`k_list_get`. If you add fields to `KRegistry`, keep appending at the end and
-update the mirror in `lib/font/kbuild.zig`.
+Confirmed sound as built. The epoch stamp added for ECS change-detection was
+**not** a new `Rc` field — it is packed into the existing flags word
+(`meta: u32` in `src/noun/rc.zig`: low 8 bits = `ArrayFlags`, high 24 bits =
+epoch), so the header stays exactly 16 bytes (four `u32`s).
 
-## 5. `table , dict` (Insert) leaks on shape mismatch
+Why 16 matters: `array.deinit` (`src/noun/array.zig`) frees
+`data_offset + cap*@sizeOf(T)` rather than the exact size `init` allocated. The
+slab (`src/noun/slab.zig`) requires the same size on alloc and free, so this
+reconstruction is exact only when `data_offset` is a multiple of every element
+size (1/2/4/8/16). `data_offset = @sizeOf(Rc) = 16` satisfies that for all
+element types, so it is correct — but it relies on the header being 16.
 
-`t , dict` dispatches to `M,m` = `insert.zig` (insert a *row* dict into a table).
-When the dict doesn't conform to the table's columns it returns `!length` but
-leaks the partially-built `new_data` (`insert.zig:25`): e.g.
-`[[]a:1 2 3;b:4 5 6] , \`c!,7 8 9` → `!length` + a leaked `N(V)` allocation.
-On the error path, free `new_data` (and any rows filled so far) before returning.
-Separately: there is currently **no** table-aware *column* merge (update/extend
-columns of a table from a column-dict); `M,m` is row-insert only. `dict , dict`
-column-merge works fine, so dict-of-columns archetypes don't need this.
+Growing `Rc` to 20/24 bytes would make `data_offset` not a multiple of the
+`V`/dict element size; `cap = (total-data_offset)/size` would floor away a
+remainder and `deinit` would free fewer bytes than allocated → DebugAllocator
+"alloc 64 / free 56" mismatch. So the 16-byte constraint is load-bearing.
 
-## 6. Slab free-size fragility — `Rc` header must stay ≤16 bytes (revisit later)
-
-`array.deinit` (`src/noun/array.zig`) frees `data_offset + cap*@sizeOf(T)` instead
-of the exact size `init` allocated. The slab allocator (`src/noun/slab.zig`) only
-handles power-of-2 blocks and requires the **same** size on alloc and free, so this
-reconstruction is correct ONLY when `data_offset` is a multiple of every element
-size (1/2/4/8/16). The 16-byte `Rc` header makes `data_offset = 16`, which satisfies
-that for all element types — so it works, but **by coincidence of the number 16**.
-
-Growing `Rc` to 20/24 bytes (e.g. to add a field) makes `data_offset` not a multiple
-of 16 (the `V`/dict element size); `cap = (total-data_offset)/size` then floors away a
-remainder and `deinit` frees fewer bytes than allocated → DebugAllocator "alloc 64 /
-free 56" mismatch. This is why the dirty-`epoch` stamp is packed into the existing
-flags word (`meta: u32` in `rc.zig`) rather than added as a new field — the header
-stays 16 bytes.
-
-To make the header growable later, fix `deinit` to free the *actual* allocated size.
-It's fiddly: `init` passes sizes >1024 through unchanged while `initWithCap` uses
-`ceilPowerOfTwo` for >1024, so `deinit` can't blindly re-round — it must either store
-the size class in the header or unify the two rounding paths. Not blocking; the
-16-byte constraint is fine for now. Documented so the next header change doesn't
-rediscover this the hard way.
-
-## 7. `,fn` (enlist of a function) corrupts the function — FIXED
-
-**Fixed** in `src/primitive/verb/enlist.zig`: the `Enlist` monadic jump-table struct
-was missing the `_o` (lambda) and `_x` (object) signature fields, so enlisting either
-fell through to the `typeError1` default — `,f` returned `!type`, hence `@,f` → `` `! ``.
-The struct also carried three dead fields (`_y`, `_q`, `_v`) whose names aren't valid
-`K` tags, so the dispatcher silently ignored them. Added `_o`/`_x` → `enlistListFn`,
-dropped the dead fields. Now `@,f` → `` `L `` and `(,f)@0` is callable.
-
-Enlisting a single function/lambda with monadic `,` produces a 1-element list whose
-element is no longer callable: `f:{x+1}; @,f` → `` `! `` (not `` `L ``), and `(,f)@0`
-applied to an arg → `!type`. A general-list literal `(f;g)` keeps its elements
-callable (`@(f;g)` → `` `L ``, fold over it works), and `1#(f;f)` also yields a proper
-callable `` `L ``. So the bug is specific to `,` (enlist) on a function value — it
-likely takes a degenerate "list of partials/ops" path (`` `! ``) instead of a general
-list. Hit while building `lib/ecs.k` (`ecsRun[a; ,sysMove]` failed); worked around by
-having `ecsRun` accept a single system **bare** (detected via `@x ~ \`func`) and only
-fold when given a real `` `L `` list. Fix: make monadic `,` on a function wrap it as a
-1-element `` `L `` general list.
-
-## 8. A `[...]` block as a `$[...]` branch hangs the parser
-
-A square-bracket block used as a conditional branch makes the parser loop forever:
-
-```k-repl
- $[1; (1;2;3); 0]      / OK — parenthesised list branch → 1 2 3
- $[x>0; [1;2]; 9]      / HANGS — never returns (whole-file parse never completes)
-```
-
-`$[cond; [a;b]; else]` never terminates (timeout / no output, since the file is
-parsed before any execution). Parenthesised `(...)` branches are fine; only `[...]`
-in branch position hangs. The conditional-branch parser has no terminating rule for a
-`[` token where it expects a branch expression, so it spins. Hit while building
-`test/ecs_demo.k` — a multi-statement change-detection branch written as
-`$[e=old; skip; [rebuild; stamp]]` silently hung; rewriting the block as a helper
-function (`$[e=old; skip; rebuild[e]]`) fixes it. Workaround: never put `[...]` in a
-`$[]` branch — use a single expression or a helper fn. Proper fix: give the branch
-parser an error/terminate path for an unexpected `[`. (Companion footgun: a
-`keys!vals` length mismatch inside a frame callback throws and silently aborts the
-rest of the callback — looks like "nothing renders / prints".)
-
-## 9. DebugAllocator "alignment 4 vs 8" on a compiled symbol-vector literal — FIXED
-
-**Fixed** in `src/runtime/vm.zig` `VM.create`: the main chunk and the compiler were
-created with the **raw backing allocator** (before the `vm.alloc → slab` swap), but the
-literal constants they hold escape into runtime/chunk values freed via the **slab** at
-teardown — alloc raw (align 4) / free slab (align 8) → mismatch. Reordered `create` so
-the chunk and compiler are built **after** `vm.alloc = vm.slab.allocator()`, with the
-slab. Now every literal constant (in the main chunk, in lambda chunks created via the
-compiler's allocator at `compiler.zig:631`, and reachable from runtime) is allocated and
-freed by the same slab allocator — same principle as the `fn_tables.value_alloc` fix.
-All ECS tests are clean (0 alignment/leak errors); zig suite passes.
-
-(Original analysis below.)
-
-
-`test/ecs_query.k` trips, at teardown only, a DebugAllocator assertion:
-`Allocation alignment 4 does not match free alignment 8`, alloc'd at
-`compiler.zig:276` (`N(u32).init` for a symbol-vector literal in `compileLiteral`),
-i.e. a u32 symbol array (align 4) freed as if align 8. This is the **allocator-
-ordering-trap class** (see the [[ink-vm-allocator-ordering-trap]] memory / earlier
-"Recently fixed" entry): a value allocated by one allocator is freed by another with
-a different alignment. RESULTS ARE CORRECT — the query output is right; the assertion
-fires during cleanup. It is **layout-dependent / latent**: the same source was clean
-on the prior binary and surfaced only after an unrelated rebuild (the 3-arg FFI work
-below shifted code addresses); a trivial symbol-vector-in-a-lambda does NOT reproduce
-it — it needs ecs_query's larger allocation pattern. Debug-only (the c_allocator in
-Release ignores free alignment). Fix: ensure the compiler allocates literal constants
-with the same allocator that frees the chunk's values (the vm.alloc/slab), as was done
-for FnTables. Not chased here — it's pre-existing, correctness-neutral, and orthogonal
-to the feature work; logged so it isn't mistaken for a regression.
-
-Context: surfaced while adding 3-argument FFI support (`ffi_vtable_3`/`call3_fn`) for
-two-input GPU compute (`gpuCompute2`/`RunShader2`). That feature works and is verified
-(`test/ecs_compute2.k`: `px += vx*dt` on the GPU matches CPU); the alignment assertion
-is unrelated to it beyond the rebuild shifting memory layout.
+To make the header growable later, `deinit` must free the *actual* allocated
+size, not reconstruct it: `init` passes sizes >1024 through unchanged while
+`initWithCap` uses `ceilPowerOfTwo` for >1024, so `deinit` can't blindly
+re-round — it must store the size class in the header or unify the two rounding
+paths. Not blocking; the 16-byte constraint is fine. Documented so the next
+header change doesn't rediscover this the hard way.

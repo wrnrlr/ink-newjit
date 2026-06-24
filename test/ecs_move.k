@@ -17,7 +17,7 @@ Static:: ecsSpawn[Static; `id`px`py!(e; 3.; 4.)]
 `0 0: $Static
 
 / ── add a Velocity component → e moves Static → Moving (supply vx,vy) ───────────
-r::      ecsAddComp[Static; Moving; e; `vx`vy!(1.; 2.)]
+r::ecsAddComp[Static; Moving; e; `vx`vy!(1.; 2.)]
 Static:: r 0
 Moving:: r 1
 `0 0: "after add Velocity — Static (now empty), Moving (px,py carried + vx,vy):"
@@ -26,6 +26,7 @@ Moving:: r 1
 
 / run a movement system on Moving (whole-column)
 sysMove: {[a] a:@[a;`px;:;(a`px)+a`vx]; @[a;`py;:;(a`py)+a`vy]}
+sysMove: {[a] a:@[a;`px`py;:;((a`px)+a`vx;(a`py)+a`vy)];
 Moving:: ecsRun[Moving; sysMove]
 `0 0: "after sysMove on Moving (px+=vx, py+=vy):"
 `0 0: $Moving

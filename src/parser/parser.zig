@@ -365,7 +365,11 @@ pub const Parser = struct {
       }
       last_sep = false;
       last_sep_is_sc = false;
+      const before = self.tok.start;
       try stmts.append(self.al(), try self.parseStmt());
+      // Guard against a non-advancing parseStmt (stray closer / unexpected
+      // token) spinning the loop forever before `end_tt`/eof is reached.
+      if (self.tok.start == before) break;
       self.skipComments();
     }
     if (last_sep and last_sep_is_sc) try stmts.append(self.al(), try self.node(.blank));
@@ -489,7 +493,13 @@ pub const Parser = struct {
       self.skipComments();
       if (self.is(.@"]")) break;
       if (self.is(.sep)) { self.advance(); continue; }
+      const before = self.tok.start;
       try stmts.append(self.al(), try self.parseStmt());
+      // parseStmt yields a .blank without consuming on a token it can't start a
+      // statement from (a stray ')'/'}'/'[' or other closer). Without this guard
+      // the loop would spin forever, never reaching ']' or eof — e.g. a '[...]'
+      // block written as a $[] branch. Stop on no forward progress.
+      if (self.tok.start == before) break;
     }
     _ = self.eat(.@"]");
     return self.node(.{ .cond = .{ .stmts = try stmts.toOwnedSlice(self.al()) } });

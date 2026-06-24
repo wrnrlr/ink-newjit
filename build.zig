@@ -96,11 +96,19 @@ pub fn build(b: *std.Build) !void {
   const gpu_step = b.step("gpu", "Build the GPU extension shared library");
   gpu_step.dependOn(&b.addInstallArtifact(gpu_lib, .{}).step);
 
+  // Canonical k-ABI definition shared by the host and extensions (src/kabi.zig),
+  // so native extensions import the registry layout instead of mirroring it.
+  const kabi_mod = b.createModule(.{
+    .root_source_file = b.path("src/kabi.zig"),
+    .target = target, .optimize = optimize,
+  });
+
   // --- Font extension shared library (native sfnt parser, no tatfi) ---
   const font_ext_mod = b.createModule(.{
     .root_source_file = b.path("lib/font/ext.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
+  font_ext_mod.addImport("kabi", kabi_mod);
 
   const font_lib = b.addLibrary(.{
     .name     = "font",

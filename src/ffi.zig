@@ -31,37 +31,10 @@ pub const KBox = struct {
 // Extensions receive this as their `reg` argument in terse_init and use it to
 // resolve host k_* symbols without relying on dlsym, which fails when the
 // linker dead-strips unreferenced export functions in release builds.
-// Field order MUST match KRegistry in include/k.h and all extension sources.
-pub const KRegistry = extern struct {
-    ki:          *const fn (i32)                         callconv(.c) ?*KBox,
-    kf:          *const fn (f32)                         callconv(.c) ?*KBox,
-    kc:          *const fn (u8)                          callconv(.c) ?*KBox,
-    kb:          *const fn (c_int)                       callconv(.c) ?*KBox,
-    ks:          *const fn ([*:0]const u8)               callconv(.c) ?*KBox,
-    kerr:        *const fn ()                            callconv(.c) ?*KBox,
-    KC:          *const fn (i32)                         callconv(.c) ?*KBox,
-    KI:          *const fn (i32)                         callconv(.c) ?*KBox,
-    KF:          *const fn (i32)                         callconv(.c) ?*KBox,
-    KL:          *const fn (i32)                         callconv(.c) ?*KBox,
-    kt:          *const fn (?*KBox)                      callconv(.c) i8,
-    kn:          *const fn (?*KBox)                      callconv(.c) i32,
-    ki_val:      *const fn (?*KBox)                      callconv(.c) i32,
-    kf_val:      *const fn (?*KBox)                      callconv(.c) f32,
-    kc_val:      *const fn (?*KBox)                      callconv(.c) u8,
-    kb_val:      *const fn (?*KBox)                      callconv(.c) c_int,
-    kip:         *const fn (?*KBox)                      callconv(.c) ?[*]i32,
-    kfp:         *const fn (?*KBox)                      callconv(.c) ?[*]f32,
-    kcp:         *const fn (?*KBox)                      callconv(.c) ?[*]u8,
-    klp:         *const fn (?*KBox)                      callconv(.c) ?[*]?*KBox,
-    ku:          *const fn (?*KBox)                      callconv(.c) void,
-    k_list_set:  *const fn (?*KBox, i32, ?*KBox)         callconv(.c) i32,
-    k_call:      *const fn (?*KBox, ?*KBox)              callconv(.c) ?*KBox,
-    k_call2:     *const fn (?*KBox, ?*KBox, ?*KBox)      callconv(.c) ?*KBox,
-    k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?*KBox) callconv(.c) ?*KBox,
-    // Appended after k_make_dict so existing extensions' (shorter) mirrors stay
-    // aligned — they read a prefix and ignore this field.
-    k_list_get: *const fn (?*KBox, i32) callconv(.c) ?*KBox,
-};
+// The layout lives in src/kabi.zig — the single source of truth shared by the
+// host and every extension (instantiated here with our concrete *KBox handle).
+// include/k.h is the matching mirror for C-language extensions.
+pub const KRegistry = @import("kabi.zig").KRegistry(*KBox);
 
 export const k_registry: KRegistry = .{
     .ki          = &ki,

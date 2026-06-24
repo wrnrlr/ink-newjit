@@ -1,6 +1,6 @@
 const std = @import("std");
 
-// 20-byte header. `cap` is the number of element slots actually backed by the
+// 16-byte header (four u32 fields). `cap` is the number of element slots actually backed by the
 // underlying allocation (i.e. `(bytes_allocated - data_offset) / @sizeOf(T)`).
 // Callers may write into positions [len, cap) without re-allocating, as long
 // as `rc == 1` and the immutable flag is clear. `deinit` reads `cap` to
