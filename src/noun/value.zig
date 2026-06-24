@@ -71,10 +71,14 @@ pub const V = union(K) {
   pub fn cow(v: *V, alloc: Alloc) !void {
     switch (v.*) {
       inline .B, .I, .F, .S, .C, .L, .m, .M => |n, t| {
-        if (n.ptr.rc > 1 or n.ptr.flags & ArrayFlags.immutable != 0) {
-          const next = try n.clone(alloc);
+        if (n.ptr.rc > 1 or n.ptr.meta & ArrayFlags.immutable != 0) {
+          const next = try n.clone(alloc);  // clone() → init() stamps a fresh epoch
           n.deinit(alloc);
           v.* = @unionInit(V, @tagName(t), next);
+        } else {
+          // In-place mutation about to happen on a uniquely-held value: bump its
+          // version so change detection sees the write.
+          n.ptr.stampEpoch();
         }
       },
       else => {},

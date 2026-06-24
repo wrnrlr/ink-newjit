@@ -148,6 +148,8 @@ const Monads = struct {
   pub const @"abs"   = _N(.abs,  calc.AbsOp);
   pub const @"$x"    = @import("format.zig").Format;
   pub const @"parse" = @import("parse.zig").Parse;
+  pub const @"depth x" = @import("depth.zig").Depth;
+  pub const @"epoch x" = @import("epoch.zig").Epoch;
   pub const @"@x"    = @import("type.zig").Type;
   pub const @":x"    = @import("right.zig").Identity;
   pub const @"=u"    = Unitary;

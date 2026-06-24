@@ -101,11 +101,12 @@ applyPass: {[ci;cj;cl0;cal;cw0;cw1;cwt]
   Cs: ds-cl0
   lams: 0.5*(Cs*safe)%(cwt+cal%gSdt*gSdt)
   dlx:ndx*lams; dly:ndy*lams; dlz:ndz*lams
-  / Fused scatter-add: amend with +accumulates on duplicate indices, so the two
-  / passes (+at ci, -at cj) collapse into one — half the COW copies per axis.
-  gPx:: @[gPx; ci,cj; +; (dlx*cw0),(0.-dlx*cw1)]
-  gPy:: @[gPy; ci,cj; +; (dly*cw0),(0.-dly*cw1)]
-  gPz:: @[gPz; ci,cj; +; (dlz*cw0),(0.-dlz*cw1)]
+  / Fused scatter-add via global indexed compound-assign: amend with + accumulates
+  / on duplicate indices, so the two passes (+at ci, -at cj) collapse into one —
+  / half the COW copies per axis. `name[i]+::v` writes back to the global.
+  gPx[ci,cj]+::(dlx*cw0),(0.-dlx*cw1)
+  gPy[ci,cj]+::(dly*cw0),(0.-dly*cw1)
+  gPz[ci,cj]+::(dlz*cw0),(0.-dlz*cw1)
 }
 
 / ── Simulation substep ────────────────────────────────────────────────────────

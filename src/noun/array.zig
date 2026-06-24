@@ -24,7 +24,7 @@ pub fn N(comptime T: type) type {
       const buf = try alloc.alignedAlloc(u8, align_enum, total);
       const header: *align(@alignOf(Rc)) Rc = @ptrCast(buf.ptr);
       const cap_n: u32 = @intCast((total - data_offset) / @sizeOf(T));
-      header.* = .{ .rc = 1, .len = @intCast(n), .cap = cap_n };
+      header.* = .{ .rc = 1, .len = @intCast(n), .cap = cap_n, .meta = Rc.freshMeta() };
       return .{ .ptr = header };
     }
 
@@ -39,12 +39,12 @@ pub fn N(comptime T: type) type {
       const buf = try alloc.alignedAlloc(u8, align_enum, rounded);
       const header: *align(@alignOf(Rc)) Rc = @ptrCast(buf.ptr);
       const cap_n: u32 = @intCast((rounded - data_offset) / @sizeOf(T));
-      header.* = .{ .rc = 1, .len = @intCast(n), .cap = cap_n };
+      header.* = .{ .rc = 1, .len = @intCast(n), .cap = cap_n, .meta = Rc.freshMeta() };
       return .{ .ptr = header };
     }
 
-    pub fn setFlag(a: Self, f: u8) void { a.ptr.flags |= f; }
-    pub fn hasFlag(a: Self, f: u8) bool { return a.ptr.flags & f != 0; }
+    pub fn setFlag(a: Self, f: u8) void { a.ptr.meta |= f; }
+    pub fn hasFlag(a: Self, f: u8) bool { return a.ptr.meta & f != 0; }
     pub fn deinit(a: Self, alloc: Alloc) void {
       if (a.ptr.rc == std.math.maxInt(u32)) return;
       a.ptr.rc -= 1;
@@ -97,7 +97,7 @@ pub fn N(comptime T: type) type {
       var cur = start;
       for (res.slice()) |*val| { val.* = cur; cur += step; }
       if (comptime (T == i32 or T == u32 or T == f32)) {
-        if (count > 0 and step > @as(T, 0)) res.ptr.flags |= ArrayFlags.ascending;
+        if (count > 0 and step > @as(T, 0)) res.ptr.meta |= ArrayFlags.ascending;
       }
       return res;
     }

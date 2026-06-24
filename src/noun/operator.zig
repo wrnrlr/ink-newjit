@@ -23,6 +23,10 @@ pub const Op1 = enum(u8) {
   sqrt, sqr, exp, log, sin, cos, abs,
   // selection keywords
   first, last, count, parse,
+  // apter-tree: parent-vector → per-node depth
+  depth,
+  // dirty-epoch: array/dict version stamp for change detection
+  epoch,
   // io verbs (monadic forms)
   @"0:", @"1:", @"2:", @"9:",
   exec,

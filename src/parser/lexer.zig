@@ -29,7 +29,7 @@ pub const Token = struct {
 const KEYWORD_OPS = [_][]const u8{
   "sqrt", "sqr", "exp", "log", "sin", "cos", "abs",
   "first", "last", "count", "in", "has", "mod", "div",
-  "parse", "exec",
+  "parse", "exec", "depth", "epoch",
 };
 
 fn isKeywordOp(s: []const u8) bool {

@@ -619,6 +619,13 @@ compCompute: {[fn]
 
   ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
 
+/ Public name, consistent with FragmentShader / VertexShader. Compiles an
+/ element-wise f32 kernel {[x] ...} to a SPIR-V compute shader (workgroup 64,
+/ reads binding 0, writes binding 1). Run it with RunShader[ComputeShader[fn]; inF].
+/ This is the lowering target for data-parallel ECS systems (a per-entity column
+/ map): compile once, then RunShader the column each frame inside a gpuRun frame.
+ComputeShader: compCompute
+
 / ── Vertex shader stencils ────────────────────────────────────────────────────
 opAccChain1: {[t;r;base;i] (0x00050041;t;r;base;i)}  / OpAccessChain single index
 varOutOne:   {[ptr;vid]    (0x0004003B;ptr;vid;3)}    / OpVariable Output storage class

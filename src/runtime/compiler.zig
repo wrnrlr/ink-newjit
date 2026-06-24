@@ -336,7 +336,14 @@ pub const Compiler = struct {
       const index_node: *ast.Node = if (seq.len == 1) seq[0] else &list_node;
       var apply_seq = [_]*ast.Node{ ap.f, index_node, &fn_node, b.a.? };
       var apply_node = ast.Node{ .apply = .{ .f = &amend_verb, .a = apply_seq[0..] } };
-      return try self.compileBind(.{ .v = ap.f, .f = null, .a = &apply_node });
+      // Preserve global-vs-local target. `name[i]::v` / `name[i]op::v` arrive with
+      // b.a wrapped in `.right` (the second colon) — the same marker plain global
+      // assigns use. Re-wrap the synthesized amend so the write-back targets the
+      // global rather than a fresh local. `name[i]:v` / `name[i]op:v` stay local.
+      const is_global = b.a.?.* == .right;
+      var right_node = ast.Node{ .right = .{ .clause = &apply_node } };
+      const write_a: *ast.Node = if (is_global) &right_node else &apply_node;
+      return try self.compileBind(.{ .v = ap.f, .f = null, .a = write_a });
     }
 
     const rhs_id: ir.ValueId = if (b.a) |rhs| blk: {

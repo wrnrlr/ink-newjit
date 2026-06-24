@@ -63,7 +63,7 @@ pub const IR = struct {
     // Mark array constants immutable so cow() always copies them.
     switch (stored) {
       inline .B, .I, .F, .S, .C, .L => |n| n.setFlag(ArrayFlags.immutable),
-      inline .m, .M => |d| d.ptr.flags |= ArrayFlags.immutable,
+      inline .m, .M => |d| d.ptr.meta |= ArrayFlags.immutable,
       else => {},
     }
     const id: u32 = @intCast(self.instructions.items.len);
