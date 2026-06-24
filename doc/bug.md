@@ -149,7 +149,20 @@ parser an error/terminate path for an unexpected `[`. (Companion footgun: a
 `keys!vals` length mismatch inside a frame callback throws and silently aborts the
 rest of the callback — looks like "nothing renders / prints".)
 
-## 9. DebugAllocator "alignment 4 vs 8" on a compiled symbol-vector literal
+## 9. DebugAllocator "alignment 4 vs 8" on a compiled symbol-vector literal — FIXED
+
+**Fixed** in `src/runtime/vm.zig` `VM.create`: the main chunk and the compiler were
+created with the **raw backing allocator** (before the `vm.alloc → slab` swap), but the
+literal constants they hold escape into runtime/chunk values freed via the **slab** at
+teardown — alloc raw (align 4) / free slab (align 8) → mismatch. Reordered `create` so
+the chunk and compiler are built **after** `vm.alloc = vm.slab.allocator()`, with the
+slab. Now every literal constant (in the main chunk, in lambda chunks created via the
+compiler's allocator at `compiler.zig:631`, and reachable from runtime) is allocated and
+freed by the same slab allocator — same principle as the `fn_tables.value_alloc` fix.
+All ECS tests are clean (0 alignment/leak errors); zig suite passes.
+
+(Original analysis below.)
+
 
 `test/ecs_query.k` trips, at teardown only, a DebugAllocator assertion:
 `Allocation alignment 4 does not match free alignment 8`, alloc'd at
