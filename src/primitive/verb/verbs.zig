@@ -164,6 +164,8 @@ const Monads = struct {
   pub const @"product x" = r.Product;
   pub const @"min x"     = r.Min;
   pub const @"max x"     = r.Max;
+  // Internal verb emitted by the peephole for the `#'=` idiom (see freq.zig).
+  pub const @"freq x"    = @import("freq.zig").Freq;
 };
 
 const Dyads = struct {

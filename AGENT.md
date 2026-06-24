@@ -49,6 +49,7 @@ Sum: +/;
 - Symbol - interned names, e.g. `` `id`Red100 ``, type symbol `` `s ``.
 - Char - single u8 character; whitespace is interpreted as empty `" "`. E.g. `"H"`, type symbol `` `c ``.
 - Integers - vector of integers
+  - null value `` &0 ``
   - type symbol `` `I ``
 - Floats - vector of floats
   - type symbol `` `F ``

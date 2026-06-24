@@ -53,10 +53,10 @@ gInvM:: n#0.
   cx:(e0y*e1z)-(e1y*e0z); cy:(e0z*e1x)-(e1z*e0x); cz:(e0x*e1y)-(e1x*e0y)
   A:0.5*sqrt[(cx*cx)+(cy*cy)+(cz*cz)]
   contrib:$[A>0.;3.%A;0.]
-  gInvM::@[@[@[gInvM;i0;+;contrib];i1;+;contrib];i2;+;contrib]
+  gInvM::@[gInvM;(i0;i1;i2);+;contrib]
 }' triIds;
 / Pin top-left (0) and top-right (nCols-1) corners
-gInvM::@[@[gInvM;0;:;0.];nCols-1;:;0.]
+gInvM::@[gInvM;(0;nCols-1);:;0.]
 
 / ── Constraint edges — 4 separate types for stable 4-pass Jacobi ──────────────
 eLen: {[i;j]
@@ -101,9 +101,11 @@ applyPass: {[ci;cj;cl0;cal;cw0;cw1;cwt]
   Cs: ds-cl0
   lams: 0.5*(Cs*safe)%(cwt+cal%gSdt*gSdt)
   dlx:ndx*lams; dly:ndy*lams; dlz:ndz*lams
-  gPx:: @[@[gPx;ci;+;dlx*cw0];cj;-;dlx*cw1]
-  gPy:: @[@[gPy;ci;+;dly*cw0];cj;-;dly*cw1]
-  gPz:: @[@[gPz;ci;+;dlz*cw0];cj;-;dlz*cw1]
+  / Fused scatter-add: amend with +accumulates on duplicate indices, so the two
+  / passes (+at ci, -at cj) collapse into one — half the COW copies per axis.
+  gPx:: @[gPx; ci,cj; +; (dlx*cw0),(0.-dlx*cw1)]
+  gPy:: @[gPy; ci,cj; +; (dly*cw0),(0.-dly*cw1)]
+  gPz:: @[gPz; ci,cj; +; (dlz*cw0),(0.-dlz*cw1)]
 }
 
 / ── Simulation substep ────────────────────────────────────────────────────────

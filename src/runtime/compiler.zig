@@ -1083,6 +1083,50 @@ fn peepholeIdioms(alloc: Alloc, scope_ir: *ir.IR) !bool {
       }
     }
 
+    // Idiom: #'=x (tally-each over group) → freq x.
+    // IR shape: Call1( Derive(', [Const #]), Call1(Const =, [x]) ). Both # and =
+    // are emitted as Op2 consts and dispatched monadically. Replace the whole
+    // thing with Apply1(freq, x), eliding both the group and the each.
+    if (f_inst.op == .Derive
+        and f_inst.arg1 == @intFromEnum(Adverb.@"'")
+        and f_inst.inputs.len == 1
+        and use_count[f_id] == 1
+        and use_count[arg_id] == 1)
+    {
+      const base_id = f_inst.inputs[0];
+      const inner = scope_ir.get(arg_id);
+      if (base_id != ir.NO_VALUE and isCall1(inner)) blk: {
+        // base of the each must be a const tally `#` (Op2, applied monadically)
+        const base = scope_ir.get(base_id);
+        if (base.op != .Const) break :blk;
+        const bv = base.val orelse break :blk;
+        if (bv != .o or bv.o.kind != .callable) break :blk;
+        if (!opmod.isOp2Idx(bv.o.idx) or bv.o.getOp2() != .@"#") break :blk;
+        // the argument must be a group: const `=` (Op2, monadic) applied to x
+        const gfn_id = inner.inputs[0];
+        const x_id   = inner.inputs[1];
+        if (gfn_id == ir.NO_VALUE or x_id == ir.NO_VALUE) break :blk;
+        const gfn = scope_ir.get(gfn_id);
+        if (gfn.op != .Const) break :blk;
+        const gv = gfn.val orelse break :blk;
+        if (gv != .o or gv.o.kind != .callable) break :blk;
+        if (!opmod.isOp2Idx(gv.o.idx) or gv.o.getOp2() != .@"=") break :blk;
+
+        const old_inputs = inst.inputs;
+        const new_inputs = try scope_ir.alloc.alloc(ir.ValueId, 1);
+        new_inputs[0] = x_id;
+        inst.inputs = new_inputs;
+        inst.op = .Apply1;
+        inst.arg1 = @intFromEnum(Op1.freq);
+        scope_ir.alloc.free(old_inputs);
+
+        scope_ir.instructions.items[f_id].is_dead = true;
+        scope_ir.instructions.items[arg_id].is_dead = true;
+        changed = true;
+        continue;
+      }
+    }
+
     if (!isBuiltinDyad(f_inst, .@"*")) continue;
     const inner = scope_ir.get(arg_id);
     if (!isCall1(inner)) continue;

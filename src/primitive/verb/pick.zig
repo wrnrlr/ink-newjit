@@ -8,7 +8,6 @@ const VM = @import("../../runtime/vm.zig").VM;
 const promote = @import("../promote.zig").promote;
 
 const value = @import("../../noun/value.zig");
-const flip = @import("flip.zig").flip;
 
 pub const Pick = struct {
   pub const op = .@"@";
@@ -271,11 +270,24 @@ fn pickTableRow(alloc: Alloc, t: Dict, idx: i32) V {
   return V{ .m = dict };
 }
 
+// Select rows by an index vector → a new table. Gathers each column directly
+// (no per-row dict materialization), so it is leak-free and allocation-light.
 fn pickTableRowVec(alloc: Alloc, x: V, indices: []const i32) V {
-  const n = indices.len;
-  const res = N(V).init(alloc, n) catch return V{ .err = .memory };
-  for (indices, 0..) |idx, k| res.slice()[k] = pickTableRow(alloc, x.M, idx);
-  return flip(alloc, .{ .L = res });
+  const keys = x.M.av();
+  const vals = x.M.bv();
+  const ncols = keys.len();
+  if (ncols == 0) return .{ .err = .length };
+  const first_col = vals.at(0);
+  const nrows: i32 = @intCast(first_col.len());
+  first_col.deinit(alloc);
+  for (indices) |idx| if (idx < 0 or idx >= nrows) return .{ .err = .length };
+  const res_vals = N(V).init(alloc, ncols) catch return V{ .err = .memory };
+  for (0..ncols) |j| {
+    const col = vals.at(j);
+    defer col.deinit(alloc);
+    res_vals.slice()[j] = pickVec(alloc, col, indices);
+  }
+  return V{ .M = Dict.init(alloc, keys.ref(), promote(alloc, res_vals)) catch return V{ .err = .memory } };
 }
 
 fn pickTableCol(t: Dict, s: u32) V {

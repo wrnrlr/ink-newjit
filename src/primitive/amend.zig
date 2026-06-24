@@ -125,7 +125,8 @@ const AmendList4 = struct {
   fn multiple(vm: *VM, a: N(V), ix: N(i32), f: V, b: V) !void {
     const s = a.slice();
     const ixs = ix.slice();
-    const b_is_vec = b.isVec() and b.len() == ixs.len;
+    // Conform on a length-matching collection (vec or general list); see amendMap.
+    const b_is_vec = (b.isVec() or b.tag() == .L) and b.len() == ixs.len;
     if (isAssign(f)) {
       for (ixs, 0..) |raw_i, n| {
         const i: usize = @intCast(raw_i);
@@ -175,11 +176,15 @@ fn amendMap(vm: *VM, a_in: V, indices: V, f: V, b: V) V {
     };
   } else if (indices.isVec()) {
     const ilen = indices.len();
-    const b_is_vec = b.isVec() and b.len() == ilen;
+    // Conform: a value collection (typed vector OR general list) whose length
+    // matches the key count distributes element-wise (vals[n] → keys[n]); any
+    // other value (atom, or mismatched length) broadcasts to every key. Mirrors
+    // `d[keys]:vals` so the two assignment forms agree.
+    const b_conforms = (b.isVec() or b.tag() == .L) and b.len() == ilen;
     for (0..ilen) |n| {
       const key = indices.at(n);
       defer key.deinit(vm.alloc);
-      const bv = if (b_is_vec) b.at(n) else b.ref();
+      const bv = if (b_conforms) b.at(n) else b.ref();
       applyAt(vm, &a, key, f, bv) catch |e| {
         a.deinit(vm.alloc);
         return if (e == error.TypeError) .{ .err = .@"type" } else .{ .err = .memory };

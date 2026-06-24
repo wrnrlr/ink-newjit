@@ -28,6 +28,8 @@ pub const Op1 = enum(u8) {
   exec,
   // fused monad-only derived verbs (sum, product, min, max)
   @"+/", @"*/", @"|/", @"&/",
+  // internal verb emitted by the peephole for the idiom `#'=` (tally-each group)
+  freq,
 
   pub const COUNT = @typeInfo(Op1).@"enum".fields.len;
 

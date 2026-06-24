@@ -73,3 +73,14 @@ needs to read list elements (the global/local subr lists), so a
 `klp` could now either be implemented properly or removed in favour of
 `k_list_get`. If you add fields to `KRegistry`, keep appending at the end and
 update the mirror in `lib/font/kbuild.zig`.
+
+## 5. `table , dict` (Insert) leaks on shape mismatch
+
+`t , dict` dispatches to `M,m` = `insert.zig` (insert a *row* dict into a table).
+When the dict doesn't conform to the table's columns it returns `!length` but
+leaks the partially-built `new_data` (`insert.zig:25`): e.g.
+`[[]a:1 2 3;b:4 5 6] , \`c!,7 8 9` → `!length` + a leaked `N(V)` allocation.
+On the error path, free `new_data` (and any rows filled so far) before returning.
+Separately: there is currently **no** table-aware *column* merge (update/extend
+columns of a table from a column-dict); `M,m` is row-insert only. `dict , dict`
+column-merge works fine, so dict-of-columns archetypes don't need this.
