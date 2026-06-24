@@ -1,4 +1,5 @@
 **/.DS_Store
+doc/otf/**
 .claude
 .zed
 .zig-cache/
