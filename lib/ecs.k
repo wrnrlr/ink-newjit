@@ -116,6 +116,72 @@ ecsFlush: {[a]
 / visible to later stages (and applied before the frame ends).
 schedRun: {[sched; a] a{[sched;acc;st] ecsFlush[ecsRun[acc; sched st]]}[sched]/!sched}
 
+/ ── world: auto-routing archetype registry ──────────────────────────────────────
+/ A "world" routes component add/remove by component-set SIGNATURE, so callers
+/ never name src/dst archetypes. It is a dict [reg; sigs; archs; loc]:
+/   reg   — component registry: compName -> field-prototype dict (field!sample), e.g.
+/           `Position`Velocity!([px:0.;py:0.];[vx:0.;vy:0.])  (establishes columns+types)
+/   sigs  — list of canonical component-sets present (sorted-distinct symbol vectors)
+/   archs — list of archetypes (column-dicts), parallel to sigs
+/   loc   — dict entityId -> index into sigs/archs (which archetype it is in)
+worldNew: {[reg] `reg`sigs`archs`loc!(reg; (); (); ()!())}
+
+ecsCanon: {[comps] c:?comps; c@<c}                  / canonical (sorted-distinct) comp set
+ecsProto: {[reg;comps] $[#comps; ([id:0]),(,/reg@comps); [id:0]]}  / merged archetype prototype
+dget:     {[d;k] (.d)@(!d)?k}                        / lookup in an int-keyed dict (@ is positional!)
+wMatch:   {[sig;s] {[sig;x]x~sig}[sig]'s}            / per-element ~ mask against the sig list
+wIdx:     {[m] w:&m; $[#w; *w; -1]}                  / first true index of a mask, or -1
+wFind:    {[w;sig] s:w`sigs; $[0=#s; -1; wIdx wMatch[sig;s]]}     / archetype index for a sig, or -1
+wMake:    {[w;sig] a:ecsArch ecsProto[w`reg;sig]; i:#w`sigs; w:@[w;`sigs;:;(w`sigs),,sig]; w:@[w;`archs;:;(w`archs),,a]; (w;i)}
+wEnsure:  {[w;sig] i:wFind[w;sig]; $[i>-1; (w;i); wMake[w;sig]]}  / NB: i>-1, NOT i>=0 (no >= in ink)
+wSig:     {[w;eid] (w`sigs)dget[w`loc;eid]}          / an entity's current component set
+
+/ worldSpawn[w;comps;vals] — spawn an entity with component set `comps` and field
+/ values `vals (a dict). Routes to the matching archetype, creating it if new. (w; eid).
+worldSpawn: {[w;comps;vals] sig:ecsCanon comps; r:wEnsure[w;sig]; w:r 0; i:r 1; eid:ecsId[]; a2:ecsSpawn[(w`archs)i; ([id:eid]),vals]; w:@[w;`archs;:;@[w`archs;i;:;a2]]; w:@[w;`loc;:;@[w`loc;eid;:;i]]; (w;eid)}
+
+/ wMoveTo[w;eid;nsig;vals] — relocate entity eid into the archetype for canonical
+/ signature nsig (creating it if new), supplying any new fields in `vals.
+wMoveTo: {[w;eid;nsig;vals] ci:dget[w`loc;eid]; cArch:(w`archs)ci; r:wEnsure[w;nsig]; w:r 0; ni:r 1; mv:ecsMove[cArch;(w`archs)ni;eid;vals]; w:@[w;`archs;:;@[@[w`archs;ci;:;mv 0];ni;:;mv 1]]; @[w;`loc;:;@[w`loc;eid;:;ni]]}
+
+/ addComponent[w;eid;comp;vals] — add component `comp` (its fields in `vals`); the
+/ entity auto-moves to the archetype with its components + comp. No-op if already present.
+wAddDo: {[w;eid;comp;vals] csig:wSig[w;eid]; wMoveTo[w;eid; ecsCanon csig,comp; vals]}
+addComponent: {[w;eid;comp;vals] $[comp in wSig[w;eid]; w; wAddDo[w;eid;comp;vals]]}
+
+/ removeComponent[w;eid;comp] — remove `comp`; the entity auto-moves to the sparser
+/ archetype (the dropped fields vanish). No-op if the entity doesn't have comp.
+wRemDo: {[w;eid;comp] csig:wSig[w;eid]; wMoveTo[w;eid; csig@&~csig in ,comp; ()!()]}
+removeComponent: {[w;eid;comp] $[~comp in wSig[w;eid]; w; wRemDo[w;eid;comp]]}
+
+/ worldArch[w;comps] — the archetype (column-dict) for a component set, for systems and
+/ queries. Returns an empty archetype if that set isn't present.
+worldArch: {[w;comps] sig:ecsCanon comps; i:wFind[w;sig]; $[i>-1; (w`archs)i; ecsArch ecsProto[w`reg;sig]]}
+
+/ worldApply[w;comps;sys] — run system(s) on the archetype for component set `comps`
+/ and write the result back into the world. No-op if that archetype isn't present.
+worldApply: {[w;comps;sys] sig:ecsCanon comps; i:wFind[w;sig]; $[i>-1; @[w;`archs;:;@[w`archs;i;:;ecsRun[(w`archs)i;sys]]]; w]}
+
+/ worldCount[w;comps] — number of live entities in the archetype for `comps.
+worldCount: {[w;comps] ecsCount worldArch[w;comps]}
+
+/ ── cross-archetype query ───────────────────────────────────────────────────────
+/ worldQuery[w;comps;sys] — run system(s) `sys on EVERY archetype whose component
+/ set is a superset of `comps, regardless of the other components those archetypes
+/ carry. This is how a movement system reaches all moving entities at once whether
+/ they also have Health, AI, … Each matching archetype is updated in place.
+/ `sys must only touch columns guaranteed by `comps (every match has those).
+worldMatch: {[csig;sig] (#csig)=+/csig in sig}      / csig ⊆ sig  (subset test)
+worldQuery: {[w;comps;sys]
+  csig: ecsCanon comps
+  m:    {[csig;s]worldMatch[csig;s]}[csig]'w`sigs   / which archetypes are supersets
+  idxs: &m
+  w{[sys;acc;i] @[acc;`archs;:;@[acc`archs;i;:;ecsRun[(acc`archs)i;sys]]]}[sys]/idxs}
+
+/ worldEach[w;comps;f] — fold a reader f[acc;archetype] over every matching archetype
+/ (acc seeded with the 2nd-to-last arg). Use for cross-archetype aggregates/counts.
+worldEach: {[w;comps;seed;f] csig:ecsCanon comps; m:{[csig;s]worldMatch[csig;s]}[csig]'w`sigs; seed{[w;f;acc;i] f[acc;(w`archs)i]}[w;f]/&m}
+
 / ── hierarchy (apter tree) ──────────────────────────────────────────────────────
 / ecsPropagate[par;local] — additive transform propagation over a parent-index
 / column. `par has self-loop roots (par[r]=r); `local is the per-node local value.
