@@ -154,11 +154,24 @@ wSig:     {[w;eid] (w`sigs)dget[w`loc;eid]}          / an entity's current compo
 
 / worldSpawn[w;comps;vals] — spawn an entity with component set `comps` and field
 / values `vals (a dict). Routes to the matching archetype, creating it if new. (w; eid).
-worldSpawn: {[w;comps;vals] sig:ecsCanon comps; r:wEnsure[w;sig]; w:r 0; i:r 1; eid:ecsId[]; a2:ecsSpawn[(w`archs)i; ([id:eid]),vals]; w:@[w;`archs;:;@[w`archs;i;:;a2]]; w:@[w;`loc;:;@[w`loc;eid;:;i]]; (w;eid)}
+worldSpawn: {[w;comps;vals]
+  sig:ecsCanon comps;
+  r:wEnsure[w;sig];
+  w:r 0; i:r 1; eid:ecsId[];
+  a2:ecsSpawn[(w`archs)i;([id:eid]),vals];
+  w:@[w;`archs;:;@[w`archs;i;:;a2]];
+  w:@[w;`loc;:;@[w`loc;eid;:;i]];
+  (w;eid)
+}
 
 / wMoveTo[w;eid;nsig;vals] — relocate entity eid into the archetype for canonical
 / signature nsig (creating it if new), supplying any new fields in `vals.
-wMoveTo: {[w;eid;nsig;vals] ci:dget[w`loc;eid]; cArch:(w`archs)ci; r:wEnsure[w;nsig]; w:r 0; ni:r 1; mv:ecsMove[cArch;(w`archs)ni;eid;vals]; w:@[w;`archs;:;@[@[w`archs;ci;:;mv 0];ni;:;mv 1]]; @[w;`loc;:;@[w`loc;eid;:;ni]]}
+wMoveTo: {[w;eid;nsig;vals]
+  ci:dget[w`loc;eid]; cArch:(w`archs)ci; r:wEnsure[w;nsig]; w:r 0; ni:r 1;
+  mv:ecsMove[cArch;(w`archs)ni;eid;vals];
+  w:@[w;`archs;:;@[@[w`archs;ci;:;mv 0];ni;:;mv 1]];
+  @[w;`loc;:;@[w`loc;eid;:;ni]]
+  }
 
 / addComponent[w;eid;comp;vals] — add component `comp` (its fields in `vals`); the
 / entity auto-moves to the archetype with its components + comp. No-op if already present.
@@ -172,11 +185,19 @@ removeComponent: {[w;eid;comp] $[~comp in wSig[w;eid]; w; wRemDo[w;eid;comp]]}
 
 / worldArch[w;comps] — the archetype (column-dict) for a component set, for systems and
 / queries. Returns an empty archetype if that set isn't present.
-worldArch: {[w;comps] sig:ecsCanon comps; i:wFind[w;sig]; $[i>-1; (w`archs)i; ecsArch ecsProto[w`reg;sig]]}
+worldArch: {[w;comps]
+  sig:ecsCanon comps;
+  i:wFind[w;sig];
+  $[i>-1; (w`archs)i; ecsArch ecsProto[w`reg;sig]]
+}
 
 / worldApply[w;comps;sys] — run system(s) on the archetype for component set `comps`
 / and write the result back into the world. No-op if that archetype isn't present.
-worldApply: {[w;comps;sys] sig:ecsCanon comps; i:wFind[w;sig]; $[i>-1; @[w;`archs;:;@[w`archs;i;:;ecsRun[(w`archs)i;sys]]]; w]}
+worldApply: {[w;comps;sys]
+  sig:ecsCanon comps;
+  i:wFind[w;sig];
+  $[i>-1; @[w;`archs;:;@[w`archs;i;:;ecsRun[(w`archs)i;sys]]]; w]
+}
 
 / worldCount[w;comps] — number of live entities in the archetype for `comps.
 worldCount: {[w;comps] ecsCount worldArch[w;comps]}
@@ -196,7 +217,9 @@ worldQuery: {[w;comps;sys]
 
 / worldEach[w;comps;f] — fold a reader f[acc;archetype] over every matching archetype
 / (acc seeded with the 2nd-to-last arg). Use for cross-archetype aggregates/counts.
-worldEach: {[w;comps;seed;f] csig:ecsCanon comps; m:{[csig;s]worldMatch[csig;s]}[csig]'w`sigs; seed{[w;f;acc;i] f[acc;(w`archs)i]}[w;f]/&m}
+worldEach: {[w;comps;seed;f]
+  csig:ecsCanon comps;
+  m:{[csig;s]worldMatch[csig;s]}[csig]'w`sigs; seed{[w;f;acc;i] f[acc;(w`archs)i]}[w;f]/&m}
 
 / ── change-filtered query (Bevy's Changed<T>) ───────────────────────────────────
 / worldQueryChanged[w;filt;comps;watch;sys] — like worldQuery, but runs `sys only on
@@ -205,12 +228,24 @@ worldEach: {[w;comps;seed;f] csig:ecsCanon comps; m:{[csig;s]worldMatch[csig;s]}
 / last-seen epoch of `watch (start with ()!()). Returns (w2; filt2) — thread both.
 / Use for consumers (build a render buffer, derive world transforms) that should
 / only re-run when their input dirtied. (epoch is never 0, so 0 = "never seen".)
-wcRun: {[w;filt;i;arch;watch;sys] arch2:ecsRun[arch;sys]; w2:@[w;`archs;:;@[w`archs;i;:;arch2]]; filt2:@[filt;i;:;epoch arch2 watch]; (w2;filt2)}
-wcStep: {[acc;i;watch;sys] w:acc 0; filt:acc 1; arch:(w`archs)i; cur:epoch arch watch; prev:$[i in !filt; dget[filt;i]; 0]; $[cur=prev; acc; wcRun[w;filt;i;arch;watch;sys]]}
+wcRun: {[w;filt;i;arch;watch;sys]
+  arch2:ecsRun[arch;sys];
+  w2:@[w;`archs;:;@[w`archs;i;:;arch2]];
+  filt2:@[filt;i;:;epoch arch2 watch];
+  (w2;filt2)
+}
+wcStep: {[acc;i;watch;sys]
+  w:acc 0; filt:acc 1;
+  arch:(w`archs)i;
+  cur:epoch arch watch;
+  prev:$[i in !filt; dget[filt;i]; 0];
+  $[cur=prev; acc; wcRun[w;filt;i;arch;watch;sys]]
+}
 worldQueryChanged: {[w;filt;comps;watch;sys]
   csig: ecsCanon comps
   m:    {[csig;s]worldMatch[csig;s]}[csig]'w`sigs
-  (w;filt){[watch;sys;acc;i] wcStep[acc;i;watch;sys]}[watch;sys]/&m}
+  (w;filt){[watch;sys;acc;i] wcStep[acc;i;watch;sys]}[watch;sys]/&m
+}
 
 / ── GPU compute offload of archetype columns ────────────────────────────────────
 / Requires lib/gpu.k + lib/spirv.k loaded, and must run inside a gpuRun frame
@@ -241,4 +276,5 @@ ecsOffload2: {[a;out;c1;c2;shader] @[a;out;:;RunShader2[shader; a c1; a c2]]}
 ecsPropagate: {[par;local]
   ord:  <depth par
   prop: {[par;w;i] $[(par i)=i; w; @[w;i;:;((w i)+(w par i))]]}[par]
-  local prop/ ord}
+  local prop/ ord
+}
