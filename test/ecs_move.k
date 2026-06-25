@@ -7,12 +7,12 @@
 / Two archetypes for the same entities, distinguished by their component set:
 /   Static : id, px, py            (a placed thing)
 /   Moving : id, px, py, vx, vy    (Static + a Velocity component)
-Static:: ecsArch `id`px`py!(0;0.;0.)
-Moving:: ecsArch `id`px`py`vx`vy!(0;0.;0.;0.;0.)
+Static:: Archetype `id`px`py!(0;0.;0.)
+Moving:: Archetype `id`px`py`vx`vy!(0;0.;0.;0.;0.)
 
 / spawn entity `e in Static
 e:: ecsId[]
-Static:: ecsSpawn[Static; `id`px`py!(e; 3.; 4.)]
+Static:: aPush[Static; `id`px`py!(e; 3.; 4.)]
 `0 0: "spawned in Static:"
 `0 0: $Static
 
@@ -27,7 +27,7 @@ Moving:: r 1
 / run a movement system on Moving (whole-column)
 sysMove: {[a] a:@[a;`px;:;(a`px)+a`vx]; @[a;`py;:;(a`py)+a`vy]}
 sysMove: {[a] a:@[a;`px`py;:;((a`px)+a`vx;(a`py)+a`vy)];
-Moving:: ecsRun[Moving; sysMove]
+Moving:: Tick[Moving; sysMove]
 `0 0: "after sysMove on Moving (px+=vx, py+=vy):"
 `0 0: $Moving
 

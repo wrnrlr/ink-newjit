@@ -320,13 +320,32 @@ pub const Compiler = struct {
     //   d[i;j]:v    →  d : .[d;(i;j);:;v]   (multi-index → drill)
     // Works for any indexable: dicts (adds/replaces a key), lists and vectors.
     if (b.v.* == .apply and b.a != null) {
-      const ap = b.v.apply;
-      // Only `name[idx...]:v` (target is a plain variable) is assignable.
-      if (ap.f.* != .literal or ap.f.literal != .@"var") return error.UnsupportedAssignment;
-      const seq: ast.Seq = ap.a orelse &.{};
+      // Indexed-lvalue assignment is sugar for amend. The lvalue may be a CHAIN of
+      // single indexes — `name[i][j]:v` — which we flatten into the base variable plus
+      // the full index path, so it drills exactly like the multi-index form `d[i;j]:v`
+      // (one in-place `.` amend, never materializing the intermediate containers).
+      var seqs: std.ArrayList(ast.Seq) = .empty;
+      defer seqs.deinit(self.alloc);
+      var node: *ast.Node = b.v;
+      while (node.* == .apply) {
+        try seqs.append(self.alloc, node.apply.a orelse &.{});
+        node = node.apply.f;
+      }
+      // Only `name[idx...]:v` (the chain bottoms out at a plain variable) is assignable.
+      if (node.* != .literal or node.literal != .@"var") return error.UnsupportedAssignment;
+      const base_node = node;
+      // The walk collected index groups outermost-first; flatten them base-outward.
+      var path: std.ArrayList(*ast.Node) = .empty;
+      defer path.deinit(self.alloc);
+      var gi: usize = seqs.items.len;
+      while (gi > 0) {
+        gi -= 1;
+        for (seqs.items[gi]) |idx| try path.append(self.alloc, idx);
+      }
+      const seq: ast.Seq = path.items;
       if (seq.len == 0) {
         // `d[]:v` / `d[]op:v` → whole-value (re)assign `d:v` / `d:d op v`.
-        return try self.compileBind(.{ .v = ap.f, .f = b.f, .a = b.a });
+        return try self.compileBind(.{ .v = base_node, .f = b.f, .a = b.a });
       }
       const amend_fn: ast.Op = if (b.f) |op| (if (std.mem.eql(u8, op, ":")) ":" else op) else ":";
       const verb_str: ast.Op = if (seq.len == 1) "@" else ".";
@@ -334,7 +353,7 @@ pub const Compiler = struct {
       var fn_node = ast.Node{ .op = amend_fn };
       var list_node = ast.Node{ .list = .{ .seq = seq } };
       const index_node: *ast.Node = if (seq.len == 1) seq[0] else &list_node;
-      var apply_seq = [_]*ast.Node{ ap.f, index_node, &fn_node, b.a.? };
+      var apply_seq = [_]*ast.Node{ base_node, index_node, &fn_node, b.a.? };
       var apply_node = ast.Node{ .apply = .{ .f = &amend_verb, .a = apply_seq[0..] } };
       // Preserve global-vs-local target. `name[i]::v` / `name[i]op::v` arrive with
       // b.a wrapped in `.right` (the second colon) — the same marker plain global
@@ -343,7 +362,7 @@ pub const Compiler = struct {
       const is_global = b.a.?.* == .right;
       var right_node = ast.Node{ .right = .{ .clause = &apply_node } };
       const write_a: *ast.Node = if (is_global) &right_node else &apply_node;
-      return try self.compileBind(.{ .v = ap.f, .f = null, .a = write_a });
+      return try self.compileBind(.{ .v = base_node, .f = null, .a = write_a });
     }
 
     const rhs_id: ir.ValueId = if (b.a) |rhs| blk: {

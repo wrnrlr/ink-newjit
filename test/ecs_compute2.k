@@ -8,11 +8,11 @@
 2: "lib/ecs.k"
 
 / archetype: id + 2D position + 2D velocity
-Movers:: ecsArch `id`px`py`vx`vy!(0;0.;0.;0.;0.)
-Movers:: ecsSpawn[Movers; `id`px`py`vx`vy!(0; 0.; 0.; 1.; 10.)]
-Movers:: ecsSpawn[Movers; `id`px`py`vx`vy!(1; 0.; 0.; 2.; 20.)]
-Movers:: ecsSpawn[Movers; `id`px`py`vx`vy!(2; 0.; 0.; 3.; 30.)]
-Movers:: ecsSpawn[Movers; `id`px`py`vx`vy!(3; 0.; 0.; 4.; 40.)]
+Movers:: Archetype `id`px`py`vx`vy!(0;0.;0.;0.;0.)
+Movers:: aPush[Movers; `id`px`py`vx`vy!(0; 0.; 0.; 1.; 10.)]
+Movers:: aPush[Movers; `id`px`py`vx`vy!(1; 0.; 0.; 2.; 20.)]
+Movers:: aPush[Movers; `id`px`py`vx`vy!(2; 0.; 0.; 3.; 30.)]
+Movers:: aPush[Movers; `id`px`py`vx`vy!(3; 0.; 0.; 4.; 40.)]
 
 / two-input integration kernels (dt = 0.5), compiled to SPIR-V once
 moveX: {[px;vx] px + vx*0.5}

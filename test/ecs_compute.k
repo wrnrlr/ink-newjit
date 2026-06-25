@@ -8,11 +8,11 @@
 2: "lib/ecs.k"
 
 / archetype: id + x-position + y-velocity
-Movers:: ecsArch `id`px`vy!(0;0.;0.)
-Movers:: ecsSpawn[Movers; `id`px`vy!(0; 10.; 1.)]
-Movers:: ecsSpawn[Movers; `id`px`vy!(1; 20.; 2.)]
-Movers:: ecsSpawn[Movers; `id`px`vy!(2; 30.; 3.)]
-Movers:: ecsSpawn[Movers; `id`px`vy!(3; 40.; 4.)]
+Movers:: Archetype `id`px`vy!(0;0.;0.)
+Movers:: aPush[Movers; `id`px`vy!(0; 10.; 1.)]
+Movers:: aPush[Movers; `id`px`vy!(1; 20.; 2.)]
+Movers:: aPush[Movers; `id`px`vy!(2; 30.; 3.)]
+Movers:: aPush[Movers; `id`px`vy!(3; 40.; 4.)]
 
 / element-wise kernels (constants baked in) — compiled to SPIR-V once
 gravK: {[vy] vy + (-0.5)}        / gravity: vy += -0.5 per step

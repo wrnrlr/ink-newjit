@@ -32,7 +32,13 @@ The library has a low layer (manipulate archetypes directly) and a high layer
 | Layer | Hold state as | Component add/remove | Use when |
 |---|---|---|---|
 | **Archetype** | each archetype is its own global (`Movers::`, `Statics::`) | name src+dst archetypes explicitly (`ecsMove`/`ecsAddComp`) | few fixed archetypes, full control |
-| **World** | one `world` dict threaded with `::` | auto-routed by signature (`addComponent`/`removeComponent`) | many archetypes, dynamic component sets |
+| **World** | the **singleton global `wld`**, mutated in place via `::` (no threading) | auto-routed by signature (`Endow`/`Divest`) | many archetypes, dynamic component sets |
+
+There is **one world per application** (`World[reg]` creates it; everything else reads
+and writes the global `wld`). World verbs take no `w` parameter and return only their
+result (an eid, a count) — never a new world to rebind. They mutate `wld` through deep
+in-place writes (`wld[\`archs][i]:: …`), which drill to the target slot without copying
+the archetype list — the reason a singleton is faster than threading a world value.
 
 Cross-cutting facilities (sparse-set side-tables, command buffer, stage
 scheduler, dependency ordering, hierarchy, change detection, GPU offload) work
@@ -52,11 +58,11 @@ movers: `id`px`py`vx`vy!(0 1 2; 0. 1. 2.; 0. 0. 0.; 1. 1. 1.; 0. 0. 0.)
 
 ## 4. API reference (`lib/ecs.k`)
 
-### Archetype storage
+### Archetype primitives (low layer — operate on a single archetype value)
 ```
 ecsId[]                fresh monotonic entity id
-ecsArch[proto]         empty archetype from a prototype row (col -> sample value); include `id
-ecsSpawn[a;row]        append one entity (row = full column dict incl id) -> archetype
+Archetype[proto]       empty archetype from a prototype row (col -> sample value); include `id
+aPush[a;row]           append one entity (row = full column dict incl id) -> archetype  (internal: use World's Spawn)
 ecsWhere[a;mask]       sub-archetype of rows where boolean mask is true
 ecsKill[a;eid]         remove the entity with id = eid
 ecsCount[a]            number of live entities
@@ -71,14 +77,16 @@ ecsRemoveComp[src;dst;eid]  move to the sparser archetype (dropped fields vanish
 ```
 
 ### Sparse-set side-tables (rare / optional / churny components)
-A sparse component is a dict `entityId!value` — cheap add/remove, **no archetype
-move**. Use for components few entities have or whose membership changes often.
+A sparse component is *just* a dict `entityId!value` — cheap add/remove, **no archetype
+move**. Use for components few entities have or whose membership changes often. There
+is no sparse-set type or constructor: the language is the API for the obvious ops, and
+only the non-obvious reads get helpers.
 ```
-ssetNew[]                  empty sparse set
-ssetSet[s;eid;v]           add/update an entity's value
-ssetDel[s;eid]             remove an entity
-ssetHas[s;eid]             membership
-ssetGet[s;eid;dflt]        value or default
+()!()  /  []               empty sparse set
+@[s;eid;:;v]  /  s[eid]::v  add/update an entity's value (amend; ::-form for a global)
+eid _ s                    remove an entity
+eid in !s                  membership
+ssetGet[s;eid;dflt]        value or default (int-keyed @ is positional, so this finds)
 ssetMask[a;s]              boolean mask over a's rows: which have the component
 ssetAlign[a;s;dflt]        the sparse value as a column aligned to a's rows (default-filled)
 ```
@@ -87,15 +95,16 @@ ssetAlign[a;s;dflt]        the sparse value as a column aligned to a's rows (def
 
 ### Systems & scheduling
 ```
-ecsRun[a;systems]          run a single system (bare) or a list, left to right
+Tick[a;systems]            thread an archetype through a system (bare) or a list, left to right
 schedRun[sched;a]          run a schedule (dict stageName!systems, in key order), flushing the
                            command buffer at each stage boundary
 ecsRunDeps[a;specs]        run systems in dependency order (specs = (name;fn;after)); topo-sorted
 ecsDepOrder[specs]         resolved system names (inspect; short result = a cycle dropped systems)
 ```
-A system is a function `archetype -> archetype`. Pass one bare (`ecsRun[a;
-sysMove]`) or a list (`ecsRun[a; (sysMove;sysGrav)]`); a 1-element enlist
-(`,sysMove`) is fine too.
+A system is a function `archetype -> archetype`. `Tick` is just the pipeline fold
+`a{y x}/systems`: pass one bare (`Tick[a; sysMove]`) or a list (`Tick[a;
+(sysMove;sysGrav)]`); a 1-element enlist (`,sysMove`) is fine too. (World-level `Query`
+/`Apply`/`Watch` run systems across archetypes and call `Tick` per archetype.)
 
 ### Command buffer (deferred structural change)
 Systems must not add/remove rows mid-frame (it invalidates indices and hierarchy
@@ -111,39 +120,42 @@ A scene/UI hierarchy is a flat **parent-index column** `par` (self-loop roots,
 `par[r]=r`). The `depth` builtin gives per-node depth; propagation processes
 nodes in `<depth par` order (parents before children).
 ```
-ecsPropagate[par;local]    additive transform propagation: world[i] = local[i] + world[par[i]]
+Cascade[par;local]         additive transform propagation: world[i] = local[i] + world[par[i]]
 ```
 For 4×4 transforms, swap `+` for matrix-compose and gather the parent matrix.
 
-### World (auto-routing registry)
-A `world` is a dict `[reg; sigs; archs; loc]`: a component registry (name ->
-field-prototype dict), a parallel list of canonical component-sets and their
-archetypes, and an entity->archetype index. It routes add/remove by signature so
-callers never name src/dst.
+### World (the singleton auto-routing registry)
+There is **one world**, the global `wld` — a dict `[reg; sigs; archs; loc; filt]`: a
+component registry (name -> field-prototype dict), a parallel list of canonical
+component-sets and their archetypes, an entity->archetype index, and per-column change
+state for `Watch`. `World[reg]` creates it; every verb below reads/writes `wld` in
+place (no `w` parameter, nothing to rebind), routing by signature so callers never name
+src/dst.
 ```
-worldNew[reg]                      empty world from a component registry
-worldSpawn[w;comps;vals]           spawn with a component set -> (w; eid)
-addComponent[w;eid;comp;vals]      add a component; entity auto-moves to the richer archetype
-removeComponent[w;eid;comp]        remove a component; auto-moves to the sparser archetype
-worldArch[w;comps]                 the archetype for a component set (empty if absent)
-worldApply[w;comps;sys]            run a system on one archetype, write it back
-worldCount[w;comps]                live entity count for a component set
+World[reg]                 (re)create the singleton world from a component registry
+Spawn[comps;vals]          spawn an entity with a component set -> eid
+Despawn[eid]               remove an entity entirely
+Endow[eid;comp;vals]       add a component; entity auto-moves to the richer archetype
+Divest[eid;comp]           remove a component; auto-moves to the sparser archetype
+worldArch[comps]           the archetype for a component set (empty if absent)  — for reading
+worldCount[comps]          live entity count for a component set
+Apply[comps;sys]           run a system on the ONE archetype for exactly comps, in place
 ```
 
 ### Cross-archetype queries
 A query reaches **every archetype whose component set ⊇ the query** — movement
 runs on all moving entities regardless of their other components.
 ```
-worldQuery[w;comps;sys]            run a system on every superset archetype, in place
-worldEach[w;comps;seed;f]          fold a reader over every superset archetype (aggregates)
+Query[comps;sys]                   run a system on every superset archetype, in place
+Survey[comps;seed;f]               fold a reader over every superset archetype (aggregates)
 ```
 
 ### Change-filtered query (Bevy's `Changed<T>`)
-Runs a system only on archetypes whose watched column changed since last time,
-via the `epoch` version stamp. `filt` is per-query state (archetype-index ->
-last-seen epoch); thread it.
+Runs a system only on archetypes whose watched column changed since last time, via the
+`epoch` version stamp. The change state lives **inside the world** (`wld\`filt`, keyed
+by the watched column), so there is nothing to thread.
 ```
-worldQueryChanged[w;filt;comps;watch;sys] -> (w2; filt2)
+Watch[comps;watch;sys]             run sys only on matching archetypes whose `watch column dirtied
 ```
 For consumers (render-prep, derive world transforms) that should re-run only when
 their input dirtied.
@@ -177,6 +189,12 @@ These live in the ink runtime, not the library:
 - **global indexed assign / scatter-add** — `name[i]::v` and `name[i]+::v` write
   back to a global from inside a lambda; `+` accumulates on duplicate indices
   (true scatter-add). (`compiler.zig compileBind`)
+- **deep indexed assign** — `name[k][i]::v` (chained single indexes) flattens to a
+  single drill `.[name;(k;i);:;v]`, amending the leaf in place without materializing
+  the intermediate container. This is what lets the singleton world write one archetype
+  (`wld[\`archs][i]:: …`) without copying the whole `archs` list. The compiler walks the
+  nested-apply lvalue down to its base variable and concatenates the index path.
+  (`compiler.zig compileBind`)
 - **two-input GPU compute** — `gpuCompute2` (binding 0=in1, 1=out, 2=in2),
   `compCompute2`/`ComputeShader2`, `RunShader2`, plus **arity-3 FFI**
   (`ffi_vtable_3`/`call3_fn`). (`lib/gpu/gpu.zig`, `lib/spirv.k`, `lib/gpu.k`,
@@ -192,8 +210,8 @@ These live in the ink runtime, not the library:
 | `test/ecs.k` | archetype storage, spawn/kill, a system, hierarchy `depth`/propagate |
 | `test/ecs_move.k` | component add/remove (archetype move) |
 | `test/ecs_stages.k` | sparse-set join + stage scheduler + command-buffer despawn |
-| `test/ecs_world.k` | auto-routing world: add/remove by signature, archetype reuse |
-| `test/ecs_query.k` | cross-archetype `worldQuery` + `worldEach` aggregate |
+| `test/ecs_world.k` | singleton world: `Spawn`/`Endow`/`Divest`/`Apply` by signature, archetype reuse |
+| `test/ecs_query.k` | cross-archetype `Query` + `Survey` aggregate |
 | `test/ecs_changed.k` | `Changed<T>` filter — skip unchanged archetypes |
 | `test/ecs_deps.k` | intra-stage dependency ordering (topo sort) + cycle detection |
 | `test/ecs_compute.k` | 1-input GPU offload of columns (gravity, damping) |
@@ -259,14 +277,14 @@ detection, GPU offload (1- and 2-input). Ten test files, all green; build clean.
 
 - **Fold `ecsRunDeps` into `schedRun`** — let a stage be given a dependency-spec
   list directly, so ordering is declarative within the normal scheduler.
-- **Multi-column change-watch** — `worldQueryChanged` watches a single column;
+- **Multi-column change-watch** — `Watch` watches a single column;
   generalize to "changed if any of N watched columns moved."
 - **Empty-archetype pruning** — world archetypes accumulate as entities move
   through component sets; prune empties (and compact `sigs`/`archs`/`loc`).
-- **Query caching** — `worldQuery` recomputes the superset match every call;
+- **Query caching** — `Query` recomputes the superset match every call;
   cache the matching archetype indices, invalidated when `sigs` grows.
 - **N-input / cross-archetype compute** — extend compute offload past 2 inputs,
-  and integrate it with `worldQuery` so a hot system offloads across all matching
+  and integrate it with `Query` so a hot system offloads across all matching
   archetypes.
 - **Resources / singletons** — a clean abstraction for Time/Input/Camera instead
   of ad-hoc globals threaded alongside the world.

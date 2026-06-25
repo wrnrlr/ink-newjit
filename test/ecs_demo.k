@@ -15,7 +15,7 @@
 2: "lib/ecs.k"
 
 / ── archetype: particles (id + 2D position, velocity, life) ─────────────────────
-Particles:: ecsArch `id`px`py`vx`vy`life!(0;0.;0.;0.;0.;0.)
+Particles:: Archetype `id`px`py`vx`vy`life!(0;0.;0.;0.;0.;0.)
 
 / ── sim parameters ──────────────────────────────────────────────────────────────
 gDt:: 0.016; gGrav:: 220.
@@ -38,8 +38,11 @@ reap: {[a;h] dead: &(~((a`life)>0.))|((a`py)>h); reapOne[a]'dead; 0}
 
 / ── render: one batched vertex buffer of particle quads ─────────────────────────
 psz:: 6.
-pquad: {[x;y] rect[x-psz; y-psz; 2.*psz; 2.*psz]}
-buildParts: {[a] $[ecsCount a; ,/{[a;i]pquad[(a`px)i;(a`py)i]}[a]'!ecsCount a; !0]}
+/ All particle quads in ONE vectorized pass — no per-entity loop. Build the 24
+/ interleaved vertex columns (6 verts × x,y,u,v) over the whole px/py columns, flip
+/ to per-particle rows, raze to a flat buffer. This is the library's whole thesis:
+/ mesh assembly is a column op, not a `'!n each.
+buildParts: {[a] $[ecsCount a; {[a] px:a`px; py:a`py; n:#px; x0:px-psz; y0:py-psz; x1:px+psz; y1:py+psz; z:n#0.; o:n#1.; ,/+(x0;y0;z;z; x1;y0;o;z; x1;y1;o;o; x0;y0;z;z; x1;y1;o;o; x0;y1;z;o)}a; !0]}
 
 / ── change-detection caches ─────────────────────────────────────────────────────
 gPV:: !0; gPVe:: -1; gBuilds:: 0; gSkips:: 0
@@ -64,7 +67,7 @@ RunWindow[{[props]
   w: props`width; h: props`height
   gFrame:: gFrame+1
   / 1. systems (whole-column updates)
-  Particles:: ecsRun[Particles; (sysGrav;sysMove;sysAge)]
+  Particles:: Tick[Particles; (sysGrav;sysMove;sysAge)]
   / 2. structural change via command buffer, then flush at the boundary
   reap[Particles; h]
   $[(gFrame mod 3)=0; emit[w;h;7]; 0]

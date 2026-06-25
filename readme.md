@@ -28,3 +28,18 @@ Problems:
 a:!9; a[2]:9
 
 d: []
+
+
+
+| now | evocative | plain |
+|---|---|---|
+| `worldSpawn` | **Conjure** | Spawn |
+| `ecsKill`/despawn | **Banish** / Dispel | Despawn |
+| `addComponent` | **Imbue** / Endow | Attach |
+| `removeComponent` | **Strip** / Divest | Detach |
+| `worldQuery` | **Muster** / Scry | Query |
+| `worldEach` | **Survey** | Each |
+| `worldQueryChanged` | **Watch** | — |
+| system run | **Tick** / Step | Run |
+| `ecsPropagate` | **Cascade** | — |
+| `worldNew` | **Genesis** / Realm | World
