@@ -90,7 +90,7 @@ pub const SelectDict = struct {
   pub const op = .@"@";
   _m_s: VM.Dyad = pick.pickDictSymFn,
   _m_S: VM.Dyad = pick.pickDictSymVecFn,
-  _m_i: VM.Dyad = pick.pickAtomFn,
+  _m_i: VM.Dyad = pick.pickDictIntFn,
   _m_I: VM.Dyad = pick.pickVecFn,
 };
 

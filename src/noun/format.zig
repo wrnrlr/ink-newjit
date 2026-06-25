@@ -276,6 +276,16 @@ pub const TerseFormatter = struct {
     const keys = d.av();
     const vals = d.bv();
     const n = keys.len();
+    // A keyed table (utable) is an `m` dict whose keys AND values are tables (M):
+    // print it in the k9 `[[keycols]valcols]` literal form.
+    if (keys.tag() == .M and vals.tag() == .M) {
+      try w.writeAll("[[");
+      try self.formatTableCols(keys.M, w);
+      try w.writeAll("]");
+      try self.formatTableCols(vals.M, w);
+      try w.writeAll("]");
+      return;
+    }
     // Empty dict prints as [] (its literal form); otherwise only symbol keys
     // can use the bracket syntax.
     const can_use_syntax = (n == 0) or (keys.tag() == .S) or (keys.tag() == .s) or (keys.tag() == .L and self.allSymbols(keys.L.slice()));
@@ -297,8 +307,8 @@ pub const TerseFormatter = struct {
     try w.writeAll("]");
   }
 
-  fn formatTable(self: *Self, d: Dict, w: anytype) anyerror!void {
-    try w.writeAll("[[]");
+  // The `col:vals;col:vals` body shared by the table `[[]…]` and utable `[[…]…]` forms.
+  fn formatTableCols(self: *Self, d: Dict, w: anytype) anyerror!void {
     const keys = d.av();
     const vals = d.bv();
     const n = keys.len();
@@ -310,6 +320,11 @@ pub const TerseFormatter = struct {
       defer v.deinit(self.alloc);
       try self.formatValue(v, w);
     }
+  }
+
+  fn formatTable(self: *Self, d: Dict, w: anytype) anyerror!void {
+    try w.writeAll("[[]");
+    try self.formatTableCols(d, w);
     try w.writeAll("]");
   }
 

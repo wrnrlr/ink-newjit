@@ -28,7 +28,9 @@ Archetype: {[proto] (!proto)!{0#x}'.proto}
 / aPush[a;row] — append one entity row to an archetype (the low-level column zip). `row
 / is a dict with a value for every column of `a (incl `id). Returns the new archetype.
 / Internal: callers use the singleton World's Spawn, which routes + assigns id for you.
-aPush: {[a;row] (!a)!{[a;row;k]((a k),row k)}[a;row]'!a}
+aPush: {[a;row]
+  (!a)!{[a;row;k]((a k),row k)}[a;row]'!a
+}
 
 / ecsWhere[a;mask] — the sub-archetype of rows where boolean `mask is true.
 ecsWhere: {[a;mask] m:&mask; (!a)!{[a;m;k](a k)@m}[a;m]'!a}

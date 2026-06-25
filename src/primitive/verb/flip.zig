@@ -24,6 +24,14 @@ fn flipVector(vm: *VM, x: V) V {
   return enlist(vm.alloc, x);
 }
 
+// Enlist an ATOM to a 1-element TYPED vector (e.g. `n → ,`n as S), used for a
+// single-column table's column-name vector so column access by symbol works.
+fn enlistTyped(alloc: Alloc, x: V) V {
+  const n = N(V).init(alloc, 1) catch return V{ .err = .memory };
+  n.slice()[0] = x.ref();
+  return promote(alloc, n);
+}
+
 // Dict → Table (values must be equal-length vectors)
 fn flipDict(vm: *VM, x: V) V {
   const alloc = vm.alloc;
@@ -45,7 +53,9 @@ fn flipDict(vm: *VM, x: V) V {
   var rv = vals.ref();
   if (keys.len() == 1 and !keys.tag().isVec()) {
     rk.deinit(alloc); rv.deinit(alloc);
-    rk = enlist(alloc, keys);
+    // Column NAMES must be a typed vector (S for symbol keys), not a general list,
+    // or table column-access (pickTableCol, which checks .S) silently misses.
+    rk = enlistTyped(alloc, keys);
     rv = enlist(alloc, vals);
   }
   return V{ .M = Dict.init(alloc, rk, rv) catch return V{ .err = .memory } };
@@ -102,7 +112,7 @@ fn flipListAlloc(alloc: Alloc, x: V) V {
     }
     var rk = keys.ref();
     const rv = promote(alloc, res_vals_n);
-    if (scalar_key) { rk.deinit(alloc); rk = enlist(alloc, keys); }
+    if (scalar_key) { rk.deinit(alloc); rk = enlistTyped(alloc, keys); }
     return V{ .M = Dict.init(alloc, rk, rv) catch return V{ .err = .memory } };
   }
   const row_count = slice.len;

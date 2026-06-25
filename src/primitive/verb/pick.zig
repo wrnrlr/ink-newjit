@@ -179,7 +179,15 @@ fn pickMaskTyped(comptime xk: K) VM.Dyad {
 }
 fn pickSymAtomFn(_: *VM, x: V, y: V) V  { return pickSymAtom(x, y.s); }
 fn pickSymVecFn(vm: *VM, x: V, y: V) V  { return pickSymVec(vm.alloc, x, y.S.slice()); }
-pub fn pickDictSymFn(_: *VM, x: V, y: V) V  { return pickDictSym(x.m, y.s); }
+pub fn pickDictSymFn(vm: *VM, x: V, y: V) V  {
+  if (isUTable(x.m)) return pickUTable(vm.alloc, x.m, y);
+  return pickDictSym(x.m, y.s);
+}
+// m@i: a utable keyed by an int column looks the key up; a plain dict indexes positionally.
+pub fn pickDictIntFn(vm: *VM, x: V, y: V) V  {
+  if (isUTable(x.m)) return pickUTable(vm.alloc, x.m, y);
+  return pickAtom(x, y.i);
+}
 pub fn pickDictSymVecFn(vm: *VM, x: V, y: V) V { return pickDictSymVec(vm.alloc, x.m, y.S.slice()); }
 pub fn pickTableRowFn(vm: *VM, x: V, y: V) V  { return pickTableRow(vm.alloc, x.M, y.i); }
 pub fn pickTableRowVecFn(vm: *VM, x: V, y: V) V { return pickTableRowVec(vm.alloc, x, y.I.slice()); }
@@ -249,6 +257,31 @@ fn pickDictSymVec(alloc: Alloc, m: Dict, keys: []const u32) V {
   const res = N(V).init(alloc, keys.len) catch return V{ .err = .memory };
   for (keys, 0..) |s, k| res.slice()[k] = pickDictSym(m, s);
   return promote(alloc, res);
+}
+
+// ── keyed table (utable) lookup: an `m` dict whose keys are a table (M) ──────────
+// u@key finds the row whose (single) key column equals `key and returns its value row.
+pub fn isUTable(m: Dict) bool { return m.av().tag() == .M; }
+
+fn uFindRow(alloc: Alloc, key_table: Dict, key: V) i32 {
+  const cols = key_table.bv();            // list of key columns
+  if (cols.len() == 0) return -1;
+  const col = cols.at(0);                 // single (first) key column
+  defer col.deinit(alloc);
+  const nrows = col.len();
+  var r: usize = 0;
+  while (r < nrows) : (r += 1) {
+    const cell = col.at(r);
+    defer cell.deinit(alloc);
+    if (cell.eq(key)) return @intCast(r);
+  }
+  return -1;
+}
+
+fn pickUTable(alloc: Alloc, u: Dict, key: V) V {
+  const idx = uFindRow(alloc, u.av().M, key);
+  if (idx < 0) return .blank;             // absent key → null
+  return pickTableRow(alloc, u.bv().M, idx);
 }
 
 fn pickTableRow(alloc: Alloc, t: Dict, idx: i32) V {

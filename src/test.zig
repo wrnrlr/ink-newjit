@@ -66,7 +66,7 @@ test "basic syntax" {
   try t.check("[a:1]", "[a:1]");
   try t.check("[a:1;b:2 3]", "[a:1;b:2 3]");
   try t.check("[[]n:`b`c;i:2 3]", "[[]n:`b`c;i:2 3]");
-  // try t.check("[[n:`b`c]i:2 3]", "[[n:`b`c]i:2 3]");
+  try t.check("[[n:`b`c]i:2 3]", "[[n:`b`c]i:2 3]"); // keyed table (utable)
 }
 
 test "parse preserves vector literal values" {
@@ -230,6 +230,26 @@ test "drill" {
   try t.check("u: `name`settings!(`Bob; `theme`vol!(0; 50)); .[u; `settings`vol; +; 10]", "[name:`Bob;settings:[theme:0;vol:60]]");
 }
 
+test "deep indexed assign" {
+  var t = try Tester.init(); defer t.deinit();
+  // A chained single-index lvalue `name[k][i]:v` flattens to one drill .[name;(k;i);:;v],
+  // amending the leaf in place without materializing the intermediate container.
+  try t.check("G:((1 2 3);(4 5 6)); G[1][2]:99; G", "(1 2 3;4 5 99)");
+  // three levels deep
+  try t.check("G:(((1 2 3);(4 5 6));((7 8 9);(0 1 2))); G[0][1][2]:99; G 0", "(1 2 3;4 5 99)");
+  // a dict slot, then a list element inside it
+  try t.check("G:`xs`ys!((1 2 3);(4 5 6)); G[`xs][1]:99; G", "[xs:1 99 3;ys:4 5 6]");
+  // compound op folds into the amend at depth (G[`c][1] += 100)
+  try t.check("G:`c!,1 2 3; G[`c][1]+:100; G", "[c:,1 102 3]");
+  // a deep write EXTENDS a nested dict with a new key (8 absent -> added)
+  try t.check("G:()!(); G[`loc]:7 9!3 5; G[`loc][8]:99; G", "[loc:,7 9 8!3 5 99]");
+  // the global form `::` works from inside a lambda (no closure over G)
+  try t.check("G::((1 2 3);(4 5 6)); {G[1][2]::99}[]; G", "(1 2 3;4 5 99)");
+  // regressions: single-level and the semicolon multi-index drill are unaffected
+  try t.check("G:`x`y!(1;2); G[`x]:9; G", "[x:9;y:2]");
+  try t.check("G:((1 2 3);(4 5 6)); G[1;2]:99; G", "(1 2 3;4 5 99)");
+}
+
 // Variadics
 test "lambda" {
   var t = try Tester.init(); defer t.deinit();
@@ -384,6 +404,28 @@ test "flip dict & table" {
   try t.check("+`a`b!(1 2;3 4)", "[[]a:1 2;b:3 4]");
   try t.check("+([a:1 2;b:3 4])", "[[]a:1 2;b:3 4]");
   try t.check("+([[]a:1 2;b:3 4])", "[a:1 2;b:3 4]");
+}
+test "single-column table column access" {
+  // A 1-column table's column names must be a typed S vector (not L), so column
+  // access by symbol works the same as a multi-column table.
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("@!([[]n:`b`c])", "`S");
+  try t.check("t:[[]n:`b`c]; t`n", "`b`c");
+  try t.check("t:[[]id:1 2 3]; t`id", "1 2 3");
+}
+test "utable (keyed table)" {
+  var t = try Tester.init(); defer t.deinit();
+  // construction + round-trip formatting; a keyed table is a dict (m) of rows
+  try t.check("[[n:`b`c]i:2 3]", "[[n:`b`c]i:2 3]");
+  try t.check("@[[n:`b`c]i:2 3]", "`m");
+  try t.check("#[[n:`b`c]i:2 3]", "2");
+  try t.check("@!([[n:`b`c]i:2 3])", "`M");        // keys are a table
+  // index by key -> value row; absent key -> null
+  try t.check("u:[[n:`b`c]i:2 3]; u@`c", "[i:,3]");
+  try t.check("u:[[id:1 2 3]px:10. 20. 30.]; u@2", "[px:,20.0]");
+  // upsert: insert a new key, then replace an existing key's value row
+  try t.check("[[id:1 2]px:10. 20.],`id`px!(3;30.)", "[[id:1 2 3]px:10.0 20.0 30.0]");
+  try t.check("[[id:1 2]px:10. 20.],`id`px!(2;99.)", "[[id:1 2]px:10.0 99.0]");
 }
 test "nulls verb" {
   var t = try Tester.init(); defer t.deinit();

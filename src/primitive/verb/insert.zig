@@ -41,6 +41,64 @@ fn insert(vm: *VM, t: V, d: V) V {
   return .{ .M = Dict.init(vm.alloc, t_cols.ref(), .{ .L = new_data }) catch return V{ .err = .memory } };
 }
 
+// u , dict — upsert a row dict into a keyed table (utable). The dict must carry the
+// key column's value; if a row with that key exists its value columns are replaced,
+// otherwise a new row is appended. Single key column only (returns !rank otherwise).
+pub fn upsert(vm: *VM, u: V, d: V) V {
+  const alloc = vm.alloc;
+  const key_tbl = u.m.av();                       // M: key columns
+  const val_tbl = u.m.bv();                       // M: value columns
+  const key_names = key_tbl.M.av();
+  const key_data = key_tbl.M.bv();
+  const val_names = val_tbl.M.av();
+  const val_data = val_tbl.M.bv();
+  if (key_names.len() != 1) return V{ .err = .rank };
+  const key_name = key_names.at(0);
+  defer key_name.deinit(alloc);
+  const key_val = findDictVal(d.m, key_name) orelse return V{ .err = .length };
+  defer key_val.deinit(alloc);
+  const key_col = key_data.at(0);
+  defer key_col.deinit(alloc);
+
+  // locate an existing row with this key
+  var found: ?usize = null;
+  for (0..key_col.len()) |r| {
+    const cell = key_col.at(r);
+    defer cell.deinit(alloc);
+    if (cell.eq(key_val)) { found = r; break; }
+  }
+
+  // rebuild the value columns (replace at row, or append a new row)
+  const nval = val_names.len();
+  const new_val_data = N(V).init(alloc, nval) catch return V{ .err = .memory };
+  @memset(new_val_data.slice(), .blank);
+  for (0..nval) |ci| {
+    const cn = val_names.at(ci);
+    defer cn.deinit(alloc);
+    const col = val_data.at(ci);
+    defer col.deinit(alloc);
+    const dv = findDictVal(d.m, cn);
+    defer if (dv) |v| v.deinit(alloc);
+    if (found) |row| {
+      new_val_data.slice()[ci] = if (dv) |v| replaceInCol(alloc, col, row, v) else col.ref();
+    } else if (dv) |v| {
+      new_val_data.slice()[ci] = appendToCol(alloc, col, v);
+    } else {
+      new_val_data.deinit(alloc);
+      return .{ .err = .length };
+    }
+  }
+  const new_val_tbl = V{ .M = Dict.init(alloc, val_names.ref(), .{ .L = new_val_data }) catch return V{ .err = .memory } };
+
+  // key table is unchanged on replace; on insert the key column gains a row
+  const new_key_tbl = if (found != null) key_tbl.ref() else blk: {
+    const nk = N(V).init(alloc, 1) catch return V{ .err = .memory };
+    nk.slice()[0] = appendToCol(alloc, key_col, key_val);
+    break :blk V{ .M = Dict.init(alloc, key_names.ref(), .{ .L = nk }) catch return V{ .err = .memory } };
+  };
+  return .{ .m = Dict.init(alloc, new_key_tbl, new_val_tbl) catch return V{ .err = .memory } };
+}
+
 // Return value in dict d for key matching col_name, or null if not found.
 // Returns a retained reference (caller must deinit).
 fn findDictVal(d: Dict, col_name: V) ?V {

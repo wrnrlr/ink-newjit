@@ -7,7 +7,10 @@ const K = @import("../../noun/class.zig").K;
 const Op2 = @import("../../noun/operator.zig").Op2;
 const h = @import("helper.zig");
 
-const key_types = [_]K{ .b, .i, .f, .s, .c, .B, .I, .F, .S, .C, .L };
+// .M as a key type makes `keyTable ! valTable` build a KEYED TABLE (utable): an `m`
+// dict whose keys are an M (the key columns) and whose values are an M (the payload
+// columns), with row count = ptr.len. This is the k9 utable `[[k]v]` representation.
+const key_types = [_]K{ .b, .i, .f, .s, .c, .B, .I, .F, .S, .C, .L, .M };
 const val_types = [_]K{ .b, .i, .f, .s, .c, .B, .I, .F, .S, .C, .L, .m, .M };
 
 fn pairHandler(comptime xk: K, comptime yk: K) VM.Dyad {
