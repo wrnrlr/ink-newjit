@@ -180,7 +180,13 @@ fn pickMaskTyped(comptime xk: K) VM.Dyad {
 fn pickSymAtomFn(_: *VM, x: V, y: V) V  { return pickSymAtom(x, y.s); }
 fn pickSymVecFn(vm: *VM, x: V, y: V) V  { return pickSymVec(vm.alloc, x, y.S.slice()); }
 pub fn pickDictSymFn(vm: *VM, x: V, y: V) V  {
-  if (isUTable(x.m)) return pickUTable(vm.alloc, x.m, y);
+  if (isUTable(x.m)) {
+    // u@`col: a value-column name reads that whole column (so a system can do u`px);
+    // any other symbol falls through to a key lookup (e.g. a symbol-keyed utable).
+    const col = pickTableCol(x.m.bv().M, y.s);
+    if (col.tag() != .blank) return col;
+    return pickUTable(vm.alloc, x.m, y);
+  }
   return pickDictSym(x.m, y.s);
 }
 // m@i: a utable keyed by an int column looks the key up; a plain dict indexes positionally.
@@ -332,14 +338,12 @@ fn pickTableCol(t: Dict, s: u32) V {
   return .blank;
 }
 
+// t`a`b → the selected columns as a LIST (one per name), the same shape a dict gives for
+// m`a`b. This makes column arithmetic positional — `(t`px`py)+t`vx`vy` pairs px with vx —
+// and round-trips with the multi-column amend `t[`px`py]:vals`. (A sub-TABLE projection is
+// `\`a\`b#t`.)
 fn pickTableColVec(alloc: Alloc, x: V, keys: []const u32) V {
-  const n = keys.len;
-  const res_keys = N(u32).init(alloc, n) catch return V{ .err = .memory };
-  const res_vals = N(V).init(alloc, n) catch return V{ .err = .memory };
-  for (keys, 0..) |s, k| {
-    res_keys.slice()[k] = s;
-    res_vals.slice()[k] = pickTableCol(x.M, s);
-  }
-  const dict = Dict.init(alloc, .{ .S = res_keys }, promote(alloc, res_vals)) catch return V{ .err = .memory };
-  return V{ .M = dict };
+  const res_vals = N(V).init(alloc, keys.len) catch return V{ .err = .memory };
+  for (keys, 0..) |s, k| res_vals.slice()[k] = pickTableCol(x.M, s);
+  return promote(alloc, res_vals);
 }

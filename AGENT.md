@@ -212,6 +212,10 @@ For example the `\` can be either a fold with a dyadic verb `F` or a converge wi
 - `\:`: Eachleft
 Some adverbs are digrams, like While `f f/` and Stencil `i f'`, they have 2 left-hand arguments.
 
+## Tables, Queries & Joins
+- Create table `` [[]id:1 2 3; age:20 43 7] ``
+- Created keyes table `` [[]id:1 2 3; age:20 43 7] ``
+
 ## Special Symbols
 - Arguments `` `argv[] `` - list of cmd-line args (also in global `x`)
 - Environment variables `` `env[] `` - dict of env variables

@@ -8,11 +8,11 @@
 2: "lib/ecs.k"
 
 / archetype: id + x-position + y-velocity
-Movers:: Archetype `id`px`vy!(0;0.;0.)
-Movers:: aPush[Movers; `id`px`vy!(0; 10.; 1.)]
-Movers:: aPush[Movers; `id`px`vy!(1; 20.; 2.)]
-Movers:: aPush[Movers; `id`px`vy!(2; 30.; 3.)]
-Movers:: aPush[Movers; `id`px`vy!(3; 40.; 4.)]
+Particle:: Archetype `id`px`vy!(0;0.;0.)
+Particle:: aPush[Particle; `id`px`vy!(0; 10.; 1.)]
+Particle:: aPush[Particle; `id`px`vy!(1; 20.; 2.)]
+Particle:: aPush[Particle; `id`px`vy!(2; 30.; 3.)]
+Particle:: aPush[Particle; `id`px`vy!(3; 40.; 4.)]
 
 / element-wise kernels (constants baked in) — compiled to SPIR-V once
 gravK: {[vy] vy + (-0.5)}        / gravity: vy += -0.5 per step
@@ -24,18 +24,18 @@ runOnce: {[]
   gGrav:: ComputeShader gravK
   gDamp:: ComputeShader dampK
   `0 0: "before  — vy / px:"
-  `0 0: $Movers`vy
-  `0 0: $Movers`px
+  `0 0: $Particle`vy
+  `0 0: $Particle`px
 
   / offload BOTH columns to the GPU in one call (ecsOffloadAll), 3 steps
-  Movers:: ecsOffloadAll[Movers; `vy`px; (gGrav;gDamp)]
-  Movers:: ecsOffloadAll[Movers; `vy`px; (gGrav;gDamp)]
-  Movers:: ecsOffloadAll[Movers; `vy`px; (gGrav;gDamp)]
+  Particle:: ecsOffloadAll[Particle; `vy`px; (gGrav;gDamp)]
+  Particle:: ecsOffloadAll[Particle; `vy`px; (gGrav;gDamp)]
+  Particle:: ecsOffloadAll[Particle; `vy`px; (gGrav;gDamp)]
 
   `0 0: "after 3 GPU steps — vy (expect -0.5 0.5 1.5 2.5):"
-  `0 0: $Movers`vy
+  `0 0: $Particle`vy
   `0 0: "after 3 GPU steps — px (expect 10/20/30/40 * 0.9^3 = 7.29 14.58 21.87 29.16):"
-  `0 0: $Movers`px
+  `0 0: $Particle`px
 
   / CPU cross-check of the velocity column
   `0 0: "CPU vy (vy - 1.5):"

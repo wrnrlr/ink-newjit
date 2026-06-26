@@ -7,6 +7,14 @@ const K = @import("../noun/class.zig").K;
 const N = @import("../noun/array.zig").N;
 const VM = @import("../runtime/vm.zig").VM;
 const Call = @import("../runtime/call.zig").Call;
+const Dict = @import("../noun/dict.zig").Dict;
+const insert = @import("verb/insert.zig");
+
+// A dict (m) and a table (M) share the same Dict payload, so amend-by-key works for
+// both — for a table the "keys" are column names, so amending a key replaces a column.
+// The active union tag must NOT be assumed to be `.m`: accessing `.m` on an `.M` value
+// is the wrong union field (a crash). This reads the Dict for whichever tag is active.
+inline fn dictOf(v: V) Dict { return switch (v) { .m, .M => |d| d, else => unreachable }; }
 
 fn Amend3Vec(comptime k: K) type {
   const rt = k.atom();
@@ -197,11 +205,58 @@ fn amendMap(vm: *VM, a_in: V, indices: V, f: V, b: V) V {
   return a;
 }
 
+fn symInVec(names: V, s: u32) bool {
+  if (names.tag() == .S) { for (names.S.slice()) |k| if (k == s) return true; }
+  else if (names.tag() == .s) return names.s == s;
+  return false;
+}
+
+// `@[u; keyval; :; valrow]` — upsert by key. Build the full row dict (keyName!keyval),valrow
+// and upsert into u (replace the entity's value columns, or append a new row). Only the
+// assign form with a dict value row is supported — this backs `u[keyval]:valrow`.
+fn amendUTableByKey(vm: *VM, u: V, args: []V) V {
+  const alloc = vm.alloc;
+  if (args.len != 4 or !isAssign(args[2]) or args[3].tag() != .m) return .{ .err = .@"type" };
+  const key_names = u.m.av().M.av();
+  if (key_names.len() != 1) return .{ .err = .rank };       // single key column only
+  const valrow = args[3];
+  const vk = valrow.m.av();
+  const vv = valrow.m.bv();
+  const n = vk.len() + 1;
+  const rk = N(V).init(alloc, n) catch return V{ .err = .memory };
+  const rv = N(V).init(alloc, n) catch return V{ .err = .memory };
+  rk.slice()[0] = key_names.at(0);                          // key column name (symbol)
+  rv.slice()[0] = args[1].ref();                            // the key value
+  for (0..vk.len()) |i| { rk.slice()[1 + i] = vk.at(i); rv.slice()[1 + i] = vv.at(i); }
+  const row = V{ .m = Dict.init(alloc, promote(alloc, rk), .{ .L = rv }) catch return V{ .err = .memory } };
+  defer row.deinit(alloc);
+  return insert.upsert(vm, u, row);
+}
+
 pub fn amend(vm: *VM, args: []V) V {
   if (args.len < 3) return .{ .err = .rank };
   var a = args[0];
   const at = a.tag();
   if (!a.isVec() and !a.isDict() and at != .L) return .{ .err = .@"type" };
+
+  // A keyed table (utable) is an `m` whose keys/values are tables (M). Two amend modes:
+  //  • `@[u;`valcol;:;newcol]` — a value-COLUMN name updates that column of the value table
+  //    (a whole-column system), keeping the key table.
+  //  • `@[u;keyval;:;valrow]` — any other index is a KEY value: UPSERT the row (replace the
+  //    entity's value columns, or append it). This is what `u[keyval]:valrow` lowers to.
+  if (at == .m and a.m.av().tag() == .M) {
+    const ix = args[1];
+    if (ix.tag() == .s and symInVec(a.m.bv().M.av(), ix.s)) {
+      var sub: [4]V = undefined;
+      sub[0] = a.m.bv();               // value table M (amend refs + cows it internally)
+      for (1..args.len) |i| sub[i] = args[i];
+      const new_val = amend(vm, sub[0..args.len]);
+      if (new_val.tag() == .err) return new_val;
+      const key_t = a.m.av().ref();
+      return .{ .m = Dict.init(vm.alloc, key_t, new_val) catch return V{ .err = .memory } };
+    }
+    return amendUTableByKey(vm, a, args);
+  }
 
   a = a.ref();
   a.cow(vm.alloc) catch {
@@ -297,7 +352,7 @@ fn drill(vm: *VM, target: *V, path: V, path_idx: usize, func: V, val: V) !void {
   defer key.deinit(vm.alloc);
 
   var item = if (target.isDict()) blk: {
-    const d = target.m;
+    const d = dictOf(target.*);
     var found_idx: ?usize = null;
     const dav = d.av();
     for (0..dav.len()) |i| {
@@ -339,7 +394,7 @@ fn applyAt(vm: *VM, target: *V, key: V, func: V, val: V) !void {
   }
 
   const current = if (target.isDict()) blk: {
-    const d = target.m;
+    const d = dictOf(target.*);
     var found_idx: ?usize = null;
     const dav = d.av();
     for (0..dav.len()) |i| {
@@ -374,7 +429,7 @@ pub fn setAt(vm: *VM, target: *V, key: V, val: V) !void {
   errdefer val.deinit(vm.alloc);
 
   if (target.isDict()) {
-    const d = target.m;
+    const d = dictOf(target.*);
     var found_idx: ?usize = null;
     const dav = d.av();
     for (0..dav.len()) |i| {

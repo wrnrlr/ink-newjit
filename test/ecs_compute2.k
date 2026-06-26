@@ -8,11 +8,11 @@
 2: "lib/ecs.k"
 
 / archetype: id + 2D position + 2D velocity
-Movers:: Archetype `id`px`py`vx`vy!(0;0.;0.;0.;0.)
-Movers:: aPush[Movers; `id`px`py`vx`vy!(0; 0.; 0.; 1.; 10.)]
-Movers:: aPush[Movers; `id`px`py`vx`vy!(1; 0.; 0.; 2.; 20.)]
-Movers:: aPush[Movers; `id`px`py`vx`vy!(2; 0.; 0.; 3.; 30.)]
-Movers:: aPush[Movers; `id`px`py`vx`vy!(3; 0.; 0.; 4.; 40.)]
+Particle:: Archetype `id`px`py`vx`vy!(0;0.;0.;0.;0.)
+Particle:: aPush[Particle; `id`px`py`vx`vy!(0; 0.; 0.; 1.; 10.)]
+Particle:: aPush[Particle; `id`px`py`vx`vy!(1; 0.; 0.; 2.; 20.)]
+Particle:: aPush[Particle; `id`px`py`vx`vy!(2; 0.; 0.; 3.; 30.)]
+Particle:: aPush[Particle; `id`px`py`vx`vy!(3; 0.; 0.; 4.; 40.)]
 
 / two-input integration kernels (dt = 0.5), compiled to SPIR-V once
 moveX: {[px;vx] px + vx*0.5}
@@ -24,21 +24,21 @@ runOnce: {[]
   gMX:: ComputeShader2 moveX
   gMY:: ComputeShader2 moveY
   `0 0: "before — px / py:"
-  `0 0: $Movers`px
-  `0 0: $Movers`py
+  `0 0: $Particle`px
+  `0 0: $Particle`py
 
   / integrate position from velocity, 3 steps, all on the GPU
-  Movers:: ecsOffload2[Movers; `px; `px; `vx; gMX]
-  Movers:: ecsOffload2[Movers; `py; `py; `vy; gMY]
-  Movers:: ecsOffload2[Movers; `px; `px; `vx; gMX]
-  Movers:: ecsOffload2[Movers; `py; `py; `vy; gMY]
-  Movers:: ecsOffload2[Movers; `px; `px; `vx; gMX]
-  Movers:: ecsOffload2[Movers; `py; `py; `vy; gMY]
+  Particle:: ecsOffload2[Particle; `px; `px; `vx; gMX]
+  Particle:: ecsOffload2[Particle; `py; `py; `vy; gMY]
+  Particle:: ecsOffload2[Particle; `px; `px; `vx; gMX]
+  Particle:: ecsOffload2[Particle; `py; `py; `vy; gMY]
+  Particle:: ecsOffload2[Particle; `px; `px; `vx; gMX]
+  Particle:: ecsOffload2[Particle; `py; `py; `vy; gMY]
 
   `0 0: "after 3 GPU steps — px (expect vx*1.5 = 1.5 3 4.5 6):"
-  `0 0: $Movers`px
+  `0 0: $Particle`px
   `0 0: "after 3 GPU steps — py (expect vy*1.5 = 15 30 45 60):"
-  `0 0: $Movers`py
+  `0 0: $Particle`py
   `0 0: "CPU px (vx*1.5):"
   `0 0: $1.5*0.+1 2 3 4
   gReady:: 1

@@ -405,6 +405,15 @@ test "flip dict & table" {
   try t.check("+([a:1 2;b:3 4])", "[[]a:1 2;b:3 4]");
   try t.check("+([[]a:1 2;b:3 4])", "[a:1 2;b:3 4]");
 }
+test "amend a table column" {
+  // A table (M) shares the Dict payload with a dict (m); amend-by-key replaces a COLUMN.
+  // Regression: this used to crash (the amend path assumed the `.m` union tag).
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("v:[[]px:10. 20.;vx:1. 2.]; @[v;`px;:;99. 99.]", "[[]px:99.0 99.0;vx:1.0 2.0]");
+  try t.check("v:[[]px:10. 20.;vx:1. 2.]; @[v;`px;:;(v`px)+v`vx]", "[[]px:11.0 22.0;vx:1.0 2.0]");
+  // dict amend (m) still works
+  try t.check("d:`px`vx!((10. 20.);(1. 2.)); @[d;`px;:;99. 99.]", "[px:99.0 99.0;vx:1.0 2.0]");
+}
 test "single-column table column access" {
   // A 1-column table's column names must be a typed S vector (not L), so column
   // access by symbol works the same as a multi-column table.
@@ -412,6 +421,12 @@ test "single-column table column access" {
   try t.check("@!([[]n:`b`c])", "`S");
   try t.check("t:[[]n:`b`c]; t`n", "`b`c");
   try t.check("t:[[]id:1 2 3]; t`id", "1 2 3");
+  // Multi-column read returns a LIST of columns (like a dict m`a`b), NOT a sub-table, so
+  // column arithmetic is positional: (t`px`py)+t`vx`vy pairs px with vx.
+  try t.check("t:[[]px:10. 20.;py:5. 6.;vx:1. 2.;vy:3. 4.]; @t`px`py", "`L");
+  try t.check("t:[[]px:10. 20.;py:5. 6.;vx:1. 2.;vy:3. 4.]; (t`px`py)+t`vx`vy", "(11.0 22.0;8.0 10.0)");
+  try t.check("t:[[]px:10. 20.;py:5. 6.;vx:1. 2.;vy:3. 4.]; @[t;`px`py;:;(t`px`py)+t`vx`vy]",
+              "[[]px:11.0 22.0;py:8.0 10.0;vx:1.0 2.0;vy:3.0 4.0]");
 }
 test "utable (keyed table)" {
   var t = try Tester.init(); defer t.deinit();
@@ -426,6 +441,41 @@ test "utable (keyed table)" {
   // upsert: insert a new key, then replace an existing key's value row
   try t.check("[[id:1 2]px:10. 20.],`id`px!(3;30.)", "[[id:1 2 3]px:10.0 20.0 30.0]");
   try t.check("[[id:1 2]px:10. 20.],`id`px!(2;99.)", "[[id:1 2]px:10.0 99.0]");
+  // columns are TYPE-STABLE: an upsert/insert with a wrong-typed value is a domain
+  // error, not a silent re-type (int into a float column → !type).
+  try t.check("[[id:1 2]px:10. 20.],`id`px!(3;30)", "!type");
+}
+test "utable as ECS archetype" {
+  var t = try Tester.init(); defer t.deinit();
+  // reading a value column by name (so a system can do W`px)
+  try t.check("W:[[id:1 2]px:10. 20.;vx:1. 2.]; W`px", "10.0 20.0");
+  // amend a value column by name = a whole-column system; keys preserved, stays a utable
+  try t.check("W:[[id:1 2]px:10. 20.;vx:1. 2.]; @[W;`px;:;(W`px)+W`vx]", "[[id:1 2]px:11.0 22.0;vx:1.0 2.0]");
+  try t.check("W:[[id:1 2]px:10. 20.]; @@[W;`px;:;99. 99.]", "`m");
+  // int-key lookup returns a row; a value-column symbol is NOT mistaken for a key
+  try t.check("W:[[id:1 2]px:10. 20.]; W@2", "[px:,20.0]");
+  // despawn: drop the row(s) whose key is in x
+  try t.check("W:[[id:1 2 3]px:10. 20. 30.]; 2 _ W", "[[id:1 3]px:10.0 30.0]");
+  try t.check("W:[[id:1 2 3]px:10. 20. 30.]; 1 3 _ W", "[[id:,2]px:,20.0]");
+  // amend BY KEY = upsert the row: replace an existing entity, or insert a new one
+  try t.check("W:[[id:1 2]px:10. 20.]; @[W;2;:;(`px!99.)]", "[[id:1 2]px:10.0 99.0]");
+  try t.check("W:[[id:1 2]px:10. 20.]; @[W;3;:;(`px!30.)]", "[[id:1 2 3]px:10.0 20.0 30.0]");
+  // the `u[key]:valrow` sugar lowers to that amend (replace, then insert)
+  try t.check("W:[[id:1 2]px:10. 20.]; W[2]:(`px!99.); W", "[[id:1 2]px:10.0 99.0]");
+  try t.check("W:[[id:1 2]px:10. 20.]; W[3]:(`px!30.); W", "[[id:1 2 3]px:10.0 20.0 30.0]");
+}
+test "utable joins" {
+  var t = try Tester.init(); defer t.deinit();
+  // left join t,k — keep every row of t; merge k's columns by key (shared col overridden
+  // where matched, k-only col 0-filled where unmatched). This is the k9 manual example.
+  try t.check("t:[[]s:`a`b`c;p:1 2 3;q:7 8 9]; k:[[s:`a`b`x`y`z]q:101 102 103 104 105;r:51 52 53 54 55]; t,k",
+              "[[]s:`a`b`c;p:1 2 3;q:101 102 9;r:51 52 0]");
+  // outer join k1,k2 — union of keys, k2 wins on shared keys (k9 manual example)
+  try t.check("k1:[[s:`a`b]p:1 2;q:3 4]; k2:[[s:`b`c]p:9 8;q:7 6]; k1,k2",
+              "[[s:`a`b`c]p:1 9 8;q:3 7 6]");
+  // ECS use: dense archetype left-joined with a sparse keyed component = ssetAlign(default 0)
+  try t.check("a:[[]id:1 2 3 4;px:10. 20. 30. 40.]; b:[[id:2 4]boost:5. 9.]; (a,b)`boost",
+              "0.0 5.0 0.0 9.0");
 }
 test "nulls verb" {
   var t = try Tester.init(); defer t.deinit();

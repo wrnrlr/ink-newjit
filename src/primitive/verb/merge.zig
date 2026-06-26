@@ -16,9 +16,13 @@ pub const DictMerge = struct {
 };
 
 fn merge(vm: *VM, x: V, y: V) V {
-  // A keyed table (utable) is an `m` whose keys are a table (M): `u , dict` upserts a
-  // row rather than dict-merging (whose symbol-key assumptions crash on M keys).
-  if (x.m.av().tag() == .M) return @import("insert.zig").upsert(vm, x, y);
+  // A keyed table (utable) is an `m` whose keys are a table (M). On the left it is never
+  // a plain dict-merge (whose symbol-key assumptions crash on M keys): `k , dict` upserts
+  // one row; `k1 , k2` (both keyed) is an OUTER JOIN (upsert every row of k2 into k1).
+  if (x.m.av().tag() == .M) {
+    if (y.m.av().tag() == .M) return @import("insert.zig").outerjoin(vm, x, y);
+    return @import("insert.zig").upsert(vm, x, y);
+  }
   var keys = std.ArrayList(V).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
   var vals = std.ArrayList(V).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
   defer { keys.deinit(vm.alloc); vals.deinit(vm.alloc); }
