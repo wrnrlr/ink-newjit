@@ -42,5 +42,6 @@ pub fn KRegistry(comptime KH: type) type {
     k_call2:     *const fn (?KH, ?KH, ?KH)               callconv(.c) ?KH,
     k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?KH) callconv(.c) ?KH,
     k_list_get:  *const fn (?KH, i32)                    callconv(.c) ?KH,
+    k_make_table: *const fn (i32, [*]const [*:0]const u8, [*]const ?KH) callconv(.c) ?KH,
   };
 }

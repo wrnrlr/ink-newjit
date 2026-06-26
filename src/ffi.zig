@@ -63,6 +63,7 @@ export const k_registry: KRegistry = .{
     .k_call2     = &k_call2,
     .k_make_dict = &k_make_dict,
     .k_list_get  = &k_list_get,
+    .k_make_table = &k_make_table,
 };
 
 const c_alloc = std.heap.c_allocator;
@@ -253,13 +254,17 @@ export fn k_call2(func_k: ?*KBox, x_k: ?*KBox, y_k: ?*KBox) callconv(.c) ?*KBox 
   return box(result) catch null;
 }
 
-// ── k_make_dict — build a symbol-keyed dict ───────────────────────────────────
+// ── k_make_dict / k_make_table — build a symbol-keyed dict or table ───────────
 //
 // n: number of entries
 // keys: null-terminated strings (will be interned as symbols)
 // vals: K value handles (borrowed; values are ref-counted before storing)
+//
+// k_make_table tags the result as a table (.M) rather than a plain dict (.m).
+// The two share an identical keys/columns payload — the caller is responsible
+// for passing equal-length column arrays (vectors or lists).
 
-export fn k_make_dict(n: i32, keys: [*]const [*:0]const u8, vals: [*]const ?*KBox) callconv(.c) ?*KBox {
+fn makeMap(comptime tag: K, n: i32, keys: [*]const [*:0]const u8, vals: [*]const ?*KBox) ?*KBox {
   const vm_ptr = current_vm orelse return null;
   const VM = @import("runtime/vm.zig").VM;
   const vm: *VM = @ptrCast(@alignCast(vm_ptr));
@@ -290,7 +295,15 @@ export fn k_make_dict(n: i32, keys: [*]const [*:0]const u8, vals: [*]const ?*KBo
     vals_v.deinit(c_alloc);
     return null;
   };
-  return box(V{ .m = d }) catch { d.deinit(c_alloc); return null; };
+  return box(@unionInit(V, @tagName(tag), d)) catch { d.deinit(c_alloc); return null; };
+}
+
+export fn k_make_dict(n: i32, keys: [*]const [*:0]const u8, vals: [*]const ?*KBox) callconv(.c) ?*KBox {
+  return makeMap(.m, n, keys, vals);
+}
+
+export fn k_make_table(n: i32, keys: [*]const [*:0]const u8, vals: [*]const ?*KBox) callconv(.c) ?*KBox {
+  return makeMap(.M, n, keys, vals);
 }
 
 // ── FFI function wrapper ──────────────────────────────────────────────────────

@@ -42,7 +42,9 @@ fn flipDict(vm: *VM, x: V) V {
   for (0..keys.len()) |i| {
     const col = if (keys.len() == 1 and !keys.tag().isVec()) vals.ref() else vals.at(i);
     defer col.deinit(alloc);
-    if (!col.tag().isVec()) return V{ .err = .@"type" };
+    // A column may be a typed vector (I/F/S/C/B) or a general list (.L, e.g. a
+    // column of strings = list of char-vectors). Reject only atoms/scalars.
+    if (!col.tag().isVec() and col.tag() != .L) return V{ .err = .@"type" };
     if (row_count) |rc| {
       if (col.len() != rc) return V{ .err = .length };
     } else {

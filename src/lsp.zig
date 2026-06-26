@@ -96,21 +96,84 @@ fn dyadicHere(prev: ?lex.Token) bool {
   };
 }
 
-// Adverbs are polysemic; list every sense (the actual meaning depends on operand
-// type/arity — including the digram forms While/Stencil — which syntax can't
-// disambiguate, so hover surfaces all of them).
-const Sense = struct { k: []const u8, v: []const u8 };
-const ADVERB_DOCS = [_]Sense{
-  .{ .k = "'", .v = "**Each** `f'x` · **Zip** `x F'y` — apply per item / elementwise pairs" },
-  .{ .k = "/", .v = "**Fold** `F/` · **Decode** `I/` · **Join** `C/` · **N-do** `i f/` · **While** `f f/` (digram) · **Converge** `f/`" },
-  .{ .k = "\\", .v = "**Scan** `F\\` · **Encode** `I\\` · **Split** `C\\` · **N-dos** `i f\\` · **Whiles** `f f\\` (digram) · **Converges** `f\\`" },
-  .{ .k = "':", .v = "**Eachprior** `F':x` · **Window** `i':x` · **Stencil** `i f':x` (digram) — adjacent pairs / sliding windows" },
-  .{ .k = "/:", .v = "**Eachright** `x F/:y` — fix the left arg, map over the right" },
-  .{ .k = "\\:", .v = "**Eachleft** `x F\\:y` — fix the right arg, map over the left" },
+// Adverbs are polysemic: the actual sense depends on whether the *derived* verb
+// is applied monadically (`F/x` — no left argument) or dyadically (`x F/y` — a
+// left argument is present), plus operand type.  We split the senses into those
+// two groups so hover/definition can narrow by call-site (see `adverbApplication`)
+// instead of always dumping every meaning.  `/:` and `\:` are inherently dyadic,
+// so their `mono` group is empty.
+const AForm = struct { name: []const u8, sig: []const u8 };
+const AdverbInfo = struct { k: []const u8, mono: []const AForm, dyad: []const AForm };
+const ADVERBS = [_]AdverbInfo{
+  .{ .k = "'",
+     .mono = &.{ .{ .name = "Each", .sig = "f'x" } },
+     .dyad = &.{ .{ .name = "Zip", .sig = "x F'y" } } },
+  .{ .k = "/",
+     .mono = &.{ .{ .name = "Fold", .sig = "F/x" }, .{ .name = "Decode", .sig = "I/x" }, .{ .name = "Join", .sig = "C/x" }, .{ .name = "Converge", .sig = "f/x" } },
+     .dyad = &.{ .{ .name = "SeededFold", .sig = "x F/y" }, .{ .name = "N-Do", .sig = "i f/y" }, .{ .name = "While", .sig = "f f/y" } } },
+  .{ .k = "\\",
+     .mono = &.{ .{ .name = "Scan", .sig = "F\\x" }, .{ .name = "Encode", .sig = "I\\x" }, .{ .name = "Split", .sig = "C\\x" }, .{ .name = "Converges", .sig = "f\\x" } },
+     .dyad = &.{ .{ .name = "SeededScan", .sig = "x F\\y" }, .{ .name = "N-Dos", .sig = "i f\\y" }, .{ .name = "Whiles", .sig = "f f\\y" } } },
+  .{ .k = "':",
+     .mono = &.{ .{ .name = "Eachprior", .sig = "F':x" }, .{ .name = "Window", .sig = "i':x" } },
+     .dyad = &.{ .{ .name = "Stencil", .sig = "i f':x" } } },
+  .{ .k = "/:",
+     .mono = &.{},
+     .dyad = &.{ .{ .name = "Eachright", .sig = "x F/:y — fix the left arg, map over the right" } } },
+  .{ .k = "\\:",
+     .mono = &.{},
+     .dyad = &.{ .{ .name = "Eachleft", .sig = "x F\\:y — fix the right arg, map over the left" } } },
 };
-fn adverbDoc(name: []const u8) ?[]const u8 {
-  for (ADVERB_DOCS) |d| if (std.mem.eql(u8, d.k, name)) return d.v;
+fn adverbInfo(name: []const u8) ?AdverbInfo {
+  for (ADVERBS) |a| if (std.mem.eql(u8, a.k, name)) return a;
   return null;
+}
+
+// How the derived verb at the cursor is being applied — drives which senses to
+// surface.  `.dyadic` means a left argument is present (`x F/y`); `.monadic`
+// means the adverb has an operand but no left arg (`F/x`); `.standalone` means
+// it sits as a bare value / partial (`f: /`, `(+/;…)` head) where we can't tell.
+const AdverbApp = enum { standalone, monadic, dyadic };
+
+// Build the hover markdown for an adverb, narrowed to the senses possible at the
+// call site.  Caller frees.
+fn adverbHoverMd(gpa: Alloc, info: AdverbInfo, app: AdverbApp) ![]u8 {
+  // Choose the sense group; fall back to the union when the chosen group is empty.
+  const group: []const AForm = switch (app) {
+    .dyadic => if (info.dyad.len > 0) info.dyad else info.mono,
+    .monadic => if (info.mono.len > 0) info.mono else info.dyad,
+    .standalone => &.{},
+  };
+  var md: std.ArrayList(u8) = .empty;
+  errdefer md.deinit(gpa);
+  const head: []const u8 = switch (app) {
+    .dyadic => "— with a left argument it is one of:",
+    .monadic => "— applied monadically it is one of:",
+    .standalone => "— a bare adverb value; depending on use it is one of:",
+  };
+  try md.appendSlice(gpa, "**`");
+  try md.appendSlice(gpa, info.k);
+  try md.appendSlice(gpa, "`** ");
+  try md.appendSlice(gpa, head);
+  try md.appendSlice(gpa, "\n\n");
+  if (app == .standalone) {
+    try appendForms(gpa, &md, info.mono);
+    if (info.mono.len > 0 and info.dyad.len > 0) try md.appendSlice(gpa, " · ");
+    try appendForms(gpa, &md, info.dyad);
+  } else {
+    try appendForms(gpa, &md, group);
+  }
+  return md.toOwnedSlice(gpa);
+}
+fn appendForms(gpa: Alloc, md: *std.ArrayList(u8), forms: []const AForm) !void {
+  for (forms, 0..) |f, i| {
+    if (i > 0) try md.appendSlice(gpa, " · ");
+    try md.appendSlice(gpa, "**");
+    try md.appendSlice(gpa, f.name);
+    try md.appendSlice(gpa, "** `");
+    try md.appendSlice(gpa, f.sig);
+    try md.appendSlice(gpa, "`");
+  }
 }
 
 // Fused reduce idioms — verb immediately followed by `/` (see fuse.zig).
@@ -205,7 +268,15 @@ const Server = struct {
   root: ?[]u8 = null, // absolute workspace root path (for reference scans)
   indexed: bool = false,
   shutdown: bool = false,
-  bdoc_uri: ?[]u8 = null, // file:// uri of the generated builtin reference
+  // Generated reference files.  `help.k` is the arity-agnostic glyph grid that
+  // `workspace/symbol` (cmd-t) lands on; `verbs.k` is the per-form doc that
+  // `textDocument/definition` lands on, picking the line for the call-site form.
+  help_uri: ?[]u8 = null,
+  verbs_uri: ?[]u8 = null,
+  // sym → line number (0-based) within each generated file.
+  help_line: std.StringHashMap(u32) = undefined,
+  vmono_line: std.StringHashMap(u32) = undefined, // monadic / first-monadic-adverb form
+  vdyad_line: std.StringHashMap(u32) = undefined, // dyadic / first-dyadic-adverb form
 
   fn init(gpa: Alloc) Server {
     return .{
@@ -215,6 +286,9 @@ const Server = struct {
       .out = .empty,
       .parser = Parser.init(gpa),
       .windex = std.StringHashMap(std.ArrayList(Loc)).init(gpa),
+      .help_line = std.StringHashMap(u32).init(gpa),
+      .vmono_line = std.StringHashMap(u32).init(gpa),
+      .vdyad_line = std.StringHashMap(u32).init(gpa),
     };
   }
 };
@@ -370,6 +444,81 @@ fn neighbors(src: []const u8, off: usize) Tri {
   }
 }
 
+// A token that can terminate a noun phrase (i.e. supply a left argument).
+fn isNounTerm(tt: TT) bool {
+  return switch (tt) {
+    .int, .float, .bit, .bits, .string, .symbol, .iden,
+    .@")", .@"}", .@"]", .adverb_val => true,
+    else => false,
+  };
+}
+
+// Classify how the adverb token `adv` is applied, by a localized backward token
+// scan inside its statement.  We find the operand the adverb post-modifies, then
+// look at the token just left of that operand: a noun there means a left
+// argument is present (dyadic application); otherwise it is a monadic
+// application, and if there is no operand at all it is a bare value / partial.
+fn adverbApplication(gpa: Alloc, src: []const u8, adv: lex.Token) AdverbApp {
+  var toks: std.ArrayList(lex.Token) = .empty;
+  defer toks.deinit(gpa);
+  var l = Lexer.init(src);
+  var ai: ?usize = null;
+  while (true) {
+    const t = l.next();
+    if (t.tt == .eof) break;
+    if (t.start == adv.start) ai = toks.items.len;
+    toks.append(gpa, t) catch return .standalone;
+  }
+  const idx = ai orelse return .standalone;
+  const items = toks.items;
+  // Statement start = first token after the previous separator.
+  var lo: usize = 0;
+  if (idx > 0) {
+    var j: usize = idx;
+    while (j > 0) : (j -= 1) {
+      if (items[j - 1].tt == .sep) { lo = j; break; }
+    }
+  }
+  if (idx == lo) return .standalone; // adverb is first in its statement
+  var pi = idx - 1; // last token of the operand
+  switch (items[pi].tt) {
+    // Not an operand the adverb can modify → bare value / partial.
+    .@"(", .@"{", .@"[", .@"$[", .@"[[", .@"[[]", .@":", .sep, .comment => return .standalone,
+    // Balanced group / lambda / apply result.
+    .@")", .@"}", .@"]" => {
+      var depth: i32 = 0;
+      while (true) {
+        switch (items[pi].tt) {
+          .@")", .@"}", .@"]" => depth += 1,
+          .@"(", .@"{", .@"[", .@"$[", .@"[[", .@"[[]" => depth -= 1,
+          else => {},
+        }
+        if (depth == 0 or pi == lo) break;
+        pi -= 1;
+      }
+    },
+    // A verb train — run of verbs/adverbs.
+    .op, .keyword, .io, .adverb, .adverb_val => {
+      while (pi > lo) : (pi -= 1) switch (items[pi - 1].tt) {
+        .op, .keyword, .io, .adverb, .adverb_val => {},
+        else => break,
+      };
+    },
+    // A noun-vector operand (decode/encode) — skip the contiguous literal run.
+    .int, .float, .bit, .bits, .symbol, .string => {
+      while (pi > lo) : (pi -= 1) switch (items[pi - 1].tt) {
+        .int, .float, .bit, .bits, .symbol, .string => {},
+        else => break,
+      };
+    },
+    // A single named operand (function value).
+    .iden => {},
+    else => {},
+  }
+  if (pi <= lo) return .monadic; // operand starts the statement → no left arg
+  return if (isNounTerm(items[pi - 1].tt)) .dyadic else .monadic;
+}
+
 const DefKind = enum { variable, function };
 const Def = struct { name: []const u8, start: usize, end: usize, kind: DefKind, toplevel: bool };
 
@@ -487,30 +636,155 @@ fn buildWorkspaceIndex(s: *Server, root_uri: ?[]const u8) void {
   indexDir(s, path, 0);
 }
 
-// Generate the builtin reference file (one `/`-comment line per glyph) in the
-// temp dir and remember its uri.  `workspace/symbol` points each builtin at its
-// line here, so cmd-t can open a real, readable location for primitives.
-// Layout: line 0 is the header; BUILTINS[i] lives on line i+1, glyph at col 2.
-const BUILTIN_COL: u32 = 2; // length of the `/ ` comment prefix
-fn buildBuiltinsDoc(s: *Server) void {
-  const tmp: []const u8 = if (std.c.getenv("TMPDIR")) |t| std.mem.span(t) else "/tmp";
-  const path = std.fmt.allocPrint(s.gpa, "{s}/ink-builtins.k", .{std.mem.trimEnd(u8, tmp, "/")}) catch return;
-  defer s.gpa.free(path);
+// The glyph grid for the 20 core operators — the body of `help.k`.  cmd-t is
+// arity-agnostic, so each row shows both valences side by side (MONAD · DYAD).
+const GridRow = struct { sym: []const u8, mono: []const u8, dyad: []const u8 };
+const GRID = [_]GridRow{
+  .{ .sym = ":", .mono = "self",    .dyad = "assign" },
+  .{ .sym = "+", .mono = "flip",    .dyad = "add" },
+  .{ .sym = "-", .mono = "negate",  .dyad = "subtract" },
+  .{ .sym = "*", .mono = "first",   .dyad = "multiply" },
+  .{ .sym = "%", .mono = "",        .dyad = "divide" },
+  .{ .sym = "!", .mono = "enum",    .dyad = "dict" },
+  .{ .sym = "&", .mono = "where",   .dyad = "min|and" },
+  .{ .sym = "|", .mono = "reverse", .dyad = "max|or" },
+  .{ .sym = "<", .mono = "ascend",  .dyad = "less" },
+  .{ .sym = ">", .mono = "descend", .dyad = "more" },
+  .{ .sym = "=", .mono = "group",   .dyad = "equal" },
+  .{ .sym = "~", .mono = "not",     .dyad = "match" },
+  .{ .sym = ",", .mono = "enlist",  .dyad = "concat" },
+  .{ .sym = "^", .mono = "null",    .dyad = "without" },
+  .{ .sym = "#", .mono = "length",  .dyad = "reshape" },
+  .{ .sym = "_", .mono = "floor",   .dyad = "drop|cut" },
+  .{ .sym = "$", .mono = "string",  .dyad = "cast" },
+  .{ .sym = "?", .mono = "uniq",    .dyad = "find|rnd" },
+  .{ .sym = "@", .mono = "type",    .dyad = "apply(1)" },
+  .{ .sym = ".", .mono = "eval",    .dyad = "apply(n)" },
+};
+fn gridRow(sym: []const u8) ?GridRow {
+  for (GRID) |g| if (std.mem.eql(u8, g.sym, sym)) return g;
+  return null;
+}
 
-  var text: std.ArrayList(u8) = .empty;
-  defer text.deinit(s.gpa);
-  text.appendSlice(s.gpa, "/ Ink builtin reference — operators, adverbs & idioms (generated by `ink lsp`)\n") catch return;
-  for (BUILTINS) |b| {
-    const line = std.fmt.allocPrint(s.gpa, "/ {s}  — {s}\n", .{ b.sym, b.doc }) catch return;
-    defer s.gpa.free(line);
-    text.appendSlice(s.gpa, line) catch return;
+const BUILTIN_COL: u32 = 2; // length of the `/ ` comment prefix; glyphs sit here
+
+fn emitLine(s: *Server, buf: *std.ArrayList(u8), ln: *u32, text: []const u8) void {
+  buf.appendSlice(s.gpa, text) catch {};
+  buf.append(s.gpa, '\n') catch {};
+  ln.* += 1;
+}
+fn emitFmt(s: *Server, buf: *std.ArrayList(u8), ln: *u32, comptime fmt: []const u8, args: anytype) void {
+  const t = std.fmt.allocPrint(s.gpa, fmt, args) catch return;
+  defer s.gpa.free(t);
+  buf.appendSlice(s.gpa, t) catch {};
+  buf.append(s.gpa, '\n') catch {};
+  ln.* += 1;
+}
+// `/ {sym}  {valence}  {gloss}` with the markdown stripped out of `gloss`.
+fn emitForm(s: *Server, buf: *std.ArrayList(u8), ln: *u32, sym: []const u8, val: []const u8, md: []const u8) void {
+  buf.appendSlice(s.gpa, "/ ") catch {};
+  buf.appendSlice(s.gpa, sym) catch {};
+  buf.appendSlice(s.gpa, "  ") catch {};
+  buf.appendSlice(s.gpa, val) catch {};
+  buf.appendSlice(s.gpa, "  ") catch {};
+  // Strip markdown: drop backticks and `**` bold markers, but keep lone `*`
+  // (the multiply glyph) and other operators that appear in signatures.
+  var i: usize = 0;
+  while (i < md.len) : (i += 1) {
+    const c = md[i];
+    if (c == '`') continue;
+    if (c == '*' and i + 1 < md.len and md[i + 1] == '*') { i += 1; continue; }
+    buf.append(s.gpa, c) catch {};
   }
+  buf.append(s.gpa, '\n') catch {};
+  ln.* += 1;
+}
 
+fn writeRefFile(s: *Server, name: []const u8, text: []const u8) ?[]u8 {
+  const tmp: []const u8 = if (std.c.getenv("TMPDIR")) |t| std.mem.span(t) else "/tmp";
+  const path = std.fmt.allocPrint(s.gpa, "{s}/{s}", .{ std.mem.trimEnd(u8, tmp, "/"), name }) catch return null;
+  defer s.gpa.free(path);
   const io = std.Io.Threaded.global_single_threaded.io();
-  const file = std.Io.Dir.cwd().createFile(io, path, .{}) catch return;
+  const file = std.Io.Dir.cwd().createFile(io, path, .{}) catch return null;
   defer file.close(io);
-  file.writePositionalAll(io, text.items, 0) catch return;
-  s.bdoc_uri = std.fmt.allocPrint(s.gpa, "file://{s}", .{path}) catch return;
+  file.writePositionalAll(io, text, 0) catch return null;
+  return std.fmt.allocPrint(s.gpa, "file://{s}", .{path}) catch null;
+}
+
+// help.k — the arity-agnostic glyph grid (workspace/symbol / cmd-t target).
+fn buildHelpDoc(s: *Server) void {
+  var buf: std.ArrayList(u8) = .empty;
+  defer buf.deinit(s.gpa);
+  var ln: u32 = 0;
+  emitLine(s, &buf, &ln, "/ Ink glyph reference (cmd-t lands here) — arity is unknown at search time,");
+  emitLine(s, &buf, &ln, "/ so each glyph shows BOTH valences.  See ink-verbs.k for per-form docs.");
+  emitLine(s, &buf, &ln, "/   MONAD     DYAD");
+  for (GRID) |g| {
+    s.help_line.put(g.sym, ln) catch {};
+    buf.appendSlice(s.gpa, "/ ") catch {};
+    buf.appendSlice(s.gpa, g.sym) catch {};
+    buf.appendSlice(s.gpa, "  ") catch {};
+    buf.appendSlice(s.gpa, g.mono) catch {};
+    var k: usize = g.mono.len;
+    while (k < 9) : (k += 1) buf.append(s.gpa, ' ') catch {};
+    buf.append(s.gpa, ' ') catch {};
+    buf.appendSlice(s.gpa, g.dyad) catch {};
+    buf.append(s.gpa, '\n') catch {};
+    ln += 1;
+  }
+  emitLine(s, &buf, &ln, "/");
+  emitLine(s, &buf, &ln, "/ === keyword verbs · adverbs · i/o · idioms ===");
+  for (BUILTINS) |b| {
+    if (gridRow(b.sym) != null) continue; // already in the grid
+    s.help_line.put(b.sym, ln) catch {};
+    emitFmt(s, &buf, &ln, "/ {s}  — {s}", .{ b.sym, b.doc });
+  }
+  s.help_uri = writeRefFile(s, "ink-help.k", buf.items);
+}
+
+// verbs.k — one line per (ad)verb FORM (textDocument/definition target).  The
+// definition handler picks the monadic or dyadic line by the call-site arity.
+fn buildVerbsDoc(s: *Server) void {
+  var buf: std.ArrayList(u8) = .empty;
+  defer buf.deinit(s.gpa);
+  var ln: u32 = 0;
+  emitLine(s, &buf, &ln, "/ Ink per-form reference — jump-to-definition lands on the form for the call site.");
+  emitLine(s, &buf, &ln, "/");
+  emitLine(s, &buf, &ln, "/ === verbs (monadic / dyadic) ===");
+  for (VERB_DOCS) |d| {
+    if (d.m) |m| { s.vmono_line.put(d.k, ln) catch {}; emitForm(s, &buf, &ln, d.k, "monad", m); }
+    if (d.d) |dd| { s.vdyad_line.put(d.k, ln) catch {}; emitForm(s, &buf, &ln, d.k, "dyad ", dd); }
+  }
+  emitLine(s, &buf, &ln, "/");
+  emitLine(s, &buf, &ln, "/ === i/o verbs ===");
+  for (IO_DOCS) |d| {
+    if (d.m) |m| { s.vmono_line.put(d.k, ln) catch {}; emitForm(s, &buf, &ln, d.k, "monad", m); }
+    if (d.d) |dd| { s.vdyad_line.put(d.k, ln) catch {}; emitForm(s, &buf, &ln, d.k, "dyad ", dd); }
+  }
+  emitLine(s, &buf, &ln, "/");
+  emitLine(s, &buf, &ln, "/ === adverbs (monadic-derived / dyadic-applied) ===");
+  for (ADVERBS) |a| {
+    for (a.mono, 0..) |f, i| {
+      if (i == 0) s.vmono_line.put(a.k, ln) catch {};
+      emitFmt(s, &buf, &ln, "/ {s}  {s} (monadic)  {s}", .{ a.k, f.name, f.sig });
+    }
+    for (a.dyad, 0..) |f, i| {
+      if (i == 0) s.vdyad_line.put(a.k, ln) catch {};
+      emitFmt(s, &buf, &ln, "/ {s}  {s} (dyadic)  {s}", .{ a.k, f.name, f.sig });
+    }
+  }
+  s.verbs_uri = writeRefFile(s, "ink-verbs.k", buf.items);
+}
+
+fn buildRefDocs(s: *Server) void {
+  buildHelpDoc(s);
+  buildVerbsDoc(s);
+}
+
+// Resolve a builtin symbol to its per-form line in verbs.k for the given arity.
+fn verbsLineFor(s: *Server, sym: []const u8, dyadic: bool) ?u32 {
+  if (dyadic) return s.vdyad_line.get(sym) orelse s.vmono_line.get(sym);
+  return s.vmono_line.get(sym) orelse s.vdyad_line.get(sym);
 }
 
 // Append every reference (any `iden` matching `word`) in `src` to `out`.
@@ -569,7 +843,7 @@ fn handleInitialize(s: *Server, id: ?json.Value, params: ?json.Value) !void {
       { root = str(obj(wf.array.items[0], "uri")); };
   }
   buildWorkspaceIndex(s, root);
-  buildBuiltinsDoc(s);
+  buildRefDocs(s);
   try replyResult(s, id,
     \\{{"capabilities":{{"textDocumentSync":1,"hoverProvider":true,"definitionProvider":true,"documentSymbolProvider":true,"referencesProvider":true,"workspaceSymbolProvider":true,"renameProvider":{{"prepareProvider":true}}}},"serverInfo":{{"name":"ink-lsp","version":"0.1.0"}}}}
   , .{});
@@ -616,9 +890,13 @@ fn handleHover(s: *Server, id: ?json.Value, params: ?json.Value) !void {
   const t = tri.cur orelse return replyResult(s, id, "null", .{});
   const word = t.slice(src);
 
-  // Adverb: show every sense, and the fused-reduce idiom if it's `verb/`.
+  // Adverb: narrow the senses to those possible at the call site (monadic vs
+  // dyadic application), and prepend the fused-reduce idiom if it's `verb/`.
   if (t.tt == .adverb) {
-    const base = adverbDoc(word) orelse return replyResult(s, id, "null", .{});
+    const info = adverbInfo(word) orelse return replyResult(s, id, "null", .{});
+    const app = adverbApplication(s.gpa, src, t);
+    const base = try adverbHoverMd(s.gpa, info, app);
+    defer s.gpa.free(base);
     if (std.mem.eql(u8, word, "/")) if (tri.prev) |pv| if (pv.tt == .op) {
       if (fusedReduceDoc(pv.slice(src))) |fr| {
         const md = try std.fmt.allocPrint(s.gpa, "{s}\n\n---\n{s}", .{ fr, base });
@@ -631,18 +909,23 @@ fn handleHover(s: *Server, id: ?json.Value, params: ?json.Value) !void {
 
   // `:\`  `:'` — the Zig lexer splits `:` then makes `\`/`'` an `.adverb_val`
   // (because `:` resets the lexer tag to `.phrase`).  Detect the pair and show
-  // the adverb's doc.  Also handle hovering over the `:` half of the pair.
+  // the adverb's senses (standalone — the `:` monadic-force gives no left arg
+  // context to narrow on).  Also handle hovering over the `:` half of the pair.
   if (t.tt == .adverb_val) if (tri.prev) |pv| if (pv.tt == .@":" and pv.end == t.start) {
     const ch = word[0];
     const adv_key: []const u8 = if (ch == '\\') "\\" else if (ch == '\'') "'" else return replyResult(s, id, "null", .{});
-    const base = adverbDoc(adv_key) orelse return replyResult(s, id, "null", .{});
-    return replyHoverMd(s, id, base);
+    const info = adverbInfo(adv_key) orelse return replyResult(s, id, "null", .{});
+    const md = try adverbHoverMd(s.gpa, info, .standalone);
+    defer s.gpa.free(md);
+    return replyHoverMd(s, id, md);
   };
   if (t.tt == .@":") if (tri.next) |nx| if (nx.tt == .adverb_val and nx.start == t.end) {
     const ch = src[nx.start];
     const adv_key: []const u8 = if (ch == '\\') "\\" else if (ch == '\'') "'" else return replyResult(s, id, "null", .{});
-    const base = adverbDoc(adv_key) orelse return replyResult(s, id, "null", .{});
-    return replyHoverMd(s, id, base);
+    const info = adverbInfo(adv_key) orelse return replyResult(s, id, "null", .{});
+    const md = try adverbHoverMd(s.gpa, info, .standalone);
+    defer s.gpa.free(md);
+    return replyHoverMd(s, id, md);
   };
 
   if (t.tt == .op or t.tt == .keyword or t.tt == .io) {
@@ -710,28 +993,35 @@ fn handleDefinition(s: *Server, id: ?json.Value, params: ?json.Value) !void {
   const off = posToOffset(src, int(obj(pos, "line")) orelse 0, int(obj(pos, "character")) orelse 0);
   const t = tokenAt(src, off) orelse return replyResult(s, id, "null", .{});
 
-  // Operators, adverbs and io verbs — jump to the generated builtin reference.
-  if (t.tt == .op or t.tt == .io or t.tt == .adverb or t.tt == .keyword) {
+  // Operators, keywords and io verbs — jump to the FORM line in verbs.k that
+  // matches the call-site arity (monadic vs dyadic).
+  if (t.tt == .op or t.tt == .io or t.tt == .keyword) {
     const word = t.slice(src);
-    if (s.bdoc_uri) |buri| {
-      for (BUILTINS, 0..) |b, i| {
-        if (std.mem.eql(u8, b.sym, word)) {
-          const line: u32 = @intCast(i + 1);
-          const endc: u32 = BUILTIN_COL + @as(u32, @intCast(b.sym.len));
-          return replyLocation(s, id, buri, line, BUILTIN_COL, line, endc);
-        }
+    if (s.verbs_uri) |vuri| {
+      const dyadic = dyadicHere(neighbors(src, off).prev);
+      if (verbsLineFor(s, word, dyadic)) |line| {
+        const endc: u32 = BUILTIN_COL + @as(u32, @intCast(word.len));
+        return replyLocation(s, id, vuri, line, BUILTIN_COL, line, endc);
       }
     }
   }
-  // `:\` / `:'` — hovering the adverb_val half: resolve via the base adverb char.
-  if (t.tt == .adverb_val) if (s.bdoc_uri) |buri| {
+  // Adverbs — jump to the monadic-derived or dyadic-applied form by call site.
+  if (t.tt == .adverb) {
+    const word = t.slice(src);
+    if (s.verbs_uri) |vuri| {
+      const dyadic = adverbApplication(s.gpa, src, t) == .dyadic;
+      if (verbsLineFor(s, word, dyadic)) |line| {
+        const endc: u32 = BUILTIN_COL + @as(u32, @intCast(word.len));
+        return replyLocation(s, id, vuri, line, BUILTIN_COL, line, endc);
+      }
+    }
+  }
+  // `:\` / `:'` — the adverb_val half resolves via the base adverb char.
+  if (t.tt == .adverb_val) if (s.verbs_uri) |vuri| {
     const ch = src[t.start];
     const adv_key: []const u8 = if (ch == '\\') "\\" else if (ch == '\'') "'" else return replyResult(s, id, "null", .{});
-    for (BUILTINS, 0..) |b, i| {
-      if (std.mem.eql(u8, b.sym, adv_key)) {
-        const line: u32 = @intCast(i + 1);
-        return replyLocation(s, id, buri, line, BUILTIN_COL, line, BUILTIN_COL + @as(u32, @intCast(b.sym.len)));
-      }
+    if (verbsLineFor(s, adv_key, false)) |line| {
+      return replyLocation(s, id, vuri, line, BUILTIN_COL, line, BUILTIN_COL + @as(u32, @intCast(adv_key.len)));
     }
   };
 
@@ -850,18 +1140,19 @@ fn handleWorkspaceSymbol(s: *Server, id: ?json.Value, params: ?json.Value) !void
         .{ l.sl, l.sc, l.el, l.ec });
     }
   }
-  // Builtins: glyphs/idioms from the generated reference file.  Match the query
-  // against the symbol *and* its gloss, so a search by meaning works too.
-  if (s.bdoc_uri) |buri| {
-    for (BUILTINS, 0..) |b, i| {
+  // Builtins: glyphs/idioms point at the arity-agnostic glyph grid (help.k).
+  // Match the query against the symbol *and* its gloss, so a search by meaning
+  // ("sum" → `+/`, "last" → `*|`) works too.
+  if (s.help_uri) |buri| {
+    for (BUILTINS) |b| {
       if (count >= 500) break;
       if (query.len > 0 and
           std.ascii.indexOfIgnoreCase(b.sym, query) == null and
           std.ascii.indexOfIgnoreCase(b.doc, query) == null) continue;
+      const line = s.help_line.get(b.sym) orelse continue;
       count += 1;
       if (!first) try s.out.append(s.gpa, ',');
       first = false;
-      const line: u32 = @intCast(i + 1); // line 0 is the header
       const endc: u32 = BUILTIN_COL + @as(u32, @intCast(b.sym.len));
       try s.out.appendSlice(s.gpa, "{\"name\":\"");
       try escapeInto(&s.out, s.gpa, b.sym);

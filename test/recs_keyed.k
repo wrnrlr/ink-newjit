@@ -16,9 +16,9 @@ Movers:: KSpawn[Movers; `px`py`vx`vy!(9.;0.;-1.;0.)]
 `0 0: $Movers
 
 / systems: whole-column amend — w`px reads a value column, @[w;`px;:;…] writes it
-sysMove:  {[w] w:@[w;`px;:;(w`px)+w`vx]; @[w;`py;:;(w`py)+w`vy]}
+move:  {[w] w:@[w;`px;:;(w`px)+w`vx]; @[w;`py;:;(w`py)+w`vy]}
 sysFloor: {[w] @[w;`py;:;0.|w`py]}
-Movers:: Tick[Movers; (sysMove;sysFloor)]
+Movers:: Tick[Movers; (move;sysFloor)]
 `0 0: "after Tick (sysMove;sysFloor):"
 `0 0: $Movers
 

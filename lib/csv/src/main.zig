@@ -1,7 +1,7 @@
 /// CSV extension for ink — loaded via lib/csv/csv.k.
 ///
 /// K API (after loading):
-///   ReadCsv "path/to/file.csv"  → dict mapping column names → typed arrays
+///   ReadCsv "path/to/file.csv"  → table whose columns are named by the header
 ///
 /// Column type inference (per column):
 ///   all cells parse as i32  → I
@@ -42,6 +42,8 @@ const KRegistry = extern struct {
     k_call:      *const fn (?K, ?K)                                     callconv(.c) ?K,
     k_call2:     *const fn (?K, ?K, ?K)                                 callconv(.c) ?K,
     k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?K)  callconv(.c) ?K,
+    k_list_get:   *const fn (?K, i32)                                   callconv(.c) ?K,
+    k_make_table: *const fn (i32, [*]const [*:0]const u8, [*]const ?K)  callconv(.c) ?K,
 };
 
 const KApi = struct {
@@ -55,7 +57,7 @@ const KApi = struct {
     kfp:         *const fn (?K)                                         callconv(.c) ?[*]f32,
     ku:          *const fn (?K)                                         callconv(.c) void,
     k_list_set:  *const fn (?K, i32, ?K)                               callconv(.c) i32,
-    k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?K)  callconv(.c) ?K,
+    k_make_table: *const fn (i32, [*]const [*:0]const u8, [*]const ?K) callconv(.c) ?K,
 };
 var g_api: ?KApi = null;
 
@@ -69,8 +71,8 @@ fn kip(x: ?K) ?[*]i32                             { return g_api.?.kip(x); }
 fn kfp(x: ?K) ?[*]f32                             { return g_api.?.kfp(x); }
 fn ku(x: ?K) void                                 { g_api.?.ku(x); }
 fn kls(l: ?K, i: i32, v: ?K) i32                 { return g_api.?.k_list_set(l, i, v); }
-fn mkdict(n: i32, ks: [*]const [*:0]const u8, vs: [*]const ?K) ?K {
-    return g_api.?.k_make_dict(n, ks, vs);
+fn mktable(n: i32, ks: [*]const [*:0]const u8, vs: [*]const ?K) ?K {
+    return g_api.?.k_make_table(n, ks, vs);
 }
 
 const Alloc = std.mem.Allocator;
@@ -165,7 +167,7 @@ fn parseCsv(alloc: Alloc, text: []const u8) OOM!K {
     }
     n = 0;  // disarm errdefer
 
-    const result = mkdict(@intCast(ncols), col_names.ptr, col_ks.ptr);
+    const result = mktable(@intCast(ncols), col_names.ptr, col_ks.ptr);
     for (col_ks[0..ncols]) |ck| ku(ck);  // release our refs
     return result orelse error.OutOfMemory;
 }
@@ -239,6 +241,6 @@ export fn terse_init(reg: *anyopaque) callconv(.c) void {
         .kfp         = r.kfp,
         .ku          = r.ku,
         .k_list_set  = r.k_list_set,
-        .k_make_dict = r.k_make_dict,
+        .k_make_table = r.k_make_table,
     };
 }
