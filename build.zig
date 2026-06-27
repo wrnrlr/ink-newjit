@@ -167,6 +167,17 @@ pub fn build(b: *std.Build) !void {
   const parquet_step = b.step("parquet", "Build the Parquet extension shared library");
   parquet_step.dependOn(&b.addInstallArtifact(parquet_lib, .{}).step);
 
+  // --- Shapefile extension shared library ---
+  const shp_ext_mod = b.createModule(.{
+    .root_source_file = b.path("lib/shp/src/main.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+  });
+  shp_ext_mod.addImport("kabi", kabi_mod);
+  const shp_lib = b.addLibrary(.{ .name = "shp", .root_module = shp_ext_mod, .linkage = .dynamic });
+  b.installArtifact(shp_lib);
+  const shp_step = b.step("shp", "Build the shapefile extension shared library");
+  shp_step.dependOn(&b.addInstallArtifact(shp_lib, .{}).step);
+
   // --- Unicode binary data (lib/data.kb) ---
   const data_gen_mod = b.createModule(.{
     .root_source_file = b.path("lib/data_gen.zig"),

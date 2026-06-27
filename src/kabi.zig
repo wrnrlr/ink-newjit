@@ -43,5 +43,13 @@ pub fn KRegistry(comptime KH: type) type {
     k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?KH) callconv(.c) ?KH,
     k_list_get:  *const fn (?KH, i32)                    callconv(.c) ?KH,
     k_make_table: *const fn (i32, [*]const [*:0]const u8, [*]const ?KH) callconv(.c) ?KH,
+    // Symbol-vector support (appended): build a packed S vector (N(u32) of
+    // interned ids) instead of an L of symbol atoms. `KS` allocates an empty
+    // S of length n, `ksp` exposes its id buffer, `kintern` maps a name to an
+    // interned id (requires host VM context, like `ks`). Lets extensions emit
+    // proper symbol columns (e.g. DBF C fields).
+    KS:          *const fn (i32)                         callconv(.c) ?KH,
+    ksp:         *const fn (?KH)                         callconv(.c) ?[*]u32,
+    kintern:     *const fn ([*:0]const u8)               callconv(.c) u32,
   };
 }

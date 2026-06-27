@@ -64,6 +64,9 @@ export const k_registry: KRegistry = .{
     .k_make_dict = &k_make_dict,
     .k_list_get  = &k_list_get,
     .k_make_table = &k_make_table,
+    .KS          = &KS,
+    .ksp         = &ksp,
+    .kintern     = &kintern,
 };
 
 const c_alloc = std.heap.c_allocator;
@@ -139,6 +142,22 @@ export fn KL(n: i32) ?*KBox {
   const arr = N(V).init(c_alloc, @intCast(n)) catch return null;
   @memset(arr.slice(), .blank);
   return box(.{ .L = arr }) catch { arr.deinit(c_alloc); return null; };
+}
+export fn KS(n: i32) ?*KBox {
+  if (n < 0) return null;
+  const arr = N(u32).init(c_alloc, @intCast(n)) catch return null;
+  @memset(arr.slice(), 0);  // 0 = null/blank symbol
+  return box(.{ .S = arr }) catch { arr.deinit(c_alloc); return null; };
+}
+export fn ksp(x: ?*KBox) ?[*]u32 {
+  const b = x orelse return null;
+  return if (b.v.tag() == .S) b.v.S.slice().ptr else null;
+}
+export fn kintern(name: [*:0]const u8) u32 {
+  const vm_ptr = current_vm orelse return 0;
+  const VM = @import("runtime/vm.zig").VM;
+  const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+  return vm.intern(std.mem.span(name)) catch 0;
 }
 
 export fn kt(x: ?*KBox) i8  { return if (x) |b| b.tag else -1; }
