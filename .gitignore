@@ -20,3 +20,4 @@ bench/report.csv
 *.otf
 *.ttc
 *.kb
+data/taxi_zones
