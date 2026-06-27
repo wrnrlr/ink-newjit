@@ -2,7 +2,7 @@ VERSION := 0.0.1
 
 INK  := zig-out/bin/ink
 
-.PHONY: test build release
+.PHONY: test build release data
 
 test:
 	time zig build test
@@ -34,8 +34,14 @@ qa:
 	$(INK) test/eyes.k
 
 info:
-	@echo "Total lines:" && find src -name '*.zig' | xargs wc -l | tail -n 1
+	@echo "Ink lines /lib:" && find lib -name '*.k' | xargs wc -l | tail -n 1
+	@echo "Zig lines /lib" && find lib -name '*.zig' | xargs wc -l | tail -n 1
+	@echo "Zig lines /src:" && find src -name '*.zig' | xargs wc -l | tail -n 1
 	@echo "Binary size:" && du -h zig-out/bin/*
+
+data:
+	./data/taxi.sh -meta
+	./data/taxi.sh -trip 2026
 
 clean:
 	rm -rf zig-out

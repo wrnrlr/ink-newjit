@@ -10,6 +10,9 @@ patches/**/zig-pkg/
 *.dylib
 *.a
 data/**/*.parquet
+data/trips/
+data/taxi_zones.zip
+data/taxi_zone_lookup.csv
 bench/ink
 bench/ink-*
 bench/report.csv
