@@ -1,0 +1,6 @@
+[submodule "tree-sitter-ink"]
+	path = tools/tree-sitter-ink
+	url = https://github.com/wrnrlr/tree-sitter-ink.git
+[submodule "zed-ink"]
+	path = tools/zed-ink
+	url = https://github.com/wrnrlr/zed-ink.git
