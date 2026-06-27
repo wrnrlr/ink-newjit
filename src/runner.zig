@@ -7,6 +7,7 @@ const serve = @import("runtime/serve.zig");
 const ffi = @import("ffi.zig");
 const modules = @import("modules.zig");
 const lsp = @import("lsp.zig");
+const Lexer = @import("parser/lexer.zig").Lexer;
 
 /// Called by C extensions (e.g. GPU) to process pending IPC messages from
 /// within their own event loop.  No-ops when current_vm is not set.
@@ -21,6 +22,23 @@ const V = @import("noun/value.zig").V;
 const K = @import("noun/class.zig").K;
 const N = @import("noun/array.zig").N;
 
+// Read one physical line (up to '\n') from fd, appending its bytes (without the
+// newline) to buf. Returns false on EOF when nothing was read on this line.
+fn readPhysicalLine(allocator: std.mem.Allocator, fd: std.posix.fd_t, buf: *std.ArrayList(u8)) !bool {
+  var byte: [1]u8 = undefined;
+  var any = false;
+  while (true) {
+    const n = std.posix.read(fd, &byte) catch |err| {
+      if (err == error.Interrupted) continue;
+      return err;
+    };
+    if (n == 0) return any; // EOF
+    any = true;
+    if (byte[0] == '\n') return true;
+    try buf.append(allocator, byte[0]);
+  }
+}
+
 fn runRepl(allocator: std.mem.Allocator, vm: *VM, loader: *modules.ModuleLoader) !void {
   var repl = Repl.init(allocator, vm);
   var buf = try std.ArrayList(u8).initCapacity(allocator, 64);
@@ -29,29 +47,30 @@ fn runRepl(allocator: std.mem.Allocator, vm: *VM, loader: *modules.ModuleLoader)
   while (true) {
     std.debug.print("  ", .{});
     buf.clearRetainingCapacity();
-    var byte: [1]u8 = undefined;
+    // Read a logical input, spanning multiple physical lines while an
+    // unterminated multi-line string keeps the buffer open.
+    var eof = false;
     while (true) {
-      const n = std.posix.read(stdin_fd, &byte) catch |err| {
-        if (err == error.Interrupted) continue;
-        return err;
-      };
-      if (n == 0) return;
-      if (byte[0] == '\n') break;
-      try buf.append(allocator, byte[0]);
+      if (!try readPhysicalLine(allocator, stdin_fd, &buf)) { eof = true; break; }
+      try buf.append(allocator, '\n');
+      if (!Lexer.endsOpenString(buf.items)) break;
+      std.debug.print("  ", .{}); // continuation prompt
     }
     const line = std.mem.trim(u8, buf.items, " \t\r\n");
+    if (eof and line.len == 0) return;
     if (std.mem.eql(u8, line, "\\q") or std.mem.eql(u8, line, "exit")) break;
     if (line.len > 0) {
       loader.autoLoad(vm, line) catch {};
-      const res = repl.eval(line) catch |err| {
+      if (repl.eval(line)) |res| {
+        defer res.deinit(allocator);
+        for (res.results) |r| {
+          if (r.output.len > 0) std.debug.print("{s}\n", .{r.output});
+        }
+      } else |err| {
         std.debug.print("Error: {s}\n", .{@errorName(err)});
-        continue;
-      };
-      defer res.deinit(allocator);
-      for (res.results) |r| {
-        if (r.output.len > 0) std.debug.print("{s}\n", .{r.output});
       }
     }
+    if (eof) return;
   }
 }
 

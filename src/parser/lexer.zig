@@ -59,6 +59,9 @@ pub const Lexer = struct {
   src: []const u8,
   i: u32 = 0,
   tag: Tag = .phrase,
+  // True when the last string token returned was a multi-line string that ran
+  // to EOF without a closing quote. Used by endsOpenString for REPL continuation.
+  last_string_open: bool = false,
 
   pub fn init(src: []const u8) Lexer { return .{ .src = src }; }
 
@@ -194,9 +197,14 @@ pub const Lexer = struct {
     // Example: """ is a 1-char string containing '"'.
     if (c == '"') {
       self.adv(); // skip opening "
+      // Multi-line string: a '"' immediately followed by a newline opens a
+      // string that spans newlines (single-line strings still break at '\n').
+      // Dedent happens later in compileLiteral.
+      const multiline = self.i < self.src.len and self.CR() == '\n';
+      var closed = false;
       while (self.i < self.src.len) {
         const sc = self.CR();
-        if (sc == '\n') break; // unclosed string
+        if (sc == '\n' and !multiline) break; // unclosed single-line string
         if (sc == '\\') {
           self.adv();
           if (self.i < self.src.len) self.adv();
@@ -204,6 +212,7 @@ pub const Lexer = struct {
           const next_c: u8 = if (self.i + 1 < self.src.len) self.src[self.i + 1] else 0;
           if (isStringCloseChar(next_c)) {
             self.adv(); // consume closing "
+            closed = true;
             break;
           } else {
             self.adv(); // " is content
@@ -212,6 +221,8 @@ pub const Lexer = struct {
           self.adv();
         }
       }
+      // A multi-line string that hit EOF without closing keeps the REPL reading.
+      self.last_string_open = multiline and !closed;
       self.tag = .noun;
       return .{ .tt = .string, .start = start, .end = self.i };
     }
@@ -419,10 +430,24 @@ pub const Lexer = struct {
   pub fn peekNext(self: *Lexer) Token {
     const saved_pos = self.i;
     const saved_tag = self.tag;
+    const saved_open = self.last_string_open;
     const tok = self.next();
     self.i = saved_pos;
     self.tag = saved_tag;
+    self.last_string_open = saved_open;
     return tok;
+  }
+
+  // Returns true if `src` ends inside an unterminated multi-line string, i.e.
+  // the REPL should keep reading more lines before evaluating. An open string
+  // always runs to EOF, so it is necessarily the last token before .eof.
+  pub fn endsOpenString(src: []const u8) bool {
+    var lex = Lexer.init(src);
+    while (true) {
+      const tok = lex.next();
+      if (tok.tt == .eof) return false;
+      if (tok.tt == .string and lex.last_string_open) return true;
+    }
   }
 };
 
@@ -477,6 +502,23 @@ test "lexer symbol" {
   const t = lex.next();
   try std.testing.expectEqual(TT.symbol, t.tt);
   try std.testing.expectEqualStrings("`abc", t.slice(src));
+}
+
+test "endsOpenString" {
+  const expectEqual = std.testing.expectEqual;
+  // Open: opening quote then a newline, no close yet (REPL keeps reading).
+  try expectEqual(true, Lexer.endsOpenString("a:\"\n"));
+  try expectEqual(true, Lexer.endsOpenString("a:\"\n  Hello,\n"));
+  // Closed multi-line string — quote on content line or on its own line.
+  try expectEqual(false, Lexer.endsOpenString("a:\"\n  Hello!\"\n"));
+  try expectEqual(false, Lexer.endsOpenString("a:\"\n  Hello!\n\"\n"));
+  // Single-line strings never trigger continuation (closed or not).
+  try expectEqual(false, Lexer.endsOpenString("\"abc\"\n"));
+  try expectEqual(false, Lexer.endsOpenString("\"abc\n"));
+  // A trailing escaped quote inside an open string does not look closed.
+  try expectEqual(true, Lexer.endsOpenString("\"\n  he said \\\"\n"));
+  // A quote in a comment must not be mistaken for a string opener.
+  try expectEqual(false, Lexer.endsOpenString("1 / a \" comment\n"));
 }
 
 test "lexer bool" {

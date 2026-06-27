@@ -19,6 +19,36 @@ const Pool = @import("../noun/symbol.zig").Pool;
 const Fs = @import("registry.zig").Fs;
 const fold_mod = @import("../primitive/adverb/fold.zig");
 
+// Strip the common leading indentation (spaces/tabs) from every line of a
+// multi-line string body. Blank lines don't count toward the common indent and
+// have their (partial) indentation removed. Returns a freshly allocated buffer.
+fn dedent(alloc: Alloc, s: []const u8) anyerror![]u8 {
+  const indentOf = struct {
+    fn f(line: []const u8) ?usize {
+      var n: usize = 0;
+      while (n < line.len and (line[n] == ' ' or line[n] == '\t')) n += 1;
+      return if (n == line.len) null else n; // null = blank line
+    }
+  }.f;
+  var min: usize = std.math.maxInt(usize);
+  var it = std.mem.splitScalar(u8, s, '\n');
+  while (it.next()) |line| {
+    if (indentOf(line)) |n| min = @min(min, n);
+  }
+  if (min == std.math.maxInt(usize)) min = 0; // all blank
+  var out = try std.ArrayList(u8).initCapacity(alloc, s.len);
+  errdefer out.deinit(alloc);
+  var lines = std.mem.splitScalar(u8, s, '\n');
+  var first = true;
+  while (lines.next()) |line| {
+    if (!first) out.appendAssumeCapacity('\n');
+    first = false;
+    const cut = @min(min, line.len);
+    out.appendSliceAssumeCapacity(line[cut..]);
+  }
+  return out.toOwnedSlice(alloc);
+}
+
 pub const Compiler = struct {
   alloc: Alloc,
   chunk: *Chunk,
@@ -249,18 +279,24 @@ pub const Compiler = struct {
       .i => |i| V{ .i = i },
       .f => |f| V{ .f = f },
       .c => |c| blk: {
+        // Multi-line string: content opens with a literal newline (only the
+        // lexer's multi-line path can produce this). Strip the leading newline
+        // and the common indentation of all non-blank lines before decoding.
+        const src = if (c.len > 0 and c[0] == '\n') try dedent(self.alloc, c[1..]) else c;
+        defer if (src.ptr != c.ptr) self.alloc.free(src);
+        const cc = src;
         // Decode backslash escapes: \n \t \0 \\ \" → actual bytes
-        var buf = try std.ArrayList(u8).initCapacity(self.alloc, c.len);
+        var buf = try std.ArrayList(u8).initCapacity(self.alloc, cc.len);
         defer buf.deinit(self.alloc);
         var i: usize = 0;
-        while (i < c.len) {
-          if (c[i] == '\\' and i + 1 < c.len) {
-            buf.appendAssumeCapacity(switch (c[i + 1]) {
-              'n' => '\n', 't' => '\t', '0' => 0, else => c[i + 1],
+        while (i < cc.len) {
+          if (cc[i] == '\\' and i + 1 < cc.len) {
+            buf.appendAssumeCapacity(switch (cc[i + 1]) {
+              'n' => '\n', 't' => '\t', '0' => 0, else => cc[i + 1],
             });
             i += 2;
           } else {
-            buf.appendAssumeCapacity(c[i]);
+            buf.appendAssumeCapacity(cc[i]);
             i += 1;
           }
         }

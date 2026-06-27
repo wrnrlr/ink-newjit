@@ -92,6 +92,18 @@ test "string" {
   try t.check("\"Hello\\0\"", "\"Hello\\0\""); // null string (single char)
 }
 
+test "multi-line string" {
+  var t = try Tester.init(); defer t.deinit();
+  // Closing quote on the content line → no trailing newline; common indent stripped.
+  try t.check("\"\n  Hello,\n  World!\"", "\"Hello,\\nWorld!\"");
+  // Closing quote on its own line → trailing newline survives.
+  try t.check("\"\n  Hello,\n  World!\n\"", "\"Hello,\\nWorld!\\n\"");
+  // Deeper indentation beyond the common prefix is preserved; blank lines ignored.
+  try t.check("\"\n  a\n\n    b\"", "\"a\\n\\n  b\"");
+  // Single-char result still collapses to a char atom.
+  try t.check("\"\n  X\"", "\"X\"");
+}
+
 test "vector" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("(1 2 3) 2", "3");
