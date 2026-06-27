@@ -9,6 +9,7 @@ patches/**/.zig-cache/
 patches/**/zig-pkg/
 *.dylib
 *.a
+data/**/*.parquet
 bench/ink
 bench/ink-*
 bench/report.csv
