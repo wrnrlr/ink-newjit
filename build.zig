@@ -121,7 +121,7 @@ pub fn build(b: *std.Build) !void {
 
   // --- MD5 extension shared library ---
   const md5_ext_mod = b.createModule(.{
-    .root_source_file = b.path("lib/md5/src/main.zig"),
+    .root_source_file = b.path("lib/md5/main.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
 
@@ -136,7 +136,7 @@ pub fn build(b: *std.Build) !void {
 
   // --- JSON extension shared library ---
   const json_ext_mod = b.createModule(.{
-    .root_source_file = b.path("lib/json/src/main.zig"),
+    .root_source_file = b.path("lib/json/main.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
 
@@ -147,7 +147,7 @@ pub fn build(b: *std.Build) !void {
 
   // --- CSV extension shared library ---
   const csv_ext_mod = b.createModule(.{
-    .root_source_file = b.path("lib/csv/src/main.zig"),
+    .root_source_file = b.path("lib/csv/main.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
 
@@ -155,6 +155,17 @@ pub fn build(b: *std.Build) !void {
   b.installArtifact(csv_lib);
   const csv_step = b.step("csv", "Build the CSV extension shared library");
   csv_step.dependOn(&b.addInstallArtifact(csv_lib, .{}).step);
+
+  // --- Parquet extension shared library ---
+  const parquet_ext_mod = b.createModule(.{
+    .root_source_file = b.path("lib/parquet/src/main.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+  });
+
+  const parquet_lib = b.addLibrary(.{ .name = "parquet", .root_module = parquet_ext_mod, .linkage = .dynamic });
+  b.installArtifact(parquet_lib);
+  const parquet_step = b.step("parquet", "Build the Parquet extension shared library");
+  parquet_step.dependOn(&b.addInstallArtifact(parquet_lib, .{}).step);
 
   // --- Unicode binary data (lib/data.kb) ---
   const data_gen_mod = b.createModule(.{

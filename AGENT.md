@@ -325,6 +325,7 @@ The loader (`src/modules.zig`) scans `lib/*.k` at startup, indexes all public de
 
 Available auto-loaded libraries:
 - `lib/csv.k` — `ReadCsv`
+- `lib/parquet.k` — `ReadParquet`
 - `lib/gpu.k` — `RunWindow`, `FillFrame`, `Tessellate`, `CompileSpirV`, `DrawShader`, `RunShader`, `CompileWgsl`, `CompileMesh`, `DrawMesh`
 - `lib/spirv.k` — `FragmentShader`, `VertexShader`
 - `lib/font.k` — font functions
