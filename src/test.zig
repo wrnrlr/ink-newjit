@@ -591,7 +591,7 @@ test "X_d drop keys verb" {
 test "&x where" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("&3", "0 0 0");
-  try t.check("&0", "&0");
+  try t.check("&0", "!0");
   try t.check("&-1", "!domain");
   try t.check("&`a", "!type");
 }
@@ -870,7 +870,7 @@ test "I_X cut" {
   try t.check("2 4_\"abcdefg\"", "(\"cd\";\"efg\")");
   try t.check("2 4 4_\"abcde\"", "(\"cd\";\"\";,\"e\")");
   try t.check("0 3_10 20 30 40 50", "(10 20 30;40 50)");
-  try t.check("5 10_1 2 3", "(&0;&0)");
+  try t.check("5 10_1 2 3", "(!0;!0)");
 }
 
 test "Y_i delete" {
@@ -886,7 +886,7 @@ test "weed out" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("(3>0 3 2)_1 2 3", ",2");   // keep where mask is false
   try t.check("(1<0 0 0)_1 2 3", "1 2 3"); // all-false mask: keep all
-  try t.check("(0<1 1 1)_1 2 3", "&0");    // all-true mask: remove all
+  try t.check("(0<1 1 1)_1 2 3", "!0");    // all-true mask: remove all
   try t.check("(3>0 3 2)_1.0 2.0 3.0", ",2.0"); // float weedout
   try t.check("(3>0 3 2)_\"abc\"", ",\"b\"");   // char weedout
 }
@@ -937,7 +937,7 @@ test "i_Y drop" {
   try t.check("2_1 2 3 4 5", "3 4 5");
   try t.check("-2_1 2 3 4 5", "1 2 3");
   try t.check("0_1 2 3", "1 2 3");
-  try t.check("10_1 2 3", "&0");
+  try t.check("10_1 2 3", "!0");
   try t.check("2_\"hello\"", "\"llo\"");
 }
 
