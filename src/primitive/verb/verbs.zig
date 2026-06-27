@@ -69,8 +69,10 @@ fn keysTable(_: *VM, x: V) V { return x.M.av().ref(); }
 const Values = struct {
   pub const op = .@".";
   _m: VM.Monad = valuesDict,
+  _M: VM.Monad = valuesTable,
 };
 fn valuesDict(_: *VM, x: V) V { return x.m.bv().ref(); }
+fn valuesTable(_: *VM, x: V) V { return x.M.bv().ref(); }
 
 const Open = struct {
   pub const op = .@"<";
