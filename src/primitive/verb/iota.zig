@@ -8,9 +8,11 @@ const VM = @import("../../runtime/vm.zig").VM;
 pub const Iota = struct {
   pub const op = .@"!";
   _i: VM.Monad = iota,
+  _f: VM.Monad = iota,
 };
 
 pub fn iota(vm: *VM, x: V) V {
+  if (x == .f) return iota(vm, .{ .i = @intFromFloat(@round(x.f)) });
   const n = x.i;
   if (n > 0 and n <= IOTA_MAX) {
     // Return a view into the static pool — zero allocation.
