@@ -56,12 +56,15 @@ fn runRepl(allocator: std.mem.Allocator, vm: *VM, loader: *modules.ModuleLoader)
       if (!Lexer.endsOpenString(buf.items)) break;
       std.debug.print("  ", .{}); // continuation prompt
     }
+    // A leading space/tab on the entry requests the raw k literal instead of
+    // the pretty multi-line dict/table rendering.
+    const lead_ws = buf.items.len > 0 and (buf.items[0] == ' ' or buf.items[0] == '\t');
     const line = std.mem.trim(u8, buf.items, " \t\r\n");
     if (eof and line.len == 0) return;
     if (std.mem.eql(u8, line, "\\q") or std.mem.eql(u8, line, "exit")) break;
     if (line.len > 0) {
       loader.autoLoad(vm, line) catch {};
-      if (repl.eval(line)) |res| {
+      if (repl.eval(line, !lead_ws)) |res| {
         defer res.deinit(allocator);
         for (res.results) |r| {
           if (r.output.len > 0) std.debug.print("{s}\n", .{r.output});

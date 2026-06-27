@@ -26,6 +26,11 @@ pub const TerseFormatter = struct {
   mode: Mode,
   indent: usize = 0,
   force_single_line: bool = false,
+  // When set, top-level dicts/tables/keyed-tables print in the multi-line REPL
+  // form (key|value lines, header/separator/row table grid) instead of the
+  // single-line k literal. Only the REPL turns this on, and only for entries
+  // that do not start with whitespace.
+  pretty: bool = false,
 
   pub const Mode = enum { Repl, Text };
 
@@ -46,7 +51,7 @@ pub const TerseFormatter = struct {
       .fmtFn = struct {
         fn fmt(ctx: *anyopaque, v: V, w: *std.Io.Writer) anyerror!void {
           const s: *Self = @ptrCast(@alignCast(ctx));
-          try s.formatValue(v, w);
+          try s.formatTop(v, w);
         }
       }.fmt,
     };
@@ -330,6 +335,217 @@ pub const TerseFormatter = struct {
     try w.writeAll("[[]");
     try self.formatTableCols(d, w);
     try w.writeAll("]");
+  }
+
+  // Top-level entry. In `pretty` mode dicts/tables/keyed-tables get the
+  // multi-line REPL rendering; everything else (and all nested values) falls
+  // through to the single-line `formatValue`.
+  fn formatTop(self: *Self, v: V, w: anytype) anyerror!void {
+    if (self.pretty) switch (v) {
+      .m => |d| {
+        const keys = d.av();
+        const vals = d.bv();
+        if (keys.tag() == .M and vals.tag() == .M)
+          return self.formatKeyedTablePretty(keys.M, vals.M, w);
+        if (keys.len() != 0) return self.formatDictPretty(d, w);
+      },
+      .M => |d| {
+        if (d.av().len() != 0) return self.formatTablePretty(d, w);
+      },
+      else => {},
+    };
+    try self.formatValue(v, w);
+  }
+
+  // Render a single cell value to bytes for the pretty grid: char data as raw
+  // text, symbols without the leading backtick, everything else as its normal
+  // single-line form. Errors (e.g. a cell larger than the scratch buffer) are
+  // swallowed — the truncated content is used.
+  fn renderCell(self: *Self, v: V, w: *std.Io.Writer) void {
+    switch (v) {
+      .C => |n| w.writeAll(n.slice()) catch {},
+      .c => |a| w.writeByte(@intCast(a)) catch {},
+      .S => |n| for (n.slice(), 0..) |sym, i| {
+        if (i > 0) w.writeAll(" ") catch {};
+        self.writeSymName(sym, w);
+      },
+      .s => |a| self.writeSymName(a, w),
+      else => {
+        const old = self.force_single_line;
+        self.force_single_line = true;
+        defer self.force_single_line = old;
+        self.formatValue(v, w) catch {};
+      },
+    }
+  }
+
+  fn writeSymName(self: *Self, a: u32, w: *std.Io.Writer) void {
+    if (a < self.vm.symbolCount()) w.writeAll(self.vm.getSymbol(a)) catch {}
+    else w.print("{d}", .{a}) catch {};
+  }
+
+  fn renderCellAlloc(self: *Self, v: V) ![]u8 {
+    var buf: [4096]u8 = undefined;
+    var fw = std.Io.Writer.fixed(&buf);
+    self.renderCell(v, &fw);
+    return self.alloc.dupe(u8, fw.buffered());
+  }
+
+  // Print `cells` separated by a single space, each padded to `colw`.
+  // Right-aligned columns (numbers, k9-style) pad on the left; left-aligned
+  // columns pad on the right, and the final column is right-padded only when
+  // `pad_last` is set (so a trailing `|` aligns).
+  fn printPrettyRow(_: *Self, strs: []const []const u8, colw: []const usize, right: []const bool, pad_last: bool, w: anytype) anyerror!void {
+    for (strs, 0..) |s, i| {
+      if (i > 0) try w.writeAll(" ");
+      if (right[i]) {
+        for (s.len..colw[i]) |_| try w.writeAll(" ");
+        try w.writeAll(s);
+      } else {
+        try w.writeAll(s);
+        if (pad_last or i + 1 < strs.len)
+          for (s.len..colw[i]) |_| try w.writeAll(" ");
+      }
+    }
+  }
+
+  // Numeric columns are right-aligned in the grid (k9 convention); everything
+  // else (symbols, chars, mixed lists) stays left-aligned.
+  fn columnIsRight(v: V) bool {
+    return switch (v) {
+      .I, .F, .B => true,
+      else => false,
+    };
+  }
+
+  // The `- -` underline: a run of dashes per column, full column width.
+  fn printPrettySep(_: *Self, colw: []const usize, w: anytype) anyerror!void {
+    for (colw, 0..) |cw, i| {
+      if (i > 0) try w.writeAll(" ");
+      for (0..cw) |_| try w.writeAll("-");
+    }
+  }
+
+  fn formatDictPretty(self: *Self, d: Dict, w: anytype) anyerror!void {
+    const keys = d.av();
+    const vals = d.bv();
+    const n = keys.len();
+    const keystrs = try self.alloc.alloc([]u8, n);
+    defer { for (keystrs) |ks| self.alloc.free(ks); self.alloc.free(keystrs); }
+    var keyw: usize = 0;
+    for (0..n) |i| {
+      const k = keys.at(i);
+      defer k.deinit(self.alloc);
+      keystrs[i] = try self.renderCellAlloc(k);
+      if (keystrs[i].len > keyw) keyw = keystrs[i].len;
+    }
+    for (0..n) |i| {
+      if (i > 0) try w.writeAll("\n");
+      try w.writeAll(keystrs[i]);
+      for (keystrs[i].len..keyw) |_| try w.writeAll(" ");
+      try w.writeAll("|");
+      const v = if (n == 1) vals.ref() else vals.at(i);
+      defer v.deinit(self.alloc);
+      self.renderCell(v, w);
+    }
+  }
+
+  // Collect a table's column headers, column arrays, per-cell strings and column
+  // widths. Caller frees via `freeGrid`. `cells` is column-major: `cells[c*nrow+r]`.
+  const Grid = struct {
+    headers: [][]u8,
+    cols: []V,
+    cells: [][]u8,
+    colw: []usize,
+    right: []bool,
+    nrow: usize,
+  };
+
+  fn buildGrid(self: *Self, d: Dict) anyerror!Grid {
+    const names = d.av();
+    const vals = d.bv();
+    const ncol = names.len();
+    const headers = try self.alloc.alloc([]u8, ncol);
+    const cols = try self.alloc.alloc(V, ncol);
+    const colw = try self.alloc.alloc(usize, ncol);
+    const right = try self.alloc.alloc(bool, ncol);
+    for (0..ncol) |c| {
+      const nm = names.at(c);
+      defer nm.deinit(self.alloc);
+      headers[c] = try self.renderCellAlloc(nm);
+      cols[c] = vals.at(c);
+      colw[c] = headers[c].len;
+      right[c] = columnIsRight(cols[c]);
+    }
+    const nrow = if (ncol > 0) cols[0].len() else 0;
+    const cells = try self.alloc.alloc([]u8, ncol * nrow);
+    for (0..ncol) |c| for (0..nrow) |r| {
+      const elem = cols[c].at(r);
+      defer elem.deinit(self.alloc);
+      const s = try self.renderCellAlloc(elem);
+      cells[c * nrow + r] = s;
+      if (s.len > colw[c]) colw[c] = s.len;
+    };
+    return .{ .headers = headers, .cols = cols, .cells = cells, .colw = colw, .right = right, .nrow = nrow };
+  }
+
+  fn freeGrid(self: *Self, g: Grid) void {
+    for (g.headers) |h| self.alloc.free(h);
+    for (g.cells) |c| self.alloc.free(c);
+    for (g.cols) |c| c.deinit(self.alloc);
+    self.alloc.free(g.headers);
+    self.alloc.free(g.cells);
+    self.alloc.free(g.cols);
+    self.alloc.free(g.colw);
+    self.alloc.free(g.right);
+  }
+
+  fn formatTablePretty(self: *Self, d: Dict, w: anytype) anyerror!void {
+    const g = try self.buildGrid(d);
+    defer self.freeGrid(g);
+    try self.printPrettyRow(g.headers, g.colw, g.right, false, w);
+    try w.writeAll("\n");
+    try self.printPrettySep(g.colw, w);
+    const ncol = g.headers.len;
+    const row = try self.alloc.alloc([]const u8, ncol);
+    defer self.alloc.free(row);
+    for (0..g.nrow) |r| {
+      try w.writeAll("\n");
+      for (0..ncol) |c| row[c] = g.cells[c * g.nrow + r];
+      try self.printPrettyRow(row, g.colw, g.right, false, w);
+    }
+  }
+
+  // A keyed table is a dict whose keys and values are both tables: the key
+  // columns and value columns share rows, joined by `|`.
+  fn formatKeyedTablePretty(self: *Self, kt: Dict, vt: Dict, w: anytype) anyerror!void {
+    const kg = try self.buildGrid(kt);
+    defer self.freeGrid(kg);
+    const vg = try self.buildGrid(vt);
+    defer self.freeGrid(vg);
+    const nrow = @max(kg.nrow, vg.nrow);
+    // header
+    try self.printPrettyRow(kg.headers, kg.colw, kg.right, true, w);
+    try w.writeAll("|");
+    try self.printPrettyRow(vg.headers, vg.colw, vg.right, false, w);
+    // separator
+    try w.writeAll("\n");
+    try self.printPrettySep(kg.colw, w);
+    try w.writeAll("|");
+    try self.printPrettySep(vg.colw, w);
+    // rows
+    const krow = try self.alloc.alloc([]const u8, kg.headers.len);
+    defer self.alloc.free(krow);
+    const vrow = try self.alloc.alloc([]const u8, vg.headers.len);
+    defer self.alloc.free(vrow);
+    for (0..nrow) |r| {
+      try w.writeAll("\n");
+      for (0..kg.headers.len) |c| krow[c] = kg.cells[c * kg.nrow + r];
+      for (0..vg.headers.len) |c| vrow[c] = vg.cells[c * vg.nrow + r];
+      try self.printPrettyRow(krow, kg.colw, kg.right, true, w);
+      try w.writeAll("|");
+      try self.printPrettyRow(vrow, vg.colw, vg.right, false, w);
+    }
   }
 
   fn allSymbols(self: *Self, slice: []const V) bool {

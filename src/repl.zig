@@ -36,7 +36,9 @@ pub const Repl = struct {
   };
 
   /// Evaluates a string of source code and returns a list of results for each statement.
-  pub fn eval(self: *Repl, source: []const u8) !EvalResult {
+  /// `pretty` selects the multi-line REPL rendering for dicts/tables (the caller
+  /// passes false when the entry began with whitespace, to get the raw k literal).
+  pub fn eval(self: *Repl, source: []const u8, pretty: bool) !EvalResult {
     if (source.len == 0) {
       return EvalResult{ .results = &.{}, .is_error = false, .vm_alloc = self.vm.alloc };
     }
@@ -128,6 +130,7 @@ pub const Repl = struct {
       var mock_out = try MockWriter.init(self.alloc);
       defer mock_out.deinit();
       var t_fmt = TerseFormatter.init(self.vm, self.alloc, .Repl);
+      t_fmt.pretty = pretty;
       var mw_out = mock_out.writer();
       if (!is_suppressed) {
         t_fmt.formatter().fmt(res, &mw_out.interface) catch {};

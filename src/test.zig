@@ -32,6 +32,11 @@ pub const Tester = struct {
     try self.fmt.formatter().fmt(res, &mw.interface);
     try testing.expectEqualStrings(expected, self.w.getText());
   }
+  fn checkPretty(self: *Tester, txt: []const u8, expected: []const u8) !void {
+    self.fmt.pretty = true;
+    defer self.fmt.pretty = false;
+    try self.check(txt, expected);
+  }
   fn printout(self: *Tester) ![]const u8 {
     const copy = try self.out.alloc.dupe(u8, self.out.getText());
     self.out.buffer.clearRetainingCapacity();
@@ -67,6 +72,26 @@ test "basic syntax" {
   try t.check("[a:1;b:2 3]", "[a:1;b:2 3]");
   try t.check("[[]n:`b`c;i:2 3]", "[[]n:`b`c;i:2 3]");
   try t.check("[[n:`b`c]i:2 3]", "[[n:`b`c]i:2 3]"); // keyed table (utable)
+}
+
+test "pretty repl dict/table rendering" {
+  var t = try Tester.init(); defer t.deinit();
+  _ = try t.eval("d:[a:1 2 3;c:\"abc\"]");
+  // Dict: one key|value per line, char data shown as raw text.
+  try t.checkPretty("d", "a|1 2 3\nc|abc");
+  // Misaligned keys pad so the bars line up.
+  try t.checkPretty("`a`bb!1 2", "a |1\nbb|2");
+  // Table: header row, dashed separator, then a row of values per record.
+  try t.checkPretty("+d", "a c\n- -\n1 a\n2 b\n3 c");
+  // Numeric columns right-align (k9-style); symbol/char columns left-align.
+  _ = try t.eval("e:[a:100 2 30;s:`x`yy`z]");
+  try t.checkPretty("+e", "  a s\n--- --\n100 x\n  2 yy\n 30 z");
+  // Keyed table: key columns and value columns share rows, joined by `|`.
+  try t.checkPretty("[[n:`b`c]i:2 3]", "n|i\n-|-\nb|2\nc|3");
+  // Single-key dict still renders one line.
+  try t.checkPretty("[a:1]", "a|1");
+  // Without pretty (raw / leading-whitespace path) the k literal is unchanged.
+  try t.check("d", "[a:1 2 3;c:\"abc\"]");
 }
 
 test "parse preserves vector literal values" {
