@@ -252,7 +252,11 @@ pub const TerseFormatter = struct {
       return;
     }
     if (slice.len == 0) {
-      try w.writeAll("&0");
+      try w.writeAll(switch (T) {
+        i32 => "!0",
+        f32 => "!0.0",
+        else => "&0",
+      });
     } else if (slice.len == 1) {
       try w.writeAll(",");
       try self.formatAtom(T, slice[0], w);
