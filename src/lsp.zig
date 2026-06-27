@@ -453,6 +453,26 @@ fn isNounTerm(tt: TT) bool {
   };
 }
 
+// Token classifiers for the documentHighlight "enclosing expression" scan.
+fn isOpenTok(tt: TT) bool {
+  return switch (tt) { .@"(", .@"{", .@"[", .@"$[", .@"[[", .@"[[]" => true, else => false };
+}
+fn isCloseTok(tt: TT) bool {
+  return switch (tt) { .@")", .@"}", .@"]" => true, else => false };
+}
+// An infix verb/operator that can sit between two operands (assignment `:`
+// included; adverbs are postfix modifiers, so excluded).
+fn isVerbTok(tt: TT) bool {
+  return switch (tt) { .op, .keyword, .io, .@":" => true, else => false };
+}
+// A bare noun token (literal or name) — not a bracket.
+fn isNounTok(tt: TT) bool {
+  return switch (tt) {
+    .int, .float, .bit, .bits, .string, .symbol, .iden, .adverb_val => true,
+    else => false,
+  };
+}
+
 // Classify how the adverb token `adv` is applied, by a localized backward token
 // scan inside its statement.  We find the operand the adverb post-modifies, then
 // look at the token just left of that operand: a noun there means a left
@@ -845,7 +865,7 @@ fn handleInitialize(s: *Server, id: ?json.Value, params: ?json.Value) !void {
   buildWorkspaceIndex(s, root);
   buildRefDocs(s);
   try replyResult(s, id,
-    \\{{"capabilities":{{"textDocumentSync":1,"hoverProvider":true,"definitionProvider":true,"documentSymbolProvider":true,"referencesProvider":true,"workspaceSymbolProvider":true,"renameProvider":{{"prepareProvider":true}}}},"serverInfo":{{"name":"ink-lsp","version":"0.1.0"}}}}
+    \\{{"capabilities":{{"textDocumentSync":1,"hoverProvider":true,"definitionProvider":true,"documentSymbolProvider":true,"referencesProvider":true,"workspaceSymbolProvider":true,"documentHighlightProvider":true,"renameProvider":{{"prepareProvider":true}}}},"serverInfo":{{"name":"ink-lsp","version":"0.1.0"}}}}
   , .{});
 }
 
@@ -1050,6 +1070,143 @@ fn handleDefinition(s: *Server, id: ?json.Value, params: ?json.Value) !void {
     }
   }
   return replyResult(s, id, "null", .{});
+}
+
+// Emit one documentHighlight range (kind: Text=1) into the response buffer.
+fn emitHl(s: *Server, first: *bool, src: []const u8, start: usize, end: usize) !void {
+  const a = offsetToPos(src, start);
+  const b = offsetToPos(src, end);
+  if (!first.*) try s.out.append(s.gpa, ',');
+  first.* = false;
+  try p(s, "{{\"range\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"kind\":1}}",
+    .{ a.line, a.col, b.line, b.col });
+}
+
+// Experimental: when the cursor sits on/within a dyadic expression (`a v b`),
+// highlight its three parts — left operand, operator, right operand — so the
+// structure pops out.  In right-to-left k the right operand runs to the end of
+// the enclosing scope, so `12+4` lights up wholly from any of `12`/`+`/`4`, and
+// `items:(…)` lights up the name, `:` and the whole rhs.  Token-based (the AST
+// carries no offsets); best-effort for the common infix shapes.
+fn handleDocumentHighlight(s: *Server, id: ?json.Value, params: ?json.Value) !void {
+  const uri = str(obj(obj(params, "textDocument"), "uri")) orelse return replyResult(s, id, "[]", .{});
+  const src = docText(s, uri) orelse return replyResult(s, id, "[]", .{});
+  const pos = obj(params, "position");
+  const off = posToOffset(src, int(obj(pos, "line")) orelse 0, int(obj(pos, "character")) orelse 0);
+
+  var toks: std.ArrayList(lex.Token) = .empty;
+  defer toks.deinit(s.gpa);
+  var lx = Lexer.init(src);
+  var ci: ?usize = null;
+  while (true) {
+    const t = lx.next();
+    if (t.tt == .eof) break;
+    if (off >= t.start and off < t.end) ci = toks.items.len;
+    toks.append(s.gpa, t) catch break;
+  }
+  const items = toks.items;
+  const cur = ci orelse return replyResult(s, id, "[]", .{});
+
+  // Statement bounds [lo, hi).  A `sep` (`;` or newline) only ends the statement
+  // at bracket depth 0 — inside `(…)`/`[…]` a `;` separates list items, not
+  // statements, so we must track depth from the start of the buffer.
+  var lo: usize = 0;
+  var depthAtCur: i32 = 0;
+  { var i: usize = 0; while (i < cur) : (i += 1) {
+      const tt = items[i].tt;
+      if (isOpenTok(tt)) { depthAtCur += 1; }
+      else if (isCloseTok(tt)) { depthAtCur -= 1; }
+      else if (tt == .sep and depthAtCur == 0) { lo = i + 1; }
+  } }
+  var hi: usize = items.len;
+  { var d: i32 = depthAtCur; var i: usize = cur; while (i < items.len) : (i += 1) {
+      const tt = items[i].tt;
+      if (isOpenTok(tt)) { d += 1; }
+      else if (isCloseTok(tt)) { d -= 1; }
+      else if (tt == .sep and d == 0) { hi = i; break; }
+  } }
+
+  // Enclosing bracket scope of the cursor: [scopeLo, scopeHi).
+  var stack: std.ArrayList(usize) = .empty;
+  defer stack.deinit(s.gpa);
+  { var i: usize = lo; while (i < cur) : (i += 1) {
+      if (isOpenTok(items[i].tt)) { stack.append(s.gpa, i) catch {}; }
+      else if (isCloseTok(items[i].tt)) { if (stack.items.len > 0) _ = stack.pop(); }
+  } }
+  const scopeLo: usize = if (stack.items.len > 0) stack.items[stack.items.len - 1] + 1 else lo;
+  var scopeHi: usize = hi;
+  if (stack.items.len > 0) {
+    const e = stack.items[stack.items.len - 1];
+    var depth: i32 = 0; var k: usize = e;
+    while (k < hi) : (k += 1) {
+      if (isOpenTok(items[k].tt)) { depth += 1; }
+      else if (isCloseTok(items[k].tt)) { depth -= 1; if (depth == 0) { scopeHi = k; break; } }
+    }
+  }
+  if (cur < scopeLo or cur >= scopeHi) return replyResult(s, id, "[]", .{});
+
+  // Locate the focus operator at relative depth 0 within the scope.
+  var focus: ?usize = null;
+  if (isVerbTok(items[cur].tt)) {
+    focus = cur;
+  } else {
+    var depth: i32 = 0; var i: usize = cur + 1;
+    while (i < scopeHi) : (i += 1) {
+      const tt = items[i].tt;
+      if (isOpenTok(tt)) { depth += 1; }
+      else if (isCloseTok(tt)) { if (depth == 0) break; depth -= 1; }
+      else if (depth == 0 and isVerbTok(tt)) { focus = i; break; }
+    }
+    if (focus == null and cur > scopeLo) {
+      depth = 0; i = cur - 1;
+      while (true) {
+        const tt = items[i].tt;
+        if (isCloseTok(tt)) { depth += 1; }
+        else if (isOpenTok(tt)) { if (depth == 0) break; depth -= 1; }
+        else if (depth == 0 and isVerbTok(tt)) { focus = i; break; }
+        if (i == scopeLo) break;
+        i -= 1;
+      }
+    }
+  }
+  const f = focus orelse return replyResult(s, id, "[]", .{});
+
+  // Left operand: the noun-phrase (group / strand / name) immediately left of f.
+  var haveLeft = false; var lStart: usize = 0; var lEnd: usize = 0;
+  if (f > scopeLo) {
+    const prev = f - 1;
+    if (isCloseTok(items[prev].tt)) {
+      var depth: i32 = 0; var k: usize = prev;
+      while (true) {
+        if (isCloseTok(items[k].tt)) { depth += 1; }
+        else if (isOpenTok(items[k].tt)) { depth -= 1; if (depth == 0) break; }
+        if (k == scopeLo) break;
+        k -= 1;
+      }
+      haveLeft = true; lStart = items[k].start; lEnd = items[prev].end;
+    } else if (isNounTok(items[prev].tt)) {
+      var k: usize = prev;
+      while (k > scopeLo and isNounTok(items[k - 1].tt)) k -= 1;
+      haveLeft = true; lStart = items[k].start; lEnd = items[prev].end;
+    }
+  }
+
+  // Right operand: from just after f to the end of the enclosing scope.
+  var haveRight = false; var rStart: usize = 0; var rEnd: usize = 0;
+  if (f + 1 < scopeHi) {
+    haveRight = true; rStart = items[f + 1].start; rEnd = items[scopeHi - 1].end;
+  }
+  if (!haveLeft and !haveRight) return replyResult(s, id, "[]", .{});
+
+  try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
+  try writeId(s, id);
+  try s.out.appendSlice(s.gpa, ",\"result\":[");
+  var first = true;
+  if (haveLeft) try emitHl(s, &first, src, lStart, lEnd);
+  try emitHl(s, &first, src, items[f].start, items[f].end);
+  if (haveRight) try emitHl(s, &first, src, rStart, rEnd);
+  try s.out.appendSlice(s.gpa, "]}");
+  try flush(s);
 }
 
 fn handleDocumentSymbol(s: *Server, id: ?json.Value, params: ?json.Value) !void {
@@ -1289,6 +1446,8 @@ fn handle(s: *Server, root: json.Value) !void {
     try handleDefinition(s, id, params);
   } else if (std.mem.eql(u8, method, "textDocument/documentSymbol")) {
     try handleDocumentSymbol(s, id, params);
+  } else if (std.mem.eql(u8, method, "textDocument/documentHighlight")) {
+    try handleDocumentHighlight(s, id, params);
   } else if (std.mem.eql(u8, method, "textDocument/references")) {
     try handleReferences(s, id, params);
   } else if (std.mem.eql(u8, method, "workspace/symbol")) {
