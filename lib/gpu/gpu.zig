@@ -14,6 +14,12 @@
 const std = @import("std");
 // Zig 0.16's std no longer exposes getenv; call libc directly.
 extern fn getenv(name: [*:0]const u8) ?[*:0]const u8;
+fn envStr(name: [*:0]const u8) ?[]const u8 {
+  return std.mem.span(getenv(name) orelse return null);
+}
+fn envInt(name: [*:0]const u8) ?i64 {
+  return std.fmt.parseInt(i64, envStr(name) orelse return null, 10) catch null;
+}
 const zglfw = @import("zglfw");
 const zgpu  = @import("zgpu");
 const wgpu  = zgpu.wgpu;
@@ -257,6 +263,13 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
     if (kn(cfg) >= 2) { win_w = @intFromFloat(cf[0]); win_h = @intFromFloat(cf[1]); }
   }
   }
+  // `ink -size WxH` overrides the script-supplied window size.
+  if (envStr("INK_SIZE")) |s| {
+    if (std.mem.indexOfScalar(u8, s, 'x')) |xi| {
+      win_w = std.fmt.parseInt(i32, s[0..xi], 10) catch win_w;
+      win_h = std.fmt.parseInt(i32, s[xi + 1 ..], 10) catch win_h;
+    }
+  }
 
   var da = std.heap.DebugAllocator(.{}).init;
   defer _ = da.deinit();
@@ -272,9 +285,36 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
     zglfw.windowHint(zglfw.Focused, 0);      // don't steal focus on creation
     zglfw.windowHint(zglfw.FocusOnShow, 0);  // don't steal focus when shown
   }
+  // `ink -top` keeps the window above all others (always-on-top).
+  if (getenv("INK_TOP") != null) zglfw.windowHint(zglfw.Floating, 1);
+  // `ink -monitor N` places the window on monitor N (0-based). Create it hidden
+  // so we can position it before it appears — no flash on the wrong screen.
+  const mon = envInt("INK_MONITOR");
+  if (mon != null) zglfw.windowHint(zglfw.Visible, 0);
 
   const window = zglfw.createWindow(win_w, win_h, "ink", null, null) catch return ki(-1);
   defer zglfw.destroyWindow(window);
+
+  if (mon) |mi| {
+    var count: c_int = 0;
+    if (zglfw.getMonitors(&count)) |ms| {
+      const idx: usize = if (mi < 0) 0 else @intCast(mi);
+      if (idx < @as(usize, @intCast(count))) {
+        var mx: c_int = 0;
+        var my: c_int = 0;
+        zglfw.getMonitorPos(ms[idx], &mx, &my);
+        var px = mx;
+        var py = my;
+        if (zglfw.getVideoMode(ms[idx])) |vmode| { // center on the monitor
+          px = mx + @divTrunc(@as(c_int, @intCast(vmode.width)) - @as(c_int, @intCast(win_w)), 2);
+          py = my + @divTrunc(@as(c_int, @intCast(vmode.height)) - @as(c_int, @intCast(win_h)), 2);
+        }
+        zglfw.setWindowPos(window, px, py);
+      }
+    }
+    zglfw.showWindow(window); // FocusOnShow=0 (with -unfocus) keeps focus put
+  }
+
   _ = zglfw.setKeyCallback(window, keyCb);
   _ = zglfw.setScrollCallback(window, scrollCb);
 
