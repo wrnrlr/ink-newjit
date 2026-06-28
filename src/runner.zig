@@ -21,6 +21,14 @@ const build_options = @import("build_options");
 // Zig 0.16's std no longer exposes setenv/getenv; call libc directly.
 extern fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
 
+// setenv() with a non-sentinel-terminated value (args aren't null-terminated).
+// setenv copies its arguments, so the temporary dup can be freed immediately.
+fn setEnvZ(allocator: std.mem.Allocator, name: [*:0]const u8, value: []const u8) void {
+  const z = allocator.dupeZ(u8, value) catch return;
+  defer allocator.free(z);
+  _ = setenv(name, z, 1);
+}
+
 const V = @import("noun/value.zig").V;
 const K = @import("noun/class.zig").K;
 const N = @import("noun/array.zig").N;
@@ -114,8 +122,17 @@ pub fn main(init: std.process.Init.Minimal) !void {
     if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--disasm")) {
       disasm_mode = true;
     } else if (std.mem.eql(u8, arg, "-unfocus")) {
-      // Tell the GPU extension to open its window without grabbing focus.
+      // GPU window opens without grabbing keyboard focus.
       _ = setenv("INK_UNFOCUS", "1", 1);
+    } else if (std.mem.eql(u8, arg, "-top")) {
+      // GPU window stays above all others (always-on-top).
+      _ = setenv("INK_TOP", "1", 1);
+    } else if (std.mem.eql(u8, arg, "-monitor")) {
+      // `-monitor N` places the GPU window on monitor N (0-based).
+      if (args_iter.next()) |v| setEnvZ(allocator, "INK_MONITOR", v);
+    } else if (std.mem.eql(u8, arg, "-size")) {
+      // `-size WxH` sets the GPU window size (e.g. -size 1280x720).
+      if (args_iter.next()) |v| setEnvZ(allocator, "INK_SIZE", v);
     } else if (script_path == null) {
       script_path = arg;
     } else {
