@@ -359,9 +359,13 @@ pub fn dyadContainerKernel(
       const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
       @memset(res.slice(), .blank);
       for (res.slice(), 0..) |*r, i| {
-        const xv = if (xn == 1) x.ref() else x.at(i);
+        // Broadcast a count-1 operand by extracting its single element (.at(0)),
+        // not by ref'ing the whole value: a length-1 *list* ref'd whole would
+        // re-enter this same kernel with identical args and loop forever. .at(0)
+        // on an atom returns the atom itself, so this is correct for both.
+        const xv = x.at(if (xn == 1) 0 else i);
         defer xv.deinit(vm.alloc);
-        const yv = if (yn == 1) y.ref() else y.at(i);
+        const yv = y.at(if (yn == 1) 0 else i);
         defer yv.deinit(vm.alloc);
         const rv = dispatch.dispatch2(vm, op2, xv, yv);
         if (rv.tag() == .err) {

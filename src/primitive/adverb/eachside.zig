@@ -5,6 +5,7 @@ const util = @import("../../util.zig");
 const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
+const promote = @import("../promote.zig").promote;
 
 pub fn eachright(vm: *VM, base: V, x: V, y: V, f: util.ApplyFn) V {
   const n = y.len();
@@ -18,7 +19,7 @@ pub fn eachright(vm: *VM, base: V, x: V, y: V, f: util.ApplyFn) V {
     const args = [_]V{ xr, item };
     res.slice()[i] = f(vm, base, &args);
   }
-  return .{ .L = res };
+  return promote(vm.alloc, res);
 }
 
 pub fn eachleft(vm: *VM, base: V, x: V, y: V, f: util.ApplyFn) V {
@@ -33,5 +34,5 @@ pub fn eachleft(vm: *VM, base: V, x: V, y: V, f: util.ApplyFn) V {
     const args = [_]V{ item, yr };
     res.slice()[i] = f(vm, base, &args);
   }
-  return .{ .L = res };
+  return promote(vm.alloc, res);
 }

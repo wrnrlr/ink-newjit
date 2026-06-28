@@ -50,13 +50,16 @@ fn derived3(vm: *VM, adv: Adverb, x: V, y: V, z: V, f: util.ApplyFn) V {
     .@"'" => .{ .err = .nyi },
     .@"/" => blk: {
       if (y.tag() == .i and x.arity() == 1) break :blk adverbs.ndo(vm, x, y.i, z, f);
-      if ((y.tag() == .o or y.tag() == .p) and x.arity() >= 1)
+      // A function on the left (cond) selects the while form regardless of the
+      // step's arity: a body that ignores the threaded value (e.g. {g::g+1;0})
+      // is arity 0 but still a valid loop step that iterates via side effects.
+      if (y.tag() == .o or y.tag() == .p)
         break :blk adverbs.whiledo(vm, y, x, z, f);
       break :blk adverbs.fold(vm, x, y, z, f);
     },
     .@"\\" => blk: {
       if (y.tag() == .i and x.arity() == 1) break :blk adverbs.ndos(vm, x, y.i, z, f);
-      if ((y.tag() == .o or y.tag() == .p) and x.arity() >= 1)
+      if (y.tag() == .o or y.tag() == .p)
         break :blk adverbs.whilescan(vm, y, x, z, f);
       break :blk adverbs.scan(vm, x, y, z, f);
     },
