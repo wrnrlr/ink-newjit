@@ -12,6 +12,8 @@
 ///   k_call, k_make_dict, ki, kf, kn, kfp, ku, KF
 
 const std = @import("std");
+// Zig 0.16's std no longer exposes getenv; call libc directly.
+extern fn getenv(name: [*:0]const u8) ?[*:0]const u8;
 const zglfw = @import("zglfw");
 const zgpu  = @import("zgpu");
 const wgpu  = zgpu.wgpu;
@@ -264,6 +266,12 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   defer zglfw.terminate();
   zglfw.windowHint(zglfw.ClientAPI, zglfw.NoAPI);
   zglfw.windowHint(zglfw.CocoaRetinaFramebuffer, 1);
+  // `ink -unfocus` sets INK_UNFOCUS=1 so the window opens without stealing
+  // keyboard focus — handy for watch loops that recreate the window on save.
+  if (getenv("INK_UNFOCUS") != null) {
+    zglfw.windowHint(zglfw.Focused, 0);      // don't steal focus on creation
+    zglfw.windowHint(zglfw.FocusOnShow, 0);  // don't steal focus when shown
+  }
 
   const window = zglfw.createWindow(win_w, win_h, "ink", null, null) catch return ki(-1);
   defer zglfw.destroyWindow(window);

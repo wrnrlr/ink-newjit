@@ -134,3 +134,40 @@ size, not reconstruct it: `init` passes sizes >1024 through unchanged while
 re-round — it must store the size class in the header or unify the two rounding
 paths. Not blocking; the 16-byte constraint is fine. Documented so the next
 header change doesn't rediscover this the hard way.
+
+---
+
+## 5. `0+`/`&` on an eachleft/eachright match result hangs
+
+```k-repl
+ 0+((,`G)~\:`G)        / hangs (infinite loop)
+ &((,`G)~\:`G)         / `!type
+```
+
+The eachleft/eachright match `(,`G)~\:`G` returns a one-element general list
+that *prints* and *types* as a normal `,1b` (`@` → `` `L ``, `#` → 1), but
+arithmetic on it (`0+…`) spins forever and `&` (Where) rejects it with
+`!type`. The same expression built from a literal works fine
+(`0+,1b` → `,1`), so the value coming out of `~\:` is structurally distinct
+(looks like a mis-refcounted / self-referential cell). Seen while writing
+`lib/fbx.k`'s tree accessors: indexing children with `c@\:`name` then masking
+with `~\:` hung. Workaround used there: build masks with plain each `'`
+(`{$[(x@`name)~q;1;0]}'c` yields a clean `` `I `` vector) instead of `\:`.
+Note `&` on a multi-element general list of bools also fails with `!type`
+(e.g. `&(0b;1b;1b)`); Where wants a `` `B ``/`` `I `` vector, and `~\:`/`'`
+returning `` `L `` is the underlying friction.
+
+---
+
+## 6. While (`f f/`) only iterates when the body uses its argument `x`
+
+```k-repl
+ fbx.n:0
+ ({fbx.n<4}){fbx.n::fbx.n+1;0}/0     / runs once, not 4×
+ ({fbx.n<4}){fbx.n::fbx.n+1;x}/0     / runs 4×  (body references x)
+```
+
+A while-loop whose body ignores the threaded value runs a single iteration.
+Bodies that reference `x` (even just returning it) loop correctly. Worked
+around in `lib/fbx.k` by threading a step counter (`{…;x+1}`) through every
+inflate loop and keeping the real state in globals.

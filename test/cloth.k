@@ -2,6 +2,9 @@
 /
 / 20×20 grid cloth pinned at two top corners, falling under gravity.
 /
+/ Particle state lives in one table `g` (px py pz vx vy vz), one row per particle.
+/ Each constraint type (h/v/d/b) is its own edge table (i j l0 al w0 w1 wt).
+/
 / Constraint solver: 4 sequential vectorized passes (h/v/d/b constraint types).
 / Each pass is a vectorized Jacobi step within one constraint type, and passes
 / are applied sequentially (Gauss-Seidel across types). This is stable because:
@@ -14,147 +17,101 @@
 2: "lib/spirv.k"
 2: "lib/gpu.k"
 
-vlen3:{sqrt[(sqr x)+(sqr y)+(sqr z)]}
-cross3:{((x@1 2 0)*y@2 0 1)-(x@2 0 1)*y@1 2 0}
-vnorm:{x%((vlen3[x@0;x@1;x@2])|0.0001)}
+/ ── Vector helpers ────────────────────────────────────────────────────────────
+vlen3:{sqrt[(sqr x)+(sqr y)+(sqr z)]}            / length from x;y;z component arrays
+cross3:{((x@1 2 0)*y@2 0 1)-(x@2 0 1)*y@1 2 0}   / cross product of two 3-vectors
+vnorm:{x%vlen3[x@0;x@1;x@2]|0.0001}              / normalise a packed 3-vector
 
 nCols::20;nRows::20;n::nCols*nRows
 gFrameDt::1.%60.;gNumSubsteps::15
 gBendAlpha::1.0;gSdt::0.0
 
-/ ── Initial positions as flat float lists ─────────────────────────────────────
-gPx:: {((x mod nCols)%nCols-1)-.5}'!n
-gPy:: n#1.
-gPz:: {((x div nCols)%nRows-1)-.5}'!n
-gVx:: n#0.; gVy:: n#0.; gVz:: n#0.
-
-Grid:{[n;m]c:n*m;
-  px:{((x mod n)%n-1)-.5}'!c
-  pz:{((x div n)%m-1)-.5}'!c
-  [[]px:px;py:c#1;pz:pz;vx:c#0.;vy:c#0.;vz:c#0.]
+/ ── Grid: particle state as a table, one row per particle ─────────────────────
+/ Flat 1×1 sheet in the xz-plane centred on the origin, held at y=1, at rest.
+Grid:{[w;h]c:w*h;i:!c;
+  px:((i mod w)%w-1)-.5;py:((i div w)%h-1)-.5
+  [[]px:px;py:c#1.;pz:py;vx:c#0.;vy:c#0.;vz:c#0.]
 }
+g::Grid[nCols;nRows]
 
-/ ── Triangle indices — CCW winding gives upward normals on flat cloth ──────────
+P:{[i] ((g`px)@i;(g`py)@i;(g`pz)@i)}     / particle i as a packed 3-vector
+
+/ ── Triangles — CCW winding gives upward normals on flat cloth ────────────────
 triIds:: ,/ {[k]
-  r:k div (nCols-1); c:k mod (nCols-1)
+  r:k div nCols-1; c:k mod nCols-1
   i00:(r*nCols)+c; i01:(r*nCols)+c+1
   i10:((r+1)*nCols)+c; i11:((r+1)*nCols)+c+1
-  ((i00;i11;i01); (i00;i10;i11))
-}' !((nRows-1)*(nCols-1))
+  ((i00;i11;i01);(i00;i10;i11))
+}' !(nRows-1)*nCols-1
 
-/ ── Inverse masses from triangle areas ────────────────────────────────────────
-gInvM:: n#0.
-{[t]
-  i0:t@0; i1:t@1; i2:t@2
-  e0x:(gPx@i1)-gPx@i0; e0y:(gPy@i1)-gPy@i0; e0z:(gPz@i1)-gPz@i0
-  e1x:(gPx@i2)-gPx@i0; e1y:(gPy@i2)-gPy@i0; e1z:(gPz@i2)-gPz@i0
-  cx:(e0y*e1z)-e1y*e0z; cy:(e0z*e1x)-e1z*e0x; cz:(e0x*e1y)-e1x*e0y
-  A:0.5*sqrt[(cx*cx)+(cy*cy)+(cz*cz)]
-  contrib:$[A>0.;3.%A;0.]
-  / gInvM[i0;i1;i2]+::contrib
-  gInvM::@[gInvM;(i0;i1;i2);+;contrib]
-}' triIds;
-/ Pin top-left (0) and top-right (nCols-1) corners
-gInvM::@[gInvM;(0;nCols-1);:;0.]
+/ ── Inverse masses from triangle areas; pin the two top corners ───────────────
+triArea:{[t] cr:cross3[(P t@1)-P t@0;(P t@2)-P t@0]; 0.5*vlen3[cr@0;cr@1;cr@2]}
+gIm::n#0.
+{[t] a:triArea t; gIm::@[gIm;t;+;$[a>0.;3.%a;0.]]}' triIds;
+gIm::@[gIm;0,nCols-1;:;0.]                        / pin top-left and top-right
 
-/ ── Constraint edges — 4 separate types for stable 4-pass Jacobi ──────────────
-eLen: {[i;j]
-  dx:(gPx@j)-(gPx@i); dy:(gPy@j)-(gPy@i); dz:(gPz@j)-(gPz@i)
-  sqrt[(dx*dx)+(dy*dy)+(dz*dz)]
-}
+/ ── Constraints: each edge type is a table of edges ───────────────────────────
+eLen:{[i;j] vlen3[((g`px)@j)-(g`px)@i; ((g`py)@j)-(g`py)@i; ((g`pz)@j)-(g`pz)@i]}
+buildCons:{[rows]                                / rows: list of (i;j;restLen;alpha)
+  i:{x@0}'rows; j:{x@1}'rows; l0:{x@2}'rows; al:{x@3}'rows
+  w0:gIm@i; w1:gIm@j
+  [[]i:i; j:j; l0:l0; al:al; w0:w0; w1:w1; wt:w0+w1]}
 
-buildCons: {[cons]
-  ci: {[c] c@0}' cons; cj: {[c] c@1}' cons
-  cl0: {[c] c@2}' cons; cal: {[c] c@3}' cons
-  cw0: gInvM@ci; cw1: gInvM@cj; cwt: cw0+cw1
-  (ci;cj;cl0;cal;cw0;cw1;cwt)
-}
+/ Edge rows are pre-computed, then handed to buildCons: writing
+/ `buildCons {..}'!n` misparses as `(buildCons {..})'!n`, so keep two steps.
+hRows:{[k] r:k div nCols-1; c:k mod nCols-1; i:(r*nCols)+c; (i;i+1;eLen[i;i+1];0.)}' !nRows*nCols-1
+vRows:{[k] r:k div nCols; c:k mod nCols; i:(r*nCols)+c; (i;i+nCols;eLen[i;i+nCols];0.)}' !(nRows-1)*nCols
+dRows:{[k] r:k div nCols-1; c:k mod nCols-1; i:(r*nCols)+c; (i;i+nCols+1;eLen[i;i+nCols+1];0.)}' !(nRows-1)*nCols-1
+bRows:{[k] r:k div nCols-1; c:k mod nCols-1; i:(r*nCols)+c+1; j:((r+1)*nCols)+c; (i;j;eLen[i;j];gBendAlpha)}' !(nRows-1)*nCols-1
+hCons::buildCons hRows; vCons::buildCons vRows; dCons::buildCons dRows; bCons::buildCons bRows
 
-/ Each raw list must be pre-computed before passing to buildCons.
-/ Passing an inline lambda-each to buildCons (e.g. buildCons {[k]...}' !n)
-/ is parsed as (buildCons {[k]...})' !n — wrong. Split into two steps.
-hRaw:: {[k] r:k div (nCols-1); c:k mod (nCols-1); i:(r*nCols)+c; (i;i+1;eLen[i;i+1];0.)}' !(nRows*(nCols-1))
-vRaw:: {[k] r:k div nCols; c:k mod nCols; i:(r*nCols)+c; (i;i+nCols;eLen[i;i+nCols];0.)}' !((nRows-1)*nCols)
-dRaw:: {[k] r:k div (nCols-1); c:k mod (nCols-1); i:(r*nCols)+c; (i;i+nCols+1;eLen[i;i+nCols+1];0.)}' !((nRows-1)*(nCols-1))
-bRaw:: {[k] r:k div (nCols-1); c:k mod (nCols-1); i:(r*nCols)+c+1; j:((r+1)*nCols)+c; (i;j;eLen[i;j];gBendAlpha)}' !((nRows-1)*(nCols-1))
-
-hBuf:: buildCons hRaw
-vBuf:: buildCons vRaw
-dBuf:: buildCons dRaw
-bBuf:: buildCons bRaw
-
-/ Extract per-type constraint arrays as globals
-ghCi::hBuf@0; ghCj::hBuf@1; ghCl0::hBuf@2; ghCal::hBuf@3; ghCw0::hBuf@4; ghCw1::hBuf@5; ghCwt::hBuf@6
-gvCi::vBuf@0; gvCj::vBuf@1; gvCl0::vBuf@2; gvCal::vBuf@3; gvCw0::vBuf@4; gvCw1::vBuf@5; gvCwt::vBuf@6
-gdCi::dBuf@0; gdCj::dBuf@1; gdCl0::dBuf@2; gdCal::dBuf@3; gdCw0::dBuf@4; gdCw1::dBuf@5; gdCwt::dBuf@6
-gbCi::bBuf@0; gbCj::bBuf@1; gbCl0::bBuf@2; gbCal::bBuf@3; gbCw0::bBuf@4; gbCw1::bBuf@5; gbCwt::bBuf@6
-
-/ ── One constraint-type pass: vectorized Jacobi within the type ───────────────
-/ Reads+writes globals gPx/gPy/gPz. ci/cj/cl0/cal/cw0/cw1/cwt are parameters.
-applyPass: {[ci;cj;cl0;cal;cw0;cw1;cwt]
-  dxs:(gPx@cj)-(gPx@ci); dys:(gPy@cj)-(gPy@ci); dzs:(gPz@cj)-(gPz@ci)
-  ds: sqrt[(dxs*dxs)+(dys*dys)+(dzs*dzs)]
-  safe: ds>0.0001
-  dsc: ds|0.0001
+/ ── One constraint-type pass: vectorized Jacobi over its edge table ───────────
+/ Reads+writes the position columns of g. c is one of the constraint tables.
+applyPass:{[c]
+  i:c`i; j:c`j; l0:c`l0; al:c`al; w0:c`w0; w1:c`w1; wt:c`wt
+  px:g`px; py:g`py; pz:g`pz
+  dxs:(px@j)-px@i; dys:(py@j)-py@i; dzs:(pz@j)-pz@i
+  ds:vlen3[dxs;dys;dzs]
+  safe:ds>0.0001
+  dsc:ds|0.0001
   ndx:dxs%dsc; ndy:dys%dsc; ndz:dzs%dsc
-  Cs: ds-cl0
-  lams: 0.5*(Cs*safe)%(cwt+cal%gSdt*gSdt)
+  Cs:ds-l0
+  lams:0.5*(Cs*safe)%wt+al%gSdt*gSdt
   dlx:ndx*lams; dly:ndy*lams; dlz:ndz*lams
-  / Fused scatter-add via global indexed compound-assign: amend with + accumulates
-  / on duplicate indices, so the two passes (+at ci, -at cj) collapse into one —
-  / half the COW copies per axis. `name[i]+::v` writes back to the global.
-  gPx[ci,cj]+::(dlx*cw0),(0.-dlx*cw1)
-  gPy[ci,cj]+::(dly*cw0),(0.-dly*cw1)
-  gPz[ci,cj]+::(dlz*cw0),(0.-dlz*cw1)
-}
+  / Scatter-add via amend-with-+: duplicate indices accumulate, so the +at ci and
+  / -at cj corrections collapse into one amend per axis. k=i,j indexes both ends.
+  k:i,j
+  g[`px]::@[px;k;+;(dlx*w0),0.-dlx*w1]
+  g[`py]::@[py;k;+;(dly*w0),0.-dly*w1]
+  g[`pz]::@[pz;k;+;(dlz*w0),0.-dlz*w1]}
 
 / ── Simulation substep ────────────────────────────────────────────────────────
-gPrevPx:: n#0.; gPrevPy:: n#0.; gPrevPz:: n#0.
+clothSubstep:{[x]
+  free:gIm>0.                              / 1 for movable particles, 0 for pinned
+  g[`vy]::(g`vy)+free*(-9.81*gSdt)         / gravity on free particles
+  prev::g                                  / snapshot positions for velocity recovery
+  g[`px]::(g`px)+(g`vx)*gSdt               / integrate positions
+  g[`py]::(g`py)+(g`vy)*gSdt
+  g[`pz]::(g`pz)+(g`vz)*gSdt
+  g[`py]::(g`py)|-2.                        / floor, below the hanging cloth
+  applyPass hCons                          / 4-pass solve: h → v → d → b
+  applyPass vCons
+  applyPass dCons
+  applyPass bCons
+  g[`vx]::free*((g`px)-prev`px)%gSdt        / recover velocity from displacement
+  g[`vy]::free*((g`py)-prev`py)%gSdt
+  g[`vz]::free*((g`pz)-prev`pz)%gSdt
+  x}
 
-clothSubstep: {[x]
-  freeMask: gInvM>0.
-  / Gravity: add g*dt to velocity for free (non-pinned) particles
-  gVy:: gVy+freeMask*(-9.81*gSdt)
-  / Save positions for velocity recovery
-  gPrevPx:: gPx; gPrevPy:: gPy; gPrevPz:: gPz
-  / Integrate positions
-  gPx:: gPx+gVx*gSdt
-  gPy:: gPy+gVy*gSdt
-  gPz:: gPz+gVz*gSdt
-  / Floor: low enough not to interfere with freely hanging cloth
-  gPy:: gPy|(-2.)
-  / 4-pass constraint solve: h → v → d → b (Gauss-Seidel across types)
-  applyPass[ghCi;ghCj;ghCl0;ghCal;ghCw0;ghCw1;ghCwt]
-  applyPass[gvCi;gvCj;gvCl0;gvCal;gvCw0;gvCw1;gvCwt]
-  applyPass[gdCi;gdCj;gdCl0;gdCal;gdCw0;gdCw1;gdCwt]
-  applyPass[gbCi;gbCj;gbCl0;gbCal;gbCw0;gbCw1;gbCwt]
-  / Velocity recovery from position delta (zero for pinned particles)
-  gVx:: freeMask*(gPx-gPrevPx)%gSdt
-  gVy:: freeMask*(gPy-gPrevPy)%gSdt
-  gVz:: freeMask*(gPz-gPrevPz)%gSdt
-  x
-}
-
-clothFrame: {[]
-  gSdt:: gFrameDt%gNumSubsteps
-  gNumSubsteps clothSubstep/ 0
-}
+clothFrame:{[] gSdt::gFrameDt%gNumSubsteps; gNumSubsteps clothSubstep/ 0}
 
 / ── Mesh building ─────────────────────────────────────────────────────────────
-buildClothMesh: {[]
+buildClothMesh:{[]
   ,/ {[t]
-    i0:t@0; i1:t@1; i2:t@2
-    p0:(gPx@i0;gPy@i0;gPz@i0)
-    p1:(gPx@i1;gPy@i1;gPz@i1)
-    p2:(gPx@i2;gPy@i2;gPz@i2)
-    e0:p1-p0; e1:p2-p0
-    nor:vnorm cross3[e0;e1]
-    nf:0.-nor
-    fr:(p0,nor),(p1,nor),(p2,nor)
-    bk:(p0,nf),(p2,nf),(p1,nf)
-    fr,bk
-  }' triIds
-}
+    p0:P t@0; p1:P t@1; p2:P t@2
+    nor:vnorm cross3[p1-p0;p2-p0]; nf:0.-nor
+    ((p0,nor),(p1,nor),(p2,nor)),(p0,nf),(p2,nf),(p1,nf)   / double-sided, per-face normals
+  }' triIds}
 
 / ── Shaders ───────────────────────────────────────────────────────────────────
 clothVtx: VertexShader[[pos:`v3;nor:`v3]; [wPos:`v3;wNor:`v3]; {[pos;nor]
@@ -166,7 +123,8 @@ clothVtx: VertexShader[[pos:`v3;nor:`v3]; [wPos:`v3;wNor:`v3]; {[pos;nor]
   px2:(s30*cy)+(c30*py2)
   ((sc*py0;sc*px1;0.5-(px2*sc*0.5);1.0);pos;nor)
 }]
-
+/ gpu.px gpu.fn gpu.vx
+/ normalize3:{x%+/x}
 clothFrag: FragmentShader[[wPos:`v3;wNor:`v3; out:`v4]; {[wPos;wNor]
   ar:0.18; ag:0.28; ab:0.62; rough:0.75
   V:normalize 0.5774 0.5774 0.5774

@@ -39,6 +39,7 @@ Sum: +/;
 ```
 
 
+
 ## Types `` ` `i`f`s`c`m`I`F`S`C`M`L ``
 - Integer - numbers like `-2 0 1 0N`
   - null value `0N`
@@ -96,8 +97,13 @@ A composition is a sequence of variadics applied in succession.
 Blanks are used for empty assignment and defining partials.
 
 ## Variables
-A variable is a name associated with a value, a name is an alphanumeric identifier starting with an alphabetic character. A name may contain dots to separate segments (e.g. `a.b`, `ab1.ed4`), but a dot is only part of the name when immediately followed by a letter — `a.1` and `a. b` keep the dot as the index/apply operator. Underscores are not permitted in a variable name (`_` is always the Drop verb).
-A variable declared at the top level of a fileis a global variable and a variable declared inside a lambda is a local variable. 
+A variable is a name associated with a value, a name is an alphanumeric identifier starting with an alphabetic character.
+A name may contain dots to separate segments (e.g. `a.b`, `ab1.ed4`), but a dot is only part of the name when immediately followed by a letter — `a.1` and `a. b` keep the dot as the index/apply operator. Underscores are not permitted in a variable name (`_` is always the Drop/Cut/Delete primitive).
+The scope of a variable is either global or local.
+A variable declared at the top level of a file are global.
+A global is (assumed) constant when assigned with the single colon `:`
+but a global is 
+and a variable declared inside a lambda is a local variable.
 Assignmet of globals and locals at the top level happens with the singe colon `:`,
 while assigment of globals in a lambda happen with a double colon `::`
 

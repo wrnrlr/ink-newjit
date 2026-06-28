@@ -18,6 +18,9 @@ export fn terse_poll() callconv(.c) void {
 
 const build_options = @import("build_options");
 
+// Zig 0.16's std no longer exposes setenv/getenv; call libc directly.
+extern fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
+
 const V = @import("noun/value.zig").V;
 const K = @import("noun/class.zig").K;
 const N = @import("noun/array.zig").N;
@@ -110,6 +113,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
   while (args_iter.next()) |arg| {
     if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--disasm")) {
       disasm_mode = true;
+    } else if (std.mem.eql(u8, arg, "-unfocus")) {
+      // Tell the GPU extension to open its window without grabbing focus.
+      _ = setenv("INK_UNFOCUS", "1", 1);
     } else if (script_path == null) {
       script_path = arg;
     } else {

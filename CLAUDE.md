@@ -40,7 +40,7 @@ make info
 - Zig 0.16 — do **not** run `zig fmt`
 - No underscores in variable names
 - Cast numerics with: `@as(f64, @floatFromInt(a))`
-- Report bugs unrelated to the current task in `doc/triage.md`
+- Report bugs unrelated to the current task in `doc/bug.md`
 
 ## Architecture
 
