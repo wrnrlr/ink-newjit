@@ -17,7 +17,8 @@
 2: "lib/spirv.k"
 2: "lib/gpu.k"
 2: "lib/fbx.k"
-2: "lib/pbr.k"   / shared PBR renderer: pbrVtx + PbrFragment
+2: "lib/pbr.k"      / shared PBR renderer: pbrVtx + PbrFragment
+2: "lib/camera.k"  / orbit camera (WASD pan, scroll zoom, right-drag rotate)
 
 / ── Material (r g b roughness) ────────────────────────────────────────────────
 steel:: 0.62 0.64 0.68 0.35
@@ -57,40 +58,19 @@ swFrame: {[ca;sa;xca;xsa;zoom;cx;cz]
 }
 
 / ── Global state ──────────────────────────────────────────────────────────────
-camX:: 0.; camZ:: 0.; zoom:: 1.
-rotCa:: 0.92; rotSa:: 0.39                                 / start at a 3/4 view
-xCa:: 0.97; xSa:: 0.26
-lastMx:: 0.; lastMy:: 0.
+cam:: CamAt[0.92;0.39;0.97;0.26]                          / start at a 3/4 view
 swHandle:: 0
 
 / ── Window loop ───────────────────────────────────────────────────────────────
 RunWindow[{[props]
   $[swHandle=0; swHandle:: CompileMesh[pbrVtx; PbrFragment]; 0]
 
-  kw: props`kw; ka: props`ka; ks: props`ks; kd: props`kd
-  scroll: props`scroll; rmb: props`rmb; mx: props`mx; my: props`my
-
-  / Camera pan + zoom
-  spd: 0.05%zoom
-  da: kd-ka; ws: kw-ks
-  camX:: camX+(spd*(da+ws)); camZ:: camZ+(spd*(da-ws))
-  zoom:: 5.0&(0.3|zoom*(1.0+(scroll*0.1)))
-
-  / Scene rotation: right-drag X → Y-axis, right-drag Y → X-axis
-  dragging: rmb>0.
-  dx: $[dragging; mx-lastMx; 0.]
-  dy: $[dragging; my-lastMy; 0.]
-  dSa: dx*0.003; dCa: 1.0-(dSa*dSa*0.5)
-  nCa: (rotCa*dCa)-(rotSa*dSa); nSa: (rotSa*dCa)+(rotCa*dSa)
-  $[dragging; rotCa:: nCa; 0]
-  $[dragging; rotSa:: nSa; 0]
-  dxSa: dy*0.003; dxCa: 1.0-(dxSa*dxSa*0.5)
-  nxCa: (xCa*dxCa)-(xSa*dxSa); nxSa: (xSa*dxCa)+(xCa*dxSa)
-  $[dragging; xCa:: nxCa; 0]
-  $[dragging; xSa:: nxSa; 0]
-  lastMx:: mx; lastMy:: my
+  / Fold one frame of input into the orbit camera, then read its pose
+  cam:: CamUpdate[cam; props]
+  ca: cam`rotCa; sa: cam`rotSa; xca: cam`xCa; xsa: cam`xSa
+  zoom: cam`zoom; camX: cam`camX; camZ: cam`camZ
 
   / Sword mesh (all per-vertex work vectorised in swFrame)
-  tvs: swFrame[rotCa;rotSa;xCa;xSa;zoom;camX;camZ]
+  tvs: swFrame[ca;sa;xca;xsa;zoom;camX;camZ]
   DrawMesh[tvs; swHandle]
 }; 0]

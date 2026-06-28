@@ -17,7 +17,8 @@
 
 2: "lib/spirv.k"
 2: "lib/gpu.k"
-2: "lib/pbr.k"   / shared PBR renderer: pbrVtx + PbrFragment
+2: "lib/pbr.k"      / shared PBR renderer: pbrVtx + PbrFragment
+2: "lib/camera.k"  / orbit camera (WASD pan, scroll zoom, right-drag rotate)
 
 / ── Sky shader ───────────────────────────────────────────────────────────────
 skyWds: FragmentShader[[uv:`v2; out:`v4]; {[uv]
@@ -35,10 +36,11 @@ skyWds: FragmentShader[[uv:`v2; out:`v4]; {[uv]
   cloudThr: 0.52+(t*0.25)
   cloudAmt: max[0.0; noise-cloudThr]*(1.0%(1.0-cloudThr))
   cld: cloudAmt*cloudAmt
-  / mix[a;1;t] = a+t*(1-a); evaluation is right-to-left so no parens needed
-  r: clamp[mix[sr; 1.0; cld]; 0.; 1.]
-  g: clamp[mix[sg; 1.0; cld]; 0.; 1.]
-  b: clamp[mix[sb; 1.0; cld]; 0.; 1.]
+  / mix[a;1;t] = a+t*(1-a); evaluation is right-to-left so no parens needed.
+  / Encode linear→sRGB (0.4545 = 1/2.2) to match lib/pbr.k's PbrFragment output.
+  r: pow[clamp[mix[sr; 1.0; cld]; 0.; 1.];0.4545]
+  g: pow[clamp[mix[sg; 1.0; cld]; 0.; 1.];0.4545]
+  b: pow[clamp[mix[sb; 1.0; cld]; 0.; 1.];0.4545]
   (r; g; b; 1.0)
 }]
 
@@ -67,10 +69,7 @@ LDB:-0.5 0. -0.5; LDF:-0.5 0. 0.5; LUB:-0.5 1. -0.5; LUF:-0.5 1. 0.5
 RDB: 0.5 0. -0.5; RDF: 0.5 0. 0.5; RUB: 0.5 1. -0.5; RUF: 0.5 1. 0.5
 
 / ── Global state ──────────────────────────────────────────────────────────────
-camX:: 0.; camZ:: 0.; zoom:: 1.
-rotCa:: 1.; rotSa:: 0.
-xCa:: 1.; xSa:: 0.
-lastMx:: 0.; lastMy:: 0.
+cam:: CamNew[]                  / orbit camera state (see lib/camera.k)
 
 pbrHandle:: 0; skyHandle:: 0
 
@@ -79,32 +78,10 @@ RunWindow[{[props]
   $[pbrHandle=0; pbrHandle:: CompileMesh[pbrVtx; PbrFragment]; 0]
   $[skyHandle=0; skyHandle:: CompileSpirV[skyWds; 0];      0]
 
-  / Read inputs into locals first — `props`key` is only safe as a standalone
-  / term (right-to-left parsing binds `props`key OP x` the wrong way otherwise).
-  kw: props`kw; ka: props`ka; ks: props`ks; kd: props`kd
-  scroll: props`scroll; rmb: props`rmb; mx: props`mx; my: props`my
-
-  / Camera pan
-  spd: 0.05%zoom
-  da: kd-ka; ws: kw-ks
-  camX:: camX+(spd*(da+ws)); camZ:: camZ+(spd*(da-ws))
-  zoom:: 5.0&(0.3|zoom*(1.0+(scroll*0.1)))
-
-  / Scene rotation: right-drag X → Y-axis, right-drag Y → X-axis
-  dragging: rmb>0.
-  dx: $[dragging; mx-lastMx; 0.]
-  dy: $[dragging; my-lastMy; 0.]
-  dSa: dx*0.003; dCa: 1.0-(dSa*dSa*0.5)
-  nCa: (rotCa*dCa)-(rotSa*dSa); nSa: (rotSa*dCa)+(rotCa*dSa)
-  $[dragging; rotCa:: nCa; 0]
-  $[dragging; rotSa:: nSa; 0]
-  dxSa: dy*0.003; dxCa: 1.0-(dxSa*dxSa*0.5)
-  nxCa: (xCa*dxCa)-(xSa*dxSa); nxSa: (xSa*dxCa)+(xCa*dxSa)
-  $[dragging; xCa:: nxCa; 0]
-  $[dragging; xSa:: nxSa; 0]
-  lastMx:: mx; lastMy:: my
-
-  ca: rotCa; sa: rotSa; xca: xCa; xsa: xSa
+  / Fold one frame of input into the orbit camera, then read its pose
+  cam:: CamUpdate[cam; props]
+  ca: cam`rotCa; sa: cam`rotSa; xca: cam`xCa; xsa: cam`xSa
+  zoom: cam`zoom; camX: cam`camX; camZ: cam`camZ
 
   / Ground plane ±8
   gndVerts: mkFace[rp[(-8.;0.;-8.);ca;sa;xca;xsa]; rp[(8.;0.;-8.);ca;sa;xca;xsa];

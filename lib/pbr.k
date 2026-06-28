@@ -44,9 +44,15 @@ PbrFragment: FragmentShader[[wNor:`v3; wMat:`v4; wLit:`f32; out:`v4]; {[wNor;wMa
   skyW: max[0.0; wNor[1]]; gndW: max[0.0; -1.0*wNor[1]]
   ambR: (skyW*0.06)+(gndW*0.10); ambG: (skyW*0.10)+(gndW*0.07); ambB: (skyW*0.18)+(gndW*0.03)
   fillR: N2L*ar*0.35%3.14159; fillG: N2L*ag*0.35%3.14159; fillB: N2L*ab*0.35%3.14159
-  lr: clamp[(ar*ambR)+fillR+((spec+d1r)*sun); 0.; 1.]
-  lg: clamp[(ag*ambG)+fillG+((spec+d1g)*sun); 0.; 1.]
-  lb: clamp[(ab*ambB)+fillB+((spec+d1b)*sun); 0.; 1.]
+  / Linear HDR radiance, then tone-map + encode for display ────────────────────
+  rawR: (ar*ambR)+fillR+((spec+d1r)*sun)
+  rawG: (ag*ambG)+fillG+((spec+d1g)*sun)
+  rawB: (ab*ambB)+fillB+((spec+d1b)*sun)
+  / Reinhard tone-map tames blown speculars; then encode linear→sRGB by hand
+  / because the swapchain is bgra8_unorm (no hardware gamma). 0.4545 = 1/2.2.
+  lr: pow[clamp[rawR%(1.0+rawR);0.;1.];0.4545]
+  lg: pow[clamp[rawG%(1.0+rawG);0.;1.];0.4545]
+  lb: pow[clamp[rawB%(1.0+rawB);0.;1.];0.4545]
   (lr; lg; lb; 1.0)
 }]
 

@@ -8,6 +8,7 @@
 
 2: "lib/spirv.k"
 2: "lib/gpu.k"
+2: "lib/pbr.k"   / shared PBR renderer: PbrFragment (Cook-Torrance)
 
 / Golden ratio — icosahedron edge lengths are 1 and φ
 F: 1.618034
@@ -49,26 +50,18 @@ icoTris: sphSubAll[icoTris]
 icoTris: sphSubAll[icoTris]
 icoTris: sphSubAll[icoTris]
 
-/ Flatten to [x y z nx ny nz ...] strip — position equals normal for unit sphere
-sphVert: {[t] ,/{[v]v,v}'t}
+/ Material (r g b roughness sun) — smooth blue, fully lit
+sphMat: 0.25 0.55 0.9 0.35 1.
+
+/ Flatten to the lib/pbr.k vertex layout (stride 11): pos(3) nor(3) mat(4) lit(1).
+/ Position equals normal on the unit sphere, so shading is smooth.
+sphVert: {[t] ,/{[v]v,v,sphMat}'t}
 icoMesh: ,/ sphVert' icoTris
 
-/ Blinn-Phong fragment shader.
-/ Light direction ld and half-vector h are constants (safe, no NaN risk).
-/ h = normalize(ld + viewDir) where viewDir=(0,0,1) in rotated screen space.
-phongFrag: FragmentShader[[nor:`v3; out:`v4]; {[nor]
-  ld: normalize 0.5 1.0 0.3
-  h: normalize 0.5 1.0 1.3
-  diff: max[0.0;dot[nor;ld]]
-  spec: pow[max[0.0;dot[nor;h]];64.0]
-  base: 0.25 0.55 0.9
-  lit: 0.08+diff
-  dc0: base[0]*lit; dc1: base[1]*lit; dc2: base[2]*lit
-  (dc0+spec; dc1+spec; dc2+spec; 1.0)
-}]
-
-/ Vertex shader: 45° Y + isometric X tilt; rotate normals by the same matrix
-phongVtx: VertexShader[[pos:`v3;nor:`v3]; [vNor:`v3]; {[pos;nor]
+/ Vertex shader: 45° Y + isometric X tilt; rotates the normal by the same matrix
+/ in-shader (no CPU normal pass), then emits the standard wNor;wMat;wLit varyings
+/ so lib/pbr.k's PbrFragment shades it.
+sphereVtx: VertexShader[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.8
   py0: (c45*pos[0])+(s45*pos[2])
   py2: (c45*pos[2])-(s45*pos[0])
@@ -78,12 +71,12 @@ phongVtx: VertexShader[[pos:`v3;nor:`v3]; [vNor:`v3]; {[pos;nor]
   ny2: (c45*nor[2])-(s45*nor[0])
   nx1: (c30*nor[1])-(s30*ny2)
   nx2: (s30*nor[1])+(c30*ny2)
-  ((sc*py0; sc*px1; 0.5-px2*sc*0.5; 1.0); (ny0;nx1;nx2))
+  ((sc*py0; sc*px1; 0.5-px2*sc*0.5; 1.0); (ny0;nx1;nx2); mat; lit)
 }]
 
 meshHandle:: 0
 loop: {[props]
-  $[meshHandle=0; meshHandle:: CompileMesh[phongVtx; phongFrag]; 0]
+  $[meshHandle=0; meshHandle:: CompileMesh[sphereVtx; PbrFragment]; 0]
   DrawMesh[icoMesh; meshHandle]}
 
 RunWindow[loop; 0]
