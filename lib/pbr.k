@@ -1,0 +1,68 @@
+/ lib/pbr.k — physically based renderer (Cook-Torrance) for the ink std lib
+/
+/ One vertex shader + one fragment shader render any mesh whose vertices carry
+/ their own material, so ground / box / cloth / loaded models are all the same
+/ pipeline fed different per-vertex data rather than near-identical shaders.
+/
+/ Vertex layout (stride 11):  x y z  nx ny nz  r g b rough  lit
+/   pos(3)   world position
+/   nor(3)   surface normal
+/   mat(4)   material = rgb + roughness
+/   lit(1)   sun factor 0..1  (1 = full sun, 0 = shadowed: ambient + sky-fill only)
+/
+/ Depends on lib/spirv.k (FragmentShader/VertexShader) and lib/gpu.k (CompileMesh).
+/ Load them first, then:  2: "lib/pbr.k"
+/
+/ Compile once:  h: PbrPipeline[]        / → mesh pipeline handle
+/ Draw a frame:  DrawMesh[verts; h]      / verts = flat stride-11 float vector
+/
+/ A material+lit tail is five floats (rgb rough lit); build one with PbrMat:
+/   grass: PbrMat[0.13; 0.42; 0.07; 0.90; 1.]   / lit grass
+/   shadow:PbrMat[0.13; 0.42; 0.07; 0.90; 0.]   / same colour, sun blocked
+
+/ ── PBR fragment shader (Cook-Torrance) ──────────────────────────────────────
+/ Material arrives per-vertex as wMat = (r; g; b; roughness) and wLit = sun
+/ factor.  Key light L1 is the sun; L2 is a soft sky fill; ambient is a simple
+/ sky/ground hemisphere term so shadowed faces still read.
+PbrFragment: FragmentShader[[wNor:`v3; wMat:`v4; wLit:`f32; out:`v4]; {[wNor;wMat;wLit]
+  ar: wMat[0]; ag: wMat[1]; ab: wMat[2]; rough: wMat[3]
+  V: normalize 0.5774 0.5774 0.5774
+  L1: normalize 0.5 1.5 0.3; H1: normalize V+L1
+  N1L: max[0.0; dot[wNor; L1]]; N1V: max[0.0001; dot[wNor; V]]
+  N1H: max[0.0; dot[wNor; H1]]; V1H: max[0.0; dot[V; H1]]
+  a: sqr rough; a2: sqr a
+  dn: (sqr[N1H]*(a2-1.0))+1.0
+  D: a2%(3.14159*dn*dn)
+  k: sqr[rough+1.0]%8.0
+  Gl: N1L%((N1L*(1.0-k))+k); Gv: N1V%((N1V*(1.0-k))+k); G: Gl*Gv
+  F1: 0.04+(0.96*pow[1.0-V1H; 5.0])
+  dnom: (4.0*N1L*N1V)+0.001; spec: (D*G*F1)%dnom
+  kd1: 1.0-F1
+  d1r: kd1*ar%3.14159; d1g: kd1*ag%3.14159; d1b: kd1*ab%3.14159
+  sun: N1L*2.0*wLit
+  L2: normalize[-0.3 0.8 -0.6]; N2L: max[0.0; dot[wNor; L2]]
+  skyW: max[0.0; wNor[1]]; gndW: max[0.0; -1.0*wNor[1]]
+  ambR: (skyW*0.06)+(gndW*0.10); ambG: (skyW*0.10)+(gndW*0.07); ambB: (skyW*0.18)+(gndW*0.03)
+  fillR: N2L*ar*0.35%3.14159; fillG: N2L*ag*0.35%3.14159; fillB: N2L*ab*0.35%3.14159
+  lr: clamp[(ar*ambR)+fillR+((spec+d1r)*sun); 0.; 1.]
+  lg: clamp[(ag*ambG)+fillG+((spec+d1g)*sun); 0.; 1.]
+  lb: clamp[(ab*ambB)+fillB+((spec+d1b)*sun); 0.; 1.]
+  (lr; lg; lb; 1.0)
+}]
+
+/ ── Vertex shader (isometric-ish projection) ─────────────────────────────────
+/ Projects pos to clip space and passes normal + material + sun through. The
+/ near-flat depth term relies on painter-order draws / mostly-convex meshes;
+/ self-occluding geometry (e.g. cloth) should use its own stronger depth term.
+pbrVtx: VertexShader[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
+  c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.3
+  py0:(c45*pos[0])+(s45*pos[2])
+  py2:(c45*pos[2])-(s45*pos[0])
+  px1:(c30*pos[1])-(s30*py2)
+  px2:(s30*pos[1])+(c30*py2)
+  ((sc*py0; sc*px1; 0.5-px2*0.001; 1.0); nor; mat; lit)
+}]
+
+/ ── Helpers ──────────────────────────────────────────────────────────────────
+PbrPipeline: {[] CompileMesh[pbrVtx; PbrFragment]}   / compile the standard mesh pipeline
+PbrMat: {[r;g;b;rough;lit] r,g,b,rough,lit}          / rgb + roughness + sun → 5-float vertex tail

@@ -89,10 +89,8 @@ fbx.toplevel:{({0<fbx.peekend[]}){x,,fbx.node[]}/()}
 ReadFbx:{[path]fbx.b::`i$1:path;fbx.ver::fbx.u32 fbx.b@23+!4;fbx.w::$[fbx.ver<7500;4;8];fbx.nullsz::(3*fbx.w)+1;fbx.p::27;fbx.toplevel[]}
 
 / --- tree accessors -----------------------------------------------------
-/ Symbol `=` and eachleft `\:`/`~\:` are unreliable here (see doc/bug.md);
-/ build the match mask with plain each `'` and thread the query via fbx.q.
 / fbx.all[node;`Name] -> list of child nodes whose name matches
-fbx.all:{[nd;nm]fbx.q::nm;c:nd`nodes;c@&({$[(x@`name)~fbx.q;1;0]}'c)}
+fbx.all:{[nd;nm]c:nd`nodes;c@&({x@`name}'c)~\:nm}
 / fbx.get[node;`Name] -> first matching child (or () if none)
 fbx.get:{[nd;nm]m:fbx.all[nd;nm];$[#m;*m;()]}
 
@@ -151,9 +149,7 @@ fbx.decsym:{[T;code;len]c:(2*code)+fbx.getbit[];l:len+1;cnt:T@0;fc:T@1;fi:T@2;sy
 fbx.emit:{fbx.out[fbx.op]::x;fbx.op::fbx.op+1;0}
 fbx.copy:{[s]li:s-257;len:(fbx.lenbase@li)+fbx.getbits fbx.lenextra@li;ds:fbx.decsym[fbx.DT;0;0];dist:(fbx.distbase@ds)+fbx.getbits fbx.distextra@ds;(len){fbx.out[fbx.op]::fbx.out@x;fbx.op::fbx.op+1;x+1}/(fbx.op-dist);0}
 fbx.onesym:{s:fbx.decsym[fbx.LT;0;0];$[s<256;fbx.emit s;s=256;fbx.eob::1;fbx.copy s]}
-/ loop bodies must reference x (ink while only iterates when the threaded
-/ value is used); x is just a step counter, the real state is global.
-fbx.runblock:{fbx.eob::0;({fbx.eob=0}){fbx.onesym[];x+1}/0}
+fbx.runblock:{fbx.eob::0;({fbx.eob=0}){fbx.onesym[];0}/0}
 
 / stored (uncompressed) block
 fbx.stored:{r:fbx.zpos mod 8;fbx.zpos::fbx.zpos+$[r;8-r;0];bp:fbx.zpos div 8;len:(fbx.zb@bp)+(256*fbx.zb@bp+1);fbx.sbp::bp+4;(len){fbx.out[fbx.op]::fbx.zb@fbx.sbp+x;fbx.op::fbx.op+1;x+1}/0;fbx.zpos::8*(bp+4+len)}
@@ -171,4 +167,12 @@ fbx.dynamic:{hlit:257+fbx.getbits 5;hdist:1+fbx.getbits 5;hclen:4+fbx.getbits 4;
 fbx.doblock:{fbx.bf::fbx.getbit[];bt:fbx.getbits 2;$[bt=0;fbx.stored[];bt=1;fbx.fixed[];bt=2;fbx.dynamic[];'`badblock]}
 
 / inflate a zlib stream to a byte int-list of known length `target`
-fbx.inflate:{[bytes;target]fbx.zb::2_bytes;fbx.zpos::0;fbx.out::target#0;fbx.op::0;fbx.target::target;fbx.bf::0;({(fbx.bf=0)&fbx.op<fbx.target}){fbx.doblock[];x+1}/0;fbx.out}
+fbx.inflate:{[bytes;target]
+  fbx.zb::2_bytes;
+  fbx.zpos::0;
+  fbx.out::target#0;
+  fbx.op::0;
+  fbx.target::target;
+  fbx.bf::0;
+  ({(fbx.bf=0)&fbx.op<fbx.target}){fbx.doblock[];0}/0;
+  fbx.out}

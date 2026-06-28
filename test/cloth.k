@@ -12,16 +12,31 @@
 / - Tridiagonal Jacobi always converges for any correction magnitude
 / - Gauss-Seidel across types propagates corrections through the mesh
 /
+/ XPBD
+/ while simulating
+/   for all particle i
+/     vi <- vi + Δt g
+/     pi <- xi
+/     xi <- xi + Δt vi
+/   for all constraints C
+/     solve(C,Δt)
+/   for all particles i
+/     vi <- (xi-pi)/Δt
+/ 
 / Run: zig build gpu && ink test/cloth.k
 
 2: "lib/spirv.k"
 2: "lib/gpu.k"
+2: "lib/pbr.k"   / shared PBR renderer: PbrFragment (Cook-Torrance)
+
+clothMat::0.18 0.28 0.62 0.75 1.                 / blue cloth: rgb + roughness + sun (lit)
 
 vlen3:{sqrt[(sqr x)+(sqr y)+(sqr z)]}            / length from x;y;z component arrays
 cross3:{((x@1 2 0)*y@2 0 1)-(x@2 0 1)*y@1 2 0}   / cross product of two 3-vectors
 vnorm:{x%vlen3[x@0;x@1;x@2]|0.0001}              / normalise a packed 3-vector
 
 nCols::20;nRows::20;n::nCols*nRows
+nTris::2*(nRows-1)*nCols-1                       / two triangles per grid cell
 gFrameDt::1.%60.;gNumSubsteps::15
 gBendAlpha::1.0;gSdt::0.0
 
@@ -35,18 +50,22 @@ g::Grid[nCols;nRows]
 
 P:{[i] ((g`px)@i;(g`py)@i;(g`pz)@i)}     / particle i as a packed 3-vector
 
-/ ── Triangles — CCW winding gives upward normals on flat cloth ────────────────
-triIds:: ,/ {[k]
-  r:k div nCols-1;c:k mod nCols-1
-  i00:(r*nCols)+c;i01:(r*nCols)+c+1
-  i10:((r+1)*nCols)+c;i11:((r+1)*nCols)+c+1
-  ((i00;i11;i01);(i00;i10;i11))
-}'!(nRows-1)*nCols-1
+/ ── Triangles — flat index buffer (3*nTris ints), CCW winding → upward normals ─
+/ Cell corners as vectors (rc@0;rc@1 = cell row;col from the odometer), then the
+/ two triangles (i00,i11,i01) and (i00,i10,i11) interleaved and razed into one buffer.
+rc:!(nRows-1;nCols-1)
+i00:(nCols*rc@0)+rc@1                           / top-left particle of each cell
+i01:i00+1; i10:i00+nCols; i11:i00+nCols+1       / top-right, bottom-left, bottom-right
+triIds::,/+(i00;i11;i01;i00;i10;i11)
 
 / ── Inverse masses from triangle areas; pin the two top corners ───────────────
-triArea:{[t] cr:cross3[(P t@1)-P t@0;(P t@2)-P t@0]; 0.5*vlen3[cr@0;cr@1;cr@2]}
-gIm::n#0.
-{[t]a:triArea t;gIm[t]+::$[a>0.;3.%a;0.]}'triIds;
+triArea:{[t]
+  cr:cross3[(P t@1)-P t@0;(P t@2)-P t@0];
+  0.5*vlen3[cr@0;cr@1;cr@2]}
+tcol:+(nTris;3)#triIds                   / transpose buffer → (i0s;i1s;i2s) vertex streams
+av:triArea tcol                          / area of every triangle at once (triArea is elementwise)
+cpt:(av>0.)*3.%av|0.0001                 / inverse-mass contribution per triangle = 1/(A/3)
+gIm::@[n#0.;triIds;+;,/+(cpt;cpt;cpt)]   / scatter each triangle's contrib to its 3 vertices
 gIm[0,nCols-1]:0.                        / pin top-left and top-right
 
 / ── Constraints: each edge type is a table of edges ───────────────────────────
@@ -98,58 +117,34 @@ clothSubstep:{[x]
 clothFrame:{[] gSdt::gFrameDt%gNumSubsteps; gNumSubsteps clothSubstep/ 0}
 
 / ── Mesh building ─────────────────────────────────────────────────────────────
+/ Vertex layout matches lib/pbr.k (stride 11): pos(3) nor(3) mat(4) lit(1).
 buildClothMesh:{[]
   ,/ {[t]
     p0:P t@0; p1:P t@1; p2:P t@2
     nor:vnorm cross3[p1-p0;p2-p0]; nf:0.-nor
-    ((p0,nor),(p1,nor),(p2,nor)),(p0,nf),(p2,nf),(p1,nf)   / double-sided, per-face normals
-  }' triIds}
+    m:clothMat
+    ((p0,nor,m),(p1,nor,m),(p2,nor,m)),(p0,nf,m),(p2,nf,m),(p1,nf,m)   / double-sided, per-face normals
+  }'(nTris;3)#triIds}
 
-/ ── Shaders ───────────────────────────────────────────────────────────────────
-clothVtx: VertexShader[[pos:`v3;nor:`v3]; [wPos:`v3;wNor:`v3]; {[pos;nor]
+/ ── Vertex shader ─────────────────────────────────────────────────────────────
+/ Cloth keeps its own projection (bigger scale, y-recentre, and a real depth term
+/ so the draped sheet self-occludes correctly), but emits the standard
+/ wNor;wMat;wLit varyings so lib/pbr.k's PbrFragment can shade it.
+clothVtx: VertexShader[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.6
   py0:(c45*pos[0])+(s45*pos[2])
   py2:(c45*pos[2])-(s45*pos[0])
   cy:pos[1]-1.0
   px1:(c30*cy)-(s30*py2)
   px2:(s30*cy)+(c30*py2)
-  ((sc*py0;sc*px1;0.5-(px2*sc*0.5);1.0);pos;nor)
-}]
-/ gpu.px gpu.fn gpu.vx
-/ normalize3:{x%+/x}
-clothFrag: FragmentShader[[wPos:`v3;wNor:`v3; out:`v4]; {[wPos;wNor]
-  ar:0.18; ag:0.28; ab:0.62; rough:0.75
-  V:normalize 0.5774 0.5774 0.5774
-  L:normalize 0.5 1.5 0.3
-  H:normalize V+L
-  NdotL:max[0.0;dot[wNor;L]]
-  NdotV:max[0.0001;dot[wNor;V]]
-  NdotH:max[0.0;dot[wNor;H]]
-  VdotH:max[0.0;dot[V;H]]
-  a:sqr rough; a2:sqr a
-  dn:(sqr[NdotH]*(a2-1.0))+1.0
-  D:a2%(3.14159*dn*dn)
-  k:sqr[rough+1.0]%8.0
-  Gl:NdotL%((NdotL*(1.0-k))+k)
-  Gv:NdotV%((NdotV*(1.0-k))+k)
-  G:Gl*Gv
-  F:0.04+(0.96*pow[1.0-VdotH;5.0])
-  dnom:(4.0*NdotL*NdotV)+0.001
-  spec:(D*G*F)%dnom
-  kd:1.0-F
-  dr:kd*ar%3.14159; dg:kd*ag%3.14159; db:kd*ab%3.14159
-  nl2:NdotL*2.0
-  lr:clamp[(0.04*ar)+((spec+dr)*nl2);0.0;1.0]
-  lg:clamp[(0.04*ag)+((spec+dg)*nl2);0.0;1.0]
-  lb:clamp[(0.04*ab)+((spec+db)*nl2);0.0;1.0]
-  (lr;lg;lb;1.0)
+  ((sc*py0;sc*px1;0.5-(px2*sc*0.5);1.0);nor;mat;lit)
 }]
 
 / ── Window loop ───────────────────────────────────────────────────────────────
 gHandle:: 0
 
 loop: {[props]
-  $[gHandle=0; gHandle::CompileMesh[clothVtx;clothFrag]; 0]
+  $[gHandle=0; gHandle::CompileMesh[clothVtx;PbrFragment]; 0]
   clothFrame[]
   DrawMesh[buildClothMesh[]; gHandle]
 }
