@@ -13,6 +13,8 @@ data/**/*.parquet
 data/trips/
 data/taxi_zones.zip
 data/taxi_zone_lookup.csv
+data/dump/
+data/postal/
 bench/ink
 bench/ink-*
 bench/report.csv

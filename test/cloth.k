@@ -15,13 +15,9 @@
 2: "lib/gpu.k"
 
 / ── Math helpers ──────────────────────────────────────────────────────────────
-vlen3: {[x;y;z] sqrt[(x*x)+(y*y)+(z*z)]}
-cross3: {[a;b]
-  (((a@1)*(b@2))-((b@1)*(a@2))
-   ((a@2)*(b@0))-((b@2)*(a@0))
-   ((a@0)*(b@1))-((b@0)*(a@1)))
-}
-vnorm: {[v] v%((vlen3[v@0;v@1;v@2])|0.0001)}
+vlen3:{sqrt[(sqr x)+(sqr y)+(sqr z)]}
+cross3:{((x@1 2 0)*y@2 0 1)-(x@2 0 1)*y@1 2 0}
+vnorm:{x%((vlen3[x@0;x@1;x@2])|0.0001)}
 
 / ── Grid parameters ───────────────────────────────────────────────────────────
 nCols:: 20; nRows:: 20; n:: nCols*nRows
@@ -48,11 +44,12 @@ triIds:: ,/ {[k]
 gInvM:: n#0.
 {[t]
   i0:t@0; i1:t@1; i2:t@2
-  e0x:(gPx@i1)-(gPx@i0); e0y:(gPy@i1)-(gPy@i0); e0z:(gPz@i1)-(gPz@i0)
-  e1x:(gPx@i2)-(gPx@i0); e1y:(gPy@i2)-(gPy@i0); e1z:(gPz@i2)-(gPz@i0)
-  cx:(e0y*e1z)-(e1y*e0z); cy:(e0z*e1x)-(e1z*e0x); cz:(e0x*e1y)-(e1x*e0y)
+  e0x:(gPx@i1)-gPx@i0; e0y:(gPy@i1)-gPy@i0; e0z:(gPz@i1)-gPz@i0
+  e1x:(gPx@i2)-gPx@i0; e1y:(gPy@i2)-gPy@i0; e1z:(gPz@i2)-gPz@i0
+  cx:(e0y*e1z)-e1y*e0z; cy:(e0z*e1x)-e1z*e0x; cz:(e0x*e1y)-e1x*e0y
   A:0.5*sqrt[(cx*cx)+(cy*cy)+(cz*cz)]
   contrib:$[A>0.;3.%A;0.]
+  / gInvM[i0;i1;i2]+::contrib
   gInvM::@[gInvM;(i0;i1;i2);+;contrib]
 }' triIds;
 / Pin top-left (0) and top-right (nCols-1) corners
