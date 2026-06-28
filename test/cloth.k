@@ -17,7 +17,6 @@
 2: "lib/spirv.k"
 2: "lib/gpu.k"
 
-/ ── Vector helpers ────────────────────────────────────────────────────────────
 vlen3:{sqrt[(sqr x)+(sqr y)+(sqr z)]}            / length from x;y;z component arrays
 cross3:{((x@1 2 0)*y@2 0 1)-(x@2 0 1)*y@1 2 0}   / cross product of two 3-vectors
 vnorm:{x%vlen3[x@0;x@1;x@2]|0.0001}              / normalise a packed 3-vector
@@ -38,17 +37,17 @@ P:{[i] ((g`px)@i;(g`py)@i;(g`pz)@i)}     / particle i as a packed 3-vector
 
 / ── Triangles — CCW winding gives upward normals on flat cloth ────────────────
 triIds:: ,/ {[k]
-  r:k div nCols-1; c:k mod nCols-1
-  i00:(r*nCols)+c; i01:(r*nCols)+c+1
-  i10:((r+1)*nCols)+c; i11:((r+1)*nCols)+c+1
+  r:k div nCols-1;c:k mod nCols-1
+  i00:(r*nCols)+c;i01:(r*nCols)+c+1
+  i10:((r+1)*nCols)+c;i11:((r+1)*nCols)+c+1
   ((i00;i11;i01);(i00;i10;i11))
-}' !(nRows-1)*nCols-1
+}'!(nRows-1)*nCols-1
 
 / ── Inverse masses from triangle areas; pin the two top corners ───────────────
 triArea:{[t] cr:cross3[(P t@1)-P t@0;(P t@2)-P t@0]; 0.5*vlen3[cr@0;cr@1;cr@2]}
 gIm::n#0.
-{[t] a:triArea t; gIm::@[gIm;t;+;$[a>0.;3.%a;0.]]}' triIds;
-gIm::@[gIm;0,nCols-1;:;0.]                        / pin top-left and top-right
+{[t]a:triArea t;gIm[t]+::$[a>0.;3.%a;0.]}'triIds;
+gIm[0,nCols-1]:0.                        / pin top-left and top-right
 
 / ── Constraints: each edge type is a table of edges ───────────────────────────
 eLen:{[i;j] vlen3[((g`px)@j)-(g`px)@i; ((g`py)@j)-(g`py)@i; ((g`pz)@j)-(g`pz)@i]}
@@ -87,22 +86,15 @@ applyPass:{[c]
 
 / ── Simulation substep ────────────────────────────────────────────────────────
 clothSubstep:{[x]
-  free:gIm>0.                              / 1 for movable particles, 0 for pinned
-  g[`vy]::(g`vy)+free*(-9.81*gSdt)         / gravity on free particles
-  prev::g                                  / snapshot positions for velocity recovery
-  g[`px]::(g`px)+(g`vx)*gSdt               / integrate positions
-  g[`py]::(g`py)+(g`vy)*gSdt
-  g[`pz]::(g`pz)+(g`vz)*gSdt
-  g[`py]::(g`py)|-2.                        / floor, below the hanging cloth
-  applyPass hCons                          / 4-pass solve: h → v → d → b
-  applyPass vCons
-  applyPass dCons
-  applyPass bCons
-  g[`vx]::free*((g`px)-prev`px)%gSdt        / recover velocity from displacement
-  g[`vy]::free*((g`py)-prev`py)%gSdt
-  g[`vz]::free*((g`pz)-prev`pz)%gSdt
+  free:gIm>0.                                           / 1 for movable particles, 0 for pinned
+  g[`vy]::(g`vy)+free*(-9.81*gSdt)                       / gravity on free particles
+  prev::g                                                / snapshot positions for velocity recovery
+  g[`px`py`pz]::(g`px`py`pz)+gSdt*g`vx`vy`vz             / integrate all three axes at once
+  g[`py]|::-2.                                     / floor, below the hanging cloth
+  applyPass'(hCons;vCons;dCons;bCons)
+  g[`vx`vy`vz]::free*/:((g`px`py`pz)-prev`px`py`pz)%gSdt / recover velocity from displacement
   x}
-
+ 
 clothFrame:{[] gSdt::gFrameDt%gNumSubsteps; gNumSubsteps clothSubstep/ 0}
 
 / ── Mesh building ─────────────────────────────────────────────────────────────
