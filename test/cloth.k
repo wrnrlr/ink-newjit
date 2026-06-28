@@ -14,23 +14,25 @@
 2: "lib/spirv.k"
 2: "lib/gpu.k"
 
-/ ── Math helpers ──────────────────────────────────────────────────────────────
 vlen3:{sqrt[(sqr x)+(sqr y)+(sqr z)]}
 cross3:{((x@1 2 0)*y@2 0 1)-(x@2 0 1)*y@1 2 0}
 vnorm:{x%((vlen3[x@0;x@1;x@2])|0.0001)}
 
-/ ── Grid parameters ───────────────────────────────────────────────────────────
-nCols:: 20; nRows:: 20; n:: nCols*nRows
-gFrameDt:: 1.%60.
-gNumSubsteps:: 15
-gBendAlpha:: 1.0
-gSdt:: 0.0
+nCols::20;nRows::20;n::nCols*nRows
+gFrameDt::1.%60.;gNumSubsteps::15
+gBendAlpha::1.0;gSdt::0.0
 
 / ── Initial positions as flat float lists ─────────────────────────────────────
-gPx:: {[i] ((1.*(i mod nCols))%(1.*(nCols-1)))-0.5}' !n
+gPx:: {((x mod nCols)%nCols-1)-.5}'!n
 gPy:: n#1.
-gPz:: {[i] ((1.*(i div nCols))%(1.*(nRows-1)))-0.5}' !n
+gPz:: {((x div nCols)%nRows-1)-.5}'!n
 gVx:: n#0.; gVy:: n#0.; gVz:: n#0.
+
+Grid:{[n;m]c:n*m;
+  px:{((x mod n)%n-1)-.5}'!c
+  pz:{((x div n)%m-1)-.5}'!c
+  [[]px:px;py:c#1;pz:pz;vx:c#0.;vy:c#0.;vz:c#0.]
+}
 
 / ── Triangle indices — CCW winding gives upward normals on flat cloth ──────────
 triIds:: ,/ {[k]
