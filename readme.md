@@ -43,3 +43,8 @@ d: []
 | system run | **Tick** / Step | Run |
 | `ecsPropagate` | **Cascade** | — |
 | `worldNew` | **Genesis** / Realm | World
+
+# Auto reload
+```sh
+watchexec -r -w test/cloth.k -- ./zig-out/bin/ink -unfocus -top -monitor 1 test/cloth.k
+```
