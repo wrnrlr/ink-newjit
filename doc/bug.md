@@ -2,6 +2,29 @@
 
 ## Recently fixed
 
+- **Arithmetic/`&` on a 1-element general list hung; `~\:`/`/:` left `` `L ``.**
+  Two issues under bug #5. (1) `dyadContainerKernel`'s broadcast path
+  (`src/primitive/verb/helper.zig`) used `x.ref()`/`y.ref()` to broadcast a
+  count-1 operand — for a length-1 *list* that re-fed the whole list back into
+  `dispatch2`, re-entering the same kernel forever (`0+,,1b`, `0+((,`G)~\:`G)`
+  hung). It now broadcasts via `.at(0)`, which extracts the element from a
+  length-1 container and returns the atom itself for a true atom. (2) `eachleft`
+  /`eachright` (`src/primitive/adverb/eachside.zig`) returned `.{ .L = res }`
+  raw while `each` calls `promote`, so `(,`G)~\:`G` came out as a `` `L `` of a
+  bool atom (typing as `` `L ``, rejected by `&` with `!type`) instead of a
+  clean `` `B ``. Both now `promote`, so `~\:`/`/:` yield typed vectors like
+  `'` does. `lib/fbx.k`'s `\:` mask workaround (using plain `'`) is no longer
+  needed.
+- **While (`(cond)f/init`) ran once when the body ignored `x`.** An implicit
+  lambda that references no argument infers `arity() == 0` (`compiler.zig`
+  `Scope.arity`). `derived3`'s while-form guard (`src/primitive/derived.zig`)
+  required `x.arity() >= 1` on the *step*, so an arity-0 body fell through to
+  `fold` and iterated once. The while form is selected by the *left* operand
+  being a function (cond); the step's arity is irrelevant — a body that loops
+  via side effects (`{g::g+1;0}`) is a valid arity-0 step. Guard relaxed to
+  `y.tag() == .o or .p` for both `/` (whiledo) and `\\` (whilescan). The
+  arity-0 arg is freed safely by the Return-frame cleanup. `lib/fbx.k`'s
+  step-counter workaround (threading `{…;x+1}`) is no longer required.
 - **`$0W` displays wrong / fails to parse.** `parseIntLit` had no `0W`/`-0W`
   case (it threw `InvalidCharacter`) and the formatter never mapped
   `maxInt(i32)`→`0W`. Both added, mirroring the float `0w`/`-0w` handling
@@ -134,40 +157,3 @@ size, not reconstruct it: `init` passes sizes >1024 through unchanged while
 re-round — it must store the size class in the header or unify the two rounding
 paths. Not blocking; the 16-byte constraint is fine. Documented so the next
 header change doesn't rediscover this the hard way.
-
----
-
-## 5. `0+`/`&` on an eachleft/eachright match result hangs
-
-```k-repl
- 0+((,`G)~\:`G)        / hangs (infinite loop)
- &((,`G)~\:`G)         / `!type
-```
-
-The eachleft/eachright match `(,`G)~\:`G` returns a one-element general list
-that *prints* and *types* as a normal `,1b` (`@` → `` `L ``, `#` → 1), but
-arithmetic on it (`0+…`) spins forever and `&` (Where) rejects it with
-`!type`. The same expression built from a literal works fine
-(`0+,1b` → `,1`), so the value coming out of `~\:` is structurally distinct
-(looks like a mis-refcounted / self-referential cell). Seen while writing
-`lib/fbx.k`'s tree accessors: indexing children with `c@\:`name` then masking
-with `~\:` hung. Workaround used there: build masks with plain each `'`
-(`{$[(x@`name)~q;1;0]}'c` yields a clean `` `I `` vector) instead of `\:`.
-Note `&` on a multi-element general list of bools also fails with `!type`
-(e.g. `&(0b;1b;1b)`); Where wants a `` `B ``/`` `I `` vector, and `~\:`/`'`
-returning `` `L `` is the underlying friction.
-
----
-
-## 6. While (`f f/`) only iterates when the body uses its argument `x`
-
-```k-repl
- fbx.n:0
- ({fbx.n<4}){fbx.n::fbx.n+1;0}/0     / runs once, not 4×
- ({fbx.n<4}){fbx.n::fbx.n+1;x}/0     / runs 4×  (body references x)
-```
-
-A while-loop whose body ignores the threaded value runs a single iteration.
-Bodies that reference `x` (even just returning it) loop correctly. Worked
-around in `lib/fbx.k` by threading a step counter (`{…;x+1}`) through every
-inflate loop and keeping the real state in globals.
