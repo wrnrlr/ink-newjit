@@ -454,6 +454,11 @@ fn isOpenTok(tt: TT) bool {
 fn isCloseTok(tt: TT) bool {
   return switch (tt) { .@")", .@"}", .@"]" => true, else => false };
 }
+// An open bracket that applies/indexes the noun to its left: `name[…]`.  (`(`
+// groups and `{` opens a lambda — neither applies a preceding noun.)
+fn isApplyOpen(tt: TT) bool {
+  return switch (tt) { .@"[", .@"[[", .@"[[]" => true, else => false };
+}
 // An infix verb/operator that can sit between two operands (assignment `:`
 // included; adverbs are postfix modifiers, so excluded).
 fn isVerbTok(tt: TT) bool {
@@ -1160,6 +1165,30 @@ fn handleDocumentHighlight(s: *Server, id: ?json.Value, params: ?json.Value) !vo
     } }
   if (cellLo >= cellHi) return replyResult(s, id, "[]", .{});
 
+  // Application unit: when the cursor is on the head of a call/index
+  // `name[args]…`, light exactly that application (with its trailing bracket
+  // groups) instead of expanding outward to the enclosing operator — so
+  // `f: g[…]` lights `g[…]`, not the whole binding.
+  if (isNounTok(items[cur].tt) and cur + 1 < cellHi and isApplyOpen(items[cur + 1].tt)) {
+    var endIdx = cur;
+    var j = cur + 1;
+    while (j < cellHi and isApplyOpen(items[j].tt)) {
+      var depth: i32 = 0;
+      while (j < cellHi) : (j += 1) {
+        if (isOpenTok(items[j].tt)) { depth += 1; }
+        else if (isCloseTok(items[j].tt)) { depth -= 1; if (depth == 0) { j += 1; break; } }
+      }
+      endIdx = j - 1;
+    }
+    try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
+    try writeId(s, id);
+    try s.out.appendSlice(s.gpa, ",\"result\":[");
+    var f1 = true;
+    try emitHl(s, &f1, src, items[cur].start, items[endIdx].end);
+    try s.out.appendSlice(s.gpa, "]}");
+    return flush(s);
+  }
+
   // Locate the focus operator at relative depth 0 within the cell.
   var focus: ?usize = null;
   if (isVerbTok(items[cur].tt)) {
@@ -1200,7 +1229,7 @@ fn handleDocumentHighlight(s: *Server, id: ?json.Value, params: ?json.Value) !vo
   };
 
   // Left operand: the noun-phrase (group / strand / name) immediately left of f.
-  var haveLeft = false; var lStart: usize = 0; var lEnd: usize = 0;
+  var haveLeft = false; var lStart: usize = 0;
   if (f > cellLo) {
     const prev = f - 1;
     if (isCloseTok(items[prev].tt)) {
@@ -1211,23 +1240,22 @@ fn handleDocumentHighlight(s: *Server, id: ?json.Value, params: ?json.Value) !vo
         if (k == cellLo) break;
         k -= 1;
       }
-      haveLeft = true; lStart = items[k].start; lEnd = items[prev].end;
+      haveLeft = true; lStart = items[k].start;
     } else if (isNounTok(items[prev].tt)) {
       var k: usize = prev;
       while (k > cellLo and isNounTok(items[k - 1].tt)) k -= 1;
-      haveLeft = true; lStart = items[k].start; lEnd = items[prev].end;
+      haveLeft = true; lStart = items[k].start;
     }
   }
 
-  // Right operand: from just after f to the end of the cell.
-  var haveRight = false; var rStart: usize = 0; var rEnd: usize = 0;
-  if (f + 1 < cellHi) {
-    haveRight = true; rStart = items[f + 1].start; rEnd = items[cellHi - 1].end;
-  }
+  // Right operand reaches to the end of the cell.
+  const haveRight = f + 1 < cellHi;
 
-  if (haveLeft) try emitHl(s, &first, src, lStart, lEnd);
-  try emitHl(s, &first, src, items[f].start, items[f].end);
-  if (haveRight) try emitHl(s, &first, src, rStart, rEnd);
+  // Emit one contiguous span covering left operand · operator · right operand,
+  // so the whitespace between the parts is highlighted too (no gaps).
+  const start = if (haveLeft) lStart else items[f].start;
+  const end = if (haveRight) items[cellHi - 1].end else items[f].end;
+  try emitHl(s, &first, src, start, end);
   try s.out.appendSlice(s.gpa, "]}");
   try flush(s);
 }
