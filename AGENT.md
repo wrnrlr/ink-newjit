@@ -157,7 +157,7 @@ while assigment of globals in a lambda happen with a double colon `::`
 - Without `X^y` - remove occurrences of X from y
 - Pad `i$C` - pad string to length |i|
 - Cast `s$y` - cast y to type s. `` `I$"-12" `` → `-12`; `` `F$"-12.3" `` → `-12.3`
-- Find `x?y` - first index of y in x (null if not found)
+- Find `x?y` - first index of y in x (`#x` / length if not found, for index-with-fallback)
 - Roll/Deal `i?x` - i random selections from x
 - `x@y` (At/Apply) - index into x at y; apply function x to y
 - `x.y` (Dot/ApplyN) - deep indexing or multi-argument application

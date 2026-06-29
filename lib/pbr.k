@@ -69,6 +69,6 @@ pbrVtx: VertexShader[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit
   ((sc*py0; sc*px1; 0.5-px2*0.001; 1.0); nor; mat; lit)
 }]
 
-/ ── Helpers ──────────────────────────────────────────────────────────────────
-PbrPipeline: {[] CompileMesh[pbrVtx; PbrFragment]}   / compile the standard mesh pipeline
-PbrMat: {[r;g;b;rough;lit] r,g,b,rough,lit}          / rgb + roughness + sun → 5-float vertex tail
+/ Compile the standard pipeline with  CompileMesh[pbrVtx; PbrFragment]  and build a
+/ material+lit vertex tail with  r,g,b,rough,lit  (kept inline, not as helpers, to
+/ spend fewer of the VM's 256 global slots — see doc/bug.md).

@@ -4,11 +4,11 @@
 / for HH move north, TT move south, HT move east, TH move west.
 / How long on avarage does it take to get to the boundry of the grid?
 
-direction: (0 1;0 -1;1 0;-1 0)
-bounds: {&/(0<x)&x<9}
-wander: {x+*1?direction}
-steps: {# bounds wander\5 5}
-avg: {(+/x)%#x}
+direction:(0 1;0 -1;1 0;-1 0)
+bounds:{&/(0<x)&x<9}
+wander:{x+*1?direction}
+steps:{# bounds wander\5 5}
+avg:{(+/x)%#x}
 \t avg[steps@'!100000]
 
 / Energy-based numeric solver (value iteration / relaxation)
@@ -38,7 +38,7 @@ m: (f/(N*N)#0.0)@h+N*h
 /  r'=2  [8]   [9]  [10]   B
 /  r'=3  [B]   [B]   [B]   B       ← actual grid boundary
 
-Q: N-h; sm: N-2*h
+Q:N-h; sm: N-2*h
 (r;c): !Q,Q; all: c+Q*r
 P: &(~r=r|Q-1)*(~c=c|Q-1)
 (ri;ci): (r@P; c@P)

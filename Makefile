@@ -10,6 +10,8 @@ test:
 	$(INK) test/regex.k
 	$(INK) test/fbx.k
 	$(INK) test/usd.k
+	zig build json
+	$(INK) test/gltf.k
 	# $(INK) test/font.k
 	sh test/ipc.sh
 

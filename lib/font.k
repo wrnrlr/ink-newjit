@@ -127,7 +127,10 @@ FontOutlines:{[f;sz;gids] FpFont::f; $[`CFF in !f; cffOutG[FontScale[f;sz]]'gids
 / Map a char string to glyph ids via the cmap (no ligatures/kerning).
 / Vectorized: find every codepoint in the cmap at once (capturing the face dict
 / in a `'`-mapped projection would hit the runtime bug — it holds `glyf`).
-FontShape: {[f;s] c: f`cmap; cps: c`cp; codes: `i$s; pos: cps?codes; (codes in cps)*(c`gid)@0|pos}
+/ find→length: an absent codepoint yields pos=#cps, so append a 0 (.notdef) fallback gid
+/ at that index — `(gid,0)@pos` — keeping the lookup total. The membership mask is then
+/ belt-and-suspenders (an absent code already maps to gid 0).
+FontShape: {[f;s] c: f`cmap; cps: c`cp; codes: `i$s; pos: cps?codes; (codes in cps)*((c`gid),0)@pos}
 
 / Pixel metrics at a size: (ascent; descent; lineGap) in pixels.
 FontMetrics: {[f;sz] (FontScale[f;sz]) * f[`hhea]`ascent`descent`lineGap}

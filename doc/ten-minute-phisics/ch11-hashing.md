@@ -79,12 +79,14 @@ buildHash: {[pos;n;h;ts]
   / Step 2: sort particle indices by bucket
   order: <bs
   sortedBs: bs@order
-  / Step 3: first occurrence of each bucket in sorted sequence
+  / Step 3: first occurrence of each bucket in sorted sequence.
+  / find→length: an absent bucket yields #sortedBs = n, exactly the "not found"
+  / sentinel we append as the guard — so empty buckets are already n, no 0N to patch.
   cs: (sortedBs?!ts),n     / n is the sentinel: "bucket not found"
-  / Step 4: backward fill — missing buckets point to next non-empty bucket
-  / Reverse, forward-fill nulls (0N) with previous non-null, then reverse back
+  / Step 4: backward fill — missing (n-valued) buckets point to next non-empty bucket.
+  / Reverse, forward-fill the n sentinels with the previous real start, then reverse back.
   gOrder:: order
-  gCellStart:: |({[acc;x] $[x=0N; acc; x]}\ |cs)
+  gCellStart:: |({[acc;x] $[x=n; acc; x]}\ |cs)
 }
 ```
 

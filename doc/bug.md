@@ -2,6 +2,24 @@
 
 ## Recently fixed
 
+- **256-global ceiling raised to 4096 (global index widened `u8`→`u16`).** Was
+  issue #6: the VM stored globals in `[256]V` and the bytecode encoded a global
+  index in one byte, so the 257th distinct global name paniced at compile
+  (`getOrAddGlobal`). Widened the index to `u16` end-to-end:
+  `globals: [MAX_GLOBALS=4096]V` and `names: StringHashMap(u16)`
+  (`src/runtime/vm.zig`); `getOrAddGlobal`→`u16` and `globals` map →`u16`
+  (`compiler.zig`); `.Global`/`.AssignGlobal` now emit/skip a 2-byte arg in
+  `lowerInst`, `instSize`, the VM decoders, `tape.zig instrSize`, and `disasm.zig`;
+  list-assign target indices are 2 bytes for the GLOBAL form (`.Nop arg3==2`,
+  `ListAssignGlobal` size `2+2n`) but stay 1 byte for the LOCAL form
+  (`.Nop arg3==1`, locals are still `u8` — per-frame, 256 is plenty). The
+  `.Nop` list-assign marker had to be split (it was shared by local + global
+  list-assigns). Verified: all unit tests pass, 1000 globals works, global and
+  local `(a;b;c):v` both work, all GPU demos unaffected. (Unrelated pre-existing
+  limit still open: a list *literal* caps at 255 elements — `MakeList` count is
+  `u8`.) The instancing/lib globals are still kept lean (opt-in `lib/instancing.k`)
+  out of good hygiene, but no longer forced by the ceiling.
+
 - **Arithmetic/`&` on a 1-element general list hung; `~\:`/`/:` left `` `L ``.**
   Two issues under bug #5. (1) `dyadContainerKernel`'s broadcast path
   (`src/primitive/verb/helper.zig`) used `x.ref()`/`y.ref()` to broadcast a
@@ -189,3 +207,15 @@ for empty integer sections. The clean fix is for dyadic `,` (Join) to treat an
 empty operand as identity and preserve the non-empty operand's type
 (`src/primitive/verb/` join path). Related to the general-list dict-join issue
 already noted for `lib/recs.k`.
+
+---
+
+## 6. List *literal* caps at 255 elements (`MakeList` count is `u8`)
+
+A list literal / collection passed in one expression (e.g. `+/(a0;a1;…;a999)`)
+lowers to a `MakeList` whose element-count arg is a single byte, so >255 elements
+panic at compile (`compiler.zig` `lowerInst`, `@intCast(inst.arg1)` to `u8`).
+Surfaced while stress-testing the (now-fixed) global limit. Same shape as the old
+256-global issue: widen the `MakeList` count if it ever bites in practice (build the
+list incrementally / via `,/` over chunks as a workaround). Low priority — literals
+that large are rare.

@@ -96,7 +96,7 @@ A lambda's type symbol is `` `o ``.
 - Pad `i$C` Pads string y to length |x|.
 - Cast `x$y` Casts y to type represented by symbol x. String to int `` `I$"-12" `` --> `` -12 `` String to float `` `F$"-12.3" `` --> `` -12.3 `` 
 - Parse `` `p@C `` Parse ink, return AST ast list.
-- Find `x?y` Returns first index of y in x (null if not found).
+- Find `x?y` Returns first index of y in x (`#x`, the length, if not found — so `(vals,default)@keys?probe` lands misses on an appended default).
 - Roll/Deal `i?x` - i random selections from x (positive: replacement, negative: unique).
 - Unmarchal/Deserialize `s@x` - supports csv, bin
 - Marchal/Serialize `s?x`: 

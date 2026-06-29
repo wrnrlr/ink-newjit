@@ -107,7 +107,7 @@ applyPass:{[c]
 clothSubstep:{[x]
   free:gIm>0.                                           / 1 for movable particles, 0 for pinned
   g[`vy]::(g`vy)+free*(-9.81*gSdt)                       / gravity on free particles
-  prev::g                                                / snapshot positions for velocity recovery
+  prev:g                                                 / snapshot positions for velocity recovery (function-local)
   g[`px`py`pz]::(g`px`py`pz)+gSdt*g`vx`vy`vz             / integrate all three axes at once
   g[`py]|::-2.                                     / floor, below the hanging cloth
   applyPass'(hCons;vCons;dCons;bCons)
