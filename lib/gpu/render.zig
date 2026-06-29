@@ -11,6 +11,13 @@ pub const Vertex = extern struct {
 // Capacity of the shared mesh vertex buffer, in f32s (~3M floats ≈ 12 MB).
 pub const MESH_BUFFER_FLOATS: usize = 3_000_000;
 
+// Per-draw mesh uniform block: 8 vec4 slots (32 f32s) exposed to the shader as
+// @group(0) @binding(0).  Each draw gets a 256-byte-aligned slot in one shared
+// buffer; pipelines opt in by declaring a Uniform-storage variable (see gpuMesh).
+pub const MESH_UNI_FLOATS: usize = 32;
+pub const MESH_UNI_SLOT: usize = 256;
+pub const MAX_MESH_UNI_CALLS: usize = 512;
+
 // Mesh vertices are stored as raw f32. The per-vertex layout (stride and
 // attributes) is whatever the mesh pipeline's vertex shader declares — see
 // gpuMesh, which derives it from the SPIR-V — so meshes are not tied to one
@@ -20,6 +27,7 @@ pub const MeshCall = struct {
   count: usize,  // vertex count
   stride: usize, // f32s per vertex
   pipeline_idx: usize,
+  uniform: [MESH_UNI_FLOATS]f32 = [_]f32{0} ** MESH_UNI_FLOATS,
 };
 
 pub const ViewUniforms = extern struct {
@@ -86,6 +94,9 @@ pub const Renderer = struct {
   mesh_calls: ArrayList(MeshCall),
   mesh_pipelines: ArrayList(wgpu.RenderPipeline),
   mesh_strides: ArrayList(usize), // f32s per vertex, parallel to mesh_pipelines
+  mesh_has_uniform: ArrayList(bool), // does pipeline i declare a uniform block? parallel to mesh_pipelines
+  mesh_bgl: wgpu.BindGroupLayout, // shared layout for the mesh uniform block (binding 0)
+  mesh_uniform_buffer: wgpu.Buffer,
 
   pub fn init(
   allocator: Alloc,
@@ -110,6 +121,20 @@ pub const Renderer = struct {
     .mesh_calls = try ArrayList(MeshCall).initCapacity(allocator, 16),
     .mesh_pipelines = try ArrayList(wgpu.RenderPipeline).initCapacity(allocator, 4),
     .mesh_strides = try ArrayList(usize).initCapacity(allocator, 4),
+    .mesh_has_uniform = try ArrayList(bool).initCapacity(allocator, 4),
+    .mesh_bgl = device.createBindGroupLayout(.{
+    .label = "mesh uniform bgl",
+    .entry_count = 1,
+    .entries = &[_]wgpu.BindGroupLayoutEntry{
+      zgpu.bufferEntry(0, .{ .vertex = true, .fragment = true }, .uniform, false, 0),
+    },
+    }),
+    .mesh_uniform_buffer = device.createBuffer(.{
+    .label = "mesh uniform buffer",
+    .usage = .{ .uniform = true, .copy_dst = true },
+    .size = MAX_MESH_UNI_CALLS * MESH_UNI_SLOT,
+    .mapped_at_creation = .false,
+    }),
     .mesh_vertex_buffer = device.createBuffer(.{
     .label = "mesh vertex buffer",
     .usage = .{ .vertex = true, .copy_dst = true },
@@ -164,6 +189,9 @@ pub const Renderer = struct {
   for (self.mesh_pipelines.items) |p| { if (@intFromPtr(p) != 0) p.release(); }
   self.mesh_pipelines.deinit(self.allocator);
   self.mesh_strides.deinit(self.allocator);
+  self.mesh_has_uniform.deinit(self.allocator);
+  self.mesh_bgl.release();
+  self.mesh_uniform_buffer.release();
   self.mesh_vertex_buffer.release();
   self.mesh_calls.deinit(self.allocator);
   self.mesh_verts.deinit(self.allocator);
@@ -249,12 +277,12 @@ pub const Renderer = struct {
 
   // Queue a 3-D mesh draw call. `verts` is raw f32 vertex data; `stride` is the
   // number of f32s per vertex (pipeline-specific, see gpuMesh).
-  pub fn drawMesh(self: *Renderer, verts: []const f32, stride: usize, pipeline_idx: usize) !void {
+  pub fn drawMesh(self: *Renderer, verts: []const f32, stride: usize, pipeline_idx: usize, uni: [MESH_UNI_FLOATS]f32) !void {
   if (stride == 0) return;
   const offset = self.mesh_verts.items.len;
   try self.mesh_verts.appendSlice(self.allocator, verts);
   try self.mesh_calls.append(self.allocator, .{
-    .offset = offset, .count = verts.len / stride, .stride = stride, .pipeline_idx = pipeline_idx,
+    .offset = offset, .count = verts.len / stride, .stride = stride, .pipeline_idx = pipeline_idx, .uniform = uni,
   });
   }
 
@@ -298,13 +326,28 @@ pub const Renderer = struct {
 
   // Each call may use a different vertex stride, so bind the buffer slice
   // per-call (byte offset/size) and draw from vertex 0 of that slice.
+  var uni_call: usize = 0;
   for (self.mesh_calls.items) |mc| {
     if (mc.pipeline_idx >= self.mesh_pipelines.items.len) continue;
     const end = mc.offset + (mc.count * mc.stride);
     if (end > write_count) continue;
     pass.setPipeline(self.mesh_pipelines.items[mc.pipeline_idx]);
     pass.setVertexBuffer(0, self.mesh_vertex_buffer, mc.offset * @sizeOf(f32), mc.count * mc.stride * @sizeOf(f32));
+    // Pipelines that declared a uniform block get a per-draw bind group; others
+    // keep the empty pipeline layout and draw with no bind group (unchanged path).
+    const has_uni = mc.pipeline_idx < self.mesh_has_uniform.items.len and self.mesh_has_uniform.items[mc.pipeline_idx];
+    if (has_uni and uni_call < MAX_MESH_UNI_CALLS) {
+    const off = uni_call * MESH_UNI_SLOT;
+    self.queue.writeBuffer(self.mesh_uniform_buffer, off, f32, mc.uniform[0..]);
+    const be = [_]wgpu.BindGroupEntry{.{ .binding = 0, .buffer = self.mesh_uniform_buffer, .offset = off, .size = MESH_UNI_FLOATS * @sizeOf(f32) }};
+    const bg = self.device.createBindGroup(.{ .layout = self.mesh_bgl, .entry_count = be.len, .entries = &be });
+    defer bg.release();
+    pass.setBindGroup(0, bg, null);
+    uni_call += 1;
     pass.draw(@intCast(mc.count), 1, 0, 0);
+    } else {
+    pass.draw(@intCast(mc.count), 1, 0, 0);
+    }
   }
   }
 

@@ -14,6 +14,7 @@ RunShader2:   so 2: (`gpuCompute2;  3)   / (spirv_I; in1_F; in2_F) → output_F 
 CompileWgsl:  so 2: (`gpuWgsl;      1)   / wgsl_src_C → handle : compile WGSL render shader
 CompileMesh:  so 2: (`gpuMesh;      2)   / (vtx_I; frg_I) → handle : compile vertex+fragment SPIR-V mesh pipeline
 DrawMesh:     so 2: (`gpuDrawMesh;  2)   / (verts_F; handle) → 0 : draw mesh; vertex stride follows the shader's declared inputs
+DrawMeshU:    so 2: (`gpuDrawMeshU; 3)   / (verts_F; handle; uni_F) → 0 : draw mesh + per-draw uniform block (8 vec4 slots; see VertexShaderU)
 
 / Solid-color fragment uniforms (44 floats matching fill.wgsl FragUniforms).
 / r,g,b,a in [0,1].  Returns a flat F vector.

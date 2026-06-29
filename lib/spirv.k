@@ -55,7 +55,15 @@ FragmentShader: {[ioTypes; fn]
 / gl_Position is always the first return element; emitted via the gl_PerVertex
 / Block struct (required by Vulkan/SPIR-V spec).  Varyings get Location 0,1,...
 / and must match the FragmentShader's input Location assignments.
-VertexShader: {[inTypes; varyTypes; fn]
+VertexShader: {[inTypes; varyTypes; fn] VertexShaderU[inTypes; varyTypes; (); fn]}
+
+/ ── VertexShaderU[inTypes; varyTypes; uniNames; fn] ─────────────────────────
+/ Like VertexShader, plus a uniform block at @group(0) @binding(0).  uniNames is
+/ a list of symbols, one per vec4 uniform slot; each becomes a v4 value in the
+/ shader body (index components with name[i]).  The host fills the slots per draw
+/ via DrawMeshU (slot k = uniform floats 4k..4k+3).  uniNames:() ⇒ no block, and
+/ the emitted module is byte-identical to the old VertexShader.
+VertexShaderU: {[inTypes; varyTypes; uniNames; fn]
   Nid::Nfixed; Buf::(); Con::()
 
   lam:      last parse $fn
@@ -82,6 +90,26 @@ VertexShader: {[inTypes; varyTypes; fn]
   varyPtrs:   PtrOut' varyTySyms
   varyVarIds: {[x] newId[]}' varyNames
   nVary:      #varyVarIds
+
+  / ── Uniform block @group(0) @binding(0): nUni vec4 members (std140) ─────────
+  / Member i lives at byte offset i*16.  Emit the access-chain+load for each into
+  / the body (before the user code), and extend env with name→loaded-v4.
+  / The per-member each-helpers run as top-level functions (memberDecOne /
+  / loadUniMember) reading globals UTuni/UPv4/UVar, because ink lambdas do NOT
+  / close over enclosing locals — a `{[i] ..Tuni..}` inline lambda would see Tuni
+  / as undefined and emit malformed (boxed/partial) words.
+  nUni:    #uniNames
+  Tuni:    $[nUni>0; newId[]; 0]   / OpTypeStruct { vec4 × nUni }
+  Puni:    $[nUni>0; newId[]; 0]   / OpTypePointer Uniform Tuni
+  PuniV4:  $[nUni>0; newId[]; 0]   / OpTypePointer Uniform vec4
+  uniVar:  $[nUni>0; newId[]; 0]   / the uniform block variable
+  UTuni::Tuni; UPv4::PuniV4; UVar::uniVar
+  uniKIdx: $[nUni>0; {[x] r:newId[]; emitCon opConst[Ti32;r;x]; r}'!nUni; !0]
+  uniPairs:$[nUni>0; loadUniMember' uniKIdx; ()]
+  / Merge uniforms into env only when present: joining a symbol vector with the
+  / empty list () upcasts it to a boxed general list and breaks dict key lookup,
+  / so leave env untouched in the no-uniform case (keeps output byte-identical).
+  env:     $[nUni>0; (argNames,uniNames)!(loadedPairs,uniPairs); argNames!loadedPairs]
 
   / Compile body stmts (all but last) to build env, then handle return tuple
   bodySeq:  lam[2]
@@ -120,13 +148,18 @@ VertexShader: {[inTypes; varyTypes; fn]
   decBlk:  (0x00030047; TperVtx; 2)
   decPos:  (0x00050048; TperVtx; 0; 11; 0)
   decVary: $[nVary>0; ,/ varyVarIds decInOne' !nVary; !0]
+  / Uniform block: Block decoration + per-member std140 Offset + set/binding 0
+  decUni:  $[nUni>0; ((0x00030047;Tuni;2),(,/memberDecOne'!nUni),(0x00040047;uniVar;34;0),(0x00040047;uniVar;33;0)); !0]
 
   types:    (0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid;0x00040020;PinF32;1;Tf32;0x00040020;PoutF32;3;Tf32;0x00040020;PinV4;1;Tv4;0x00040020;PoutV4;3;Tv4;0x00040020;PinV2;1;Tv2;0x00040020;PoutV2;3;Tv2;0x00040020;PinV3;1;Tv3;0x00040020;PoutV3;3;Tv3)
   vtxTypes: (0x0003001E;TperVtx;Tv4;0x00040020;PperVtx;3;TperVtx)
+  / OpTypeStruct{vec4×nUni} (wc=2+nUni, op=30), then Uniform pointers to it / to vec4
+  uniTypes: $[nUni>0; ((((2+nUni)*65536)+30;Tuni),(nUni#Tv4),(0x00040020;Puni;2;Tuni),(0x00040020;PuniV4;2;Tv4)); !0]
 
   varIn:     ,/ inPtrs varInOne' inVarIds
   varPerVtx: (0x0004003B; PperVtx; perVtxVar; 3)
   varVary:   $[nVary>0; ,/ varyPtrs varOutOne' varyVarIds; !0]
+  varUni:    $[nUni>0; (0x0004003B; Puni; uniVar; 2); !0]   / OpVariable Uniform
 
   label: newId[]
   fn:  (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
@@ -135,7 +168,7 @@ VertexShader: {[inTypes; varyTypes; fn]
   conWds: $[#Con; ,/Con; !0]
   bodWds: $[#Buf; ,/Buf; !0]
 
-  ,/(hdr;cap;ext;mem;ep;decIn;decBlk;decPos;decVary;types;vtxTypes;varIn;varPerVtx;varVary;conWds;fn;bodWds;ret)
+  ,/(hdr;cap;ext;mem;ep;decIn;decBlk;decPos;decVary;decUni;types;vtxTypes;uniTypes;varIn;varPerVtx;varVary;varUni;conWds;fn;bodWds;ret)
 }
 
 
@@ -281,10 +314,22 @@ Nid:: Nfixed
 Con:: ()
 Buf:: ()
 
+/ VertexShaderU uniform-block scratch: the current block's struct type id, the
+/ Uniform→vec4 pointer type id, and the block variable id.  Set per shader and
+/ read by the top-level each-helpers below (ink lambdas can't see enclosing locals).
+UTuni:: 0
+UPv4::  0
+UVar::  0
+
 newId:   {[] r:Nid; Nid::Nid+1; r}
 emitCon: {[ws] Con,:: ,ws}
 emitBuf: {[ws] Buf,:: ,ws}
 emitW:   emitBuf
+
+/ One OpMemberDecorate Offset for uniform member i (std140: vec4 at byte i*16).
+memberDecOne: {[i] (0x00050048; UTuni; i; 35; i*16)}
+/ Load uniform member at constant id `kidx`: OpAccessChain (Uniform vec4*) + OpLoad.
+loadUniMember: {[kidx] p:newId[]; emitBuf opAccChain1[UPv4;p;UVar;kidx]; v:newId[]; emitBuf opLoad[Tv4;v;p]; (v;`v4)}
 
 / Bug fix: splat a scalar id `sid` to vector type `vty` via OpCompositeConstruct.
 / SPIR-V OpFAdd/Sub/Div require both operands to share the exact type, so a

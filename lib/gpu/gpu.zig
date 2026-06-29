@@ -888,11 +888,32 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
     .depth_write_enabled = true,
     .depth_compare       = .less,
   };
-  // No uniforms in the mesh shaders — empty pipeline layout.
-  const layout = r.device.createPipelineLayout(.{
-    .bind_group_layout_count = 0,
-    .bind_group_layouts = &[_]wgpu.BindGroupLayout{},
-  });
+  // A shader opts into the per-draw uniform block by declaring an OpVariable in
+  // Uniform storage (storage class 2).  Such pipelines get the mesh uniform
+  // bind-group layout at @group(0); shaders without it keep the empty layout
+  // (and the no-bind-group draw path) so existing meshes are unaffected.
+  var has_uniform = false;
+  {
+    const ws = vtx_words[0..@intCast(vn)];
+    var j: usize = 5;
+    while (j < ws.len) {
+      const w0 = ws[j];
+      const wc: usize = w0 >> 16;
+      if (wc == 0) break;
+      if ((w0 & 0xffff) == 59 and j + 3 < ws.len and ws[j + 3] == 2) { has_uniform = true; break; }
+      j += wc;
+    }
+  }
+  const layout = if (has_uniform)
+    r.device.createPipelineLayout(.{
+      .bind_group_layout_count = 1,
+      .bind_group_layouts = &[_]wgpu.BindGroupLayout{r.mesh_bgl},
+    })
+  else
+    r.device.createPipelineLayout(.{
+      .bind_group_layout_count = 0,
+      .bind_group_layouts = &[_]wgpu.BindGroupLayout{},
+    });
   defer layout.release();
 
   const pipeline = r.device.createRenderPipeline(.{
@@ -909,6 +930,7 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
   if (@intFromPtr(pipeline) == 0) return ki(0);
   r.mesh_pipelines.append(r.allocator, pipeline) catch return ki(0);
   r.mesh_strides.append(r.allocator, layout_info.stride_floats) catch return ki(0);
+  r.mesh_has_uniform.append(r.allocator, has_uniform) catch return ki(0);
   return ki(@intCast(r.mesh_pipelines.items.len));
 }
 
@@ -929,7 +951,36 @@ export fn gpuDrawMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
 
   const n_floats: usize = @intCast(@divTrunc(vn, @as(i32, @intCast(stride))) * @as(i32, @intCast(stride)));
   const floats = vf[0..n_floats];
-  r.drawMesh(floats, stride, @intCast(handle - 1)) catch {};
+  r.drawMesh(floats, stride, @intCast(handle - 1), [_]f32{0} ** render.MESH_UNI_FLOATS) catch {};
+  return ki(0);
+}
+
+// ── gpuDrawMeshU ────────────────────────────────────────────────────────────────
+//
+// Like gpuDrawMesh, plus a per-draw uniform block.  uni_k is a flat f32 vector
+// (up to 32 floats = 8 vec4s) copied into @group(0) @binding(0); a vertex/fragment
+// shader built with VertexShaderU reads slot i as its i-th declared vec4 uniform.
+
+export fn gpuDrawMeshU(verts_k: ?K, handle_k: ?K, uni_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const vf = kfp(verts_k) orelse return ki(0);
+  const vn = kn(verts_k);
+  const handle = ki_val(handle_k);
+  if (handle <= 0 or handle > r.mesh_strides.items.len) return ki(0);
+  const stride = r.mesh_strides.items[@intCast(handle - 1)];
+  if (stride == 0 or vn < @as(i32, @intCast(stride))) return ki(0);
+
+  var uni = [_]f32{0} ** render.MESH_UNI_FLOATS;
+  if (kfp(uni_k)) |up| {
+    const un = kn(uni_k);
+    const m: usize = @min(@as(usize, @intCast(@max(un, 0))), render.MESH_UNI_FLOATS);
+    var j: usize = 0;
+    while (j < m) : (j += 1) uni[j] = up[j];
+  }
+
+  const n_floats: usize = @intCast(@divTrunc(vn, @as(i32, @intCast(stride))) * @as(i32, @intCast(stride)));
+  const floats = vf[0..n_floats];
+  r.drawMesh(floats, stride, @intCast(handle - 1), uni) catch {};
   return ki(0);
 }
 
