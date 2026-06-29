@@ -157,3 +157,35 @@ size, not reconstruct it: `init` passes sizes >1024 through unchanged while
 re-round — it must store the size class in the header or unify the two rounding
 paths. Not blocking; the 16-byte constraint is fine. Documented so the next
 header change doesn't rediscover this the hard way.
+
+---
+
+## 5. Concatenating a typed vector with `()` upcasts it to a boxed `` `L ``
+
+```k-repl
+ (`a`b),()
+(`a;`b)                 / `L (boxed general list), not `a`b (`S)
+ ((`a`b),())!1 2
+ ... lookup by `a fails ...
+```
+
+`x,()` should be identity (append nothing), but joining a typed vector
+(symbol vector `` `S ``, int vector `` `I ``, …) with the empty general list `()`
+re-types the result to a boxed general list `` `L ``. Two downstream surprises:
+
+- A dict built from such keys no longer matches plain-symbol lookups:
+  `((`a`b),())!1 2` indexed by `` `a `` returns empty (the keys are boxed
+  symbols, not a `` `S `` vector).
+- `,/sections` where one branch is `()` (e.g. an `$[cond; vec; ()]`) boxes the
+  whole razed result to `` `L ``.
+
+Found while building `lib/spirv.k`'s `VertexShaderU`: a `(keys,())!(vals,())`
+env-merge silently lost every binding, and an assembly section list with an
+empty branch produced a `` `L `` SPIR-V word list that the GPU host's `kip()`
+then rejected (a uniform mesh pipeline silently failed → black screen, no
+error). Worked around by guarding the empty case
+(`$[n>0; (a,b)!(c,d); a!c]`) and using `!0` (empty `` `I ``) rather than `()`
+for empty integer sections. The clean fix is for dyadic `,` (Join) to treat an
+empty operand as identity and preserve the non-empty operand's type
+(`src/primitive/verb/` join path). Related to the general-list dict-join issue
+already noted for `lib/recs.k`.

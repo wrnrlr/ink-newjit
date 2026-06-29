@@ -24,37 +24,31 @@
 steel:: 0.62 0.64 0.68 0.35
 
 / ── Load the FBX mesh once and bake it into model space ───────────────────────
+/ Positions are centred + scaled to fit; normals come straight from the FBX file
+/ (fbx.mesh → smooth per-polygon-vertex normals) rather than being recomputed, so
+/ the sword is smooth-shaded.  Both are triangle soup (3 verts/triangle), aligned.
 fbxMesh: {[path]
   t: ReadFbx path
   obj: *t@&({$[(x`name)~`Objects;1;0]}'t)
   geo: fbx.get[obj;`Geometry]
   `0 0:"loaded ",(fbx.uname (geo`props)@1)
-  m: fbx.trimesh geo
-  soup: (m@0)@,/m@1                 / triangle-soup positions (3 per triangle)
+  m: fbx.mesh geo
+  soup: m`pos                       / triangle-soup positions (3 per triangle)
   col: +soup; xs: col@0; ys: col@1; zs: col@2
   cx: 0.5*(&/xs)+(|/xs); cy: 0.5*(&/ys)+(|/ys); cz: 0.5*(&/zs)+(|/zs)   / centre
   sca: 2.4%|/(((|/xs)-(&/xs));((|/ys)-(&/ys));((|/zs)-(&/zs)))
-  +((sca*xs-cx); (sca*ys-cy); (sca*zs-cz))                              / centred/scaled soup×3
+  ( +((sca*xs-cx); (sca*ys-cy); (sca*zs-cz)) ; m`nor )                  / (centred/scaled soup; FBX normals)
 }
-swBase:: fbxMesh "data/FBX/Sword.fbx"
-swNT::   (#swBase) div 3                                   / triangle count
-swMrep:: (#swBase) # ,steel,1.0                            / per-vertex (mat;lit)
+swData::  fbxMesh "data/FBX/Sword.fbx"
+swBase::  swData@0                                        / soup×3 positions (model space)
+swNor::   swData@1                                        / soup×3 normals (from the FBX file)
+swNT::    (#swBase) div 3                                 / triangle count
+swMrep::  (#swBase) # ,steel,1.0                          / per-vertex (mat;lit)
 
 / ── Static mesh, built once in MODEL space ────────────────────────────────────
-/ Flat per-triangle normals are computed in model space; the vertex shader rotates
-/ both position and normal each frame, so the mesh uploads once and never changes.
-swModelMesh: {[]
-  i0: 3*!swNT
-  pa: +swBase@i0; pb: +swBase@(i0+1); pc: +swBase@(i0+2)
-  e1x: (pb@0)-(pa@0); e1y: (pb@1)-(pa@1); e1z: (pb@2)-(pa@2)
-  e2x: (pc@0)-(pa@0); e2y: (pc@1)-(pa@1); e2z: (pc@2)-(pa@2)
-  nx: (e1y*e2z)-(e1z*e2y); ny: (e1z*e2x)-(e1x*e2z); nz: (e1x*e2y)-(e1y*e2x)
-  ln: sqrt 1e-9+(nx*nx)+(ny*ny)+(nz*nz)
-  Ntri: +((nx%ln); (ny%ln); (nz%ln))
-  Nsoup: Ntri@(!3*swNT) div 3                              / flat per-triangle normal
-  ,/swBase,'Nsoup,'swMrep
-}
-swStatic:: swModelMesh[]
+/ pos + FBX normal + material, interleaved.  The vertex shader rotates both the
+/ position and the normal each frame, so the mesh uploads once and never changes.
+swStatic:: ,/swBase,'swNor,'swMrep
 
 / ── Vertex shader: rotate (Y then X) + zoom + pan + iso projection, all on GPU ─
 / Camera pose arrives as uniforms: uCam = (ca;sa;xca;xsa), uPan = (zoom;cx;cz;_).

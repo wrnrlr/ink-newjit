@@ -119,6 +119,64 @@ fbx.trimesh:{[g]
   (P;{fbx.rg@x}'post)
 }
 
+/ --- geometry -> flat-shaded triangle soup with FBX normals/UVs --------
+/ fbx.mesh[g] decodes a Geometry node into a render-ready triangle SOUP (3
+/ vertices per triangle, no shared indices) and returns a dict
+/   [pos:Psoup; nor:Nsoup; uv:UVsoup]
+/ where Psoup/Nsoup are (3·nTris)×3 and UVsoup is (3·nTris)×2 (or () if the mesh
+/ has no UV layer).  Normals come straight from the file's LayerElementNormal —
+/ smooth as authored — instead of being recomputed from face winding; if the
+/ mesh has no normal layer, fbx.flatNorm derives flat per-face normals.
+
+/ Flat per-face normals for a triangle soup (fallback when a mesh ships none).
+fbx.flatNorm:{[Psoup]
+  nt:(#Psoup)div 3
+  col:+Psoup; xs:col@0; ys:col@1; zs:col@2
+  i0:3*!nt
+  ax:xs@i0; ay:ys@i0; az:zs@i0
+  bx:xs@(i0+1); by:ys@(i0+1); bz:zs@(i0+1)
+  cx:xs@(i0+2); cy:ys@(i0+2); cz:zs@(i0+2)
+  e1x:bx-ax; e1y:by-ay; e1z:bz-az
+  e2x:cx-ax; e2y:cy-ay; e2z:cz-az
+  nx:(e1y*e2z)-(e1z*e2y); ny:(e1z*e2x)-(e1x*e2z); nz:(e1x*e2y)-(e1y*e2x)
+  ln:sqrt 1e-9+(nx*nx)+(ny*ny)+(nz*nz)
+  Ntri:+((nx%ln);(ny%ln);(nz%ln))
+  Ntri@(!3*nt) div 3
+}
+
+/ Resolve a LayerElement* node to one value per triangle corner.  pf = flat PVI
+/ positions (one per corner), rg = ridx (PVI position -> vertex index), comp =
+/ floats per value.  Honours MappingInformationType (ByPolygonVertex / ByVertice
+/ / ByVertex / AllSame) and ReferenceInformationType (Direct / IndexToDirect).
+fbx.layerSoup:{[le;valName;idxName;pf;rg;comp]
+  vals:(fbx.get[le;valName]`props)@0
+  M:((#vals)div comp;comp)#vals
+  map:fbx.uname (fbx.get[le;`MappingInformationType]`props)@0
+  ref:fbx.uname (fbx.get[le;`ReferenceInformationType]`props)@0
+  key:$[map~"ByPolygonVertex"; pf; map~"AllSame"; (#pf)#0; rg@pf]   / else per-vertex
+  idxArr:$[ref~"IndexToDirect"; (fbx.get[le;idxName]`props)@0; !0]
+  sel:$[#idxArr; idxArr@key; key]
+  M@sel
+}
+
+fbx.mesh:{[g]
+  V:(fbx.get[g;`Vertices]`props)@0
+  PVI:(fbx.get[g;`PolygonVertexIndex]`props)@0
+  P:((#V)div 3;3)#V
+  neg:PVI<0
+  rg:@[PVI;&neg;:;(0-PVI@&neg)-1]
+  ends:&neg
+  starts:0,1+ -1_ends
+  post:,/starts{fbx.fan[x;y]}'ends
+  pf:,/post
+  Psoup:P@rg@pf
+  ln:fbx.get[g;`LayerElementNormal]
+  Nsoup:$[ln~(); fbx.flatNorm[Psoup]; fbx.layerSoup[ln;`Normals;`NormalsIndex;pf;rg;3]]
+  lu:fbx.get[g;`LayerElementUV]
+  UVsoup:$[lu~(); (); fbx.layerSoup[lu;`UV;`UVIndex;pf;rg;2]]
+  `pos`nor`uv!(Psoup;Nsoup;UVsoup)
+}
+
 / --- inflate (zlib / RFC1951 DEFLATE) ----------------------------------
 / Decompresses a zlib stream (byte int-list) to a byte int-list.
 / Uses globals: fbx.zb (deflate bytes), fbx.zpos (bit cursor), fbx.out
