@@ -25,6 +25,8 @@ bench/report.csv
 data/taxi_zones
 data/**/*.jpg
 data/**/*.png
+data/**/*.gltf
+data/**/*.glb
 data/**/*.fbx
 data/**/*.zip
 data/**/*.blend
