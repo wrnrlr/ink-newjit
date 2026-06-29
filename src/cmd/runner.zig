@@ -1,14 +1,15 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const VM = @import("runtime/vm.zig").VM;
+const VM = @import("../runtime/vm.zig").VM;
 const Repl = @import("repl.zig").Repl;
-const disasm = @import("runtime/disasm.zig");
-const serve = @import("runtime/serve.zig");
-const ffi = @import("ffi.zig");
+const disasm = @import("../runtime/disasm.zig");
+const serve = @import("../runtime/serve.zig");
+const ffi = @import("../ffi.zig");
 const modules = @import("modules.zig");
 const lsp = @import("lsp.zig");
 const jupyter = @import("jupyter.zig");
-const Lexer = @import("parser/lexer.zig").Lexer;
+const help = @import("help.zig");
+const Lexer = @import("../parser/lexer.zig").Lexer;
 
 /// Called by C extensions (e.g. GPU) to process pending IPC messages from
 /// within their own event loop.  No-ops when current_vm is not set.
@@ -52,9 +53,9 @@ fn snapBase(p: []const u8) []const u8 {
   return name[0..dot];
 }
 
-const V = @import("noun/value.zig").V;
-const K = @import("noun/class.zig").K;
-const N = @import("noun/array.zig").N;
+const V = @import("../noun/value.zig").V;
+const K = @import("../noun/class.zig").K;
+const N = @import("../noun/array.zig").N;
 
 // Read one physical line (up to '\n') from fd, appending its bytes (without the
 // newline) to buf. Returns false on EOF when nothing was read on this line.
@@ -175,6 +176,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
   // Snapshot filenames are `<script-basename>-snap-<epoch-ms>.png` in the CWD.
   if (script_path) |sp| setEnvZ(allocator, "INK_SNAP_BASE", snapBase(sp));
+
+  // `ink help` / `ink -h` / `ink --help` — print usage and exit.  No VM needed.
+  if (script_path) |sp| if (std.mem.eql(u8, sp, "help") or
+      std.mem.eql(u8, sp, "-h") or std.mem.eql(u8, sp, "--help")) return help.run(allocator);
 
   // `ink lsp` — run the language server over stdio (JSON-RPC).  No VM needed.
   if (script_path) |sp| if (std.mem.eql(u8, sp, "lsp")) return lsp.run(allocator);

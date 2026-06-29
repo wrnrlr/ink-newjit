@@ -1,8 +1,8 @@
 const std = @import("std");
-const VM = @import("runtime/vm.zig").VM;
-const TerseFormatter = @import("noun/format.zig").TerseFormatter;
-const MockWriter = @import("util.zig").MockWriter;
-const V = @import("noun/value.zig").V;
+const VM = @import("../runtime/vm.zig").VM;
+const TerseFormatter = @import("../noun/format.zig").TerseFormatter;
+const MockWriter = @import("../util.zig").MockWriter;
+const V = @import("../noun/value.zig").V;
 
 /// A generic interface for evaluating Terse expressions and formatting results.
 /// This can be used by both the CLI and GUI environments.

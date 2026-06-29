@@ -23,11 +23,11 @@ const json = std.json;
 
 const Fd = posix.fd_t;
 const Alloc = std.mem.Allocator;
-const VM = @import("runtime/vm.zig").VM;
+const VM = @import("../runtime/vm.zig").VM;
 const Repl = @import("repl.zig").Repl;
-const MockWriter = @import("util.zig").MockWriter;
+const MockWriter = @import("../util.zig").MockWriter;
 const modules = @import("modules.zig");
-const Lexer = @import("parser/lexer.zig").Lexer;
+const Lexer = @import("../parser/lexer.zig").Lexer;
 
 const HmacSha256 = std.crypto.auth.hmac.sha2.HmacSha256;
 const PROTOCOL_VERSION = "5.3";

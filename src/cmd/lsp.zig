@@ -9,8 +9,8 @@
 //
 // Launch with:  ink lsp
 const std = @import("std");
-const lex = @import("parser/lexer.zig");
-const Parser = @import("parser/parser.zig").Parser;
+const lex = @import("../parser/lexer.zig");
+const Parser = @import("../parser/parser.zig").Parser;
 const Lexer = lex.Lexer;
 const TT = lex.TT;
 const Alloc = std.mem.Allocator;

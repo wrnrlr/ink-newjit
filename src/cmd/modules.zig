@@ -1,6 +1,6 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-const VM = @import("runtime/vm.zig").VM;
+const VM = @import("../runtime/vm.zig").VM;
 
 /// Automatic module loader: scans lib/*.k files for public identifiers — those
 /// starting with an Uppercase letter, plus dotted names namespaced under the
