@@ -2,6 +2,7 @@ const std = @import("std");
 const chunk_mod  = @import("tape.zig");
 const value      = @import("../noun/value.zig");
 const compiler_mod = @import("compiler.zig");
+const vm_mod       = @import("vm.zig");
 const ast        = @import("../parser/ast.zig");
 
 const OpCode   = chunk_mod.OpCode;
@@ -56,8 +57,8 @@ pub const Disassembler = struct {
   }
 };
 
-fn buildNameMap(alloc: std.mem.Allocator, globals: *std.StringHashMap(u8)) ![]const ?[]const u8 {
-  const map = try alloc.alloc(?[]const u8, 256);
+fn buildNameMap(alloc: std.mem.Allocator, globals: *std.StringHashMap(u16)) ![]const ?[]const u8 {
+  const map = try alloc.alloc(?[]const u8, vm_mod.MAX_GLOBALS);
   @memset(map, null);
   var it = globals.iterator();
   while (it.next()) |e| map[@as(usize, e.value_ptr.*)] = e.key_ptr.*;
@@ -96,7 +97,7 @@ fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, o
         try out.print("Int         {d}\n", .{v});
       },
       .Global => {
-        const idx = code[ip]; ip += 1;
+        const idx = readU16(code, ip); ip += 2;
         try out.print("Global      {d:3}", .{idx});
         if (names[idx]) |n| try out.print("    ({s})", .{n});
         try out.print("\n", .{});
@@ -111,7 +112,7 @@ fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, o
       },
 
       .AssignGlobal => {
-        const idx = code[ip]; ip += 1;
+        const idx = readU16(code, ip); ip += 2;
         try out.print("AssignGlobal {d:3}", .{idx});
         if (names[idx]) |n| try out.print("    ({s})", .{n});
         try out.print("\n", .{});
@@ -124,7 +125,7 @@ fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, o
         const n = code[ip]; ip += 1;
         try out.print("ListAssignGlobal {d}  (", .{n});
         for (0..n) |k| {
-          const idx = code[ip]; ip += 1;
+          const idx = readU16(code, ip); ip += 2;
           if (k > 0) try out.print("; ", .{});
           if (names[idx]) |nm| try out.print("{s}", .{nm})
           else try out.print("{d}", .{idx});

@@ -52,14 +52,14 @@ fn dedent(alloc: Alloc, s: []const u8) anyerror![]u8 {
 pub const Compiler = struct {
   alloc: Alloc,
   chunk: *Chunk,
-  globals: *std.StringHashMap(u8),
+  globals: *std.StringHashMap(u16),
   symbols: *Pool,
   registry: *Fs,
   fn_tables: *fntable.FnTables,
   scope: *Scope,
   text_id: u32 = 0,
 
-  pub fn init(alloc: Alloc, chunk: *Chunk, globals: *std.StringHashMap(u8), symbols: *Pool, registry: *Fs, fn_tables: *fntable.FnTables) !Compiler {
+  pub fn init(alloc: Alloc, chunk: *Chunk, globals: *std.StringHashMap(u16), symbols: *Pool, registry: *Fs, fn_tables: *fntable.FnTables) !Compiler {
     const scope = try alloc.create(Scope);
     scope.* = Scope.init(alloc, chunk, null);
     return .{
@@ -461,7 +461,7 @@ pub const Compiler = struct {
             const name = item.literal.@"var";
             const nop_id = try self.emitOpWithArg(.Nop, try self.getOrAddGlobal(name), &.{});
             const inst = self.scope.ir.get(nop_id);
-            inst.arg3 = 1;
+            inst.arg3 = 2; // arg3==2: global list-assign target (u16 index); ==1 is a local (u8)
             self.scope.ir.markEffectful(nop_id);
           } else return error.UnsupportedAssignment;
         }
@@ -832,7 +832,7 @@ pub const Compiler = struct {
     return try self.scope.ir.emitConstant(val);
   }
 
-  fn getOrAddGlobal(self: *Compiler, name: []const u8) !u8 {
+  fn getOrAddGlobal(self: *Compiler, name: []const u8) !u16 {
     const gop = try self.globals.getOrPut(name);
     if (!gop.found_existing) {
       gop.key_ptr.* = try self.alloc.dupe(u8, name);
@@ -872,7 +872,8 @@ pub const Compiler = struct {
 
   fn instSize(self: *Compiler, inst: ir.IRInst) usize {
     switch (inst.op) {
-      .Nop => return if (inst.arg3 == 1) 1 else 0,
+      // Nop carries a list-assign target index: arg3==1 a u8 local, ==2 a u16 global.
+      .Nop => return switch (inst.arg3) { 1 => 1, 2 => 2, else => 0 },
       .Const => {
         // Small i32 constants are emitted as the 3-byte Int opcode.
         if (inst.val) |v| {
@@ -880,8 +881,9 @@ pub const Compiler = struct {
         }
         return 3;
       },
-      .Global => return 2,
-      .Local, .AssignLocal, .AssignGlobal,
+      // Global indices are u16 (opcode + 2 bytes); local/list-assign-count args stay u8.
+      .Global, .AssignGlobal => return 3,
+      .Local, .AssignLocal,
       .Call, .TailCall, .Apply1, .Apply2, .Apply3, .Apply4, .Apply,
       .MakeList, .Derive,
       .ListAssignLocal, .ListAssignGlobal => return 2,
@@ -896,10 +898,9 @@ pub const Compiler = struct {
   }
 
   fn lowerInst(self: *Compiler, chunk: *Chunk, inst: ir.IRInst, idx: usize, offsets: []usize) !void {
-    if (inst.op == .Nop and inst.arg3 == 1) {
-      try chunk.write(@as(u8, @intCast(inst.arg1)));
-      return;
-    } else if (inst.op == .Nop) {
+    if (inst.op == .Nop) {
+      if (inst.arg3 == 1) try chunk.write(@as(u8, @intCast(inst.arg1)))       // local list-assign target
+      else if (inst.arg3 == 2) try chunk.write16(@as(u16, @intCast(inst.arg1))); // global list-assign target
       return;
     }
 
@@ -928,7 +929,12 @@ pub const Compiler = struct {
 
     try chunk.writeOp(effective_op);
     switch (effective_op) {
-      .Local, .LocalLast, .Global, .AssignLocal, .AssignGlobal, .Call, .TailCall, .Apply1, .Apply2, .Apply3, .Apply4, .Apply,
+      // Global indices are u16; everything else here (local slots, arg counts,
+      // adverb ids, list-assign target counts) stays a single byte.
+      .Global, .AssignGlobal => {
+        try chunk.write16(@as(u16, @intCast(inst.arg1)));
+      },
+      .Local, .LocalLast, .AssignLocal, .Call, .TailCall, .Apply1, .Apply2, .Apply3, .Apply4, .Apply,
       .MakeList, .Derive, .ListAssignLocal, .ListAssignGlobal => {
         try chunk.write(@as(u8, @intCast(inst.arg1)));
       },

@@ -888,11 +888,13 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
     .depth_write_enabled = true,
     .depth_compare       = .less,
   };
-  // A shader opts into the per-draw uniform block by declaring an OpVariable in
-  // Uniform storage (storage class 2).  Such pipelines get the mesh uniform
-  // bind-group layout at @group(0); shaders without it keep the empty layout
-  // (and the no-bind-group draw path) so existing meshes are unaffected.
+  // A shader opts into the per-draw uniform block (OpVariable in Uniform storage,
+  // class 2) or instancing (OpVariable in StorageBuffer storage, class 12), and
+  // gets the matching bind-group layout at @group(0).  Shaders with neither keep
+  // the empty layout (and the no-bind-group draw path) so existing meshes are
+  // unaffected.  Instancing and the uniform block are mutually exclusive here.
   var has_uniform = false;
+  var has_instance = false;
   {
     const ws = vtx_words[0..@intCast(vn)];
     var j: usize = 5;
@@ -900,11 +902,19 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
       const w0 = ws[j];
       const wc: usize = w0 >> 16;
       if (wc == 0) break;
-      if ((w0 & 0xffff) == 59 and j + 3 < ws.len and ws[j + 3] == 2) { has_uniform = true; break; }
+      if ((w0 & 0xffff) == 59 and j + 3 < ws.len) {
+        if (ws[j + 3] == 2) has_uniform = true;
+        if (ws[j + 3] == 12) has_instance = true;
+      }
       j += wc;
     }
   }
-  const layout = if (has_uniform)
+  const layout = if (has_instance)
+    r.device.createPipelineLayout(.{
+      .bind_group_layout_count = 1,
+      .bind_group_layouts = &[_]wgpu.BindGroupLayout{r.mesh_inst_bgl},
+    })
+  else if (has_uniform)
     r.device.createPipelineLayout(.{
       .bind_group_layout_count = 1,
       .bind_group_layouts = &[_]wgpu.BindGroupLayout{r.mesh_bgl},
@@ -931,7 +941,49 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
   r.mesh_pipelines.append(r.allocator, pipeline) catch return ki(0);
   r.mesh_strides.append(r.allocator, layout_info.stride_floats) catch return ki(0);
   r.mesh_has_uniform.append(r.allocator, has_uniform) catch return ki(0);
+  r.mesh_is_instanced.append(r.allocator, has_instance) catch return ki(0);
   return ki(@intCast(r.mesh_pipelines.items.len));
+}
+
+// ── gpuUploadMesh ───────────────────────────────────────────────────────────────
+//
+// verts_k:  flat f32 vertex data (layout per the pipeline's vertex shader).
+// handle_k: a mesh pipeline handle from gpuMesh.
+// Uploads the geometry to a PERSISTENT vertex buffer (retained — once, not per
+// frame) and returns a geometry handle (>0) for gpuDrawInstanced.
+
+export fn gpuUploadMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const vf = kfp(verts_k) orelse return ki(0);
+  const vn = kn(verts_k);
+  const handle = ki_val(handle_k);
+  if (handle <= 0 or handle > r.mesh_strides.items.len) return ki(0);
+  const stride = r.mesh_strides.items[@intCast(handle - 1)];
+  if (stride == 0 or vn < @as(i32, @intCast(stride))) return ki(0);
+  const n_floats: usize = @intCast(@divTrunc(vn, @as(i32, @intCast(stride))) * @as(i32, @intCast(stride)));
+  const gid = r.uploadGeom(vf[0..n_floats], stride, @intCast(handle - 1)) catch return ki(0);
+  return ki(@intCast(gid + 1));
+}
+
+// ── gpuDrawInstanced ────────────────────────────────────────────────────────────
+//
+// geom_k:  geometry handle from gpuUploadMesh.
+// count_k: instance count (int).
+// data_k:  flat f32 instance data — count × K vec4s, read in-shader via
+//   gl_InstanceIndex (see InstancedVertexShader).  Draws the geometry once with
+//   `count` instances.
+
+export fn gpuDrawInstanced(geom_k: ?K, count_k: ?K, data_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const geom = ki_val(geom_k);
+  if (geom <= 0 or geom > r.geom_buffers.items.len) return ki(0);
+  const count = ki_val(count_k);
+  if (count <= 0) return ki(0);
+  const df = kfp(data_k) orelse return ki(0);
+  const dn = kn(data_k);
+  if (dn <= 0) return ki(0);
+  r.queueInstanced(@intCast(geom - 1), @intCast(count), df[0..@intCast(dn)]) catch {};
+  return ki(0);
 }
 
 // ── gpuDrawMesh ───────────────────────────────────────────────────────────────

@@ -18,6 +18,21 @@ pub const MESH_UNI_FLOATS: usize = 32;
 pub const MESH_UNI_SLOT: usize = 256;
 pub const MAX_MESH_UNI_CALLS: usize = 512;
 
+// Instancing: per-frame storage buffer holding every instanced draw's instance
+// data (a flat vec4[] per draw, read in-shader via gl_InstanceIndex).  Each draw's
+// slice starts on a 64-float (256-byte) boundary for storage-binding alignment.
+pub const MESH_INST_FLOATS: usize = 1_000_000;
+pub const INST_ALIGN_FLOATS: usize = 64;
+
+// A retained, instanced draw: a geometry (persistent vertex buffer) drawn once
+// with instanceCount instances; instance data lives at inst_data[data_off..].
+pub const InstCall = struct {
+  geom_idx: usize,
+  inst_count: u32,
+  data_off: usize, // f32 offset into the renderer's inst_data
+  data_len: usize, // f32 length of this draw's instance block
+};
+
 // Mesh vertices are stored as raw f32. The per-vertex layout (stride and
 // attributes) is whatever the mesh pipeline's vertex shader declares — see
 // gpuMesh, which derives it from the SPIR-V — so meshes are not tied to one
@@ -95,8 +110,17 @@ pub const Renderer = struct {
   mesh_pipelines: ArrayList(wgpu.RenderPipeline),
   mesh_strides: ArrayList(usize), // f32s per vertex, parallel to mesh_pipelines
   mesh_has_uniform: ArrayList(bool), // does pipeline i declare a uniform block? parallel to mesh_pipelines
+  mesh_is_instanced: ArrayList(bool), // does pipeline i read an instance storage buffer? parallel to mesh_pipelines
   mesh_bgl: wgpu.BindGroupLayout, // shared layout for the mesh uniform block (binding 0)
   mesh_uniform_buffer: wgpu.Buffer,
+  // Instancing: retained geometry (persistent vertex buffers) + per-frame instance data
+  mesh_inst_bgl: wgpu.BindGroupLayout, // read-only storage buffer (binding 0)
+  mesh_inst_buffer: wgpu.Buffer,
+  geom_buffers: ArrayList(wgpu.Buffer), // persistent vertex buffers (one per UploadMesh)
+  geom_counts: ArrayList(u32),          // vertex count per geometry
+  geom_pipeline: ArrayList(usize),      // pipeline index per geometry
+  inst_data: ArrayList(f32),            // this frame's instance data (all instanced draws)
+  inst_calls: ArrayList(InstCall),
 
   pub fn init(
   allocator: Alloc,
@@ -122,6 +146,7 @@ pub const Renderer = struct {
     .mesh_pipelines = try ArrayList(wgpu.RenderPipeline).initCapacity(allocator, 4),
     .mesh_strides = try ArrayList(usize).initCapacity(allocator, 4),
     .mesh_has_uniform = try ArrayList(bool).initCapacity(allocator, 4),
+    .mesh_is_instanced = try ArrayList(bool).initCapacity(allocator, 4),
     .mesh_bgl = device.createBindGroupLayout(.{
     .label = "mesh uniform bgl",
     .entry_count = 1,
@@ -135,6 +160,24 @@ pub const Renderer = struct {
     .size = MAX_MESH_UNI_CALLS * MESH_UNI_SLOT,
     .mapped_at_creation = .false,
     }),
+    .mesh_inst_bgl = device.createBindGroupLayout(.{
+    .label = "mesh instance bgl",
+    .entry_count = 1,
+    .entries = &[_]wgpu.BindGroupLayoutEntry{
+      zgpu.bufferEntry(0, .{ .vertex = true }, .read_only_storage, false, 0),
+    },
+    }),
+    .mesh_inst_buffer = device.createBuffer(.{
+    .label = "mesh instance buffer",
+    .usage = .{ .storage = true, .copy_dst = true },
+    .size = MESH_INST_FLOATS * @sizeOf(f32),
+    .mapped_at_creation = .false,
+    }),
+    .geom_buffers = try ArrayList(wgpu.Buffer).initCapacity(allocator, 4),
+    .geom_counts = try ArrayList(u32).initCapacity(allocator, 4),
+    .geom_pipeline = try ArrayList(usize).initCapacity(allocator, 4),
+    .inst_data = try ArrayList(f32).initCapacity(allocator, 4096),
+    .inst_calls = try ArrayList(InstCall).initCapacity(allocator, 16),
     .mesh_vertex_buffer = device.createBuffer(.{
     .label = "mesh vertex buffer",
     .usage = .{ .vertex = true, .copy_dst = true },
@@ -190,8 +233,17 @@ pub const Renderer = struct {
   self.mesh_pipelines.deinit(self.allocator);
   self.mesh_strides.deinit(self.allocator);
   self.mesh_has_uniform.deinit(self.allocator);
+  self.mesh_is_instanced.deinit(self.allocator);
   self.mesh_bgl.release();
   self.mesh_uniform_buffer.release();
+  self.mesh_inst_bgl.release();
+  self.mesh_inst_buffer.release();
+  for (self.geom_buffers.items) |b| b.release();
+  self.geom_buffers.deinit(self.allocator);
+  self.geom_counts.deinit(self.allocator);
+  self.geom_pipeline.deinit(self.allocator);
+  self.inst_data.deinit(self.allocator);
+  self.inst_calls.deinit(self.allocator);
   self.mesh_vertex_buffer.release();
   self.mesh_calls.deinit(self.allocator);
   self.mesh_verts.deinit(self.allocator);
@@ -286,6 +338,37 @@ pub const Renderer = struct {
   });
   }
 
+  // Upload mesh geometry to a PERSISTENT vertex buffer (retained — uploaded once,
+  // not per frame).  Returns a geometry index for drawInstanced.
+  pub fn uploadGeom(self: *Renderer, verts: []const f32, stride: usize, pipeline_idx: usize) !usize {
+  const buf = self.device.createBuffer(.{
+    .label = "geom vertex buffer",
+    .usage = .{ .vertex = true, .copy_dst = true },
+    .size = verts.len * @sizeOf(f32),
+    .mapped_at_creation = .false,
+  });
+  self.queue.writeBuffer(buf, 0, f32, verts);
+  try self.geom_buffers.append(self.allocator, buf);
+  try self.geom_counts.append(self.allocator, @intCast(if (stride == 0) 0 else verts.len / stride));
+  try self.geom_pipeline.append(self.allocator, pipeline_idx);
+  return self.geom_buffers.items.len - 1;
+  }
+
+  // Queue an instanced draw of a retained geometry: `data` is the flat vec4[]
+  // instance block (inst_count instances × K vec4s).  The block is appended to
+  // this frame's instance buffer on a 64-float boundary.
+  pub fn queueInstanced(self: *Renderer, geom_idx: usize, inst_count: u32, data: []const f32) !void {
+  if (geom_idx >= self.geom_buffers.items.len) return;
+  // pad to the storage-binding alignment so this block starts 256-byte aligned
+  const rem = self.inst_data.items.len % INST_ALIGN_FLOATS;
+  if (rem != 0) try self.inst_data.appendNTimes(self.allocator, 0, INST_ALIGN_FLOATS - rem);
+  const off = self.inst_data.items.len;
+  try self.inst_data.appendSlice(self.allocator, data);
+  try self.inst_calls.append(self.allocator, .{
+    .geom_idx = geom_idx, .inst_count = inst_count, .data_off = off, .data_len = data.len,
+  });
+  }
+
   // Submit all mesh draw calls in a new render pass that loads the existing colour
   // layer and adds depth-tested geometry on top.
   pub fn flushMeshes(
@@ -297,12 +380,18 @@ pub const Renderer = struct {
   defer {
     self.mesh_calls.clearRetainingCapacity();
     self.mesh_verts.clearRetainingCapacity();
+    self.inst_calls.clearRetainingCapacity();
+    self.inst_data.clearRetainingCapacity();
   }
-  if (self.mesh_verts.items.len == 0) return;
+  if (self.mesh_verts.items.len == 0 and self.inst_calls.items.len == 0) return;
 
   const verts = self.mesh_verts.items;
   const write_count = @min(verts.len, MESH_BUFFER_FLOATS);
-  self.queue.writeBuffer(self.mesh_vertex_buffer, 0, f32, verts[0..write_count]);
+  if (write_count > 0) self.queue.writeBuffer(self.mesh_vertex_buffer, 0, f32, verts[0..write_count]);
+
+  // Upload this frame's instance data once (one storage buffer for all instanced draws).
+  const inst_n = @min(self.inst_data.items.len, MESH_INST_FLOATS);
+  if (inst_n > 0) self.queue.writeBuffer(self.mesh_inst_buffer, 0, f32, self.inst_data.items[0..inst_n]);
 
   const depth_att = wgpu.RenderPassDepthStencilAttachment{
     .view             = depth_view,
@@ -348,6 +437,23 @@ pub const Renderer = struct {
     } else {
     pass.draw(@intCast(mc.count), 1, 0, 0);
     }
+  }
+
+  // Instanced draws: each retained geometry is drawn once with instanceCount
+  // instances; the shader reads instance data from the bound storage-buffer slice.
+  for (self.inst_calls.items) |ic| {
+    if (ic.geom_idx >= self.geom_buffers.items.len) continue;
+    if (ic.data_off + ic.data_len > inst_n) continue;
+    const pidx = self.geom_pipeline.items[ic.geom_idx];
+    if (pidx >= self.mesh_pipelines.items.len) continue;
+    pass.setPipeline(self.mesh_pipelines.items[pidx]);
+    const gcount = self.geom_counts.items[ic.geom_idx];
+    pass.setVertexBuffer(0, self.geom_buffers.items[ic.geom_idx], 0, @as(usize, gcount) * self.mesh_strides.items[pidx] * @sizeOf(f32));
+    const be = [_]wgpu.BindGroupEntry{.{ .binding = 0, .buffer = self.mesh_inst_buffer, .offset = ic.data_off * @sizeOf(f32), .size = ic.data_len * @sizeOf(f32) }};
+    const bg = self.device.createBindGroup(.{ .layout = self.mesh_inst_bgl, .entry_count = be.len, .entries = &be });
+    defer bg.release();
+    pass.setBindGroup(0, bg, null);
+    pass.draw(gcount, ic.inst_count, 0, 0);
   }
   }
 

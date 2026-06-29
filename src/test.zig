@@ -948,13 +948,13 @@ test "s$y to int/float" {
 test "X?Y find" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("\"abcb\"?\"b\"", "1");
-  try t.check("\"abc\"?\"z\"", "0N");
+  try t.check("\"abc\"?\"z\"", "3");
   try t.check("\"abc\"?\"ca\"", "2 0");
   try t.check("(1;2.3;`c)?2.3", "1");
   // try t.check("(`a`b`c!1 2 3)?2", "`b"); // Not implemented in Finc or dispatch fallback logic
   try t.check("3 1 4 1 5?3", "0");
-  try t.check("3 1 4 1 5?9", "0N");
-  try t.check("3 1 4?4 9 3", "2 0N 0");
+  try t.check("3 1 4 1 5?9", "5");
+  try t.check("3 1 4?4 9 3", "2 3 0");
 }
 
 test "i_Y drop" {

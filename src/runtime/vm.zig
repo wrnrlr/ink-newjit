@@ -27,6 +27,9 @@ const Partials = std.heap.MemoryPool(Partial);
 
 const STACK_MAX = 2048;
 const FRAMES_MAX = 64;
+// Global slots. Indexed by a u16 in the bytecode (.Global/.AssignGlobal/list-assign),
+// so a program may define up to this many distinct global names (was 256).
+pub const MAX_GLOBALS = 4096;
 const NO_LAMBDA: u24 = std.math.maxInt(u24); // lambda_idx = maxInt(u24) for top-level (no lambda)
 
 pub const VMError = error{ StackOverflow, InvalidOpCode, RuntimeError };
@@ -45,7 +48,7 @@ pub const VM = struct {
   stack: [STACK_MAX]V = undefined, stack_len: usize = 0,
   frames: [FRAMES_MAX]Frame = undefined, frames_len: usize = 0,
   partials: Partials, symbols: Pool,
-  globals: [256]V = undefined, names: std.StringHashMap(u8),
+  globals: [MAX_GLOBALS]V = undefined, names: std.StringHashMap(u16),
   current_chunk: *Chunk,
   fs: Fs, conns: Conns,
   listen_handle: ?u32 = null,
@@ -77,7 +80,7 @@ pub const VM = struct {
       .current_chunk = undefined,
       .partials  = .empty,
       .symbols       = symbols,
-      .names = std.StringHashMap(u8).init(alloc),
+      .names = std.StringHashMap(u16).init(alloc),
       .fs      = try Fs.init(alloc),
       .conns   = Conns.init(alloc),
       .fn_tables     = FnTables.init(alloc),
@@ -249,8 +252,8 @@ pub const VM = struct {
           try vm.push(.{ .i = @as(i32, @as(i16, @bitCast(raw))) });
         },
         .Global => {
-          const idx = code[frame.ip];
-          frame.ip += 1;
+          const idx: u16 = @as(u16, code[frame.ip]) | (@as(u16, code[frame.ip + 1]) << 8);
+          frame.ip += 2;
           try vm.push(vm.globals[idx].ref());
         },
         .Local => {
@@ -267,8 +270,8 @@ pub const VM = struct {
           try vm.push(v);
         },
         .AssignGlobal => {
-          const index = code[frame.ip];
-          frame.ip += 1;
+          const index: u16 = @as(u16, code[frame.ip]) | (@as(u16, code[frame.ip + 1]) << 8);
+          frame.ip += 2;
           const val = vm.pop();
           vm.globals[index].deinit(vm.alloc);
           vm.globals[index] = val;
@@ -325,16 +328,16 @@ pub const VM = struct {
   // structural opcodes below keep dedicated helpers because the switch calls
   // them directly.
   fn doListAssignGlobal(vm: *VM) !void {
-    const n = vm.readByte();
+    const n = vm.readByte(); // target count (small) — the per-target indices are u16
     const val = vm.pop();
     defer val.deinit(vm.alloc);
     const is_atom = std.meta.activeTag(val).isAtom();
     if (val.len() != n and !is_atom) {
       try vm.push(.{ .err = .length });
-      for (0..n) |_| _ = vm.readByte();
+      for (0..n) |_| _ = vm.read16();
     } else {
       for (0..n) |i| {
-        const index = vm.readByte();
+        const index = vm.read16();
         vm.globals[index].deinit(vm.alloc);
         vm.globals[index] = val.at(i);
       }
