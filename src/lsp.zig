@@ -103,26 +103,26 @@ fn dyadicHere(prev: ?lex.Token) bool {
 // instead of always dumping every meaning.  `/:` and `\:` are inherently dyadic,
 // so their `mono` group is empty.
 const AForm = struct { name: []const u8, sig: []const u8 };
-const AdverbInfo = struct { k: []const u8, mono: []const AForm, dyad: []const AForm };
+const AdverbInfo = struct { k: []const u8, monogram: []const AForm, digram: []const AForm };
 const ADVERBS = [_]AdverbInfo{
   .{ .k = "'",
-     .mono = &.{ .{ .name = "Each", .sig = "f'x" } },
-     .dyad = &.{ .{ .name = "Zip", .sig = "x F'y" } } },
+     .monogram = &.{ .{ .name = "Each", .sig = "f'x" } },
+     .digram = &.{ .{ .name = "Zip", .sig = "x F'y" } } },
   .{ .k = "/",
-     .mono = &.{ .{ .name = "Fold", .sig = "F/x" }, .{ .name = "Decode", .sig = "I/x" }, .{ .name = "Join", .sig = "C/x" }, .{ .name = "Converge", .sig = "f/x" } },
-     .dyad = &.{ .{ .name = "SeededFold", .sig = "x F/y" }, .{ .name = "N-Do", .sig = "i f/y" }, .{ .name = "While", .sig = "f f/y" } } },
+     .monogram = &.{ .{ .name = "Fold", .sig = "F/x" }, .{ .name = "Decode", .sig = "I/x" }, .{ .name = "Join", .sig = "C/x" }, .{ .name = "Converge", .sig = "f/x" } },
+     .digram = &.{ .{ .name = "SeededFold", .sig = "x F/y" }, .{ .name = "N-Do", .sig = "i f/y" }, .{ .name = "While", .sig = "f f/y" } } },
   .{ .k = "\\",
-     .mono = &.{ .{ .name = "Scan", .sig = "F\\x" }, .{ .name = "Encode", .sig = "I\\x" }, .{ .name = "Split", .sig = "C\\x" }, .{ .name = "Converges", .sig = "f\\x" } },
-     .dyad = &.{ .{ .name = "SeededScan", .sig = "x F\\y" }, .{ .name = "N-Dos", .sig = "i f\\y" }, .{ .name = "Whiles", .sig = "f f\\y" } } },
+     .monogram = &.{ .{ .name = "Scan", .sig = "F\\x" }, .{ .name = "Encode", .sig = "I\\x" }, .{ .name = "Split", .sig = "C\\x" }, .{ .name = "Converges", .sig = "f\\x" } },
+     .digram = &.{ .{ .name = "SeededScan", .sig = "x F\\y" }, .{ .name = "N-Dos", .sig = "i f\\y" }, .{ .name = "Whiles", .sig = "f f\\y" } } },
   .{ .k = "':",
-     .mono = &.{ .{ .name = "Eachprior", .sig = "F':x" }, .{ .name = "Window", .sig = "i':x" } },
-     .dyad = &.{ .{ .name = "Stencil", .sig = "i f':x" } } },
+     .monogram = &.{ .{ .name = "Eachprior", .sig = "F':x" }, .{ .name = "Window", .sig = "i':x" } },
+     .digram = &.{ .{ .name = "Stencil", .sig = "i f':x" } } },
   .{ .k = "/:",
-     .mono = &.{},
-     .dyad = &.{ .{ .name = "Eachright", .sig = "x F/:y — fix the left arg, map over the right" } } },
+     .monogram = &.{},
+     .digram = &.{ .{ .name = "Eachright", .sig = "x F/:y — fix the left arg, map over the right" } } },
   .{ .k = "\\:",
-     .mono = &.{},
-     .dyad = &.{ .{ .name = "Eachleft", .sig = "x F\\:y — fix the right arg, map over the left" } } },
+     .monogram = &.{},
+     .digram = &.{ .{ .name = "Eachleft", .sig = "x F\\:y — fix the right arg, map over the left" } } },
 };
 fn adverbInfo(name: []const u8) ?AdverbInfo {
   for (ADVERBS) |a| if (std.mem.eql(u8, a.k, name)) return a;
@@ -140,26 +140,20 @@ const AdverbApp = enum { standalone, monadic, dyadic };
 fn adverbHoverMd(gpa: Alloc, info: AdverbInfo, app: AdverbApp) ![]u8 {
   // Choose the sense group; fall back to the union when the chosen group is empty.
   const group: []const AForm = switch (app) {
-    .dyadic => if (info.dyad.len > 0) info.dyad else info.mono,
-    .monadic => if (info.mono.len > 0) info.mono else info.dyad,
+    .dyadic => if (info.digram.len > 0) info.digram else info.monogram,
+    .monadic => if (info.monogram.len > 0) info.monogram else info.digram,
     .standalone => &.{},
   };
   var md: std.ArrayList(u8) = .empty;
   errdefer md.deinit(gpa);
-  const head: []const u8 = switch (app) {
-    .dyadic => "— with a left argument it is one of:",
-    .monadic => "— applied monadically it is one of:",
-    .standalone => "— a bare adverb value; depending on use it is one of:",
-  };
-  try md.appendSlice(gpa, "**`");
-  try md.appendSlice(gpa, info.k);
-  try md.appendSlice(gpa, "`** ");
-  try md.appendSlice(gpa, head);
-  try md.appendSlice(gpa, "\n\n");
+  // try md.appendSlice(gpa, "**`");
+  // try md.appendSlice(gpa, info.k);
+  // try md.appendSlice(gpa, "`** ");
+  // try md.appendSlice(gpa, "\n\n");
   if (app == .standalone) {
-    try appendForms(gpa, &md, info.mono);
-    if (info.mono.len > 0 and info.dyad.len > 0) try md.appendSlice(gpa, " · ");
-    try appendForms(gpa, &md, info.dyad);
+    try appendForms(gpa, &md, info.monogram);
+    if (info.monogram.len > 0 and info.digram.len > 0) try md.appendSlice(gpa, " · ");
+    try appendForms(gpa, &md, info.digram);
   } else {
     try appendForms(gpa, &md, group);
   }
@@ -167,12 +161,12 @@ fn adverbHoverMd(gpa: Alloc, info: AdverbInfo, app: AdverbApp) ![]u8 {
 }
 fn appendForms(gpa: Alloc, md: *std.ArrayList(u8), forms: []const AForm) !void {
   for (forms, 0..) |f, i| {
-    if (i > 0) try md.appendSlice(gpa, " · ");
+    if (i > 0) try md.appendSlice(gpa, "\n\n");
     try md.appendSlice(gpa, "**");
     try md.appendSlice(gpa, f.name);
-    try md.appendSlice(gpa, "** `");
+    try md.appendSlice(gpa, "** `` ");
     try md.appendSlice(gpa, f.sig);
-    try md.appendSlice(gpa, "`");
+    try md.appendSlice(gpa, " ``");
   }
 }
 
@@ -200,7 +194,7 @@ const BUILTINS = [_]Builtin{
   .{ .sym = "-",  .doc = "Negate -x · Subtract x-y" },
   .{ .sym = "*",  .doc = "First *x · Multiply x*y" },
   .{ .sym = "%",  .doc = "Divide x%y (float division)" },
-  .{ .sym = "!",  .doc = "Iota/Odometer !x · Key (dict) x!y" },
+  .{ .sym = "!",  .doc = "Iota/Odometer !x ·\n Key (dict) x!y" },
   .{ .sym = "&",  .doc = "Where &x · Min/And x&y" },
   .{ .sym = "|",  .doc = "Reverse |x · Max/Or x|y" },
   .{ .sym = "<",  .doc = "Ascend (grade up) <x · Less x<y" },
@@ -784,11 +778,11 @@ fn buildVerbsDoc(s: *Server) void {
   emitLine(s, &buf, &ln, "/");
   emitLine(s, &buf, &ln, "/ === adverbs (monadic-derived / dyadic-applied) ===");
   for (ADVERBS) |a| {
-    for (a.mono, 0..) |f, i| {
+    for (a.monogram, 0..) |f, i| {
       if (i == 0) s.vmono_line.put(a.k, ln) catch {};
       emitFmt(s, &buf, &ln, "/ {s}  {s} (monadic)  {s}", .{ a.k, f.name, f.sig });
     }
-    for (a.dyad, 0..) |f, i| {
+    for (a.digram, 0..) |f, i| {
       if (i == 0) s.vdyad_line.put(a.k, ln) catch {};
       emitFmt(s, &buf, &ln, "/ {s}  {s} (dyadic)  {s}", .{ a.k, f.name, f.sig });
     }
@@ -996,13 +990,23 @@ fn replyHoverMd(s: *Server, id: ?json.Value, md: []const u8) !void {
   try flush(s);
 }
 
-fn replyLocation(s: *Server, id: ?json.Value, uri: []const u8, sl: u32, sc: u32, el: u32, ec: u32) !void {
+// The range of the token under the cursor, used as a LocationLink's
+// `originSelectionRange` so the editor underlines exactly that glyph on
+// cmd-hover (without it Zed widens the link to the whole operator run, e.g.
+// `*+/` when only `/` was hovered).
+const OriginRange = struct { sl: u32, sc: u32, el: u32, ec: u32 };
+
+// Reply with a single definition target.  Emitted as a `LocationLink[]` so the
+// `originSelectionRange` controls the link underline span.
+fn replyLocation(s: *Server, id: ?json.Value, org: OriginRange, uri: []const u8, sl: u32, sc: u32, el: u32, ec: u32) !void {
   try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
   try writeId(s, id);
-  try s.out.appendSlice(s.gpa, ",\"result\":{\"uri\":\"");
+  try p(s, ",\"result\":[{{\"originSelectionRange\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"targetUri\":\"",
+    .{ org.sl, org.sc, org.el, org.ec });
   try escapeInto(&s.out, s.gpa, uri);
-  try p(s, "\",\"range\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}}}}}}",
-    .{ sl, sc, el, ec });
+  const r = "{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}}";
+  try p(s, "\",\"targetRange\":" ++ r ++ ",\"targetSelectionRange\":" ++ r ++ "}}]}}",
+    .{ sl, sc, el, ec, sl, sc, el, ec });
   try flush(s);
 }
 
@@ -1012,6 +1016,9 @@ fn handleDefinition(s: *Server, id: ?json.Value, params: ?json.Value) !void {
   const pos = obj(params, "position");
   const off = posToOffset(src, int(obj(pos, "line")) orelse 0, int(obj(pos, "character")) orelse 0);
   const t = tokenAt(src, off) orelse return replyResult(s, id, "null", .{});
+  const oa = offsetToPos(src, t.start);
+  const ob = offsetToPos(src, t.end);
+  const org: OriginRange = .{ .sl = oa.line, .sc = oa.col, .el = ob.line, .ec = ob.col };
 
   // Operators, keywords and io verbs — jump to the FORM line in verbs.k that
   // matches the call-site arity (monadic vs dyadic).
@@ -1021,7 +1028,7 @@ fn handleDefinition(s: *Server, id: ?json.Value, params: ?json.Value) !void {
       const dyadic = dyadicHere(neighbors(src, off).prev);
       if (verbsLineFor(s, word, dyadic)) |line| {
         const endc: u32 = BUILTIN_COL + @as(u32, @intCast(word.len));
-        return replyLocation(s, id, vuri, line, BUILTIN_COL, line, endc);
+        return replyLocation(s, id, org, vuri, line, BUILTIN_COL, line, endc);
       }
     }
   }
@@ -1032,7 +1039,7 @@ fn handleDefinition(s: *Server, id: ?json.Value, params: ?json.Value) !void {
       const dyadic = adverbApplication(s.gpa, src, t) == .dyadic;
       if (verbsLineFor(s, word, dyadic)) |line| {
         const endc: u32 = BUILTIN_COL + @as(u32, @intCast(word.len));
-        return replyLocation(s, id, vuri, line, BUILTIN_COL, line, endc);
+        return replyLocation(s, id, org, vuri, line, BUILTIN_COL, line, endc);
       }
     }
   }
@@ -1041,7 +1048,7 @@ fn handleDefinition(s: *Server, id: ?json.Value, params: ?json.Value) !void {
     const ch = src[t.start];
     const adv_key: []const u8 = if (ch == '\\') "\\" else if (ch == '\'') "'" else return replyResult(s, id, "null", .{});
     if (verbsLineFor(s, adv_key, false)) |line| {
-      return replyLocation(s, id, vuri, line, BUILTIN_COL, line, BUILTIN_COL + @as(u32, @intCast(adv_key.len)));
+      return replyLocation(s, id, org, vuri, line, BUILTIN_COL, line, BUILTIN_COL + @as(u32, @intCast(adv_key.len)));
     }
   };
 
@@ -1059,14 +1066,14 @@ fn handleDefinition(s: *Server, id: ?json.Value, params: ?json.Value) !void {
   if (best) |d| {
     const a = offsetToPos(src, d.start);
     const b = offsetToPos(src, d.end);
-    return replyLocation(s, id, uri, a.line, a.col, b.line, b.col);
+    return replyLocation(s, id, org, uri, a.line, a.col, b.line, b.col);
   }
 
   // 2. Cross-file: consult the workspace index (modules, libs, other files).
   if (s.windex.get(word)) |locs| {
     if (locs.items.len > 0) {
       const l0 = locs.items[0];
-      return replyLocation(s, id, l0.uri, l0.sl, l0.sc, l0.el, l0.ec);
+      return replyLocation(s, id, org, l0.uri, l0.sl, l0.sc, l0.el, l0.ec);
     }
   }
   return replyResult(s, id, "null", .{});
@@ -1098,110 +1105,126 @@ fn handleDocumentHighlight(s: *Server, id: ?json.Value, params: ?json.Value) !vo
   defer toks.deinit(s.gpa);
   var lx = Lexer.init(src);
   var ci: ?usize = null;
+  var fb: ?usize = null; // last non-sep token ending at/before the cursor
   while (true) {
     const t = lx.next();
     if (t.tt == .eof) break;
     if (off >= t.start and off < t.end) ci = toks.items.len;
+    if (t.end <= off) fb = if (t.tt == .sep) null else toks.items.len;
     toks.append(s.gpa, t) catch break;
   }
   const items = toks.items;
-  const cur = ci orelse return replyResult(s, id, "[]", .{});
-
-  // Statement bounds [lo, hi).  A `sep` (`;` or newline) only ends the statement
-  // at bracket depth 0 — inside `(…)`/`[…]` a `;` separates list items, not
-  // statements, so we must track depth from the start of the buffer.
-  var lo: usize = 0;
-  var depthAtCur: i32 = 0;
-  { var i: usize = 0; while (i < cur) : (i += 1) {
-      const tt = items[i].tt;
-      if (isOpenTok(tt)) { depthAtCur += 1; }
-      else if (isCloseTok(tt)) { depthAtCur -= 1; }
-      else if (tt == .sep and depthAtCur == 0) { lo = i + 1; }
-  } }
-  var hi: usize = items.len;
-  { var d: i32 = depthAtCur; var i: usize = cur; while (i < items.len) : (i += 1) {
-      const tt = items[i].tt;
-      if (isOpenTok(tt)) { d += 1; }
-      else if (isCloseTok(tt)) { d -= 1; }
-      else if (tt == .sep and d == 0) { hi = i; break; }
-  } }
+  // When the cursor sits between tokens (on inter-token whitespace) snap to the
+  // noun just left of it, so a click between vector elements still lights the
+  // strand — but not across a separator (fb is cleared by one).
+  const cur = ci orelse fb orelse return replyResult(s, id, "[]", .{});
+  // Never highlight from a separator itself (e.g. the newline ending a line).
+  if (items[cur].tt == .sep) return replyResult(s, id, "[]", .{});
 
   // Enclosing bracket scope of the cursor: [scopeLo, scopeHi).
   var stack: std.ArrayList(usize) = .empty;
   defer stack.deinit(s.gpa);
-  { var i: usize = lo; while (i < cur) : (i += 1) {
+  { var i: usize = 0; while (i < cur) : (i += 1) {
       if (isOpenTok(items[i].tt)) { stack.append(s.gpa, i) catch {}; }
       else if (isCloseTok(items[i].tt)) { if (stack.items.len > 0) _ = stack.pop(); }
   } }
-  const scopeLo: usize = if (stack.items.len > 0) stack.items[stack.items.len - 1] + 1 else lo;
-  var scopeHi: usize = hi;
+  const scopeLo: usize = if (stack.items.len > 0) stack.items[stack.items.len - 1] + 1 else 0;
+  var scopeHi: usize = items.len;
   if (stack.items.len > 0) {
-    const e = stack.items[stack.items.len - 1];
-    var depth: i32 = 0; var k: usize = e;
-    while (k < hi) : (k += 1) {
+    var depth: i32 = 0; var k: usize = stack.items[stack.items.len - 1];
+    while (k < items.len) : (k += 1) {
       if (isOpenTok(items[k].tt)) { depth += 1; }
       else if (isCloseTok(items[k].tt)) { depth -= 1; if (depth == 0) { scopeHi = k; break; } }
     }
   }
-  if (cur < scopeLo or cur >= scopeHi) return replyResult(s, id, "[]", .{});
 
-  // Locate the focus operator at relative depth 0 within the scope.
+  // Cell = the slice of the scope between the `;`/newline separators around the
+  // cursor.  This confines the highlight to one statement (in a `{…}` body) or
+  // one argument / list item (in `(…)`/`[…]`), at relative depth 0.
+  var cellLo: usize = scopeLo;
+  { var depth: i32 = 0; var i: usize = cur;
+    while (i > scopeLo) {
+      i -= 1;
+      const tt = items[i].tt;
+      if (isCloseTok(tt)) { depth += 1; }
+      else if (isOpenTok(tt)) { depth -= 1; }
+      else if (depth == 0 and tt == .sep) { cellLo = i + 1; break; }
+    } }
+  var cellHi: usize = scopeHi;
+  { var depth: i32 = 0; var i: usize = cur;
+    while (i < scopeHi) : (i += 1) {
+      const tt = items[i].tt;
+      if (isOpenTok(tt)) { depth += 1; }
+      else if (isCloseTok(tt)) { depth -= 1; }
+      else if (depth == 0 and tt == .sep) { cellHi = i; break; }
+    } }
+  if (cellLo >= cellHi) return replyResult(s, id, "[]", .{});
+
+  // Locate the focus operator at relative depth 0 within the cell.
   var focus: ?usize = null;
   if (isVerbTok(items[cur].tt)) {
     focus = cur;
   } else {
     var depth: i32 = 0; var i: usize = cur + 1;
-    while (i < scopeHi) : (i += 1) {
+    while (i < cellHi) : (i += 1) {
       const tt = items[i].tt;
       if (isOpenTok(tt)) { depth += 1; }
       else if (isCloseTok(tt)) { if (depth == 0) break; depth -= 1; }
       else if (depth == 0 and isVerbTok(tt)) { focus = i; break; }
     }
-    if (focus == null and cur > scopeLo) {
+    if (focus == null and cur > cellLo) {
       depth = 0; i = cur - 1;
       while (true) {
         const tt = items[i].tt;
         if (isCloseTok(tt)) { depth += 1; }
         else if (isOpenTok(tt)) { if (depth == 0) break; depth -= 1; }
         else if (depth == 0 and isVerbTok(tt)) { focus = i; break; }
-        if (i == scopeLo) break;
+        if (i == cellLo) break;
         i -= 1;
       }
     }
   }
-  const f = focus orelse return replyResult(s, id, "[]", .{});
+
+  try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
+  try writeId(s, id);
+  try s.out.appendSlice(s.gpa, ",\"result\":[");
+  var first = true;
+
+  // No operator in the cell → the cell is a bare noun-phrase (a name, a strand
+  // like `1 2 3 4` / `` `a`b`c ``, or a lone argument such as `pts`).  Light the
+  // whole cell so vectors and single operands highlight as one unit.
+  const f = focus orelse {
+    try emitHl(s, &first, src, items[cellLo].start, items[cellHi - 1].end);
+    try s.out.appendSlice(s.gpa, "]}");
+    return flush(s);
+  };
 
   // Left operand: the noun-phrase (group / strand / name) immediately left of f.
   var haveLeft = false; var lStart: usize = 0; var lEnd: usize = 0;
-  if (f > scopeLo) {
+  if (f > cellLo) {
     const prev = f - 1;
     if (isCloseTok(items[prev].tt)) {
       var depth: i32 = 0; var k: usize = prev;
       while (true) {
         if (isCloseTok(items[k].tt)) { depth += 1; }
         else if (isOpenTok(items[k].tt)) { depth -= 1; if (depth == 0) break; }
-        if (k == scopeLo) break;
+        if (k == cellLo) break;
         k -= 1;
       }
       haveLeft = true; lStart = items[k].start; lEnd = items[prev].end;
     } else if (isNounTok(items[prev].tt)) {
       var k: usize = prev;
-      while (k > scopeLo and isNounTok(items[k - 1].tt)) k -= 1;
+      while (k > cellLo and isNounTok(items[k - 1].tt)) k -= 1;
       haveLeft = true; lStart = items[k].start; lEnd = items[prev].end;
     }
   }
 
-  // Right operand: from just after f to the end of the enclosing scope.
+  // Right operand: from just after f to the end of the cell.
   var haveRight = false; var rStart: usize = 0; var rEnd: usize = 0;
-  if (f + 1 < scopeHi) {
-    haveRight = true; rStart = items[f + 1].start; rEnd = items[scopeHi - 1].end;
+  if (f + 1 < cellHi) {
+    haveRight = true; rStart = items[f + 1].start; rEnd = items[cellHi - 1].end;
   }
-  if (!haveLeft and !haveRight) return replyResult(s, id, "[]", .{});
 
-  try s.out.appendSlice(s.gpa, "{\"jsonrpc\":\"2.0\",\"id\":");
-  try writeId(s, id);
-  try s.out.appendSlice(s.gpa, ",\"result\":[");
-  var first = true;
   if (haveLeft) try emitHl(s, &first, src, lStart, lEnd);
   try emitHl(s, &first, src, items[f].start, items[f].end);
   if (haveRight) try emitHl(s, &first, src, rStart, rEnd);
