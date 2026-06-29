@@ -5,3 +5,4 @@
 
 so: "./zig-out/lib/libjson.dylib"
 ReadJson: so 2: (`ReadJson; 1)   / ReadJson "path.json"  → K value
+ParseJson: so 2: (`ParseJson; 1) / ParseJson "{...}"     → K value (parse a string)

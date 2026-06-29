@@ -92,6 +92,20 @@ export fn ReadJson(path_k: ?K) callconv(.c) ?K {
     const io = std.Io.Threaded.global_single_threaded.io();
     const text = std.Io.Dir.cwd().readFileAlloc(io, p[0..@intCast(n)], alloc, std.Io.Limit.limited(256 << 20)) catch return null;
     defer alloc.free(text);
+    return parseText(alloc, text);
+}
+
+/// ParseJson "<json text>" → K value.  Parses an in-memory char vector instead
+/// of a file path; used to decode the JSON chunk embedded in a GLB container.
+export fn ParseJson(text_k: ?K) callconv(.c) ?K {
+    const alloc = std.heap.c_allocator;
+    const p = kcp(text_k) orelse return null;
+    const n = kn(text_k);
+    if (n <= 0) return null;
+    return parseText(alloc, p[0..@intCast(n)]);
+}
+
+fn parseText(alloc: Alloc, text: []const u8) ?K {
     const parsed = std.json.parseFromSlice(std.json.Value, alloc, text, .{}) catch return null;
     defer parsed.deinit();
     return convertVal(alloc, parsed.value) catch null;
