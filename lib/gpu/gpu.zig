@@ -14,6 +14,14 @@
 const std = @import("std");
 // Zig 0.16's std no longer exposes getenv; call libc directly.
 extern fn getenv(name: [*:0]const u8) ?[*:0]const u8;
+// std.time no longer exposes a wall-clock timestamp; call libc gettimeofday.
+const timeval = extern struct { sec: i64, usec: i32 };
+extern fn gettimeofday(tv: *timeval, tz: ?*anyopaque) c_int;
+fn epochMillis() i64 {
+  var tv: timeval = undefined;
+  _ = gettimeofday(&tv, null);
+  return tv.sec * 1000 + @divTrunc(tv.usec, 1000);
+}
 fn envStr(name: [*:0]const u8) ?[]const u8 {
   return std.mem.span(getenv(name) orelse return null);
 }
@@ -25,6 +33,7 @@ const zgpu  = @import("zgpu");
 const wgpu  = zgpu.wgpu;
 const render = @import("render");
 const tri    = @import("triangulate");
+const png    = @import("png.zig");
 const Renderer = render.Renderer;
 
 // ── Host K API — resolved at init time via dlsym ─────────────────────────────
@@ -247,6 +256,37 @@ fn createPipeline(device: wgpu.Device, bgl: wgpu.BindGroupLayout) !wgpu.RenderPi
   });
 }
 
+// Fullscreen-quad pipeline that samples the offscreen target into the swapchain.
+// Only built in snapshot mode (see gpuRun).
+fn createBlitPipeline(device: wgpu.Device, bgl: wgpu.BindGroupLayout) !wgpu.RenderPipeline {
+  const src = @embedFile("blit.wgsl");
+  var buf: [src.len + 1]u8 = undefined;
+  @memcpy(buf[0..src.len], src);
+  buf[src.len] = 0;
+  const sm = zgpu.createWgslShaderModule(device, buf[0..src.len :0], "blit");
+  defer sm.release();
+
+  const pl = device.createPipelineLayout(.{
+  .bind_group_layout_count = 1,
+  .bind_group_layouts = &[_]wgpu.BindGroupLayout{bgl},
+  });
+  defer pl.release();
+
+  const targets = [_]wgpu.ColorTargetState{.{
+  .format = zgpu.GraphicsContext.swapchain_format,
+  .write_mask = wgpu.ColorWriteMask.all,
+  }};
+  return device.createRenderPipeline(.{
+  .layout = pl,
+  .vertex = .{ .module = sm, .entry_point = "vs_main" },
+  .primitive = .{ .topology = .triangle_list },
+  .fragment = &wgpu.FragmentState{
+    .module = sm, .entry_point = "fs_main",
+    .target_count = targets.len, .targets = &targets,
+  },
+  });
+}
+
 // ── gpu_run ───────────────────────────────────────────────────────────────────
 //
 // loop_fn: K lambda called each frame with a props dict
@@ -271,6 +311,24 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
     }
   }
 
+  // `ink -snap [t0,t1,...]` requests PNG screenshots at the given sim-times
+  // (seconds); INK_SNAP="0" (bare -snap) shoots once on the first frame. In snap
+  // mode we render to an offscreen target so the framebuffer can be read back,
+  // then blit it to the swapchain; the normal path renders straight to the
+  // swapchain with no offscreen target or blit.
+  var snap_times: [32]f32 = undefined;
+  var snap_count: usize = 0;
+  var snap_next: usize = 0;
+  const snap_enabled = envStr("INK_SNAP") != null;
+  if (envStr("INK_SNAP")) |spec| {
+    var it = std.mem.splitScalar(u8, spec, ',');
+    while (it.next()) |tok| {
+      const t = std.fmt.parseFloat(f32, std.mem.trim(u8, tok, " ")) catch continue;
+      if (snap_count < snap_times.len) { snap_times[snap_count] = t; snap_count += 1; }
+    }
+    if (snap_count == 0) { snap_times[0] = 0; snap_count = 1; }
+  }
+
   var da = std.heap.DebugAllocator(.{}).init;
   defer _ = da.deinit();
   const alloc = da.allocator();
@@ -287,6 +345,8 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   }
   // `ink -top` keeps the window above all others (always-on-top).
   if (getenv("INK_TOP") != null) zglfw.windowHint(zglfw.Floating, 1);
+  // Snapshot mode runs headless: create the window hidden (never shown).
+  if (snap_enabled) zglfw.windowHint(zglfw.Visible, 0);
   // `ink -monitor N` places the window on monitor N (0-based). Create it hidden
   // so we can position it before it appears — no flash on the wrong screen.
   const mon = envInt("INK_MONITOR");
@@ -312,7 +372,7 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
         zglfw.setWindowPos(window, px, py);
       }
     }
-    zglfw.showWindow(window); // FocusOnShow=0 (with -unfocus) keeps focus put
+    if (!snap_enabled) zglfw.showWindow(window); // FocusOnShow=0 (with -unfocus) keeps focus put
   }
 
   _ = zglfw.setKeyCallback(window, keyCb);
@@ -365,6 +425,35 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   if (depth_tex_opt) |dt| dt.release();
   }
 
+  // Snapshot mode: offscreen colour target (resized with the framebuffer) plus a
+  // blit pipeline/sampler to present it.  All null/unused on the normal path.
+  var off_tex_opt: ?wgpu.Texture = null;
+  var off_view_opt: ?wgpu.TextureView = null;
+  defer {
+  if (off_view_opt) |ov| ov.release();
+  if (off_tex_opt) |ot| ot.release();
+  }
+  var blit_bgl_opt: ?wgpu.BindGroupLayout = null;
+  var blit_sampler_opt: ?wgpu.Sampler = null;
+  var blit_pipeline_opt: ?wgpu.RenderPipeline = null;
+  defer {
+  if (blit_pipeline_opt) |bp| bp.release();
+  if (blit_sampler_opt) |bs| bs.release();
+  if (blit_bgl_opt) |bb| bb.release();
+  }
+  if (snap_enabled) {
+  const blit_entries = [_]wgpu.BindGroupLayoutEntry{
+    .{ .binding = 0, .visibility = .{ .fragment = true }, .texture = .{ .sample_type = .float } },
+    zgpu.samplerEntry(1, .{ .fragment = true }, .filtering),
+  };
+  const blit_bgl = gctx.device.createBindGroupLayout(.{
+    .label = "blit bgl", .entry_count = blit_entries.len, .entries = &blit_entries,
+  });
+  blit_bgl_opt = blit_bgl;
+  blit_sampler_opt = gctx.device.createSampler(.{ .label = "blit sampler" });
+  blit_pipeline_opt = createBlitPipeline(gctx.device, blit_bgl) catch return ki(-1);
+  }
+
   const start_time = zglfw.getTime();
 
   while (!zglfw.windowShouldClose(window)) {
@@ -386,6 +475,19 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
     depth_tex_opt = dt;
     depth_view_opt = dt.createView(.{});
     depth_fb = fb;
+
+    if (snap_enabled) {
+    if (off_view_opt) |ov| ov.release();
+    if (off_tex_opt) |ot| ot.release();
+    const ot = gctx.device.createTexture(.{
+      .label = "offscreen",
+      .usage = .{ .render_attachment = true, .texture_binding = true, .copy_src = true },
+      .size  = .{ .width = fb[0], .height = fb[1], .depth_or_array_layers = 1 },
+      .format = zgpu.GraphicsContext.swapchain_format,
+    });
+    off_tex_opt = ot;
+    off_view_opt = ot.createView(.{});
+    }
   }
 
   const fw: f32 = @floatFromInt(fb[0]);
@@ -397,13 +499,16 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
 
   const swapchain_view = gctx.swapchain.getCurrentTextureView();
   defer swapchain_view.release();
+  // Snapshot mode draws into the offscreen target (read back below); otherwise
+  // straight into the swapchain.
+  const target_view = if (snap_enabled) off_view_opt.? else swapchain_view;
   const encoder = gctx.device.createCommandEncoder(.{ .label = "frame" });
   defer encoder.release();
 
   const pass = encoder.beginRenderPass(.{
     .color_attachment_count = 1,
     .color_attachments = &[_]wgpu.RenderPassColorAttachment{.{
-    .view        = swapchain_view,
+    .view        = target_view,
     .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 1 },
     .load_op     = .clear,
     .store_op    = .store,
@@ -446,7 +551,54 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
 
   // 3-D mesh pass — runs after the 2-D layer, loads colour, adds depth.
   if (depth_view_opt) |depth_view| {
-    renderer.flushMeshes(encoder, swapchain_view, depth_view) catch {};
+    renderer.flushMeshes(encoder, target_view, depth_view) catch {};
+  }
+
+  // Snapshot mode: blit the offscreen target to the swapchain, and — when a
+  // scheduled time has been reached — copy it into a CPU-readable buffer.
+  var snap_due = false;
+  var snap_stage_opt: ?wgpu.Buffer = null;
+  var snap_bpr: u32 = 0;
+  if (snap_enabled) {
+    const blit_pass = encoder.beginRenderPass(.{
+    .color_attachment_count = 1,
+    .color_attachments = &[_]wgpu.RenderPassColorAttachment{.{
+      .view        = swapchain_view,
+      .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 1 },
+      .load_op     = .clear,
+      .store_op    = .store,
+    }},
+    });
+    blit_pass.setPipeline(blit_pipeline_opt.?);
+    const be = [_]wgpu.BindGroupEntry{
+    .{ .binding = 0, .texture_view = off_view_opt.?, .size = 0 },
+    .{ .binding = 1, .sampler = blit_sampler_opt.?, .size = 0 },
+    };
+    const bg = gctx.device.createBindGroup(.{
+    .layout = blit_bgl_opt.?, .entry_count = be.len, .entries = &be,
+    });
+    defer bg.release();
+    blit_pass.setBindGroup(0, bg, null);
+    blit_pass.draw(3, 1, 0, 0);
+    blit_pass.end();
+    blit_pass.release();
+
+    snap_due = snap_next < snap_count and t >= snap_times[snap_next];
+    if (snap_due) {
+    snap_bpr = (fb[0] * 4 + 255) & ~@as(u32, 255); // 256-byte row alignment
+    const stage = gctx.device.createBuffer(.{
+      .label = "snap stage",
+      .usage = .{ .map_read = true, .copy_dst = true },
+      .size = @as(u64, snap_bpr) * fb[1],
+      .mapped_at_creation = .false,
+    });
+    snap_stage_opt = stage;
+    encoder.copyTextureToBuffer(
+      .{ .texture = off_tex_opt.?, .mip_level = 0, .origin = .{}, .aspect = .all },
+      .{ .layout = .{ .offset = 0, .bytes_per_row = snap_bpr, .rows_per_image = fb[1] }, .buffer = stage },
+      .{ .width = fb[0], .height = fb[1], .depth_or_array_layers = 1 },
+    );
+    }
   }
 
   const cmd = encoder.finish(.{});
@@ -454,6 +606,30 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   gctx.queue.submit(&[_]wgpu.CommandBuffer{cmd});
   _ = gctx.present();
   gctx.device.tick();
+
+  // Read back the captured frame and write it as a PNG.
+  if (snap_due) if (snap_stage_opt) |stage| {
+    const size: usize = @as(usize, snap_bpr) * fb[1];
+    var done = false;
+    stage.mapAsync(.{ .read = true }, 0, size, computeMapCallback, &done);
+    while (!done) gctx.device.tick();
+    if (stage.getConstMappedRange(u8, 0, size)) |data| {
+    const base = envStr("INK_SNAP_BASE") orelse "ink";
+    const ms = epochMillis();
+    if (std.fmt.allocPrint(alloc, "{s}-snap-{d}.png", .{ base, ms })) |path| {
+      if (png.writePng(alloc, path, fb[0], fb[1], data, snap_bpr))
+      std.debug.print("[snap] wrote {s}\n", .{path})
+      else |e| std.debug.print("[snap] write failed: {}\n", .{e});
+      alloc.free(path);
+    } else |_| {}
+    }
+    stage.unmap();
+    stage.release();
+    snap_next += 1;
+  };
+
+  // Exit once every scheduled snapshot has been taken.
+  if (snap_enabled and snap_next >= snap_count) break;
   }
 
   return ki(0);
