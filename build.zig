@@ -26,7 +26,7 @@ pub fn build(b: *std.Build) !void {
   runner_options.addOption(bool, "paranoid",  paranoid);
 
   const runner_mod = b.createModule(.{
-    .root_source_file = b.path("src/runner.zig"),
+    .root_source_file = b.path("src/main.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
   const runner_exe = b.addExecutable(.{ .name = "ink", .root_module = runner_mod });
