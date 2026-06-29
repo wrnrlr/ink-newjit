@@ -7,6 +7,7 @@ const serve = @import("runtime/serve.zig");
 const ffi = @import("ffi.zig");
 const modules = @import("modules.zig");
 const lsp = @import("lsp.zig");
+const jupyter = @import("jupyter.zig");
 const Lexer = @import("parser/lexer.zig").Lexer;
 
 /// Called by C extensions (e.g. GPU) to process pending IPC messages from
@@ -27,6 +28,28 @@ fn setEnvZ(allocator: std.mem.Allocator, name: [*:0]const u8, value: []const u8)
   const z = allocator.dupeZ(u8, value) catch return;
   defer allocator.free(z);
   _ = setenv(name, z, 1);
+}
+
+// True if `s` is a comma/dot-separated list of numbers (a `-snap` time list),
+// so we can tell `-snap 0.5,2` from `-snap script.k`.
+fn looksLikeTimes(s: []const u8) bool {
+  if (s.len == 0) return false;
+  var has_digit = false;
+  for (s) |c| {
+    if (c >= '0' and c <= '9') has_digit = true
+    else if (c != '.' and c != ',') return false;
+  }
+  return has_digit;
+}
+
+// Basename with its extension removed: `test/eyes.k` → `eyes`. The directory is
+// dropped so snapshots are written into the CWD, not next to the script.
+fn snapBase(p: []const u8) []const u8 {
+  const start = if (std.mem.lastIndexOfScalar(u8, p, '/')) |s| s + 1 else 0;
+  const name = p[start..];
+  const dot = std.mem.lastIndexOfScalar(u8, name, '.') orelse return name;
+  if (dot == 0) return name; // dotfile like ".foo" — keep whole name
+  return name[0..dot];
 }
 
 const V = @import("noun/value.zig").V;
@@ -118,7 +141,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
   var script_path: ?[]const u8 = null;
   var extra_args: std.ArrayList([]const u8) = .empty;
   defer extra_args.deinit(allocator);
-  while (args_iter.next()) |arg| {
+  var pushback: ?[]const u8 = null; // one-arg lookahead (for -snap's optional time list)
+  while (true) {
+    const arg = if (pushback) |p| blk: { pushback = null; break :blk p; } else (args_iter.next() orelse break);
     if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--disasm")) {
       disasm_mode = true;
     } else if (std.mem.eql(u8, arg, "-unfocus")) {
@@ -133,6 +158,14 @@ pub fn main(init: std.process.Init.Minimal) !void {
     } else if (std.mem.eql(u8, arg, "-size")) {
       // `-size WxH` sets the GPU window size (e.g. -size 1280x720).
       if (args_iter.next()) |v| setEnvZ(allocator, "INK_SIZE", v);
+    } else if (std.mem.eql(u8, arg, "-snap")) {
+      // `-snap [t0,t1,...]` captures PNG screenshots headlessly at the given
+      // sim-times (seconds); bare `-snap` shoots once on the first frame and
+      // exits.  The optional time list, if present, is the next argument.
+      if (args_iter.next()) |v| {
+        if (looksLikeTimes(v)) setEnvZ(allocator, "INK_SNAP", v)
+        else { _ = setenv("INK_SNAP", "0", 1); pushback = v; }
+      } else _ = setenv("INK_SNAP", "0", 1);
     } else if (script_path == null) {
       script_path = arg;
     } else {
@@ -140,8 +173,23 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
   }
 
+  // Snapshot filenames are `<script-basename>-snap-<epoch-ms>.png` in the CWD.
+  if (script_path) |sp| setEnvZ(allocator, "INK_SNAP_BASE", snapBase(sp));
+
   // `ink lsp` — run the language server over stdio (JSON-RPC).  No VM needed.
   if (script_path) |sp| if (std.mem.eql(u8, sp, "lsp")) return lsp.run(allocator);
+
+  // `ink jupyter -f <connection-file>` — run a Jupyter kernel over ZeroMQ.
+  // `ink jupyter install` — write a kernelspec so editors can discover it.
+  if (script_path) |sp| if (std.mem.eql(u8, sp, "jupyter")) {
+    for (extra_args.items) |a| if (std.mem.eql(u8, a, "install")) return jupyter.install(allocator);
+    var conn: ?[]const u8 = null;
+    for (extra_args.items) |a| if (!std.mem.eql(u8, a, "-f")) { conn = a; break; };
+    return jupyter.run(allocator, conn orelse {
+      std.debug.print("usage: ink jupyter -f <connection-file> | ink jupyter install\n", .{});
+      std.process.exit(1);
+    });
+  };
 
   const io = std.Io.Threaded.global_single_threaded.io();
   const stdin_is_tty = (std.Io.File.stdin().isTty(io) catch false);

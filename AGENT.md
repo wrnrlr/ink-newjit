@@ -38,8 +38,6 @@ Train: *|
 Sum: +/;
 ```
 
-
-
 ## Types `` ` `i`f`s`c`m`I`F`S`C`M`L ``
 - Integer - numbers like `-2 0 1 0N`
   - null value `0N`

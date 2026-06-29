@@ -48,3 +48,10 @@ d: []
 ```sh
 watchexec -r -w test/cloth.k -- ./zig-out/bin/ink -unfocus -top -monitor 1 test/cloth.k
 ```
+
+```k
+!10;
+
+[[]id:!20;w:?20]
+```
+
