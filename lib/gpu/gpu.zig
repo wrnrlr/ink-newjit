@@ -36,13 +36,9 @@ const tri    = @import("triangulate");
 const png    = @import("png.zig");
 const Renderer = render.Renderer;
 
-// ── Host K API — resolved at init time via dlsym ─────────────────────────────
+// ── Host K API — captured from the registry passed to terse_init ─────────────
 
 const K = *anyopaque;
-
-// macOS RTLD_DEFAULT = (void*)-2; finds symbols in any already-loaded image.
-const RTLD_DEFAULT = @as(?*anyopaque, @ptrFromInt(@as(usize, @bitCast(@as(isize, -2)))));
-extern fn dlsym(handle: ?*anyopaque, symbol: [*:0]const u8) ?*anyopaque;
 
 const KApi = struct {
   k_call:      *const fn (K, K) callconv(.c) ?K,
@@ -58,11 +54,6 @@ const KApi = struct {
   ku:          *const fn (?K) callconv(.c) void,
 };
 var g_api: ?KApi = null;
-
-fn lookupFn(comptime T: type, name: [*:0]const u8) ?T {
-  const ptr = dlsym(RTLD_DEFAULT, name) orelse return null;
-  return @ptrCast(@alignCast(ptr));
-}
 
 // Thin wrappers so the rest of the file can call ki/kf/etc. without changing.
 fn ki(v: i32) ?K         { return g_api.?.ki(v); }
@@ -1230,19 +1221,36 @@ export fn gpuWgsl(source_k: ?K) callconv(.c) ?K {
   return ki(handle);
 }
 
-export fn terse_init(reg: *anyopaque) callconv(.c) void {
-  _ = reg;
+fn inkInit(reg: *anyopaque) void {
+  const r: *const @import("kabi").KRegistry(K) = @ptrCast(@alignCast(reg));
   g_api = .{
-    .k_call      = lookupFn(*const fn (K, K) callconv(.c) ?K, "k_call")           orelse return,
-    .k_make_dict = lookupFn(*const fn (i32, [*]const [*:0]const u8, [*]const ?K) callconv(.c) ?K, "k_make_dict") orelse return,
-    .kf          = lookupFn(*const fn (f32) callconv(.c) ?K, "kf")                 orelse return,
-    .ki          = lookupFn(*const fn (i32) callconv(.c) ?K, "ki")                 orelse return,
-    .kn          = lookupFn(*const fn (?K) callconv(.c) i32, "kn")                 orelse return,
-    .kfp         = lookupFn(*const fn (?K) callconv(.c) ?[*]f32, "kfp")            orelse return,
-    .kip         = lookupFn(*const fn (?K) callconv(.c) ?[*]i32, "kip")            orelse return,
-    .kcp         = lookupFn(*const fn (?K) callconv(.c) ?[*]u8, "kcp")             orelse return,
-    .ki_val      = lookupFn(*const fn (?K) callconv(.c) i32, "ki_val")             orelse return,
-    .KF          = lookupFn(*const fn (i32) callconv(.c) ?K, "KF")                 orelse return,
-    .ku          = lookupFn(*const fn (?K) callconv(.c) void, "ku")                 orelse return,
+    .k_call      = r.k_call,
+    .k_make_dict = r.k_make_dict,
+    .kf          = r.kf,
+    .ki          = r.ki,
+    .kn          = r.kn,
+    .kfp         = r.kfp,
+    .kip         = r.kip,
+    .kcp         = r.kcp,
+    .ki_val      = r.ki_val,
+    .KF          = r.KF,
+    .ku          = r.ku,
   };
+  // Register callable functions by name (works dlopen'd or statically linked).
+  r.k_register("gpuRun", @ptrCast(&gpuRun), 2);
+  r.k_register("gpuFill", @ptrCast(&gpuFill), 2);
+  r.k_register("gpuTess", @ptrCast(&gpuTess), 1);
+  r.k_register("gpuSpirv", @ptrCast(&gpuSpirv), 2);
+  r.k_register("gpuFillShader", @ptrCast(&gpuFillShader), 2);
+  r.k_register("gpuCompute", @ptrCast(&gpuCompute), 2);
+  r.k_register("gpuCompute2", @ptrCast(&gpuCompute2), 3);
+  r.k_register("gpuMesh", @ptrCast(&gpuMesh), 2);
+  r.k_register("gpuUploadMesh", @ptrCast(&gpuUploadMesh), 2);
+  r.k_register("gpuDrawInstanced", @ptrCast(&gpuDrawInstanced), 3);
+  r.k_register("gpuDrawMesh", @ptrCast(&gpuDrawMesh), 2);
+  r.k_register("gpuDrawMeshU", @ptrCast(&gpuDrawMeshU), 3);
+  r.k_register("gpuWgsl", @ptrCast(&gpuWgsl), 1);
 }
+
+export fn terse_init(reg: *anyopaque) callconv(.c) void { inkInit(reg); }
+export fn ink_ext_init_gpu(reg: *anyopaque) callconv(.c) void { inkInit(reg); }

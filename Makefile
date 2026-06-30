@@ -22,7 +22,7 @@ HOST := $(HOST_OS)-$(HOST_ARCH)
 # Jupyter kernel, and native FFI extensions are unavailable there.
 PLATFORMS := macos-arm64 macos-x64 linux-arm64 linux-x64 windows-arm64 windows-x64
 
-.PHONY: test build release all install data demo qa info clean
+.PHONY: test build release all static-all install data demo qa info clean
 
 test:
 	time zig build test
@@ -62,14 +62,37 @@ all:
 	done
 	@echo "Built:" && ls -1 zig-out/bin/ink-* | grep -v '\.pdb$$'
 
+# Cross-compile the static libs (libink-core + extensions) for every platform
+# into zig-out/static/<platform>/lib, so `ink bundle -t <platform>` can link a
+# self-contained binary that targets that platform.  GPU (libgpu-bundle.a) is
+# produced only for macos-arm64 (Dawn is arm64-only).
+static-all:
+	@for p in $(PLATFORMS); do \
+	  case $$p in \
+	    macos-arm64)   t=aarch64-macos ;; \
+	    macos-x64)     t=x86_64-macos ;; \
+	    linux-arm64)   t=aarch64-linux-musl ;; \
+	    linux-x64)     t=x86_64-linux-musl ;; \
+	    windows-arm64) t=aarch64-windows-gnu ;; \
+	    windows-x64)   t=x86_64-windows-gnu ;; \
+	    *) echo "unknown platform $$p"; exit 1 ;; \
+	  esac; \
+	  if [ "$$p" = "$(HOST)" ]; then tgt=""; else tgt="-Dtarget=$$t"; fi; \
+	  echo "==> static libs for $$p ($$t)"; \
+	  zig build static -Doptimize=ReleaseFast -Dversion=$(VERSION) \
+	    $$tgt --prefix zig-out/static/$$p || exit 1; \
+	done
+	@echo "Built static libs under zig-out/static/<platform>/lib"
+
 # Install ink into $(PREFIX) (~/.ink):
 #   bin/             one binary per distributed platform
 #   ink              symlink to the host binary
 #   lib/             k source library (*.k, *.kb)
-#   share/<host>/    host-platform native extensions (.dylib/.so)
-# Shipping every platform's binary lets users `ink bundle -t <platform>` to
-# cross-target their k programs.
-install: build all
+#   share/<host>/     host-platform native extensions (.dylib/.so) for the REPL
+#   share/<platform>/ per-platform static libs (.a/.lib) for `ink bundle -t`
+# Shipping every platform's binary + static libs lets users `ink bundle [-t …]`
+# to produce self-contained native programs for any distributed platform.
+install: build all static-all
 	@echo "Installing ink $(VERSION) -> $(PREFIX)"
 	@mkdir -p $(PREFIX)/bin $(PREFIX)/lib $(PREFIX)/share/$(HOST)
 	@cp zig-out/bin/ink-* $(PREFIX)/bin/
@@ -78,6 +101,10 @@ install: build all
 	@(cd lib && find . \( -name '*.k' -o -name '*.kb' \) -print | tar -cf - -T -) | (cd $(PREFIX)/lib && tar -xf -)
 	@cp zig-out/lib/*.dylib $(PREFIX)/share/$(HOST)/ 2>/dev/null || true
 	@cp zig-out/lib/*.so    $(PREFIX)/share/$(HOST)/ 2>/dev/null || true
+	@for p in $(PLATFORMS); do \
+	  mkdir -p $(PREFIX)/share/$$p; \
+	  cp zig-out/static/$$p/lib/* $(PREFIX)/share/$$p/ 2>/dev/null || true; \
+	done
 	@echo "Done. Host binary: $(PREFIX)/ink ($(HOST))"
 	@echo "Add to PATH:  ln -sf $(PREFIX)/ink /usr/local/bin/ink   (or add $(PREFIX) to PATH)"
 

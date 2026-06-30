@@ -168,7 +168,7 @@ fn buildColumn(c: reader.Column) OOM!K {
   }
 }
 
-export fn terse_init(reg: *anyopaque) callconv(.c) void {
+fn inkInit(reg: *anyopaque) void {
   const r: *const KRegistry = @ptrCast(@alignCast(reg));
   g_api = .{
     .KC = r.KC,
@@ -183,4 +183,10 @@ export fn terse_init(reg: *anyopaque) callconv(.c) void {
     .k_list_set = r.k_list_set,
     .k_make_table = r.k_make_table,
   };
+  // Register callable functions by name (loader-independent resolution).
+  const kr: *const @import("kabi").KRegistry(K) = @ptrCast(@alignCast(reg));
+  kr.k_register("ReadParquet", @ptrCast(&ReadParquet), 1);
 }
+
+export fn terse_init(reg: *anyopaque) callconv(.c) void { inkInit(reg); }
+export fn ink_ext_init_parquet(reg: *anyopaque) callconv(.c) void { inkInit(reg); }

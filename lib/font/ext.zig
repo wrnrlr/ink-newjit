@@ -87,6 +87,13 @@ export fn cffOutline(arg: ?*anyopaque) callconv(.c) ?*anyopaque {
 
 // ── terse_init ──────────────────────────────────────────────────────────────────
 
-export fn terse_init(reg: *anyopaque) callconv(.c) void {
+fn inkInit(reg: *anyopaque) void {
   k.init(@ptrCast(@alignCast(reg)));
+  // Register callable functions by name (loader-independent resolution).
+  const kr: *const @import("kabi").KRegistry(*anyopaque) = @ptrCast(@alignCast(reg));
+  kr.k_register("ReadFont", @ptrCast(&ReadFont), 1);
+  kr.k_register("cffOutline", @ptrCast(&cffOutline), 1);
 }
+
+export fn terse_init(reg: *anyopaque) callconv(.c) void { inkInit(reg); }
+export fn ink_ext_init_font(reg: *anyopaque) callconv(.c) void { inkInit(reg); }

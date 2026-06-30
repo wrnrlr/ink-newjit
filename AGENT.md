@@ -311,6 +311,15 @@ The parser, compiler, and runtime are all written in Zig 0.16.
 - Connect to server `` h: > "127.0.0.1:5001" ``
 - Write text to stdout `` `0 0: "hello" ``
 
+## Home Directory
+The ink home directory is by default `~/.ink`. The `$INK_HOME` variable can overwrite the default.
+This directory contains the ink executable for all platforms, shared libraries and k files:
+- `ink` symlink to system executable
+- `bin/ink-<target>`
+- `lib/`
+- `share/<target>/`
+
+
 ## Useful Commands
 - Build debug: `time zig build`
 - Build release: `time zig build -Doptimize=ReleaseFast`

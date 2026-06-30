@@ -74,6 +74,17 @@ export fn ReadCpg(path_k: ?*anyopaque) callconv(.c) ?*anyopaque {
   return @ptrCast(readText(path_k, true));
 }
 
-export fn terse_init(reg: *anyopaque) callconv(.c) void {
+fn inkInit(reg: *anyopaque) void {
   k.init(@ptrCast(@alignCast(reg)));
+  // Register callable functions by name (loader-independent resolution).
+  const kr: *const @import("kabi").KRegistry(*anyopaque) = @ptrCast(@alignCast(reg));
+  kr.k_register("ReadShp", @ptrCast(&ReadShp), 1);
+  kr.k_register("ReadShx", @ptrCast(&ReadShx), 1);
+  kr.k_register("ReadDbf", @ptrCast(&ReadDbf), 1);
+  kr.k_register("ReadSbn", @ptrCast(&ReadSbn), 1);
+  kr.k_register("ReadPrj", @ptrCast(&ReadPrj), 1);
+  kr.k_register("ReadCpg", @ptrCast(&ReadCpg), 1);
 }
+
+export fn terse_init(reg: *anyopaque) callconv(.c) void { inkInit(reg); }
+export fn ink_ext_init_shp(reg: *anyopaque) callconv(.c) void { inkInit(reg); }

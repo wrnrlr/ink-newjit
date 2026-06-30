@@ -56,6 +56,22 @@ pub fn build(b: *std.Build) !void {
   const core_only = b.option(bool, "core-only", "Build only the ink binary, no extensions") orelse false;
   if (core_only) return;
 
+  // Canonical k-ABI definition shared by the host and extensions (src/kabi.zig),
+  // so native extensions import the registry layout instead of mirroring it.
+  const kabi_mod = b.createModule(.{
+    .root_source_file = b.path("src/kabi.zig"),
+    .target = target, .optimize = optimize,
+  });
+
+  // Static .a libraries for `ink bundle` (linked, not dlopen'd).  Contributed to
+  // from here (gpu, below) and after the light extensions are defined.
+  const static_step = b.step("static", "Build static .a libs (core + extensions) for bundling");
+
+  // The GPU extension links the prebuilt arm64 Dawn + macOS frameworks, so it
+  // only builds for aarch64-macos.  Gating it (rather than the whole extension
+  // graph) lets the light extensions and static .a libs cross-compile for the
+  // other targets.
+  if (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64) {
   // --- GPU extension shared library (~20MB with Dawn) ---
   const zgpu_dep  = b.dependency("zgpu",  .{ .target = target, .optimize = optimize });
   const zglfw_dep = b.dependency("zglfw", .{ .target = target, .optimize = optimize });
@@ -82,6 +98,7 @@ pub fn build(b: *std.Build) !void {
   gpu_ext_mod.addImport("zglfw",      zglfw_dep.module("glfw"));
   gpu_ext_mod.addImport("render",     gpu_render_mod);
   gpu_ext_mod.addImport("triangulate", gpu_tri_mod);
+  gpu_ext_mod.addImport("kabi",       kabi_mod);
 
   const dawn_dep = b.dependency("dawn_aarch64_macos", .{});
 
@@ -112,12 +129,18 @@ pub fn build(b: *std.Build) !void {
   const gpu_step = b.step("gpu", "Build the GPU extension shared library");
   gpu_step.dependOn(&b.addInstallArtifact(gpu_lib, .{}).step);
 
-  // Canonical k-ABI definition shared by the host and extensions (src/kabi.zig),
-  // so native extensions import the registry layout instead of mirroring it.
-  const kabi_mod = b.createModule(.{
-    .root_source_file = b.path("src/kabi.zig"),
-    .target = target, .optimize = optimize,
-  });
+  // Static gpu archive for bundling.  A static .a doesn't absorb its native
+  // dependencies, so merge gpu + zdawn + Dawn + GLFW into one archive with
+  // libtool; `ink bundle` then links just libgpu-bundle.a + the macOS frameworks.
+  const gpu_static = b.addLibrary(.{ .name = "gpu", .root_module = gpu_ext_mod, .linkage = .static });
+  const merge = b.addSystemCommand(&.{ "libtool", "-static", "-o" });
+  const merged = merge.addOutputFileArg("libgpu-bundle.a");
+  merge.addArtifactArg(gpu_static);
+  merge.addArtifactArg(zdawn);
+  merge.addFileArg(dawn_dep.path("libdawn.a"));
+  merge.addFileArg(.{ .cwd_relative = "/opt/homebrew/lib/libglfw3.a" });
+  static_step.dependOn(&b.addInstallLibFile(merged, "libgpu-bundle.a").step);
+  } // end macOS-only GPU section
 
   // --- Font extension shared library (native sfnt parser, no tatfi) ---
   const font_ext_mod = b.createModule(.{
@@ -140,6 +163,7 @@ pub fn build(b: *std.Build) !void {
     .root_source_file = b.path("lib/md5/main.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
+  md5_ext_mod.addImport("kabi", kabi_mod);
 
   const md5_lib = b.addLibrary(.{
     .name     = "md5",
@@ -155,6 +179,7 @@ pub fn build(b: *std.Build) !void {
     .root_source_file = b.path("lib/json/main.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
+  json_ext_mod.addImport("kabi", kabi_mod);
 
   const json_lib = b.addLibrary(.{ .name = "json", .root_module = json_ext_mod, .linkage = .dynamic });
   b.installArtifact(json_lib);
@@ -166,6 +191,7 @@ pub fn build(b: *std.Build) !void {
     .root_source_file = b.path("lib/csv/main.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
+  csv_ext_mod.addImport("kabi", kabi_mod);
 
   const csv_lib = b.addLibrary(.{ .name = "csv", .root_module = csv_ext_mod, .linkage  = .dynamic });
   b.installArtifact(csv_lib);
@@ -177,6 +203,7 @@ pub fn build(b: *std.Build) !void {
     .root_source_file = b.path("lib/parquet/src/main.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
+  parquet_ext_mod.addImport("kabi", kabi_mod);
 
   const parquet_lib = b.addLibrary(.{ .name = "parquet", .root_module = parquet_ext_mod, .linkage = .dynamic });
   b.installArtifact(parquet_lib);
@@ -193,6 +220,27 @@ pub fn build(b: *std.Build) !void {
   b.installArtifact(shp_lib);
   const shp_step = b.step("shp", "Build the shapefile extension shared library");
   shp_step.dependOn(&b.addInstallArtifact(shp_lib, .{}).step);
+
+  // --- Static .a libraries for `ink bundle` (linked, not dlopen'd) ---
+  // The interpreter core as a linkable archive (exposes the C-ABI
+  // `ink_run_bundle` entry; no `main`), plus a static .a per light extension.
+  // `ink bundle` links these with the generated glue into one native exe.
+  const corelib_mod = b.createModule(.{
+    .root_source_file = b.path("src/corelib.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+  });
+  corelib_mod.addOptions("build_options", runner_options);
+  corelib_mod.addIncludePath(b.path("src"));
+  const core_lib = b.addLibrary(.{ .name = "ink-core", .root_module = corelib_mod, .linkage = .static });
+
+  static_step.dependOn(&b.addInstallArtifact(core_lib, .{}).step);
+  inline for (.{
+    .{ "json", json_ext_mod },   .{ "csv", csv_ext_mod }, .{ "md5", md5_ext_mod },
+    .{ "font", font_ext_mod }, .{ "parquet", parquet_ext_mod }, .{ "shp", shp_ext_mod },
+  }) |pair| {
+    const slib = b.addLibrary(.{ .name = pair[0], .root_module = pair[1], .linkage = .static });
+    static_step.dependOn(&b.addInstallArtifact(slib, .{}).step);
+  }
 
   // --- Unicode binary data (lib/data.kb) ---
   const data_gen_mod = b.createModule(.{

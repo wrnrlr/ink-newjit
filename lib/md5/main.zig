@@ -71,7 +71,7 @@ export fn md5Hash(x: ?K) callconv(.c) ?K {
     return out;
 }
 
-export fn terse_init(reg: *anyopaque) callconv(.c) void {
+fn inkInit(reg: *anyopaque) void {
     const r: *const KRegistry = @ptrCast(@alignCast(reg));
     g_api = .{
         .kcp = r.kcp,
@@ -79,4 +79,10 @@ export fn terse_init(reg: *anyopaque) callconv(.c) void {
         .KC  = r.KC,
         .ku  = r.ku,
     };
+    // Register callable functions by name (loader-independent resolution).
+    const kr: *const @import("kabi").KRegistry(K) = @ptrCast(@alignCast(reg));
+    kr.k_register("md5Hash", @ptrCast(&md5Hash), 1);
 }
+
+export fn terse_init(reg: *anyopaque) callconv(.c) void { inkInit(reg); }
+export fn ink_ext_init_md5(reg: *anyopaque) callconv(.c) void { inkInit(reg); }

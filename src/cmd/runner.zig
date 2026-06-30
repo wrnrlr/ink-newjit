@@ -203,6 +203,34 @@ fn evalSource(allocator: std.mem.Allocator, vm: *VM, loader: *modules.ModuleLoad
   }
 }
 
+// Entry point for a statically-linked bundle (called via corelib's C-ABI
+// `ink_run_bundle`).  `inits` are the linked extensions' ink_ext_init_<name>
+// functions; calling each registers its functions by name into the FFI registry
+// (so `2:(`Name;…)` resolves with no dlopen).  `archive` is the embedded
+// script+modules blob produced by `ink bundle`.
+pub fn runBundle(archive: []const u8, inits: []const ?*const fn (*anyopaque) callconv(.c) void) c_int {
+  const allocator = std.heap.c_allocator;
+  for (inits) |maybe| if (maybe) |init_fn| init_fn(ffi.registryPtr());
+
+  const owned = allocator.dupe(u8, archive) catch return 1;
+  var b = bundle.decode(allocator, owned) catch return 1; // decode frees `owned` on error
+  defer b.deinit(allocator);
+
+  var vfs = std.StringHashMap([]const u8).init(allocator);
+  defer vfs.deinit();
+  for (b.paths, b.data) |p, d| vfs.put(p, d) catch return 1;
+
+  const vm = VM.create(allocator) catch return 1;
+  defer vm.deinit();
+  vm.vfs = &vfs;
+  var loader = modules.ModuleLoader.init(allocator);
+  defer loader.deinit();
+  for (b.paths, b.data) |p, d| loader.scanText(p, d) catch {};
+  setupArgs(vm, "ink", null, &[_][]const u8{}) catch return 1;
+  evalSource(allocator, vm, &loader, b.main, "bundle") catch return 1;
+  return 0;
+}
+
 pub fn main(init: std.process.Init.Minimal) !void {
   var gpa = std.heap.DebugAllocator(.{}){};
   defer { if (builtin.mode == .Debug) _ = gpa.deinit(); }

@@ -16,6 +16,8 @@ const HELP =
   \\  bundle <script.k> [opts]  Ship a k script as a single executable
   \\                              -o <out>        output path
   \\                              -t <platform>   cross-bundle (e.g. linux-x64)
+  \\                              --static        link native extensions in (needs zig)
+  \\                              --trailer       append-to-binary mode (no zig)
   \\  lsp                       Run the language server over stdio (JSON-RPC)
   \\  jupyter -f <conn-file>    Run a Jupyter kernel over ZeroMQ
   \\  jupyter install           Install the Jupyter kernelspec

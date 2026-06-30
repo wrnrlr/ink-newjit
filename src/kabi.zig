@@ -51,5 +51,11 @@ pub fn KRegistry(comptime KH: type) type {
     KS:          *const fn (i32)                         callconv(.c) ?KH,
     ksp:         *const fn (?KH)                         callconv(.c) ?[*]u32,
     kintern:     *const fn ([*:0]const u8)               callconv(.c) u32,
+    // Register a callable extension function by name (appended). At terse_init
+    // an extension calls k_register("ReadJson", &ReadJson, 1) for each function
+    // it exports; the host then resolves `2:(`Name;arity)` by name from this
+    // registry instead of dlsym, so the binding works identically whether the
+    // extension is dlopen'd at runtime or statically linked at bundle time.
+    k_register:  *const fn ([*:0]const u8, *const anyopaque, u8) callconv(.c) void,
   };
 }

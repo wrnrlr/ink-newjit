@@ -18,33 +18,9 @@
 const std = @import("std");
 const K = *anyopaque;
 
-const KRegistry = extern struct {
-    ki:          *const fn (i32)                                        callconv(.c) ?K,
-    kf:          *const fn (f32)                                        callconv(.c) ?K,
-    kc:          *const fn (u8)                                         callconv(.c) ?K,
-    kb:          *const fn (c_int)                                      callconv(.c) ?K,
-    ks:          *const fn ([*:0]const u8)                              callconv(.c) ?K,
-    kerr:        *const fn ()                                           callconv(.c) ?K,
-    KC:          *const fn (i32)                                        callconv(.c) ?K,
-    KI:          *const fn (i32)                                        callconv(.c) ?K,
-    KF:          *const fn (i32)                                        callconv(.c) ?K,
-    KL:          *const fn (i32)                                        callconv(.c) ?K,
-    kt:          *const fn (?K)                                         callconv(.c) i8,
-    kn:          *const fn (?K)                                         callconv(.c) i32,
-    ki_val:      *const fn (?K)                                         callconv(.c) i32,
-    kf_val:      *const fn (?K)                                         callconv(.c) f32,
-    kc_val:      *const fn (?K)                                         callconv(.c) u8,
-    kb_val:      *const fn (?K)                                         callconv(.c) c_int,
-    kip:         *const fn (?K)                                         callconv(.c) ?[*]i32,
-    kfp:         *const fn (?K)                                         callconv(.c) ?[*]f32,
-    kcp:         *const fn (?K)                                         callconv(.c) ?[*]u8,
-    klp:         *const fn (?K)                                         callconv(.c) ?[*]?K,
-    ku:          *const fn (?K)                                         callconv(.c) void,
-    k_list_set:  *const fn (?K, i32, ?K)                               callconv(.c) i32,
-    k_call:      *const fn (?K, ?K)                                     callconv(.c) ?K,
-    k_call2:     *const fn (?K, ?K, ?K)                                 callconv(.c) ?K,
-    k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?K)  callconv(.c) ?K,
-};
+// Single source of truth for the host↔extension ABI (src/kabi.zig), instantiated
+// with our opaque K handle.  Same extern layout the host uses.
+const KRegistry = @import("kabi").KRegistry(K);
 
 const KApi = struct {
     ki:          *const fn (i32)                                        callconv(.c) ?K,
@@ -311,7 +287,7 @@ fn convertObj(alloc: Alloc, obj: *const std.json.ObjectMap) OOM!K {
     return result orelse error.OutOfMemory;
 }
 
-export fn terse_init(reg: *anyopaque) callconv(.c) void {
+fn initApi(reg: *anyopaque) void {
     const r: *const KRegistry = @ptrCast(@alignCast(reg));
     g_api = .{
         .ki          = r.ki,
@@ -329,4 +305,19 @@ export fn terse_init(reg: *anyopaque) callconv(.c) void {
         .k_list_set  = r.k_list_set,
         .k_make_dict = r.k_make_dict,
     };
+    // Register callable functions by name so the host resolves them without
+    // dlsym (works the same when this extension is statically linked).
+    r.k_register("ReadJson", @ptrCast(&ReadJson), 1);
+    r.k_register("ParseJson", @ptrCast(&ParseJson), 1);
+}
+
+// Entry point for dlopen loading (host looks up "terse_init").
+export fn terse_init(reg: *anyopaque) callconv(.c) void {
+    initApi(reg);
+}
+
+// Uniquely-named entry point for static linking (the bundler's generated init
+// table calls this; avoids the terse_init symbol colliding across extensions).
+export fn ink_ext_init_json(reg: *anyopaque) callconv(.c) void {
+    initApi(reg);
 }

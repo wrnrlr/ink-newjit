@@ -69,9 +69,41 @@ export const k_registry: KRegistry = .{
     .KS          = &KS,
     .ksp         = &ksp,
     .kintern     = &kintern,
+    .k_register  = &k_register,
 };
 
 const c_alloc = std.heap.c_allocator;
+
+// Pointer to the host k_* table, for statically-linked bundles to hand each
+// extension's ink_ext_init_<name> at startup (the dlopen path passes this same
+// pointer to terse_init).
+pub fn registryPtr() *anyopaque { return @constCast(@ptrCast(&k_registry)); }
+
+// ── Extension function registry (name → callable) ─────────────────────────────
+// Populated by extensions at terse_init (dlopen) or by the bundle's static init
+// table (static link).  `ffiLoad` resolves `2:(`Name;arity)` from here first, so
+// the call path never depends on the dynamic loader — that's what lets the same
+// ABI bind at runtime (dlopen), at bundle time (static link), or, later, at
+// patch time (copy-and-patch).
+const ExtFn = struct { ptr: *const anyopaque, arity: u8 };
+var ext_fns: std.StringHashMapUnmanaged(ExtFn) = .empty;
+
+// Libraries kept open for the process lifetime once dlopen'd, so the function
+// pointers and name strings they registered stay valid.  Keyed by request path
+// to avoid re-opening (and re-running terse_init) on each `2:` load.
+var loaded_libs: std.StringHashMapUnmanaged(std.DynLib) = .empty;
+
+export fn k_register(name: [*:0]const u8, fnptr: *const anyopaque, arity: u8) callconv(.c) void {
+  const s = std.mem.span(name);
+  const gop = ext_fns.getOrPut(c_alloc, s) catch return;
+  if (!gop.found_existing) {
+    gop.key_ptr.* = c_alloc.dupe(u8, s) catch {
+      _ = ext_fns.remove(s);
+      return;
+    };
+  }
+  gop.value_ptr.* = .{ .ptr = fnptr, .arity = arity };
+}
 
 // ── Thread-local VM pointer (set around every C call) ─────────────────────────
 
@@ -334,15 +366,15 @@ const FfiFn2 = *const fn (?*KBox, ?*KBox) callconv(.c) ?*KBox;
 const FfiFn3 = *const fn (?*KBox, ?*KBox, ?*KBox) callconv(.c) ?*KBox;
 
 const FfiData = struct {
-  lib:    std.DynLib,
-  fn_ptr: *anyopaque,
+  fn_ptr: *const anyopaque,
   arity:  u8,
   vm:     *anyopaque,  // VM pointer so k_call works from inside the C function
 };
 
 fn ffiDeinit(data: *anyopaque) void {
+  // The owning library lives in `loaded_libs` for the process lifetime, so
+  // there is nothing to close here.
   const d: *FfiData = @ptrCast(@alignCast(data));
-  d.lib.close();
   c_alloc.destroy(d);
 }
 
@@ -468,45 +500,71 @@ fn openHome(lib_path: []const u8) ?std.DynLib {
   return null;
 }
 
-// Loading native extensions needs dlopen; Zig 0.16's std.DynLib has no Windows
-// backend, so FFI is unavailable there (the impl is a comptime-dead branch).
 pub fn ffiLoad(vm: *anyopaque, lib_path: []const u8, sym_name: []const u8, arity: u8) V {
-  if (builtin.os.tag != .windows) return ffiLoadImpl(vm, lib_path, sym_name, arity);
-  return .{ .err = .nyi };
-}
-
-fn ffiLoadImpl(vm: *anyopaque, lib_path: []const u8, sym_name: []const u8, arity: u8) V {
   const VM = @import("runtime/vm.zig").VM;
   const the_vm: *VM = @ptrCast(@alignCast(vm));
 
+  // Name-first resolution works on every platform with no dynamic loader: a
+  // statically-linked extension (in a bundle) registered its functions at
+  // startup, and a dlopen'd one registered them on first load.  This is what
+  // makes FFI work in static Windows bundles too.
+  if (ext_fns.get(sym_name)) |e| return wrapFn(the_vm.alloc, vm, e.ptr, arity);
+
+  // Otherwise the providing library must be dlopen'd — and Zig 0.16's
+  // std.DynLib has no Windows backend, so that path is a comptime-dead branch
+  // there (a Windows host can only use statically-linked extensions).
+  if (builtin.os.tag != .windows) return ffiLoadDlopen(the_vm.alloc, vm, lib_path, sym_name, arity);
+  return .{ .err = .nyi };
+}
+
+fn ffiLoadDlopen(vm_alloc: Alloc, vm: *anyopaque, lib_path: []const u8, sym_name: []const u8, arity: u8) V {
+  // dlopen the lib; its terse_init registers its functions via k_register.
+  ensureLoaded(lib_path);
+  if (ext_fns.get(sym_name)) |e| return wrapFn(vm_alloc, vm, e.ptr, arity);
+  // Legacy: an extension that hasn't migrated to k_register — dlsym directly.
+  if (legacyResolve(lib_path, sym_name)) |fn_ptr| return wrapFn(vm_alloc, vm, fn_ptr, arity);
+  return .{ .err = .domain };
+}
+
+// dlopen `lib_path` once (deduped by request path), run its terse_init so it can
+// register its functions, and keep the handle open for the process lifetime.
+fn ensureLoaded(lib_path: []const u8) void {
+  if (loaded_libs.contains(lib_path)) return;
+
   var path_buf: [512]u8 = undefined;
-  if (lib_path.len >= path_buf.len) return .{ .err = .domain };
+  if (lib_path.len >= path_buf.len) return;
   @memcpy(path_buf[0..lib_path.len], lib_path);
   path_buf[lib_path.len] = 0;
 
-  var sym_buf: [256]u8 = undefined;
-  if (sym_name.len >= sym_buf.len) return .{ .err = .domain };
-  @memcpy(sym_buf[0..sym_name.len], sym_name);
-  sym_buf[sym_name.len] = 0;
-
   var lib = std.DynLib.open(path_buf[0..lib_path.len :0]) catch
-    openHome(lib_path) orelse return .{ .err = .io };
-  const fn_ptr = lib.lookup(*anyopaque, sym_buf[0..sym_name.len :0]) orelse {
-    lib.close();
-    return .{ .err = .domain };
-  };
+    openHome(lib_path) orelse return;
 
-  // Pass the full k_* function-pointer table to the extension's terse_init so
-  // it can resolve host symbols without relying on dlsym(RTLD_DEFAULT, ...).
+  // Hand the extension the full host k_* table (and k_register) so it can both
+  // call back into the host and register its own functions by name.
   const TerseInit = *const fn (*anyopaque) callconv(.c) void;
   if (lib.lookup(TerseInit, "terse_init")) |init_fn| {
     init_fn(@constCast(@ptrCast(&k_registry)));
   }
 
-  const data = c_alloc.create(FfiData) catch { lib.close(); return .{ .err = .memory }; };
-  data.* = .{ .lib = lib, .fn_ptr = fn_ptr, .arity = arity, .vm = vm };
+  const key = c_alloc.dupe(u8, lib_path) catch { lib.close(); return; };
+  loaded_libs.put(c_alloc, key, lib) catch { c_alloc.free(key); lib.close(); };
+}
 
-  const obj = the_vm.alloc.create(ExtObj) catch { ffiDeinit(data); return .{ .err = .memory }; };
+// Legacy dlsym resolution on an already-loaded handle (pre-k_register extensions).
+fn legacyResolve(lib_path: []const u8, sym_name: []const u8) ?*const anyopaque {
+  const lib = loaded_libs.getPtr(lib_path) orelse return null;
+  var sym_buf: [256]u8 = undefined;
+  if (sym_name.len >= sym_buf.len) return null;
+  @memcpy(sym_buf[0..sym_name.len], sym_name);
+  sym_buf[sym_name.len] = 0;
+  return lib.lookup(*anyopaque, sym_buf[0..sym_name.len :0]);
+}
+
+// Wrap a resolved extension function pointer in a callable ExtObj.
+fn wrapFn(vm_alloc: Alloc, vm: *anyopaque, fn_ptr: *const anyopaque, arity: u8) V {
+  const data = c_alloc.create(FfiData) catch return .{ .err = .memory };
+  data.* = .{ .fn_ptr = fn_ptr, .arity = arity, .vm = vm };
+  const obj = vm_alloc.create(ExtObj) catch { c_alloc.destroy(data); return .{ .err = .memory }; };
   const vtable = if (arity >= 3) &ffi_vtable_3 else if (arity >= 2) &ffi_vtable_2 else &ffi_vtable_1;
   obj.* = .{ .rc = 1, .type_id = 0, .vtable = vtable, .data = data };
   return .{ .x = obj };
