@@ -57,6 +57,10 @@ pub const VM = struct {
   out: ?*std.Io.Writer = null,
   prng: std.Random.DefaultPrng,
   argv: V = .blank,
+  // Optional in-memory file overlay (path → content), consulted before disk by
+  // load()/mapFile().  Set by `ink bundle` executables to read their embedded
+  // k modules; null for normal runs.
+  vfs: ?*const std.StringHashMap([]const u8) = null,
 
   pub const Monad = *const fn (*VM, V) V;
   pub const Dyad = *const fn (*VM, V, V) V;
@@ -149,9 +153,16 @@ pub const VM = struct {
     return vm.interpret(txt, tid);
   }
 
-  pub fn load(vm: *VM, path: []const u8) !V {
+  // Read a file's text by path, consulting the in-memory overlay (vfs) before
+  // disk.  Caller owns the returned buffer.
+  pub fn readFileText(vm: *VM, path: []const u8) ![]u8 {
+    if (vm.vfs) |vfs| if (vfs.get(path)) |content| return vm.alloc.dupe(u8, content);
     const io = std.Io.Threaded.global_single_threaded.io();
-    const text = try std.Io.Dir.cwd().readFileAlloc(io, path, vm.alloc, std.Io.Limit.limited(10 * 1024 * 1024));
+    return std.Io.Dir.cwd().readFileAlloc(io, path, vm.alloc, std.Io.Limit.limited(10 * 1024 * 1024));
+  }
+
+  pub fn load(vm: *VM, path: []const u8) !V {
+    const text = try vm.readFileText(path);
     const text_id = try vm.fs.addFile(path, text);
     return vm.interpret(text, text_id);
   }
@@ -620,8 +631,7 @@ pub const VM = struct {
   
   pub fn mapFile(vm: *VM, path: []const u8) !u32 {
     if (vm.fs.findFile(path)) |id| return id;
-    const io = std.Io.Threaded.global_single_threaded.io();
-    const text = try std.Io.Dir.cwd().readFileAlloc(io, path, vm.alloc, std.Io.Limit.limited(10 * 1024 * 1024));
+    const text = try vm.readFileText(path);
     return try vm.fs.addFile(path, text);
   }
 

@@ -4,6 +4,10 @@ pub fn build(b: *std.Build) !void {
   const target   = b.standardTargetOptions(.{});
   const optimize = b.standardOptimizeOption(.{});
   const paranoid = b.option(bool, "paranoid", "Enable extra runtime validation") orelse false;
+  const version  = b.option([]const u8, "version", "Release version string") orelse "0.1.0";
+  // Output name for the ink binary; `make all` sets this per target
+  // (e.g. ink-linux-x64) so cross-built binaries land at distinct paths.
+  const exe_name = b.option([]const u8, "exe-name", "Name of the ink executable") orelse "ink";
 
   // --- Tests ---
   const test_mod = b.createModule(.{
@@ -24,12 +28,13 @@ pub fn build(b: *std.Build) !void {
   const runner_options = b.addOptions();
   runner_options.addOption(bool, "enable_ui", false);
   runner_options.addOption(bool, "paranoid",  paranoid);
+  runner_options.addOption([]const u8, "version", version);
 
   const runner_mod = b.createModule(.{
     .root_source_file = b.path("src/main.zig"),
     .target = target, .optimize = optimize, .link_libc = true,
   });
-  const runner_exe = b.addExecutable(.{ .name = "ink", .root_module = runner_mod });
+  const runner_exe = b.addExecutable(.{ .name = exe_name, .root_module = runner_mod });
   runner_exe.rdynamic = true;  // export k_* symbols so dlopen'd extensions can find them
   runner_mod.addOptions("build_options", runner_options);
   runner_mod.addIncludePath(b.path("src"));
@@ -39,6 +44,17 @@ pub fn build(b: *std.Build) !void {
   if (b.args) |run_args| runner_run_cmd.addArgs(run_args);
   const runner_step = b.step("run", "Run ink (repl / file / stdin eval)");
   runner_step.dependOn(&runner_run_cmd.step);
+
+  // `zig build bin` installs only the ink binary — used by `make all` to
+  // cross-compile the core runner without the (macOS-only) native extensions.
+  const bin_step = b.step("bin", "Build just the ink binary");
+  bin_step.dependOn(&b.addInstallArtifact(runner_exe, .{}).step);
+
+  // `-Dcore-only` skips the native extension graph entirely (Dawn/Metal/GLFW),
+  // which only links on macOS; cross builds pass it so the dependency graph
+  // never references the host-only toolchain.
+  const core_only = b.option(bool, "core-only", "Build only the ink binary, no extensions") orelse false;
+  if (core_only) return;
 
   // --- GPU extension shared library (~20MB with Dawn) ---
   const zgpu_dep  = b.dependency("zgpu",  .{ .target = target, .optimize = optimize });

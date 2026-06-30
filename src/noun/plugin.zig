@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Alloc = std.mem.Allocator;
 const V = @import("value.zig").V;
 
@@ -54,7 +55,9 @@ pub const ExtRegistry = struct {
 
   pub fn deinit(reg: *ExtRegistry) void {
     reg.types.deinit(reg.alloc);
-    for (reg.libs.items) |*lib| lib.close();
+    // std.DynLib has no Windows backend; extensions never load there, so there
+    // is nothing to close (the .close() call would not compile for Windows).
+    if (builtin.os.tag != .windows) for (reg.libs.items) |*lib| lib.close();
     reg.libs.deinit(reg.alloc);
   }
 

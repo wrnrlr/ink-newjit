@@ -9,12 +9,14 @@
 ///   K my_fn(K x) { return ki(ki_val(x) + 1); }
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Alloc = std.mem.Allocator;
 const V    = @import("noun/value.zig").V;
 const N    = @import("noun/array.zig").N;
 const K    = @import("noun/class.zig").K;
 const Dict = @import("noun/dict.zig").Dict;
 const plugin = @import("noun/plugin.zig");
+const home = @import("home.zig");
 const ExtObj   = plugin.ExtObj;
 const ExtVTable = plugin.ExtVTable;
 
@@ -442,7 +444,38 @@ const ffi_vtable_3 = ExtVTable{ .name = "ffi3", .deinit_fn = ffiDeinit, .call1_f
 
 // ── 2: FFI load ───────────────────────────────────────────────────────────────
 
+// The library stem of a path: `./zig-out/lib/libgpu.dylib` → `libgpu`.
+fn libStem(path: []const u8) []const u8 {
+  const start = if (std.mem.lastIndexOfScalar(u8, path, '/')) |s| s + 1 else 0;
+  const name = path[start..];
+  const dot = std.mem.lastIndexOfScalar(u8, name, '.') orelse return name;
+  return name[0..dot];
+}
+
+// Fallback when a dylib path (which the .k files give relative to the source
+// tree) doesn't exist: an installed ink resolves the library from its home dir,
+// trying `$INK_HOME/share/<platform>/<stem>.<ext>` then `$INK_HOME/lib/<stem>.<ext>`
+// with the host's native extension.
+fn openHome(lib_path: []const u8) ?std.DynLib {
+  var hbuf: [512]u8 = undefined;
+  const hdir = home.dir(&hbuf) orelse return null;
+  const stem = libStem(lib_path);
+  for ([_][]const u8{ "share/" ++ home.platform, "lib" }) |sub| {
+    var cbuf: [1024]u8 = undefined;
+    const full = std.fmt.bufPrintZ(&cbuf, "{s}/{s}/{s}.{s}", .{ hdir, sub, stem, home.lib_ext }) catch continue;
+    if (std.DynLib.open(full)) |l| return l else |_| {}
+  }
+  return null;
+}
+
+// Loading native extensions needs dlopen; Zig 0.16's std.DynLib has no Windows
+// backend, so FFI is unavailable there (the impl is a comptime-dead branch).
 pub fn ffiLoad(vm: *anyopaque, lib_path: []const u8, sym_name: []const u8, arity: u8) V {
+  if (builtin.os.tag != .windows) return ffiLoadImpl(vm, lib_path, sym_name, arity);
+  return .{ .err = .nyi };
+}
+
+fn ffiLoadImpl(vm: *anyopaque, lib_path: []const u8, sym_name: []const u8, arity: u8) V {
   const VM = @import("runtime/vm.zig").VM;
   const the_vm: *VM = @ptrCast(@alignCast(vm));
 
@@ -456,7 +489,8 @@ pub fn ffiLoad(vm: *anyopaque, lib_path: []const u8, sym_name: []const u8, arity
   @memcpy(sym_buf[0..sym_name.len], sym_name);
   sym_buf[sym_name.len] = 0;
 
-  var lib = std.DynLib.open(path_buf[0..lib_path.len :0]) catch return .{ .err = .io };
+  var lib = std.DynLib.open(path_buf[0..lib_path.len :0]) catch
+    openHome(lib_path) orelse return .{ .err = .io };
   const fn_ptr = lib.lookup(*anyopaque, sym_buf[0..sym_name.len :0]) orelse {
     lib.close();
     return .{ .err = .domain };

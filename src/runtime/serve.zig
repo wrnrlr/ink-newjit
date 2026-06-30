@@ -10,6 +10,7 @@
 /// For GPU/FFI extensions that run their own event loop, the exported C function
 /// `terse_poll()` does one non-blocking pass and can be called each frame.
 const std = @import("std");
+const builtin = @import("builtin");
 const posix = std.posix;
 const V = @import("../noun/value.zig").V;
 const VM = @import("vm.zig").VM;
@@ -22,7 +23,12 @@ const MAX_CONNS = 64;
 /// Non-blocking single pass over all open connections.
 /// Accepts new clients on listening sockets, reads and dispatches on connected ones.
 /// `handler` overrides the global `pg`/`ps` fallbacks when non-blank.
+/// IPC relies on posix poll(2), which Windows' std lacks — there it is a no-op.
 pub fn pollOnce(vm: *VM, handler: V) void {
+    if (builtin.os.tag != .windows) pollOncePosix(vm, handler);
+}
+
+fn pollOncePosix(vm: *VM, handler: V) void {
     if (vm.conns.map.count() == 0) return;
 
     var pfds: [MAX_CONNS]posix.pollfd = undefined;
@@ -116,8 +122,12 @@ fn resolveHandler(vm: *VM, conn_id: u32, explicit: V) V {
 }
 
 pub fn runLoop(vm: *VM) void {
+    if (builtin.os.tag != .windows) runLoopPosix(vm);
+}
+
+fn runLoopPosix(vm: *VM) void {
     while (true) {
-        pollOnce(vm, .blank);
+        pollOncePosix(vm, .blank);
         _ = std.c.nanosleep(&.{ .sec = 0, .nsec = 1_000_000 }, null);
     }
 }

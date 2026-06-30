@@ -289,9 +289,10 @@ const Server = struct {
 
 // ── stdio framing ───────────────────────────────────────────────────────────
 fn readChunk(s: *Server) !bool {
+  const io = std.Io.Threaded.global_single_threaded.io();
   var tmp: [4096]u8 = undefined;
-  const n = std.posix.read(std.posix.STDIN_FILENO, &tmp) catch |e| {
-    if (e == error.Interrupted) return true;
+  const n = std.Io.File.stdin().readStreaming(io, &.{tmp[0..]}) catch |e| {
+    if (e == error.EndOfStream) return false;
     return e;
   };
   if (n == 0) return false; // EOF

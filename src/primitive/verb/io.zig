@@ -1,6 +1,15 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const VM = @import("../../runtime/vm.zig").VM;
 const Conns = @import("../../runtime/registry.zig").Conns;
+
+// Raw socket read for binary IPC. Windows uses Winsock recv (not posix.read)
+// and IPC is unsupported there, so this errors on Windows without referencing
+// posix.read (a comptime-dead branch keeps it out of the Windows build).
+fn sockRead(sock: anytype, buf: []u8) error{Io}!usize {
+  if (builtin.os.tag != .windows) return std.posix.read(sock, buf) catch error.Io;
+  return error.Io;
+}
 const sort = @import("sort.zig");
 const format = @import("../../noun/format.zig");
 const util = @import("../../util.zig");
@@ -350,7 +359,7 @@ pub fn readConnBinary(vm: *VM, id: u32) V {
   var len_buf: [4]u8 = undefined;
   var total: usize = 0;
   while (total < 4) {
-    const n = std.posix.read(sock, len_buf[total..]) catch return V{ .err = .io };
+    const n = sockRead(sock, len_buf[total..]) catch return V{ .err = .io };
     if (n == 0) return V{ .err = .io };
     total += n;
   }
@@ -359,7 +368,7 @@ pub fn readConnBinary(vm: *VM, id: u32) V {
   defer vm.alloc.free(payload);
   total = 0;
   while (total < payload_len) {
-    const n = std.posix.read(sock, payload[total..]) catch return V{ .err = .io };
+    const n = sockRead(sock, payload[total..]) catch return V{ .err = .io };
     if (n == 0) return V{ .err = .io };
     total += n;
   }
@@ -393,7 +402,7 @@ fn readSocketLine(vm: *VM, id: u32) V {
   defer buf.deinit(vm.alloc);
   var byte: [1]u8 = undefined;
   while (true) {
-    const n = std.posix.read(sock, &byte) catch return V{ .err = .io };
+    const n = sockRead(sock, &byte) catch return V{ .err = .io };
     if (n == 0) {
       // EOF: if nothing was buffered, the connection was closed by the peer.
       if (buf.items.len == 0) return V{ .err = .io };
@@ -411,7 +420,7 @@ fn readSocketBytes(vm: *VM, id: u32) V {
   if (conn.stream == null) return V{ .err = .io };
   const sock = conn.stream.?.socket.handle;
   var buf: [65536]u8 = undefined;
-  const n = std.posix.read(sock, &buf) catch return V{ .err = .io };
+  const n = sockRead(sock, &buf) catch return V{ .err = .io };
   return V.Chars(vm.alloc, buf[0..n]) catch V{ .err = .memory };
 }
 

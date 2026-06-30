@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const eql = std.mem.eql;
 const V = @import("../noun/value.zig").V;
 const N = @import("../noun/array.zig").N;
@@ -6,14 +7,28 @@ const Dict = @import("../noun/dict.zig").Dict;
 const VM = @import("vm.zig").VM;
 const exec_mod = @import("../primitive/verb/exec.zig");
 
-pub fn apply(vm: *VM, sym_idx: u32, args: []const V) !V {
-  const name = vm.getSymbol(sym_idx);
-  if (eql(u8, name, "t")) {
+// Microsecond clock.  std.time has no timestamp fns and posix clock_gettime
+// doesn't compile for Windows, so branch at comptime per platform.
+extern "kernel32" fn GetSystemTimeAsFileTime(*std.os.windows.FILETIME) callconv(.winapi) void;
+
+fn microsNow() i64 {
+  if (builtin.os.tag == .windows) {
+    var ft: std.os.windows.FILETIME = undefined;
+    GetSystemTimeAsFileTime(&ft);
+    // 100ns ticks since 1601; we only use it for relative timing, so the epoch
+    // offset is irrelevant — convert ticks to microseconds.
+    const ticks = (@as(u64, ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+    return @bitCast(@divTrunc(ticks, 10));
+  } else {
     var ts: std.posix.timespec = undefined;
     _ = std.c.clock_gettime(std.posix.CLOCK.MONOTONIC, &ts);
-    const us: i64 = ts.sec * 1_000_000 + @divTrunc(ts.nsec, 1000);
-    return .{ .i = @truncate(us) };
+    return ts.sec * 1_000_000 + @divTrunc(ts.nsec, 1000);
   }
+}
+
+pub fn apply(vm: *VM, sym_idx: u32, args: []const V) !V {
+  const name = vm.getSymbol(sym_idx);
+  if (eql(u8, name, "t")) return .{ .i = @truncate(microsNow()) };
   if (eql(u8, name, "argv")) {
     const has_arg = args.len == 1 and args[0] != .blank;
     if (!has_arg) return vm.argv.ref();
@@ -59,6 +74,15 @@ fn setPrngState(vm: *VM, v: V) V {
 }
 
 fn getEnv(vm: *VM) !V {
+  // std.c.environ doesn't exist on Windows; return an empty environment there.
+  if (builtin.os.tag != .windows) return getEnvPosix(vm);
+  const vals = try N(V).init(vm.alloc, 0);
+  errdefer (V{ .L = vals }).deinit(vm.alloc);
+  const keys = try V.Symbols(vm.alloc, &[_]u32{});
+  return .{ .m = try Dict.init(vm.alloc, keys, V{ .L = vals }) };
+}
+
+fn getEnvPosix(vm: *VM) !V {
   var n: usize = 0;
   while (std.c.environ[n]) |_| n += 1;
 
