@@ -53,7 +53,7 @@ fn castChars(vm: *VM, x: V, y: V) V {
   const type_name = vm.getSymbol(x.s);
   const src = y.C.slice();
   if (eql(u8, type_name, "c")) {
-    return y;
+    return y.ref();  // identity: caller releases y, so hand back a retained ref
   } else if (eql(u8, type_name, "i")) {
     const res = N(i32).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @intCast(v);
@@ -81,7 +81,7 @@ fn castInts(vm: *VM, x: V, y: V) V {
     for (src, res.slice()) |v, *d| d.* = @intCast(v);
     return .{ .C = res };
   } else if (eql(u8, type_name, "i")) {
-    return y;
+    return y.ref();  // identity: caller releases y, so hand back a retained ref
   } else if (eql(u8, type_name, "f")) {
     const res = N(f32).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @floatFromInt(v);
@@ -101,7 +101,7 @@ fn castFloats(vm: *VM, x: V, y: V) V {
     for (src, res.slice()) |v, *d| d.* = @intFromFloat(v);
     return .{ .I = res };
   } else if (eql(u8, type_name, "f")) {
-    return y;
+    return y.ref();  // identity: caller releases y, so hand back a retained ref
   } else if (eql(u8, type_name, "I")) {
     const res = N(i32).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @bitCast(v);

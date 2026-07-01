@@ -50,6 +50,7 @@ const KApi = struct {
   kip:         *const fn (?K) callconv(.c) ?[*]i32,
   kcp:         *const fn (?K) callconv(.c) ?[*]u8,
   ki_val:      *const fn (?K) callconv(.c) i32,
+  KI:          *const fn (i32) callconv(.c) ?K,
   KF:          *const fn (i32) callconv(.c) ?K,
   ku:          *const fn (?K) callconv(.c) void,
 };
@@ -63,6 +64,7 @@ fn kfp(x: ?K) ?[*]f32   { return g_api.?.kfp(x); }
 fn kip(x: ?K) ?[*]i32   { return g_api.?.kip(x); }
 fn kcp(x: ?K) ?[*]u8    { return g_api.?.kcp(x); }
 fn ki_val(x: ?K) i32    { return g_api.?.ki_val(x); }
+fn KI(n: i32) ?K         { return g_api.?.KI(n); }
 fn KF(n: i32) ?K         { return g_api.?.KF(n); }
 fn ku(x: ?K) void        { g_api.?.ku(x); }
 fn k_call(f: K, a: K) ?K { return g_api.?.k_call(f, a); }
@@ -82,7 +84,50 @@ var g_key_s: bool = false;
 var g_key_d: bool = false;
 var g_scroll: f64 = 0.0;
 
-fn keyCb(_: *zglfw.Window, key: c_int, _: c_int, action: c_int, _: c_int) callconv(.c) void {
+// ── Event queue → props`events table ──────────────────────────────────────────
+//
+// Every input transition since the last frame is recorded as one Event and
+// handed to the loop_fn as a flat table (one row per event). One int `kind`
+// column discriminates the row (symbol `=` is broken in ink, so kind is an int,
+// not a symbol); unused payload columns hold 0N/0n nulls the consumer filters.
+//
+//   kind  code            mods    down     x,y            amt
+//   0 text codepoint      0N      0N       cursor px      0n
+//   1 key  GLFW keycode   modbits 1/0      cursor px      0n
+//   2 mouse button index  modbits 1/0      cursor px      0n
+//   3 scroll  0N          0N      0N       cursor px      wheel dy
+//
+const NI: i32 = -2147483648;                 // ink null int (0N)
+const KIND_TEXT: i32 = 0;
+const KIND_KEY: i32 = 1;
+const KIND_MOUSE: i32 = 2;
+const KIND_SCROLL: i32 = 3;
+
+const Event = struct { kind: i32, code: i32, mods: i32, down: i32, x: f32, y: f32, amt: f32 };
+const QCAP = 256;
+var g_events: [QCAP]Event = undefined;
+var g_nev: usize = 0;
+
+// Device-pixel ratio from the previous frame, so callback-time cursor positions
+// match the framebuffer-space mx/my the frame reports. Stable across frames.
+var g_dpr_x: f64 = 1.0;
+var g_dpr_y: f64 = 1.0;
+
+fn cursorPx(win: *zglfw.Window) [2]f32 {
+  var cx: f64 = 0;
+  var cy: f64 = 0;
+  zglfw.getCursorPos(win, &cx, &cy);
+  return .{ @floatCast(cx * g_dpr_x), @floatCast(cy * g_dpr_y) };
+}
+
+fn pushEvent(e: Event) void {
+  if (g_nev < QCAP) {
+    g_events[g_nev] = e;
+    g_nev += 1;
+  }
+}
+
+fn keyCb(win: *zglfw.Window, key: c_int, _: c_int, action: c_int, mods: c_int) callconv(.c) void {
   const down = (action != zglfw.Release);
   switch (key) {
     zglfw.KeyW => g_key_w = down,
@@ -91,10 +136,62 @@ fn keyCb(_: *zglfw.Window, key: c_int, _: c_int, action: c_int, _: c_int) callco
     zglfw.KeyD => g_key_d = down,
     else => {},
   }
+  const c = cursorPx(win);
+  const nan = std.math.nan(f32);
+  pushEvent(.{ .kind = KIND_KEY, .code = key, .mods = mods, .down = if (down) 1 else 0, .x = c[0], .y = c[1], .amt = nan });
 }
 
-fn scrollCb(_: *zglfw.Window, _: f64, yoffset: f64) callconv(.c) void {
+fn charCb(win: *zglfw.Window, codepoint: c_uint) callconv(.c) void {
+  const c = cursorPx(win);
+  pushEvent(.{ .kind = KIND_TEXT, .code = @intCast(codepoint), .mods = NI, .down = NI, .x = c[0], .y = c[1], .amt = std.math.nan(f32) });
+}
+
+fn mouseBtnCb(win: *zglfw.Window, button: c_int, action: c_int, mods: c_int) callconv(.c) void {
+  const c = cursorPx(win);
+  pushEvent(.{ .kind = KIND_MOUSE, .code = button, .mods = mods, .down = if (action == zglfw.Press) 1 else 0, .x = c[0], .y = c[1], .amt = std.math.nan(f32) });
+}
+
+fn scrollCb(win: *zglfw.Window, _: f64, yoffset: f64) callconv(.c) void {
   g_scroll += yoffset;
+  const c = cursorPx(win);
+  pushEvent(.{ .kind = KIND_SCROLL, .code = NI, .mods = NI, .down = NI, .x = c[0], .y = c[1], .amt = @floatCast(yoffset) });
+}
+
+// Build the `events` table (a column dict; the caller flips it to a table with
+// `+`). Returns an empty-column table when no events occurred. Columns are
+// released by the caller after it is folded into the props dict.
+fn buildEvents() ?K {
+  const n: i32 = @intCast(g_nev);
+  const c_kind = KI(n);
+  const c_code = KI(n);
+  const c_mods = KI(n);
+  const c_down = KI(n);
+  const c_x = KF(n);
+  const c_y = KF(n);
+  const c_amt = KF(n);
+  if (g_nev != 0) {
+    const pk = kip(c_kind).?;
+    const pc = kip(c_code).?;
+    const pm = kip(c_mods).?;
+    const pd = kip(c_down).?;
+    const px = kfp(c_x).?;
+    const py = kfp(c_y).?;
+    const pa = kfp(c_amt).?;
+    for (g_events[0..g_nev], 0..) |e, i| {
+      pk[i] = e.kind;
+      pc[i] = e.code;
+      pm[i] = e.mods;
+      pd[i] = e.down;
+      px[i] = e.x;
+      py[i] = e.y;
+      pa[i] = e.amt;
+    }
+  }
+  const keys = [7][*:0]const u8{ "kind", "code", "mods", "down", "x", "y", "amt" };
+  const vals = [7]?K{ c_kind, c_code, c_mods, c_down, c_x, c_y, c_amt };
+  const dict = k_make_dict(7, &keys, &vals);
+  ku(c_kind); ku(c_code); ku(c_mods); ku(c_down); ku(c_x); ku(c_y); ku(c_amt);
+  return dict;
 }
 
 // ── gpu_fill ──────────────────────────────────────────────────────────────────
@@ -367,6 +464,8 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   }
 
   _ = zglfw.setKeyCallback(window, keyCb);
+  _ = zglfw.setCharCallback(window, charCb);
+  _ = zglfw.setMouseButtonCallback(window, mouseBtnCb);
   _ = zglfw.setScrollCallback(window, scrollCb);
 
   const gctx = zgpu.GraphicsContext.create(alloc, .{
@@ -487,6 +586,8 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   const ws = getWindowSize(window);
   const dpr_x: f64 = if (ws[0] > 0) @as(f64, @floatFromInt(fb[0])) / @as(f64, @floatFromInt(ws[0])) else 1.0;
   const dpr_y: f64 = if (ws[1] > 0) @as(f64, @floatFromInt(fb[1])) / @as(f64, @floatFromInt(ws[1])) else 1.0;
+  g_dpr_x = dpr_x; // so callback-time cursor positions match mx/my
+  g_dpr_y = dpr_y;
 
   const swapchain_view = gctx.swapchain.getCurrentTextureView();
   defer swapchain_view.release();
@@ -515,7 +616,7 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   const t: f32 = @floatCast(zglfw.getTime() - start_time);
 
   // Build props dict and call loop_fn
-  const prop_keys = [11][*:0]const u8{ "width", "height", "mx", "my", "time", "kw", "ka", "ks", "kd", "scroll", "rmb" };
+  const prop_keys = [13][*:0]const u8{ "width", "height", "mx", "my", "time", "kw", "ka", "ks", "kd", "scroll", "rmb", "lmb", "events" };
   const v_w = kf(fw); const v_h = kf(fh);
   const v_mx = kf(@floatCast(mx * dpr_x)); const v_my = kf(@floatCast(my * dpr_y));
   const v_t = kf(t);
@@ -527,15 +628,20 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   g_scroll = 0.0;
   const rmb_state = zglfw.getMouseButton(window, zglfw.MouseButtonRight);
   const v_rmb = kf(if (rmb_state == zglfw.Press) 1.0 else 0.0);
-  const prop_vals = [11]?K{ v_w, v_h, v_mx, v_my, v_t, v_kw, v_ka, v_ks, v_kd, v_sc, v_rmb };
+  const lmb_state = zglfw.getMouseButton(window, zglfw.MouseButtonLeft);
+  const v_lmb = kf(if (lmb_state == zglfw.Press) 1.0 else 0.0);
+  const v_events = buildEvents();
+  g_nev = 0;
+  const prop_vals = [13]?K{ v_w, v_h, v_mx, v_my, v_t, v_kw, v_ka, v_ks, v_kd, v_sc, v_rmb, v_lmb, v_events };
 
-  if (k_make_dict(11, &prop_keys, &prop_vals)) |pk| {
+  if (k_make_dict(13, &prop_keys, &prop_vals)) |pk| {
     const result = k_call(loop_fn, pk);
     ku(result);
     ku(pk);
   }
   ku(v_w); ku(v_h); ku(v_mx); ku(v_my); ku(v_t);
-  ku(v_kw); ku(v_ka); ku(v_ks); ku(v_kd); ku(v_sc); ku(v_rmb);
+  ku(v_kw); ku(v_ka); ku(v_ks); ku(v_kd); ku(v_sc); ku(v_rmb); ku(v_lmb);
+  ku(v_events);
 
   renderer.flush(pass, fw, fh, t) catch {};
   pass.release();
@@ -1233,6 +1339,7 @@ fn inkInit(reg: *anyopaque) void {
     .kip         = r.kip,
     .kcp         = r.kcp,
     .ki_val      = r.ki_val,
+    .KI          = r.KI,
     .KF          = r.KF,
     .ku          = r.ku,
   };
