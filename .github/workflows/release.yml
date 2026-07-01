@@ -1,0 +1,64 @@
+name: release
+
+# Cut a release by pushing a tag like `v0.1.0`.  Zig cross-compiles every
+# distributed platform's core binary from a single Linux runner (core-only
+# builds have no external dependencies), so one job produces all artifacts.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag/version to build (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write   # needed to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      # Builds bin/ink-<platform> for all six platforms + the shared k library.
+      - name: Cross-build all platform binaries
+        run: nix build .#ink-cross --print-build-logs
+
+      - name: Package per-platform archives
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
+          VERSION="${VERSION#v}"
+          mkdir -p dist staging
+          # result/ is the ink-cross output: bin/ink-<platform> + lib/
+          for bin in result/bin/ink-*; do
+            name="$(basename "$bin")"            # e.g. ink-linux-x64 or ink-windows-x64.exe
+            plat="${name#ink-}"; plat="${plat%.exe}"
+            rm -rf staging/ink && mkdir -p staging/ink
+            cp -rL result/lib staging/ink/lib
+            case "$plat" in
+              windows-*)
+                cp -L "$bin" staging/ink/ink.exe
+                ( cd staging && zip -qr "../dist/ink-${VERSION}-${plat}.zip" ink )
+                ;;
+              *)
+                cp -L "$bin" staging/ink/ink
+                chmod +x staging/ink/ink
+                tar -C staging -czf "dist/ink-${VERSION}-${plat}.tar.gz" ink
+                ;;
+            esac
+          done
+          ( cd dist && sha256sum * > SHA256SUMS.txt )
+          ls -la dist
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.tag }}
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

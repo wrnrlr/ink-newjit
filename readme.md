@@ -23,6 +23,36 @@ Functional programming with APL2
 watchexec -r -e k -- ./zig-out/bin/ink test/planes.k
 ```
 
+### Nix
+
+The flake pins the exact Zig toolchain (0.16.0) so the dev, CI, and release
+builds are identical.
+
+```sh
+nix develop            # dev shell: zig 0.16.0 + make, gh, watchexec
+nix build              # ReleaseFast core binary -> ./result/bin/ink
+nix run . -- test/planes.k
+nix build .#ink-cross  # core binaries for all six distributed platforms
+```
+
+Depend on ink from another flake:
+
+```nix
+{
+  inputs.ink.url = "github:wrnrlr/ink-newjit";
+  # then either:           inputs.ink.packages.<system>.default
+  # or via the overlay:    nixpkgs.overlays = [ inputs.ink.overlays.default ];  # -> pkgs.ink
+}
+```
+
+The Nix package is the **core** language (no native extensions). The GPU
+extension is macOS-arm64 only and links system GLFW + Dawn, so it stays a
+host build (`make build`). `nix develop` provides GLFW on Darwin for that.
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which cross-builds
+every platform and publishes per-platform archives + `SHA256SUMS.txt` to a
+GitHub Release.
+
 Problems:
 
 a:!9; a[2]:9

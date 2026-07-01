@@ -50,6 +50,22 @@ pub fn build(b: *std.Build) !void {
   const bin_step = b.step("bin", "Build just the ink binary");
   bin_step.dependOn(&b.addInstallArtifact(runner_exe, .{}).step);
 
+  // --- Unicode binary data (lib/data.kb) ---
+  // Defined before the `core-only` early return so a dependency-free build can
+  // still (re)generate lib/data.kb — it is purely host codegen from the unicode
+  // tables embedded in lib/font/data.zig and pulls in no external packages.
+  const data_gen_mod = b.createModule(.{
+    .root_source_file = b.path("lib/data_gen.zig"),
+    .target = target, .optimize = optimize,
+  });
+  const data_gen_exe = b.addExecutable(.{
+    .name = "data_gen",
+    .root_module = data_gen_mod,
+  });
+  const run_data_gen = b.addRunArtifact(data_gen_exe);
+  const data_step = b.step("data", "Regenerate lib/data.kb from unicode tables");
+  data_step.dependOn(&run_data_gen.step);
+
   // `-Dcore-only` skips the native extension graph entirely (Dawn/Metal/GLFW),
   // which only links on macOS; cross builds pass it so the dependency graph
   // never references the host-only toolchain.
@@ -241,17 +257,4 @@ pub fn build(b: *std.Build) !void {
     const slib = b.addLibrary(.{ .name = pair[0], .root_module = pair[1], .linkage = .static });
     static_step.dependOn(&b.addInstallArtifact(slib, .{}).step);
   }
-
-  // --- Unicode binary data (lib/data.kb) ---
-  const data_gen_mod = b.createModule(.{
-    .root_source_file = b.path("lib/data_gen.zig"),
-    .target = target, .optimize = optimize,
-  });
-  const data_gen_exe = b.addExecutable(.{
-    .name = "data_gen",
-    .root_module = data_gen_mod,
-  });
-  const run_data_gen = b.addRunArtifact(data_gen_exe);
-  const data_step = b.step("data", "Regenerate lib/data.kb from unicode tables");
-  data_step.dependOn(&run_data_gen.step);
 }

@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      # Determinate Nix installer — flakes enabled out of the box.
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      # The flake pins Zig 0.16.0; `nix develop` provides it so the toolchain
+      # is identical to local dev and to the release build.
+      - name: Build (ReleaseFast, core)
+        run: nix build .#ink --print-build-logs
+
+      - name: Smoke test the package
+        run: |
+          echo '1+2' | ./result/bin/ink | grep -qx 3
+          echo 'ok: ink evaluates'
+
+      - name: Unit tests + library checks
+        run: nix develop --command make test
+
+  flake-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: nix flake check
+        run: nix flake check --print-build-logs
