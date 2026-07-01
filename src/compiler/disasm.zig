@@ -1,8 +1,8 @@
 const std = @import("std");
-const chunk_mod  = @import("tape.zig");
+const chunk_mod  = @import("../runtime/tape.zig");
 const value      = @import("../noun/value.zig");
 const compiler_mod = @import("compiler.zig");
-const vm_mod       = @import("vm.zig");
+const vm_mod       = @import("../runtime/vm.zig");
 const ast        = @import("../parser/ast.zig");
 
 const OpCode   = chunk_mod.OpCode;

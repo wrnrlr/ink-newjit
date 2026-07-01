@@ -1,7 +1,7 @@
 const std = @import("std");
 const V = @import("../noun/value.zig").V;
 const ArrayFlags = @import("../noun/array.zig").ArrayFlags;
-const OpCode = @import("tape.zig").OpCode;
+const OpCode = @import("../runtime/tape.zig").OpCode;
 
 pub const ValueId = u32;
 pub const NO_VALUE: ValueId = 0xffffffff;

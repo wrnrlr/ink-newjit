@@ -8,15 +8,15 @@ const Op2 = opmod.Op2;
 const Op3 = opmod.Op3;
 const Op4 = opmod.Op4;
 const ir = @import("ir.zig");
-const fntable = @import("fntable.zig");
+const fntable = @import("../runtime/fntable.zig");
 const V = value.V;
 const N = @import("../noun/array.zig").N;
 const Fn = opmod.Fn;
 const Alloc = std.mem.Allocator;
-const Chunk = @import("tape.zig").Chunk;
-const OpCode = @import("tape.zig").OpCode;
+const Chunk = @import("../runtime/tape.zig").Chunk;
+const OpCode = @import("../runtime/tape.zig").OpCode;
 const Pool = @import("../noun/symbol.zig").Pool;
-const Fs = @import("registry.zig").Fs;
+const Fs = @import("../runtime/registry.zig").Fs;
 const fold_mod = @import("../primitive/adverb/fold.zig");
 
 // Strip the common leading indentation (spaces/tabs) from every line of a

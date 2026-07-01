@@ -2,7 +2,7 @@
 // resulting bytecode.
 const std = @import("std");
 const VM = @import("../runtime/vm.zig").VM;
-const disasm = @import("../runtime/disasm.zig");
+const disasm = @import("../compiler/disasm.zig");
 
 pub fn run(vm: *VM, file: []const u8) !void {
   const io = std.Io.Threaded.global_single_threaded.io();
