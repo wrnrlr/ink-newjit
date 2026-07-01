@@ -2,9 +2,12 @@
     .name = .terse,
     .version = "0.16.0-dev.191+9fa2394f8",
     .dependencies = .{
+        // Lazy: only the macOS-arm64 GPU extension pulls this in (via
+        // b.lazyDependency), so core-only and non-macOS builds never fetch it.
         .zglfw = .{
             .url = "git+https://github.com/IridescenceTech/zglfw.git#188d33b5abdb24768905dec1dad6b3ffd60fc324",
             .hash = "zglfw-0.1.0-BghZXaTUAAAkCOlD_2akK4k1zIzo6HIXelVZu39yr_MO",
+            .lazy = true,
         },
         .zgpu = .{
             .path = "patches/zgpu",
@@ -12,9 +15,12 @@
         .zpool = .{
             .path = "patches/zpool",
         },
+        // Lazy: prebuilt Dawn is macOS-arm64 only and fetched on demand by the
+        // GPU extension; keeps every other target's build fully offline.
         .dawn_aarch64_macos = .{
             .url = "https://github.com/michal-z/webgpu_dawn-aarch64-macos/archive/d2360cdfff0cf4a780cb77aa47c57aca03cc6dfe.tar.gz",
             .hash = "N-V-__8AALVIRAIf5nfpx8-4mEo2RGsynVryPQPcHk95qFM5",
+            .lazy = true,
         },
     },
     .paths = .{

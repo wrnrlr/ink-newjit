@@ -87,10 +87,16 @@ pub fn build(b: *std.Build) !void {
   // only builds for aarch64-macos.  Gating it (rather than the whole extension
   // graph) lets the light extensions and static .a libs cross-compile for the
   // other targets.
-  if (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64) {
+  if (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64) blk: {
   // --- GPU extension shared library (~20MB with Dawn) ---
+  // zglfw + Dawn are marked lazy in build.zig.zon, so `-Dcore-only` and non-macOS
+  // builds never fetch them (Zig resolves non-lazy URL deps eagerly, before this
+  // function runs).  When not yet cached, lazyDependency enqueues the fetch and
+  // returns null; break out of the gpu section (without aborting the rest of the
+  // build) and let Zig re-run build() once the fetch completes.
+  const zglfw_dep = b.lazyDependency("zglfw", .{ .target = target, .optimize = optimize }) orelse break :blk;
+  const dawn_dep  = b.lazyDependency("dawn_aarch64_macos", .{}) orelse break :blk;
   const zgpu_dep  = b.dependency("zgpu",  .{ .target = target, .optimize = optimize });
-  const zglfw_dep = b.dependency("zglfw", .{ .target = target, .optimize = optimize });
   const zpool_dep = b.dependency("zpool", .{ .target = target, .optimize = optimize });
   // zgpu requires zpool but doesn't declare it in its module
   zgpu_dep.module("root").addImport("zpool", zpool_dep.module("root"));
@@ -115,8 +121,6 @@ pub fn build(b: *std.Build) !void {
   gpu_ext_mod.addImport("render",     gpu_render_mod);
   gpu_ext_mod.addImport("triangulate", gpu_tri_mod);
   gpu_ext_mod.addImport("kabi",       kabi_mod);
-
-  const dawn_dep = b.dependency("dawn_aarch64_macos", .{});
 
   // zdawn adapter: compiles dawn_proc.c + dawn.cpp (C API + proc-table dispatch)
   const zdawn = zgpu_dep.artifact("zdawn");

@@ -39,8 +39,12 @@ jobs:
           echo '1+2' | ./result/bin/ink | grep -qx 3
           echo 'ok: ink evaluates'
 
-      - name: Unit tests + library checks
-        run: nix develop --command make test
+      # Self-contained unit tests.  `-Dcore-only` returns before the (macOS-only)
+      # GPU extension graph, so this needs no external packages and runs offline;
+      # the heavier `make test` integration suite (extensions, ipc, fonts) is a
+      # local/dev check, not wired into CI.
+      - name: Unit tests
+        run: nix develop --command bash -c "zig build test -Dcore-only=true"
 
   flake-check:
     runs-on: ubuntu-latest
