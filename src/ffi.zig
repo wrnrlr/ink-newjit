@@ -518,11 +518,10 @@ pub fn ffiLoad(vm: *anyopaque, lib_path: []const u8, sym_name: []const u8, arity
 }
 
 fn ffiLoadDlopen(vm_alloc: Alloc, vm: *anyopaque, lib_path: []const u8, sym_name: []const u8, arity: u8) V {
-  // dlopen the lib; its terse_init registers its functions via k_register.
+  // dlopen the lib; its terse_init registers its functions by name via
+  // k_register, which the second lookup then resolves.
   ensureLoaded(lib_path);
   if (ext_fns.get(sym_name)) |e| return wrapFn(vm_alloc, vm, e.ptr, arity);
-  // Legacy: an extension that hasn't migrated to k_register — dlsym directly.
-  if (legacyResolve(lib_path, sym_name)) |fn_ptr| return wrapFn(vm_alloc, vm, fn_ptr, arity);
   return .{ .err = .domain };
 }
 
@@ -548,16 +547,6 @@ fn ensureLoaded(lib_path: []const u8) void {
 
   const key = c_alloc.dupe(u8, lib_path) catch { lib.close(); return; };
   loaded_libs.put(c_alloc, key, lib) catch { c_alloc.free(key); lib.close(); };
-}
-
-// Legacy dlsym resolution on an already-loaded handle (pre-k_register extensions).
-fn legacyResolve(lib_path: []const u8, sym_name: []const u8) ?*const anyopaque {
-  const lib = loaded_libs.getPtr(lib_path) orelse return null;
-  var sym_buf: [256]u8 = undefined;
-  if (sym_name.len >= sym_buf.len) return null;
-  @memcpy(sym_buf[0..sym_name.len], sym_name);
-  sym_buf[sym_name.len] = 0;
-  return lib.lookup(*anyopaque, sym_buf[0..sym_name.len :0]);
 }
 
 // Wrap a resolved extension function pointer in a callable ExtObj.
