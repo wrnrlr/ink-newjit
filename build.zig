@@ -56,9 +56,10 @@ pub fn build(b: *std.Build) !void {
   // tables embedded in lib/font/data.zig and pulls in no external packages.
   const data_gen_mod = b.createModule(.{
     .root_source_file = b.path("lib/data_gen.zig"),
-    // data_gen uses std.heap.c_allocator, so it must link libc explicitly.
-    // macOS links libc implicitly (so this built there), but Linux requires it.
-    .target = target, .optimize = optimize, .link_libc = true,
+    // No libc: data_gen uses page_allocator + raw syscalls, so it links fully
+    // static and runs in libc-less build sandboxes (Nix/CI) where a dynamically
+    // linked host tool can't find the system loader.
+    .target = target, .optimize = optimize,
   });
   const data_gen_exe = b.addExecutable(.{
     .name = "data_gen",

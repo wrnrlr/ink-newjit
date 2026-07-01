@@ -16,7 +16,11 @@
 const std = @import("std");
 const data = @import("font/data.zig");
 
-const alloc = std.heap.c_allocator;
+// page_allocator (mmap syscall, no libc) keeps this a fully static host tool, so
+// the `data` build step runs in libc-less sandboxes (Nix/CI) where a dynamically
+// linked binary can't find the system loader.  It's a one-shot codegen; the
+// allocator choice is not perf-sensitive.
+const alloc = std.heap.page_allocator;
 
 const VERSION: u8 = 0x03;
 const TAG_L: u8   = 9;
