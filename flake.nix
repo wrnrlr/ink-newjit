@@ -44,6 +44,15 @@
           "x86_64-linux" = "linux-x64";
         }.${system} or (throw "unsupported system ${system}");
 
+        # On Linux, build the host binary against the static musl triple (same as
+        # ink-cross) so it has no dynamic loader dependency and runs everywhere —
+        # a glibc-linked binary references an ELF interpreter that isn't present
+        # in the pure Nix store.  macOS links libSystem (always present natively).
+        hostTargetFlag =
+          if pkgs.stdenv.isLinux
+          then "-Dtarget=${crossTargets.${hostPlatform}}"
+          else "";
+
         # Shared bits of the build: a writable Zig cache (the sandbox has no
         # network, but core-only needs none) and regenerated unicode data.
         zigCacheSetup = ''
@@ -75,7 +84,7 @@
             runHook preBuild
             ${zigCacheSetup}
             zig build bin -Dcore-only=true -Doptimize=ReleaseFast \
-              -Dversion=${version} -Dexe-name=ink-${hostPlatform}
+              -Dversion=${version} ${hostTargetFlag} -Dexe-name=ink-${hostPlatform}
             runHook postBuild
           '';
 
