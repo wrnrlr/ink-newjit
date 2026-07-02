@@ -7,8 +7,8 @@ chkN: 0
 chk: {[name;got;want] chkN::chkN+1; $[got~want; pass::pass+1; {fail::fail+1; `0 0:"FAIL #",($chkN)," ",name}[]]; 0}
 
 / ── parse plain + zipped fixtures ────────────────────────────────────────────
-u: ReadFbx "test/data/cube.fbx"
-z: ReadFbx "test/data/cube_zip.fbx"
+u: fbx.read "test/data/cube.fbx"
+z: fbx.read "test/data/cube_zip.fbx"
 
 / ── structure / scalar property decoding ─────────────────────────────────────
 chk["toplevel count"; #u; 1]
@@ -38,7 +38,7 @@ chk["uname split";   fbx.uname "Cube",(,`c$0),(,`c$1),"Geometry"; "Cube"]
 chk["uname no-sep";  fbx.uname "Plain"; "Plain"]
 
 / ── real Autodesk file (binary, zlib-compressed arrays, v7400) ───────────────
-s: ReadFbx "data/FBX/Sword.fbx"
+s: fbx.read "data/FBX/Sword.fbx"
 chk["sword toplevel";   {x`name}'s; `FBXHeaderExtension`FileId`CreationTime`Creator`GlobalSettings`Documents`References`Definitions`Objects`Connections`Takes]
 sobj: *s@&({$[(x`name)~`Objects;1;0]}'s)
 sg: fbx.get[sobj;`Geometry]

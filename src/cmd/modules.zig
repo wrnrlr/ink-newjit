@@ -61,45 +61,95 @@ pub const ModuleLoader = struct {
     return if (std.mem.endsWith(u8, name, ".k")) name[0 .. name.len - 2] else name;
   }
 
+  // Record `ident → path` in the index (skip if already present). Both slices
+  // are duped and owned by self.alloc.
+  fn addEntry(self: *ModuleLoader, ident: []const u8, path: []const u8) !void {
+    if (self.index.contains(ident)) return;
+    const key = try self.alloc.dupe(u8, ident);
+    errdefer self.alloc.free(key);
+    const val = try self.alloc.dupe(u8, path);
+    errdefer self.alloc.free(val);
+    try self.index.put(key, val);
+  }
+
   /// Index the public identifiers defined in one module's `content`, mapping
-  /// each to `path`.  Public = starts with an uppercase letter, or is a dotted
-  /// name namespaced under the file's stem (e.g. `regex.match` in regex.k).
-  /// Works the same whether the source comes from disk or an embedded bundle.
+  /// each to `path`.  A module's public surface is defined by its `\d`
+  /// namespaces: `\d ns` exports every `ns.member`; `\d ns a b` exports only
+  /// `ns.a`/`ns.b`.  The bare namespace name (`ns`) and every top-level name at
+  /// global scope (outside any `\d`) are also indexed, so both `ns.member` and
+  /// a bare `ns` / `2:"ns"` reference trigger the load.  Works the same whether
+  /// the source comes from disk or an embedded bundle.
   pub fn scanText(self: *ModuleLoader, path: []const u8, content: []const u8) !void {
-    const stem = stemOf(path);
+    var ns: ?[]const u8 = null;      // current namespace (slice into content)
+    var all_public = true;           // bare `\d ns` → every member public
+    var pubs: std.ArrayListUnmanaged([]const u8) = .empty; // explicit public members
+    defer pubs.deinit(self.alloc);
+
     var lines = std.mem.splitScalar(u8, content, '\n');
     while (lines.next()) |line| {
       var skip: usize = 0;
       while (skip < line.len and (line[skip] == ' ' or line[skip] == '\t')) skip += 1;
       const trimmed = line[skip..];
       if (trimmed.len == 0 or trimmed[0] == '/') continue;
+
+      // `\d` namespace directive: `\d` (reset), `\d ns`, or `\d ns a b`.
+      if (trimmed[0] == '\\' and trimmed.len >= 2 and trimmed[1] == 'd' and
+          (trimmed.len == 2 or trimmed[2] == ' ' or trimmed[2] == '\t')) {
+        pubs.clearRetainingCapacity();
+        var it = std.mem.tokenizeAny(u8, trimmed[2..], " \t");
+        if (it.next()) |name| {
+          ns = name;
+          try self.addEntry(name, path);
+          all_public = true;
+          while (it.next()) |p| { all_public = false; try pubs.append(self.alloc, p); }
+        } else ns = null;
+        continue;
+      }
+
       if (!std.ascii.isAlphabetic(trimmed[0])) continue;
 
-      // [A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)*
+      // [A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)* — a def LHS may be dotted
+      // (the `stem.member` convention used by the parser modules).
       var end: usize = 1;
       while (end < trimmed.len and std.ascii.isAlphanumeric(trimmed[end])) end += 1;
       while (end + 1 < trimmed.len and trimmed[end] == '.' and std.ascii.isAlphabetic(trimmed[end + 1])) {
         end += 1; // consume '.'
         while (end < trimmed.len and std.ascii.isAlphanumeric(trimmed[end])) end += 1;
       }
-      const ident = trimmed[0..end];
+      const name = trimmed[0..end];
 
       var after = end;
       while (after < trimmed.len and (trimmed[after] == ' ' or trimmed[after] == '\t')) after += 1;
       if (after >= trimmed.len or trimmed[after] != ':') continue;
 
-      const is_upper = std.ascii.isUpper(ident[0]);
-      const is_module = ident.len > stem.len + 1 and
-        std.mem.startsWith(u8, ident, stem) and ident[stem.len] == '.';
-      if (!is_upper and !is_module) continue;
-
-      if (self.index.contains(ident)) continue;
-      const key = try self.alloc.dupe(u8, ident);
-      errdefer self.alloc.free(key);
-      const val = try self.alloc.dupe(u8, path);
-      errdefer self.alloc.free(val);
-      try self.index.put(key, val);
+      if (ns != null and std.mem.indexOfScalar(u8, name, '.') == null) {
+        // Unqualified member inside `\d ns` — index `ns.name` only when public.
+        var is_pub = all_public;
+        if (!is_pub) for (pubs.items) |p| { if (std.mem.eql(u8, p, name)) { is_pub = true; break; } };
+        if (!is_pub) continue;
+        var buf: [256]u8 = undefined;
+        const q = std.fmt.bufPrint(&buf, "{s}.{s}", .{ ns.?, name }) catch continue;
+        try self.addEntry(q, path);
+      } else if (std.mem.indexOfScalar(u8, name, '.')) |dot| {
+        // Explicit `stem.member` global (the dotted-convention parser modules):
+        // index the full name and its namespace prefix so both `stem` and
+        // `stem.member` references trigger the load.  Bare (undotted) global
+        // names are NOT indexed — they are almost always private helpers
+        // (`so`, `tmp`, …) and indexing them would flood autoload, pulling in
+        // half the library on any common identifier.
+        try self.addEntry(name, path);
+        try self.addEntry(name[0..dot], path);
+      }
     }
+  }
+
+  /// Look up `ident` in the index, falling back from a qualified name to its
+  /// namespace: `csv.read` → try `csv.read`, then `csv`.
+  fn indexLookup(self: *ModuleLoader, ident: []const u8) ?[]const u8 {
+    if (self.index.get(ident)) |p| return p;
+    if (std.mem.indexOfScalar(u8, ident, '.')) |dot|
+      if (self.index.get(ident[0..dot])) |p| return p;
+    return null;
   }
 
   /// Scan source for identifier tokens (skipping comments and strings),
@@ -143,7 +193,7 @@ pub const ModuleLoader = struct {
         const ident = source[i..end];
         i = end;
 
-        if (self.index.get(ident)) |path| {
+        if (self.indexLookup(ident)) |path| {
           if (!self.loaded.contains(path)) {
             const path_key = try self.alloc.dupe(u8, path);
             errdefer self.alloc.free(path_key);
@@ -167,6 +217,10 @@ pub const ModuleLoader = struct {
     const text = try vm.readFileText(path);
     self.autoLoad(vm, text) catch {};
     const id = try vm.fs.addFile(path, text);
+    // A module's `\d` namespace must not leak into the scope that triggered the
+    // autoload (or into the next module scanned in the same batch).
+    const saved_ns = vm.compiler.namespace;
+    defer vm.compiler.namespace = saved_ns;
     _ = try vm.interpret(text, id);
   }
 
@@ -215,7 +269,15 @@ pub const ModuleLoader = struct {
           var k = start;
           while (k < source.len and source[k] != '"') k += 1;
           const pathstr = source[start..k];
-          if (std.mem.endsWith(u8, pathstr, ".k")) try self.addDep(out, queue, pathstr);
+          if (std.mem.endsWith(u8, pathstr, ".k")) {
+            try self.addDep(out, queue, pathstr);
+          } else if (std.mem.indexOfScalar(u8, pathstr, '/') == null and
+                     std.mem.indexOfScalar(u8, pathstr, '.') == null and pathstr.len > 0) {
+            // Std-lib shorthand: `2:"math"` → lib/math.k.
+            var buf: [256]u8 = undefined;
+            if (std.fmt.bufPrint(&buf, "lib/{s}.k", .{pathstr})) |lib|
+              try self.addDep(out, queue, lib) else |_| {}
+          }
           i = if (k < source.len) k + 1 else k;
           continue;
         }
@@ -239,7 +301,7 @@ pub const ModuleLoader = struct {
         }
         const ident = source[i..end];
         i = end;
-        if (self.index.get(ident)) |path| try self.addDep(out, queue, path);
+        if (self.indexLookup(ident)) |path| try self.addDep(out, queue, path);
         continue;
       }
 

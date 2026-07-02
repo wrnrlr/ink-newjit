@@ -74,7 +74,7 @@ cam:: CamNew[]                  / orbit camera state (see lib/camera.k)
 pbrHandle:: 0; skyHandle:: 0
 
 / ── Window loop ───────────────────────────────────────────────────────────────
-RunWindow[{[props]
+window.run[{[props]
   $[pbrHandle=0; pbrHandle:: CompileMesh[pbrVtx; PbrFragment]; 0]
   $[skyHandle=0; skyHandle:: CompileSpirV[skyWds; 0];      0]
 

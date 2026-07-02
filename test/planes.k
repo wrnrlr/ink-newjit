@@ -44,7 +44,7 @@ vert: VertexShader[[pos:`v3;nor:`v3]; [vNor:`v3]; {[pos;nor]
 }]
 
 handle:: 0
-RunWindow[{[props]
+window.run[{[props]
   $[handle=0; handle:: CompileMesh[vert; frag]; 0]
   DrawMesh[verts; handle]
 }; 0]

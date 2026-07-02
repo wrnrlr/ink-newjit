@@ -86,7 +86,7 @@ fbx.node:{
 fbx.toplevel:{({0<fbx.peekend[]}){x,,fbx.node[]}/()}
 
 / --- entry point --------------------------------------------------------
-ReadFbx:{[path]fbx.b::`i$1:path;fbx.ver::fbx.u32 fbx.b@23+!4;fbx.w::$[fbx.ver<7500;4;8];fbx.nullsz::(3*fbx.w)+1;fbx.p::27;fbx.toplevel[]}
+fbx.read:{[path]fbx.b::`i$1:path;fbx.ver::fbx.u32 fbx.b@23+!4;fbx.w::$[fbx.ver<7500;4;8];fbx.nullsz::(3*fbx.w)+1;fbx.p::27;fbx.toplevel[]}
 
 / --- tree accessors -----------------------------------------------------
 / fbx.all[node;`Name] -> list of child nodes whose name matches

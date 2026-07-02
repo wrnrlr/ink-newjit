@@ -1,7 +1,9 @@
-/ lib/parquet.k — load Parquet extension
+/ lib/parquet.k — Parquet extension
 /
 / Build first:  zig build parquet
-/ Public name ReadParquet auto-loads this file on first use.
+/ Use:          parquet.read "path.parquet"   (auto-loads on first use)
 
+\d parquet read
 so: "./zig-out/lib/libparquet.dylib"
-ReadParquet: so 2: (`ReadParquet; 1)   / ReadParquet "path.parquet"  → table
+read: so 2: (`ReadParquet; 1)   / parquet.read "path.parquet"  → table
+\d

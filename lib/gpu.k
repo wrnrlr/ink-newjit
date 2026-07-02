@@ -4,7 +4,7 @@
 / Load with:    2: "lib/gpu.k"
 
 so: "./zig-out/lib/libgpu.dylib"
-/ RunWindow calls loop_fn(props) each frame. props is a dict:
+/ window.run calls loop_fn(props) each frame. props is a dict:
 /   width height mx my time     — framebuffer size, cursor pos (px), seconds
 /   events                      — a TABLE of every input event since last frame
 /                                 (one row each; use it directly, no flip). Columns:
@@ -16,9 +16,9 @@ so: "./zig-out/lib/libgpu.dylib"
 /                                   amt   scroll wheel delta (else 0n)
 /                                 unused cells are 0N/0n nulls — filter them.
 / For held keys/buttons, track down/up events yourself (see lib/camera.k).
-RunWindow:    so 2: (`gpuRun;       2)   / (loop_fn; config) → 0 : blocking event loop
+window.run:    so 2: (`gpuRun;       2)   / (loop_fn; config) → 0 : blocking event loop
 FillFrame:    so 2: (`gpuFill;      2)   / (verts_F; frag_F) → 0 : draw triangles with built-in shader
-Tessellate:   so 2: (`gpuTess;      1)   / pts_F → verts_F   : tessellate polygon
+tessellate:   so 2: (`gpuTess;      1)   / pts_F → verts_F   : tessellate polygon
 CompileSpirV: so 2: (`gpuSpirv;     2)   / (spirv_I; 0) → handle : compile SPIR-V fragment shader
 DrawShader:   so 2: (`gpuFillShader;2)   / (verts_F; handle) → 0 : draw triangles with custom SPIR-V shader
 RunShader:    so 2: (`gpuCompute;   2)   / (spirv_I; input_F) → output_F : run compute shader

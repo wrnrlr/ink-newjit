@@ -7,6 +7,7 @@ const Compiler = @import("../compiler/compiler.zig").Compiler;
 const Fs    = @import("registry.zig").Fs;
 const Conns = @import("registry.zig").Conns;
 const command = @import("command.zig");
+const home = @import("../home.zig");
 const FnTables = @import("fntable.zig").FnTables;
 const call = @import("call.zig");
 const V = @import("../noun/value.zig").V;
@@ -153,17 +154,47 @@ pub const VM = struct {
     return vm.interpret(txt, tid);
   }
 
-  // Read a file's text by path, consulting the in-memory overlay (vfs) before
-  // disk.  Caller owns the returned buffer.
-  pub fn readFileText(vm: *VM, path: []const u8) ![]u8 {
-    if (vm.vfs) |vfs| if (vfs.get(path)) |content| return vm.alloc.dupe(u8, content);
+  // Std-lib shorthand: a bare name with no path separator and no extension
+  // (`math`) resolves to the k file `lib/math.k`, searching the working-dir lib
+  // (dev tree), $INK_HOME/lib (installed), and the embedded bundle overlay.
+  // Returns an allocated path when a candidate exists, else `path` unchanged.
+  // Callers free the result only when `result.ptr != path.ptr`.
+  fn resolveLibPath(vm: *VM, path: []const u8) []const u8 {
+    if (path.len == 0) return path;
+    if (std.mem.indexOfScalar(u8, path, '/') != null) return path;
+    if (std.mem.indexOfScalar(u8, path, '.') != null) return path;
+    // ./lib/<name>.k — also the key form used by the bundle overlay.
+    const rel = std.fmt.allocPrint(vm.alloc, "lib/{s}.k", .{path}) catch return path;
+    if (vm.vfs) |vfs| if (vfs.contains(rel)) return rel;
     const io = std.Io.Threaded.global_single_threaded.io();
-    return std.Io.Dir.cwd().readFileAlloc(io, path, vm.alloc, std.Io.Limit.limited(10 * 1024 * 1024));
+    if (std.Io.Dir.cwd().access(io, rel, .{})) |_| return rel else |_| {}
+    // $INK_HOME/lib/<name>.k (installed layout).
+    var hbuf: [512]u8 = undefined;
+    if (home.dir(&hbuf)) |hdir| {
+      const abs = std.fmt.allocPrint(vm.alloc, "{s}/lib/{s}.k", .{ hdir, path }) catch { vm.alloc.free(rel); return path; };
+      if (std.Io.Dir.cwd().access(io, abs, .{})) |_| { vm.alloc.free(rel); return abs; } else |_| vm.alloc.free(abs);
+    }
+    vm.alloc.free(rel);
+    return path;
+  }
+
+  // Read a file's text by path, consulting the in-memory overlay (vfs) before
+  // disk.  Applies the std-lib shorthand (`math` → `lib/math.k`).  Caller owns
+  // the returned buffer.
+  pub fn readFileText(vm: *VM, path: []const u8) ![]u8 {
+    const p = vm.resolveLibPath(path);
+    defer if (p.ptr != path.ptr) vm.alloc.free(p);
+    if (vm.vfs) |vfs| if (vfs.get(p)) |content| return vm.alloc.dupe(u8, content);
+    const io = std.Io.Threaded.global_single_threaded.io();
+    return std.Io.Dir.cwd().readFileAlloc(io, p, vm.alloc, std.Io.Limit.limited(10 * 1024 * 1024));
   }
 
   pub fn load(vm: *VM, path: []const u8) !V {
     const text = try vm.readFileText(path);
     const text_id = try vm.fs.addFile(path, text);
+    // A loaded module's `\d` namespace must not leak into the caller's scope.
+    const saved_ns = vm.compiler.namespace;
+    defer vm.compiler.namespace = saved_ns;
     return vm.interpret(text, text_id);
   }
 

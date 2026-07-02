@@ -4,13 +4,13 @@
 / Run:          ink test/edit.k
 /
 / Shows three things worth reusing elsewhere:
-/  1. Input as a TABLE. RunWindow hands each frame a `props`events` column dict —
+/  1. Input as a TABLE. window.run hands each frame a `props`events` column dict —
 /     one row per input event since the last frame. We flip it to a table (+) and
 /     filter by the int `kind` column (0 text,1 key,2 mouse,3 scroll). Payload
 /     columns carry 0N/0n where they don't apply. (kind is an int, not a symbol,
 /     because symbol `=` is broken in ink.)
 /  2. Unicode. Lines are stored as codepoint INT-vectors, not byte strings —
-/     FontShape int-casts its argument, so passing codepoints renders the whole
+/     font.shape int-casts its argument, so passing codepoints renders the whole
 /     Unicode cmap. Text events already deliver decoded codepoints; the `u8`
 /     helper decodes UTF-8 source literals for the seed text.
 /  3. Speed. Each glyph is tessellated ONCE (cached by glyph id); a frame only
@@ -21,14 +21,14 @@
 2: "lib/font.k"
 2: "lib/gpu.k"
 
-FONT: (ReadFont "font/FiraCode-Regular.ttf") 0   / face 0 (FiraCode is monospaced)
+FONT: (font.read "font/FiraCode-Regular.ttf") 0   / face 0 (FiraCode is monospaced)
 
 / ── Metrics / layout ─────────────────────────────────────────────────────────
 SZ:     22.                        / glyph size in pixels
-SCALE:  FontScale[FONT; SZ]
+SCALE:  font.scale[FONT; SZ]
 AV:     (FONT`hmtx)`adv            / advance widths (font units); monospace ⇒ all equal
 ADV:    SCALE * AV 0               / one cell width in pixels
-MET:    FontMetrics[FONT; SZ]      / (ascent; descent; lineGap), descent < 0
+MET:    font.metrics[FONT; SZ]      / (ascent; descent; lineGap), descent < 0
 ASC:    MET 0
 LINEH:  6. + (MET 0) - MET 1       / baseline-to-baseline pixel step
 MARGIN: 18.
@@ -60,20 +60,24 @@ CR: 0                              / caret row
 CC: 0                              / caret column
 
 / ── Geometry (verbatim from typeset.k) ───────────────────────────────────────
-quad:  {[x;y;w;h] Tessellate (x,y, (x+w),y, (x+w),(y+h), x,(y+h))}
+quad:  {[x;y;w;h] tessellate (x,y, (x+w),y, (x+w),(y+h), x,(y+h))}
 shift: {[t;ox;oy] t + ((#t) # ox,oy,0.,0.)}
 
 / ── Glyph cache ──────────────────────────────────────────────────────────────
 / Tessellating a glyph (Bézier flatten + triangulate) is the expensive step, so
 / do it once per glyph id and keep the local-space vertices. A cache miss appends
 / to the parallel CKEYS/CVALS globals (found via `?`); hits just reuse. Contours
-/ are packed with NaN pairs so Tessellate resolves counters (holes in a,e,o,…).
+/ are packed with NaN pairs so tessellate resolves counters (holes in a,e,o,…).
 CKEYS: !0                          / cached glyph ids (I)
 CVALS: ()                          / their local vertex buffers (L)
 / 0.+ copies the tessellation out of the extension's C-allocated buffer into VM
 / memory, so caching it in a global is freed with the matching allocator at exit.
-cacheGlyph: {[gid] cs: FontOutline[FONT; gid; SZ]; v: $[0=#cs; 0#0.; 0. + Tessellate (,/{x,0n,0n}'cs)]; CKEYS:: CKEYS,gid; CVALS:: CVALS,,v; v}
-glyphLocal: {[gid] i: CKEYS?gid; $[i<#CKEYS; CVALS i; cacheGlyph gid]}
+cacheGlyph: {[gid]
+  cs:font.outline[FONT;gid;SZ];
+  v:$[0=#cs;0#0.;0.+tessellate(,/{x,0n,0n}'cs)];
+  CKEYS,::gid;CVALS,::,v;
+  v}
+glyphLocal: {[gid]$[(CKEYS?gid)<#CKEYS;CVALS i;cacheGlyph gid]}
 
 / The current row's glyph ids and baseline live in globals so the mapped builder
 / captures no vector (a vector captured into a '-mapped projection hits the
@@ -81,7 +85,7 @@ glyphLocal: {[gid] i: CKEYS?gid; $[i<#CKEYS; CVALS i; cacheGlyph gid]}
 RowGids: !0
 RowBase: 0.
 glyphAt:   {[i] shift[glyphLocal RowGids i; MARGIN + ADV*i; RowBase]}
-lineVerts: {[r] RowGids:: FontShape[FONT; LINES r]; RowBase:: MARGIN + ASC + LINEH*r; n: #RowGids; $[0=n; 0#0.; ,/{glyphAt x}' !n]}
+lineVerts: {[r] RowGids:: font.shape[FONT; LINES r]; RowBase:: MARGIN + ASC + LINEH*r; n: #RowGids; $[0=n; 0#0.; ,/{glyphAt x}' !n]}
 textVerts: {[] $[0=#LINES; 0#0.; ,/{lineVerts x}' !#LINES]}
 
 / Whole-document vertex buffer, rebuilt only when the frame changed something.
@@ -147,4 +151,4 @@ run: {[props]
   FillFrame[caretVerts[];    CARET]   / caret (drawn under the glyphs)
   FillFrame[GLYPHS;          PEN]}    / all glyphs in one cached draw
 
-RunWindow[run; WINW,WINH]
+window.run[run; WINW,WINH]

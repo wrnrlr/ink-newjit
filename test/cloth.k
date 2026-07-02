@@ -149,4 +149,4 @@ loop: {[props]
   DrawMesh[buildClothMesh[]; gHandle]
 }
 
-RunWindow[loop; 0]
+window.run[loop; 0]

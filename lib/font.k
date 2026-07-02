@@ -16,10 +16,10 @@
 / present in the file appear in the dict.
 /
 / Outline extraction and text shaping are rebuilt on top of this in a later
-/ step (the old tatfi-backed FontShape/FontOutline/FontMetrics are retired).
+/ step (the old tatfi-backed font.shape/font.outline/font.metrics are retired).
 
 so:"./zig-out/lib/libfont.dylib"
-ReadFont:so 2:(`ReadFont;1)      / "path" → L of face dicts
+font.read:so 2:(`ReadFont;1)      / "path" → L of face dicts
 cffOutline0:so 2:(`cffOutline;1) / (charstring_C; gsubrs_L; lsubrs_L; scale_f) → L of flat F contours (CFF outlines)
 
 FontFace:`a`b`c
@@ -39,7 +39,7 @@ FontGlyph: {[f;cp] c: f`cmap; cps: c`cp; $[cp in cps; (c`gid) cps?cp; 0]}
 FontUpm: {[f] f[`head]`upm}
 
 / Em→pixel scale factor at a given pixel size.
-FontScale: {[f;sz] sz % FontUpm f}
+font.scale: {[f;sz] sz % FontUpm f}
 
 / ── outline flattening (glyf TrueType outlines → polyline contours) ────────────
 /
@@ -103,7 +103,7 @@ GlyphContours: {[f;gid] FpFont:: f; GlyphC gid}
 
 / Pixel-space outline for a glyph: scales to size and flips y (font y-up → screen
 / y-down). f: face.  gid: glyph id.  sz: pixel size.  → L of flat F [x,y,x,y,...]
-/ Pass each contour to Tessellate (as the old API did).
+/ Pass each contour to tessellate (as the old API did).
 fpEmit: {[sc;c] xs: {x 0}'c; ys: {x 1}'c; ,/ +((sc*xs); (-sc)*ys)}
 
 / CFF (PostScript) outlines — Type 2 charstrings interpreted in Zig. Returns the
@@ -115,14 +115,14 @@ fpOutG:    {[sc;gid] fpEmit[sc]' GlyphC gid}
 
 / Pixel-space outline for a glyph: scales to size, flips y (font y-up → screen
 / y-down). Dispatches on glyph flavour (glyf vs CFF). f: face. gid: glyph id.
-/ sz: pixel size. → L of flat F [x,y,x,y,...]. Pass each contour to Tessellate.
-FontOutline: {[f;gid;sz] FpFont:: f; $[`CFF in !f; cffOutG[FontScale[f;sz];gid]; fpOutG[FontScale[f;sz];gid]]}
+/ sz: pixel size. → L of flat F [x,y,x,y,...]. Pass each contour to tessellate.
+font.outline: {[f;gid;sz] FpFont:: f; $[`CFF in !f; cffOutG[font.scale[f;sz];gid]; fpOutG[font.scale[f;sz];gid]]}
 
 / Outlines for MANY glyphs at once → list (per glyph) of L of flat F contours.
 / Use this to render a string: it threads the face dict via the FpFont global so
 / nothing captures the (list-bearing) face dict in a mapped projection (which
 / would hit the runtime bug). f: face. sz: px. gids: I glyph ids.
-FontOutlines:{[f;sz;gids] FpFont::f; $[`CFF in !f; cffOutG[FontScale[f;sz]]'gids; fpOutG[FontScale[f;sz]]'gids]}
+font.outlines:{[f;sz;gids] FpFont::f; $[`CFF in !f; cffOutG[font.scale[f;sz]]'gids; fpOutG[font.scale[f;sz]]'gids]}
 
 / Map a char string to glyph ids via the cmap (no ligatures/kerning).
 / Vectorized: find every codepoint in the cmap at once (capturing the face dict
@@ -130,7 +130,7 @@ FontOutlines:{[f;sz;gids] FpFont::f; $[`CFF in !f; cffOutG[FontScale[f;sz]]'gids
 / find→length: an absent codepoint yields pos=#cps, so append a 0 (.notdef) fallback gid
 / at that index — `(gid,0)@pos` — keeping the lookup total. The membership mask is then
 / belt-and-suspenders (an absent code already maps to gid 0).
-FontShape: {[f;s] c: f`cmap; cps: c`cp; codes: `i$s; pos: cps?codes; (codes in cps)*((c`gid),0)@pos}
+font.shape: {[f;s] c: f`cmap; cps: c`cp; codes: `i$s; pos: cps?codes; (codes in cps)*((c`gid),0)@pos}
 
 / Pixel metrics at a size: (ascent; descent; lineGap) in pixels.
-FontMetrics: {[f;sz] (FontScale[f;sz]) * f[`hhea]`ascent`descent`lineGap}
+font.metrics: {[f;sz] (font.scale[f;sz]) * f[`hhea]`ascent`descent`lineGap}

@@ -85,7 +85,9 @@ doc/               # spec.md, triage.md, changelog.md, future.md
 - Newlines inside `(...)` inject null elements — keep list literals on one line.
 - `,/()` returns a unit, not an empty list — use `$[#x;,/x;!0]` when folding possibly-empty lists.
 - Lambdas do **not** close over parent scope. Use `/:` patterns instead of nested closures.
-- Module system is incomplete: use `2:"file.k"` for file loading (not `\l`).
+- Namespaces: `\d ns` opens namespace `ns` (all members public); `\d ns a b` makes only `a`,`b` public (rest private, reachable only within `ns`); bare `\d` resets to global. Resolution is compile-time — names mangle to `ns.member` global keys (zero runtime cost). A bare name inside `ns` resolves to `ns.name` if that member exists, else the global.
+- A **member name colliding with a keyword verb** (`parse exec count first last in has mod div sqrt sqr exp log sin cos abs depth epoch`) must be defined via its explicit qualified LHS (`json.parse: …`, not `parse: …`) — a bare `parse:` lexes as the verb.
+- Module loading: `2:"lib/foo.k"` loads by path; `2:"foo"` / `\l foo` (extension-less) resolve to `lib/foo.k`. A public `ns.member` / dotted name auto-loads its file on first reference. Only namespaced/dotted public names are indexed for autoload — bare global names are file-private.
 
 ## Native Extensions (FFI)
 

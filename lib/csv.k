@@ -1,7 +1,9 @@
-/ lib/csv/csv.k — load CSV extension
+/ lib/csv.k — CSV extension
 /
 / Build first:  zig build csv
-/ Load with:    2: "lib/csv/csv.k"
+/ Use:          csv.read "path.csv"   (auto-loads this file on first use)
 
+\d csv read
 so: "./zig-out/lib/libcsv.dylib"
-ReadCsv: so 2: (`ReadCsv; 1)   / ReadCsv "path.csv"  → dict of column arrays
+read: so 2: (`ReadCsv; 1)   / csv.read "path.csv"  → dict of column arrays
+\d

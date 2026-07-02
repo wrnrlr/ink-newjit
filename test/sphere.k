@@ -79,4 +79,4 @@ loop: {[props]
   $[meshHandle=0; meshHandle:: CompileMesh[sphereVtx; PbrFragment]; 0]
   DrawMesh[icoMesh; meshHandle]}
 
-RunWindow[loop; 0]
+window.run[loop; 0]

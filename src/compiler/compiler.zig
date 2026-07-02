@@ -49,6 +49,15 @@ fn dedent(alloc: Alloc, s: []const u8) anyerror![]u8 {
   return out.toOwnedSlice(alloc);
 }
 
+// Public/private policy for one namespace declared with `\d ns [pub ...]`.
+// `all_public` (bare `\d ns`) exports every member; otherwise only the names in
+// `publics` are reachable from outside the namespace. Keys are interned symbol
+// slices (stable, pool-owned), so the maps never free their own keys.
+const NsPolicy = struct {
+  all_public: bool,
+  publics: std.StringHashMap(void),
+};
+
 pub const Compiler = struct {
   alloc: Alloc,
   chunk: *Chunk,
@@ -58,6 +67,15 @@ pub const Compiler = struct {
   fn_tables: *fntable.FnTables,
   scope: *Scope,
   text_id: u32 = 0,
+  // Namespaces (`\d`). Compile-time only — resolution mangles names to global
+  // keys (`ns.member`) so there is zero runtime cost. `namespace` is the active
+  // namespace (interned, stable; null = global scope) and persists across
+  // separate compiles (REPL lines) since the Compiler outlives them.
+  namespace: ?[]const u8 = null,
+  namespaces: std.StringHashMap(NsPolicy),
+  // Fully-qualified names (`ns.member`, interned) declared private by their
+  // namespace's policy. Referenced from outside their namespace → compile error.
+  private_members: std.StringHashMap(void),
 
   pub fn init(alloc: Alloc, chunk: *Chunk, globals: *std.StringHashMap(u16), symbols: *Pool, registry: *Fs, fn_tables: *fntable.FnTables) !Compiler {
     const scope = try alloc.create(Scope);
@@ -70,6 +88,8 @@ pub const Compiler = struct {
       .registry = registry,
       .fn_tables = fn_tables,
       .scope = scope,
+      .namespaces = std.StringHashMap(NsPolicy).init(alloc),
+      .private_members = std.StringHashMap(void).init(alloc),
     };
   }
 
@@ -81,6 +101,10 @@ pub const Compiler = struct {
       self.alloc.destroy(s);
       curr = parent;
     }
+    var nit = self.namespaces.valueIterator();
+    while (nit.next()) |p| p.publics.deinit();
+    self.namespaces.deinit();
+    self.private_members.deinit();
   }
 
   pub fn compile(self: *Compiler, node: *ast.Node, is_tail: bool) anyerror!void {
@@ -145,6 +169,12 @@ pub const Compiler = struct {
       },
       .adverb_val => |a| try self.emitConst(V{ .o = Fn.adverb(adverbFromString(a)) }),
       .command => |cmd| blk: {
+        // `\d` switches the compile-time namespace (see setNamespace); it has no
+        // runtime effect, so it lowers to a blank rather than a Command opcode.
+        if (std.mem.eql(u8, cmd.verb, "d")) {
+          try self.setNamespace(cmd.args);
+          break :blk try self.emitOp(.Gap, &.{});
+        }
         // Encode command as: verb\0count_str\0args
         var count_buf: [12]u8 = undefined;
         const count_str = std.fmt.bufPrint(&count_buf, "{d}", .{cmd.n}) catch "1";
@@ -337,7 +367,7 @@ pub const Compiler = struct {
       try self.addPatch(name);
       return id;
     } else {
-      return try self.emitOpWithArg(.Global, try self.getOrAddGlobal(name), &.{});
+      return try self.emitOpWithArg(.Global, try self.resolveGlobalRef(name), &.{});
     }
   }
 
@@ -428,7 +458,7 @@ pub const Compiler = struct {
         try self.addPatch(name);
         return id;
       } else {
-        return try self.emitOpWithArg(.AssignGlobal, try self.getOrAddGlobal(name), &.{rhs_id});
+        return try self.emitOpWithArg(.AssignGlobal, try self.resolveGlobalAssign(name), &.{rhs_id});
       }
     } else if (b.v.* == .literal and b.v.literal != .@"var") {
       // Non-variable noun on LHS of ':' — dyadic right verb: x:y = y.
@@ -459,7 +489,7 @@ pub const Compiler = struct {
         for (seq) |item| {
           if (item.* == .literal and item.literal == .@"var") {
             const name = item.literal.@"var";
-            const nop_id = try self.emitOpWithArg(.Nop, try self.getOrAddGlobal(name), &.{});
+            const nop_id = try self.emitOpWithArg(.Nop, try self.resolveGlobalAssign(name), &.{});
             const inst = self.scope.ir.get(nop_id);
             inst.arg3 = 2; // arg3==2: global list-assign target (u16 index); ==1 is a local (u8)
             self.scope.ir.markEffectful(nop_id);
@@ -756,7 +786,7 @@ pub const Compiler = struct {
 
         if (!found_local) {
           inst.op = .Global;
-          inst.arg1 = try self.getOrAddGlobal(patch.name);
+          inst.arg1 = try self.resolveGlobalRef(patch.name);
         }
       }
 
@@ -839,6 +869,90 @@ pub const Compiler = struct {
       gop.value_ptr.* = @intCast(self.globals.count() - 1);
     }
     return gop.value_ptr.*;
+  }
+
+  // ── Namespaces (`\d`) ────────────────────────────────────────────────────
+  // The namespace of a qualified name (`ns.member` → `ns`), or null if bare.
+  fn nsOf(name: []const u8) ?[]const u8 {
+    const dot = std.mem.indexOfScalar(u8, name, '.') orelse return null;
+    return name[0..dot];
+  }
+  // The short member name of a qualified name (`ns.member` → `member`).
+  fn memberOf(name: []const u8) []const u8 {
+    const dot = std.mem.indexOfScalar(u8, name, '.') orelse return name;
+    return name[dot + 1 ..];
+  }
+
+  // Intern `s` and return the pool-owned (stable, deduped) slice.
+  fn interned(self: *Compiler, s: []const u8) ![]const u8 {
+    return self.symbols.get(try self.symbols.intern(s));
+  }
+
+  // `ns.member`, interned so the slice is stable for use as a map/global key.
+  fn qualify(self: *Compiler, ns: []const u8, member: []const u8) ![]const u8 {
+    var buf: [256]u8 = undefined;
+    const q = std.fmt.bufPrint(&buf, "{s}.{s}", .{ ns, member }) catch return error.NameTooLong;
+    return self.interned(q);
+  }
+
+  // Handle a `\d` command at compile time: `\d` resets to global scope,
+  // `\d ns` opens namespace `ns` (all members public), `\d ns a b` opens `ns`
+  // with only `a` and `b` public. Registers/updates the namespace policy.
+  fn setNamespace(self: *Compiler, args: []const u8) !void {
+    const trimmed = std.mem.trim(u8, args, " \t");
+    if (trimmed.len == 0) { self.namespace = null; return; }
+    var it = std.mem.tokenizeAny(u8, trimmed, " \t");
+    const ns = try self.interned(it.next().?);
+    const gop = try self.namespaces.getOrPut(ns);
+    if (!gop.found_existing) {
+      gop.key_ptr.* = ns;
+      gop.value_ptr.* = .{ .all_public = true, .publics = std.StringHashMap(void).init(self.alloc) };
+    }
+    var any_pub = false;
+    while (it.next()) |p| {
+      any_pub = true;
+      try gop.value_ptr.publics.put(try self.interned(p), {});
+    }
+    if (any_pub) gop.value_ptr.all_public = false;
+    self.namespace = ns;
+  }
+
+  // True if `member` is exported by namespace `ns` per its policy. Namespaces
+  // never `\d`-declared (ad-hoc dotted names) are treated as fully public.
+  fn isPublic(self: *Compiler, ns: []const u8, member: []const u8) bool {
+    const policy = self.namespaces.get(ns) orelse return true;
+    return policy.all_public or policy.publics.contains(member);
+  }
+
+  // Resolve a variable *reference* to a global slot, applying namespace rules.
+  //   qualified `ns.m`  → that global; error if private and referenced from
+  //                       outside `ns` (strict privacy).
+  //   bare `m` in `ns`  → `ns.m` if that member exists, else global `m`.
+  //   bare `m` globally → global `m`.
+  fn resolveGlobalRef(self: *Compiler, name: []const u8) !u16 {
+    if (nsOf(name)) |ns| {
+      const inside = if (self.namespace) |cur| std.mem.eql(u8, cur, ns) else false;
+      if (!inside and self.private_members.contains(name)) return error.PrivateName;
+      return self.getOrAddGlobal(name);
+    }
+    if (self.namespace) |ns| {
+      const q = try self.qualify(ns, name);
+      if (self.globals.contains(q)) return self.getOrAddGlobal(q);
+    }
+    return self.getOrAddGlobal(name);
+  }
+
+  // Resolve an *assignment* target to a global slot. A bare name inside a
+  // namespace defines `ns.name`; its visibility is recorded so later
+  // cross-namespace references can be rejected.
+  fn resolveGlobalAssign(self: *Compiler, name: []const u8) !u16 {
+    if (nsOf(name) != null) return self.getOrAddGlobal(name); // explicit `ns.m:`
+    if (self.namespace) |ns| {
+      const q = try self.qualify(ns, name);
+      if (!self.isPublic(ns, name)) try self.private_members.put(q, {});
+      return self.getOrAddGlobal(q);
+    }
+    return self.getOrAddGlobal(name);
   }
 
   fn addPatch(self: *Compiler, name: []const u8) !void {

@@ -1,12 +1,12 @@
 / test/fill_demo.k — Immediate mode UI demo using the fill shader
 /
-/ Demonstrates FillFrame + gpuSolid + Tessellate for 2D UI rendering.
+/ Demonstrates FillFrame + gpuSolid + tessellate for 2D UI rendering.
 / Also shows a k-compiled SPIR-V "fill" variant: a rounded-rect SDF shader
 / that produces soft, anti-aliased filled rectangles without tesselation.
 /
 / Layout:
 /   - Animated solid-colored rectangles (FillFrame + gpuSolid)
-/   - Tessellated polygon (star shape via Tessellate)
+/   - tessellated polygon (star shape via tessellate)
 /   - SPIR-V rounded-rect SDF overlay
 /
 / Run: zig build gpu && ink test/fill_demo.k
@@ -79,7 +79,7 @@ loop: {[props]
   ro: 90.; ri: 38.
   rs: ,/((ri,ro)' !n*2)
   pts: ,/((cx+rs*cos angs),' (cy+rs*sin angs))
-  starVerts: Tessellate[pts]
+  starVerts: tessellate[pts]
   FillFrame[starVerts; gpuSolid[1.0;0.85;0.1;1.]]
 
   / SPIR-V rounded-rect in lower-right corner
@@ -88,4 +88,4 @@ loop: {[props]
 
   0}
 
-RunWindow[loop; 0]
+window.run[loop; 0]

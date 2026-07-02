@@ -5,13 +5,13 @@
 
 2: "lib/font.k"
 
-/ ── ReadFont always returns a LIST of face dicts ──────────────────────────────
+/ ── font.read always returns a LIST of face dicts ──────────────────────────────
 
-faces: ReadFont "font/FiraCode-Regular.ttf"
+faces: font.read "font/FiraCode-Regular.ttf"
 `L ~ @faces
 1 = #faces
 `m ~ @faces 0
-"ReadFont returns list-of-dicts ok"
+"font.read returns list-of-dicts ok"
 
 f: faces 0
 
@@ -68,12 +68,12 @@ f: faces 0
 / ── metric helpers ───────────────────────────────────────────────────────────
 
 1950 = FontUpm f
-(FontScale[f;48.]) ~ 48. % 1950
+(font.scale[f;48.]) ~ 48. % 1950
 "metrics ok"
 
 / ── TTC → multiple faces ─────────────────────────────────────────────────────
 
-ttc: ReadFont "font/NotoSansCJK-Regular.ttc"
+ttc: font.read "font/NotoSansCJK-Regular.ttc"
 1 < #ttc
 `m ~ @ttc 0
 "ttc ok"

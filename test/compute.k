@@ -34,4 +34,4 @@ demo: {[]
   0
 }
 
-RunWindow[{[props] $[gReady=0; demo[]; 0]}; 0]
+window.run[{[props] $[gReady=0; demo[]; 0]}; 0]

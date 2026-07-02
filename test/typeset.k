@@ -1,5 +1,5 @@
 / test/typeset.k — render every printable ASCII glyph from a font.
-/ Reuses the eyes.k GPU pipeline (Tessellate + FillFrame).
+/ Reuses the eyes.k GPU pipeline (tessellate + FillFrame).
 /
 / Build first:  zig build gpu && zig build font
 / Run:          ink test/typeset.k
@@ -11,11 +11,11 @@
 2: "lib/font.k"
 2: "lib/gpu.k"
 
-FONT:  (ReadFont "font/FiraCode-Regular.ttf") 0   / ReadFont → list of faces; take face 0
+FONT:  (font.read "font/FiraCode-Regular.ttf") 0   / font.read → list of faces; take face 0
 
 SZ:    28.                / glyph size in pixels
 CODES: 32+!95             / printable ASCII: space (32) .. '~' (126)
-IDS:   FontShape[FONT; `c$CODES]   / glyph IDs, one per char
+IDS:   font.shape[FONT; `c$CODES]   / glyph IDs, one per char
 IDX:   !#IDS
 
 / ── Layout ───────────────────────────────────────────────────────────────────
@@ -40,17 +40,17 @@ PEN:  gpuSolid[0.93; 0.92; 0.86; 1.]   / glyph ink
 / ── Geometry ─────────────────────────────────────────────────────────────────
 
 / A rectangle as a tessellated quad (flat [x,y,u,v] triangles).
-quad: {[x;y;w;h] Tessellate (x,y, (x+w),y, (x+w),(y+h), x,(y+h))}
+quad: {[x;y;w;h] tessellate (x,y, (x+w),y, (x+w),(y+h), x,(y+h))}
 
 / Translate a flat [x,y,u,v] vertex stream by (ox,oy): tile (ox,oy,0,0) and add.
 shift: {[t;ox;oy] t + ((#t) # ox,oy,0.,0.)}
 
 / All triangles for one glyph cell, translated to its baseline. Empty for space.
-/ Contours are packed into one buffer separated by NaN pairs so Tessellate
+/ Contours are packed into one buffer separated by NaN pairs so tessellate
 / resolves counters (the holes in 0,8,@,a,b,e,…) instead of filling them.
 cellVerts: {[i]
-  cs: FontOutline[FONT; IDS@i; SZ]
-  $[0=#cs; 0#0.; shift[Tessellate (,/{x,0n,0n}'cs); cellOx i; cellOy i]]}
+  cs: font.outline[FONT; IDS@i; SZ]
+  $[0=#cs; 0#0.; shift[tessellate (,/{x,0n,0n}'cs); cellOx i; cellOy i]]}
 
 / Baseline rule quads, one per row, concatenated.
 ruleVerts: ,/{[r] quad[MARGIN; (MARGIN + SZ + 8.) + CELLH*r; CELLW*COLS; 1.]}' !ROWS
@@ -69,4 +69,4 @@ run: {[props]
   FillFrame[ruleVerts;       GRID]    / baseline rules
   FillFrame[GLYPHS;          PEN]}    / all glyphs in one draw
 
-RunWindow[run; WINW,WINH]
+window.run[run; WINW,WINH]

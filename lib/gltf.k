@@ -1,12 +1,12 @@
 / gltf.k — glTF 2.0 / GLB reader (pure k, on top of the JSON extension)
 /
 / Build first:  zig build json
-/ Load with:    2: "lib/json/json.k"   (ParseJson — required dependency)
-/               2: "lib/gltf.k"
+/ Use:          gltf.read "model.gltf"  /  gltf.readGlb "model.glb"
+/ (auto-loads this file; json.parse pulls in the JSON extension transitively)
 /
-/ ReadGltf "model.gltf"  parses a textual glTF asset (a JSON scene description
+/ gltf.read    "model.gltf"  parses a textual glTF asset (a JSON scene description
 / plus binary buffers referenced by URI / base64 data: URI), and
-/ ReadGlb  "model.glb"   parses the binary GLB container (12-byte header + a
+/ gltf.readGlb "model.glb"   parses the binary GLB container (12-byte header + a
 / JSON chunk + an optional BIN chunk).  Both return the same wrapper dict
 /   [json: <parsed glTF document>; bin: <list of resolved buffers>]
 / where `json` is the glTF JSON exactly as the extension decodes it (top-level
@@ -77,18 +77,18 @@ gltf.resolveall:{[doc;dir;bin]
   $[gltf.cnt bs;(gltf.resolvebuf[dir;bin])'gltf.rows bs;()]}
 
 / --- entry points ------------------------------------------------------------
-ReadGltf:{[path]
+gltf.read:{[path]
   txt:1:path;                                        / 1: already yields chars
-  doc:ParseJson txt;
+  doc:json.parse txt;
   `json`bin!(doc;gltf.resolveall[doc;gltf.dirof path;()])}
 
-ReadGlb:{[path]
+gltf.readGlb:{[path]
   b:`i$1:path;
   jlen:gltf.u32 b@12+!4;                             / chunk 0 length (JSON)
   json:`c$b@20+!jlen;
   p:20+jlen;
   bin:$[p<#b;b@(p+8)+!gltf.u32 b@p+!4;()];           / chunk 1 (BIN), if present
-  doc:ParseJson json;
+  doc:json.parse json;
   `json`bin!(doc;gltf.resolveall[doc;gltf.dirof path;bin])}
 
 / --- accessor decoding -------------------------------------------------------

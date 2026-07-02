@@ -105,4 +105,4 @@ loop: {[props]
   $[handle=0; handle:: CompileSpirV[dhWds; 0]; 0]
   DrawShader[verts; handle]}
 
-RunWindow[loop; 0]
+window.run[loop; 0]

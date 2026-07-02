@@ -29,4 +29,4 @@ loop: {[props]
     0]
   DrawShader[verts; handle]}
 
-RunWindow[loop; 0]
+window.run[loop; 0]

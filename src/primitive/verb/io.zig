@@ -199,6 +199,9 @@ fn readDataByChars(vm: *VM, x: V) V {
 fn readDataById(vm: *VM, x: V) V {
   const id: u32 = @intCast(x.i);
   if (Conns.isConn(id)) return readConnBinary(vm, id);
+  // A loaded module's `\d` namespace must not leak into the caller's scope.
+  const saved_ns = vm.compiler.namespace;
+  defer vm.compiler.namespace = saved_ns;
   return vm.eval(vm.fs.getFileText(id)) catch return V{ .err = .io };
 }
 

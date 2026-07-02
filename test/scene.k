@@ -100,7 +100,7 @@ cam:: CamAt[0.92;0.39;0.97;0.26]                 / a 3/4 view
 sceneHandle:: 0                                   / mesh pipeline (compiled once)
 sceneGeom:: 0                                     / retained geometry handle (uploaded once)
 
-RunWindow[{[props]
+window.run[{[props]
   $[sceneHandle=0; sceneHandle:: CompileMesh[sceneVtx; PbrFragment]; 0]
   $[sceneGeom=0;   sceneGeom:: UploadMesh[icoMesh; sceneHandle]; 0]   / upload sphere once
   cam:: CamUpdate[cam; props]

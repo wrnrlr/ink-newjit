@@ -1,6 +1,6 @@
 / test/sword.k — load a binary FBX model (lib/fbx.k) and render just the mesh.
 /
-/ The mesh comes from data/FBX/Sword.fbx: ReadFbx → fbx.trimesh gives a
+/ The mesh comes from data/FBX/Sword.fbx: fbx.read → fbx.trimesh gives a
 / (positions; triangles) pair, which is centred, scaled and flat-shaded into
 / the pbr vertex layout (stride 11: x y z  nx ny nz  r g b rough  lit).
 / All per-frame work (rotation, zoom, pan, normal recompute) is vectorised
@@ -28,7 +28,7 @@ steel:: 0.62 0.64 0.68 0.35
 / (fbx.mesh → smooth per-polygon-vertex normals) rather than being recomputed, so
 / the sword is smooth-shaded.  Both are triangle soup (3 verts/triangle), aligned.
 fbxMesh: {[path]
-  t: ReadFbx path
+  t: fbx.read path
   obj: *t@&({$[(x`name)~`Objects;1;0]}'t)
   geo: fbx.get[obj;`Geometry]
   `0 0:"loaded ",(fbx.uname (geo`props)@1)
@@ -73,7 +73,7 @@ cam:: CamAt[0.92;0.39;0.97;0.26]                          / start at a 3/4 view
 swHandle:: 0
 
 / ── Window loop ───────────────────────────────────────────────────────────────
-RunWindow[{[props]
+window.run[{[props]
   $[swHandle=0; swHandle:: CompileMesh[swVtx; PbrFragment]; 0]
 
   / Fold one frame of input into the orbit camera, then pack its pose as uniforms

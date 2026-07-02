@@ -1,5 +1,4 @@
-2:"lib/json/json.k"
-2:"lib/gltf.k"
+/ gltf.read / gltf.readGlb auto-load lib/gltf.k (which pulls in json.parse).
 
 / ── helper ──────────────────────────────────────────────────────────────────
 pass: 0
@@ -11,9 +10,9 @@ chk: {[name;got;want] chkN::chkN+1; $[got~want; pass::pass+1; failed name]; 0}
 / ── the same triangle delivered three ways: GLB, embedded data: URI, .bin ────
 / positions (0,0,0)(1,0,0)(0,1,0), ushort indices 0 1 2
 P3: (0.0 0.0 0.0;1.0 0.0 0.0;0.0 1.0 0.0)
-gb: ReadGlb  "test/data/gltf/tri.glb"
-ge: ReadGltf "test/data/gltf/tri_embed.gltf"
-gx: ReadGltf "test/data/gltf/tri_ext.gltf"
+gb: gltf.readGlb  "test/data/gltf/tri.glb"
+ge: gltf.read "test/data/gltf/tri_embed.gltf"
+gx: gltf.read "test/data/gltf/tri_ext.gltf"
 chk["glb wrapper keys";   !gb;  `json`bin]
 chk["glb one buffer";     #gb`bin;  1]
 chk["glb pos";            gltf.accessor[gb;0];  P3]
@@ -37,7 +36,7 @@ chk["prim mode (default triangles)";  p`mode;  4]
 chk["mesh nprims"; #gltf.mesh[gb;0];  1]
 
 / ── interleaved byteStride, VEC2/VEC3, float attributes (quad) ───────────────
-q:  ReadGltf "test/data/gltf/quad.gltf"
+q:  gltf.read "test/data/gltf/quad.gltf"
 qp: gltf.prim[q;0;0]
 chk["quad POSITION";   qp`POSITION;  (-1.0 -1.0 0.0;1.0 -1.0 0.0;1.0 1.0 0.0;-1.0 1.0 0.0)]
 chk["quad NORMAL";     gltf.at[qp;"NORMAL"];  (0.0 0.0 1.0;0.0 0.0 1.0;0.0 0.0 1.0;0.0 0.0 1.0)]
@@ -51,7 +50,7 @@ chk["node0 T*R*S col-major"; gltf.trs gltf.row[nds;0];  2.0 0.0 0.0 0.0 0.0 2.0 
 chk["material name"; (gltf.row[gltf.materials q;0])`name;  "red"]
 
 / ── non-indexed primitive + 5125 UNSIGNED_INT indices ───────────────────────
-e:  ReadGltf "test/data/gltf/edge.gltf"
+e:  gltf.read "test/data/gltf/edge.gltf"
 em: gltf.mesh[e;0]
 chk["edge nprims";          #em;  2]
 chk["non-indexed has no idx"; `indices in!em@0;  0b]
@@ -59,7 +58,7 @@ chk["non-indexed mode";     (em@0)`mode;  4]
 chk["uint32 indices";       (em@1)`indices;  0 1 2]
 
 / ── a real Khronos asset (embedded Box.gltf): unit cube, 24 verts, 36 idx ────
-b: ReadGltf "test/data/gltf/Box.gltf"
+b: gltf.read "test/data/gltf/Box.gltf"
 bp: gltf.prim[b;0;0]
 chk["box vert count";  #bp`POSITION;  24]
 chk["box pos row0";    (bp`POSITION)@0;  -0.5 -0.5 0.5]
