@@ -18,7 +18,26 @@ pub const Take = struct {
   _i_L: VM.Dyad = takeList,
   _i_i: VM.Dyad = takeScalarInt,
   _i_f: VM.Dyad = takeScalarFloat,
+  _i_s: VM.Dyad = takeScalarAtom(.s),
+  _i_c: VM.Dyad = takeScalarAtom(.c),
+  _i_b: VM.Dyad = takeScalarAtom(.b),
 };
+
+// n#atom for a symbol/char/bool atom → a vector of n copies (empty when n=0),
+// so `0#`x is a typed empty `` `S `` (etc.), not `!type`.
+fn takeScalarAtom(comptime ak: K) VM.Dyad {
+  return struct {
+    fn f(vm: *VM, x: V, y: V) V {
+      const CK = comptime ak.container();
+      const T = comptime CK.backing();
+      const count: usize = @intCast(@abs(x.i));
+      const res = N(T).init(vm.alloc, count) catch return V{ .err = .memory };
+      const val = @field(y, @tagName(ak));
+      for (res.slice()) |*v| v.* = val;
+      return @unionInit(V, @tagName(CK), res);
+    }
+  }.f;
+}
 
 fn takeScalarInt(vm: *VM, x: V, y: V) V {
   const count: usize = @intCast(@abs(x.i));

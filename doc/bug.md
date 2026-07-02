@@ -219,3 +219,25 @@ Surfaced while stress-testing the (now-fixed) global limit. Same shape as the ol
 256-global issue: widen the `MakeList` count if it ever bites in practice (build the
 list incrementally / via `,/` over chunks as a workaround). Low priority — literals
 that large are rare.
+
+---
+
+## 7. (FIXED) Empty vectors lost their type → `=`/`&` on them gave `!type`
+
+Symptom: filtering an empty events table (`E@&`kind=E`kind` on an idle frame)
+raised `!type`. Two root causes, both about *making* a typed empty — the
+comparison kernels themselves were fine on genuine typed empties:
+
+1. **`take` on a symbol/char/bool ATOM was unimplemented** — `` 0#`x ``,
+   `0#" "`, `0#0b` all gave `!type` (only `_i_i`/`_i_f` existed), so you couldn't
+   even write an empty `` `S ``/`` `C ``/`` `B ``. Fixed by adding
+   `takeScalarAtom(.s/.c/.b)` to `src/primitive/verb/take.zig` (`n#atom` → n
+   copies; `0#atom` → typed empty).
+2. **A 0-row table/vector select degraded columns to untyped `` `L ``** —
+   `pickVec`/`pickMask` built an `N(V)` and `promote`d it, but `promote` of an
+   empty list can't infer a type → returns `` `L ``, and then `=`/`&` on `` `L ``
+   fail. Fixed with `promote.emptyOf(k)` (typed empty of a class), returned by
+   `pickVec`/`pickMask` when the selection is empty (`src/primitive/verb/pick.zig`).
+
+Now `` `key=(some empty `S) `` → empty, `E@&…` on a 0-row table keeps typed
+columns, and the editor/camera need no empty-frame guards.

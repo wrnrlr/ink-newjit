@@ -6,6 +6,7 @@ const N = @import("../../noun/array.zig").N;
 const Dict = @import("../../noun/dict.zig").Dict;
 const VM = @import("../../runtime/vm.zig").VM;
 const promote = @import("../promote.zig").promote;
+const emptyOf = @import("../promote.zig").emptyOf;
 
 const value = @import("../../noun/value.zig");
 
@@ -208,6 +209,9 @@ fn pickAtom(x: V, idx: i32) V {
 
 fn pickVec(alloc: Alloc, x: V, indices: []const i32) V {
   const length = x.len();
+  // Empty selection keeps the source's type (promote can't infer it from 0
+  // elements → it would return an untyped `L`, breaking downstream =/&/columns).
+  if (indices.len == 0) return emptyOf(alloc, x.tag());
   const res = N(V).init(alloc, indices.len) catch return V{ .err = .memory };
   @memset(res.slice(), .blank);
   for (indices, 0..) |idx, k| {
@@ -233,6 +237,7 @@ fn pickMask(alloc: Alloc, x: V, mask: []const bool) V {
   defer res_list.deinit(alloc);
   res_list.ensureTotalCapacity(alloc, mask.len) catch return V{ .err = .memory };
   for (mask, 0..) |m, k| if (m) res_list.appendAssumeCapacity(x.at(k));
+  if (res_list.items.len == 0) return emptyOf(alloc, x.tag());
   const res = N(V).init(alloc, res_list.items.len) catch return V{ .err = .memory };
   @memcpy(res.slice(), res_list.items);
   res_list.items.len = 0;

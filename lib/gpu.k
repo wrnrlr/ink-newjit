@@ -6,17 +6,16 @@
 so: "./zig-out/lib/libgpu.dylib"
 / RunWindow calls loop_fn(props) each frame. props is a dict:
 /   width height mx my time     — framebuffer size, cursor pos (px), seconds
-/   kw ka ks kd                 — WASD held (1/0); scroll rmb lmb — wheel + buttons
-/   events                      — column dict of every input event since last frame;
-/                                 flip to a table with +props`events. Columns:
-/                                   kind  0=text 1=key 2=mouse 3=scroll  (int, not sym:
-/                                         symbol = is broken, so filter kind on ints)
+/   events                      — a TABLE of every input event since last frame
+/                                 (one row each; use it directly, no flip). Columns:
+/                                   kind  `text `key `mouse `scroll   (symbol)
 /                                   code  text=codepoint key=GLFW-keycode mouse=button
 /                                   mods  modifier bits (1=shift 2=ctrl 4=alt 8=super)
 /                                   down  1=press/repeat 0=release (key/mouse); else 0N
 /                                   x y   cursor px at event time
 /                                   amt   scroll wheel delta (else 0n)
 /                                 unused cells are 0N/0n nulls — filter them.
+/ For held keys/buttons, track down/up events yourself (see lib/camera.k).
 RunWindow:    so 2: (`gpuRun;       2)   / (loop_fn; config) → 0 : blocking event loop
 FillFrame:    so 2: (`gpuFill;      2)   / (verts_F; frag_F) → 0 : draw triangles with built-in shader
 Tessellate:   so 2: (`gpuTess;      1)   / pts_F → verts_F   : tessellate polygon

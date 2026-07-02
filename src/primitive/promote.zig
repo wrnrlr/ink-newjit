@@ -61,3 +61,18 @@ pub fn promote(alloc: Alloc, n: N(V)) V {
   if (inferKind(slice)) |k| return promoteAs(alloc, n, k);
   return V{ .L = n };
 }
+
+/// An empty vector of the given kind's container type (`.i`→empty `` `I ``, `.S`→
+/// empty `` `S ``, …). Used where a gather/filter yields zero elements but the
+/// source type is known — an empty typed vector, never a general `` `L `` or the
+/// untyped empty that would otherwise break `=`/`&`/table columns downstream.
+pub fn emptyOf(alloc: Alloc, k: K) V {
+  return switch (k) {
+    .b, .B => V.wrap(.B, N(bool).init(alloc, 0) catch return V{ .err = .memory }),
+    .i, .I => V.wrap(.I, N(i32).init(alloc, 0) catch return V{ .err = .memory }),
+    .f, .F => V.wrap(.F, N(f32).init(alloc, 0) catch return V{ .err = .memory }),
+    .s, .S => V.wrap(.S, N(u32).init(alloc, 0) catch return V{ .err = .memory }),
+    .c, .C => V.wrap(.C, N(u8).init(alloc, 0) catch return V{ .err = .memory }),
+    else => V{ .L = N(V).init(alloc, 0) catch return V{ .err = .memory } },
+  };
+}

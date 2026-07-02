@@ -35,6 +35,15 @@ pub fn _F_F(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.F
 pub fn _X2(comptime op: Op2, comptime f: type) type { return h._X(Op2, op, f); }
 pub fn _Cmp(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Upcast2, h.Bool2, f, &at); }
 
+// Comparison over like-typed operands with no numeric upcast: the result stays
+// in the operand's backing type (u8 for chars, u32 for interned symbols), so the
+// generic Caster never has to convert a u8/u32 it can't. Used for char/symbol =
+// (and char order), which the numeric _Cmp over {b,i,f,B,I,F} can't express.
+fn Same2(comptime T1: type, comptime _: type) type { return T1; }
+const char_types   = [_]K{ .c, .C };
+const symbol_types = [_]K{ .s, .S };
+pub fn _CmpSame(comptime op: Op2, comptime f: type, comptime ts: []const K) type { return h.makeDyad(op, Same2, h.Bool2, f, ts); }
+
 // ── Inlined from tiny single-file verbs ──────────────────────────────────────
 
 const LessOp  = struct { pub fn f(x: anytype, y: @TypeOf(x)) bool { return x < y; } };
@@ -185,6 +194,13 @@ const Dyads = struct {
   pub const @"X=X" = _Cmp(.@"=", EqualOp);
   pub const @"X<X" = _Cmp(.@"<", LessOp);
   pub const @"X>X" = _Cmp(.@">", MoreOp);
+  // Symbol equality (interned-id compare) and char equality/order — separate
+  // structs so they add only the c/C and s/S type-pair slots to =,<,> without
+  // disturbing the numeric kernels above. Symbols compare only for equality.
+  pub const @"c=c" = _CmpSame(.@"=", EqualOp, &char_types);
+  pub const @"c<c" = _CmpSame(.@"<", LessOp,  &char_types);
+  pub const @"c>c" = _CmpSame(.@">", MoreOp,  &char_types);
+  pub const @"s=s" = _CmpSame(.@"=", EqualOp, &symbol_types);
   pub const @"X~X" = @import("match.zig").Match;
   pub const @"x!y" = pair.Pair;
   pub const @"I⌊I"  = _I_I(.mod, calc.ModOp);

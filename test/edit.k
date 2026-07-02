@@ -36,11 +36,11 @@ MARGIN: 18.
 WINW: 760.
 WINH: 480.
 
-/ Event kinds (props`events`kind).
-KTEXT: 0
-KKEY: 1
-KMOUSE: 2
-KSCROLL: 3
+/ Event kinds (props`events`kind) — symbols now that symbol `=` works.
+KTEXT: `text
+KKEY: `key
+KMOUSE: `mouse
+KSCROLL: `scroll
 
 / ── Colours ──────────────────────────────────────────────────────────────────
 BG:    gpuSolid[0.12; 0.12; 0.15; 1.]   / dark background
@@ -135,7 +135,7 @@ procKeys:  {[E] {doKey x}' 0 + (E`code)@&(KKEY=(E`kind))&(1=(E`down))}
 / would read `*` as dyadic multiply, not monadic first).
 clickAt:   {[E;j] setCaret[(E`x)@j; (E`y)@j]}
 procMouse: {[E] m: &(KMOUSE=(E`kind))&(1=(E`down)); $[#m; clickAt[E; *|m]; 0]}
-handle: {[props] E: +props`events; n: #E; $[n>0; procAll E; 0]; n}
+handle: {[props] E: props`events; n: #E; $[n>0; procAll E; 0]; n}
 procAll: {[E] procText E; procKeys E; procMouse E; 0}
 
 / ── Frame ────────────────────────────────────────────────────────────────────

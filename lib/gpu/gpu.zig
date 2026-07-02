@@ -43,6 +43,7 @@ const K = *anyopaque;
 const KApi = struct {
   k_call:      *const fn (K, K) callconv(.c) ?K,
   k_make_dict: *const fn (i32, [*]const [*:0]const u8, [*]const ?K) callconv(.c) ?K,
+  k_make_table:*const fn (i32, [*]const [*:0]const u8, [*]const ?K) callconv(.c) ?K,
   kf:          *const fn (f32) callconv(.c) ?K,
   ki:          *const fn (i32) callconv(.c) ?K,
   kn:          *const fn (?K) callconv(.c) i32,
@@ -52,6 +53,9 @@ const KApi = struct {
   ki_val:      *const fn (?K) callconv(.c) i32,
   KI:          *const fn (i32) callconv(.c) ?K,
   KF:          *const fn (i32) callconv(.c) ?K,
+  KS:          *const fn (i32) callconv(.c) ?K,
+  ksp:         *const fn (?K) callconv(.c) ?[*]u32,
+  kintern:     *const fn ([*:0]const u8) callconv(.c) u32,
   ku:          *const fn (?K) callconv(.c) void,
 };
 var g_api: ?KApi = null;
@@ -66,44 +70,58 @@ fn kcp(x: ?K) ?[*]u8    { return g_api.?.kcp(x); }
 fn ki_val(x: ?K) i32    { return g_api.?.ki_val(x); }
 fn KI(n: i32) ?K         { return g_api.?.KI(n); }
 fn KF(n: i32) ?K         { return g_api.?.KF(n); }
+fn KS(n: i32) ?K         { return g_api.?.KS(n); }
+fn ksp(x: ?K) ?[*]u32   { return g_api.?.ksp(x); }
+fn kintern(s: [*:0]const u8) u32 { return g_api.?.kintern(s); }
 fn ku(x: ?K) void        { g_api.?.ku(x); }
 fn k_call(f: K, a: K) ?K { return g_api.?.k_call(f, a); }
 fn k_make_dict(n: i32, keys: [*]const [*:0]const u8, vals: [*]const ?K) ?K {
   return g_api.?.k_make_dict(n, keys, vals);
+}
+fn k_make_table(n: i32, keys: [*]const [*:0]const u8, vals: [*]const ?K) ?K {
+  return g_api.?.k_make_table(n, keys, vals);
 }
 
 // ── Frame-local renderer (set while the frame callback executes) ───────────────
 
 var g_renderer: ?*Renderer = null;
 
-// ── Input state (written by GLFW callbacks, read each frame) ──────────────────
-
-var g_key_w: bool = false;
-var g_key_a: bool = false;
-var g_key_s: bool = false;
-var g_key_d: bool = false;
-var g_scroll: f64 = 0.0;
-
 // ── Event queue → props`events table ──────────────────────────────────────────
 //
 // Every input transition since the last frame is recorded as one Event and
-// handed to the loop_fn as a flat table (one row per event). One int `kind`
-// column discriminates the row (symbol `=` is broken in ink, so kind is an int,
-// not a symbol); unused payload columns hold 0N/0n nulls the consumer filters.
+// handed to the loop_fn as a flat table (one row per event). A `kind` symbol
+// column discriminates the row; unused payload columns hold 0N/0n nulls the
+// consumer filters.
 //
-//   kind  code            mods    down     x,y            amt
-//   0 text codepoint      0N      0N       cursor px      0n
-//   1 key  GLFW keycode   modbits 1/0      cursor px      0n
-//   2 mouse button index  modbits 1/0      cursor px      0n
-//   3 scroll  0N          0N      0N       cursor px      wheel dy
+//   kind    code            mods    down     x,y            amt
+//   `text   codepoint       0N      0N       cursor px      0n
+//   `key    GLFW keycode    modbits 1/0      cursor px      0n
+//   `mouse  button index    modbits 1/0      cursor px      0n
+//   `scroll 0N              0N      0N       cursor px      wheel dy
 //
 const NI: i32 = -2147483648;                 // ink null int (0N)
-const KIND_TEXT: i32 = 0;
-const KIND_KEY: i32 = 1;
-const KIND_MOUSE: i32 = 2;
-const KIND_SCROLL: i32 = 3;
 
-const Event = struct { kind: i32, code: i32, mods: i32, down: i32, x: f32, y: f32, amt: f32 };
+// The kind discriminant is a symbol, interned once on first use. `Event.kind`
+// stores the interned id directly, so the `kind` column is filled with no mapping.
+var g_kind_text: u32 = 0;
+var g_kind_key: u32 = 0;
+var g_kind_mouse: u32 = 0;
+var g_kind_scroll: u32 = 0;
+var g_kind_ready: bool = false;
+fn ensureKinds() void {
+  if (g_kind_ready) return;
+  g_kind_text = kintern("text");
+  g_kind_key = kintern("key");
+  g_kind_mouse = kintern("mouse");
+  g_kind_scroll = kintern("scroll");
+  g_kind_ready = true;
+}
+fn KIND_TEXT() u32 { ensureKinds(); return g_kind_text; }
+fn KIND_KEY() u32 { ensureKinds(); return g_kind_key; }
+fn KIND_MOUSE() u32 { ensureKinds(); return g_kind_mouse; }
+fn KIND_SCROLL() u32 { ensureKinds(); return g_kind_scroll; }
+
+const Event = struct { kind: u32, code: i32, mods: i32, down: i32, x: f32, y: f32, amt: f32 };
 const QCAP = 256;
 var g_events: [QCAP]Event = undefined;
 var g_nev: usize = 0;
@@ -129,40 +147,31 @@ fn pushEvent(e: Event) void {
 
 fn keyCb(win: *zglfw.Window, key: c_int, _: c_int, action: c_int, mods: c_int) callconv(.c) void {
   const down = (action != zglfw.Release);
-  switch (key) {
-    zglfw.KeyW => g_key_w = down,
-    zglfw.KeyA => g_key_a = down,
-    zglfw.KeyS => g_key_s = down,
-    zglfw.KeyD => g_key_d = down,
-    else => {},
-  }
   const c = cursorPx(win);
-  const nan = std.math.nan(f32);
-  pushEvent(.{ .kind = KIND_KEY, .code = key, .mods = mods, .down = if (down) 1 else 0, .x = c[0], .y = c[1], .amt = nan });
+  pushEvent(.{ .kind = KIND_KEY(), .code = key, .mods = mods, .down = if (down) 1 else 0, .x = c[0], .y = c[1], .amt = std.math.nan(f32) });
 }
 
 fn charCb(win: *zglfw.Window, codepoint: c_uint) callconv(.c) void {
   const c = cursorPx(win);
-  pushEvent(.{ .kind = KIND_TEXT, .code = @intCast(codepoint), .mods = NI, .down = NI, .x = c[0], .y = c[1], .amt = std.math.nan(f32) });
+  pushEvent(.{ .kind = KIND_TEXT(), .code = @intCast(codepoint), .mods = NI, .down = NI, .x = c[0], .y = c[1], .amt = std.math.nan(f32) });
 }
 
 fn mouseBtnCb(win: *zglfw.Window, button: c_int, action: c_int, mods: c_int) callconv(.c) void {
   const c = cursorPx(win);
-  pushEvent(.{ .kind = KIND_MOUSE, .code = button, .mods = mods, .down = if (action == zglfw.Press) 1 else 0, .x = c[0], .y = c[1], .amt = std.math.nan(f32) });
+  pushEvent(.{ .kind = KIND_MOUSE(), .code = button, .mods = mods, .down = if (action == zglfw.Press) 1 else 0, .x = c[0], .y = c[1], .amt = std.math.nan(f32) });
 }
 
 fn scrollCb(win: *zglfw.Window, _: f64, yoffset: f64) callconv(.c) void {
-  g_scroll += yoffset;
   const c = cursorPx(win);
-  pushEvent(.{ .kind = KIND_SCROLL, .code = NI, .mods = NI, .down = NI, .x = c[0], .y = c[1], .amt = @floatCast(yoffset) });
+  pushEvent(.{ .kind = KIND_SCROLL(), .code = NI, .mods = NI, .down = NI, .x = c[0], .y = c[1], .amt = @floatCast(yoffset) });
 }
 
-// Build the `events` table (a column dict; the caller flips it to a table with
-// `+`). Returns an empty-column table when no events occurred. Columns are
-// released by the caller after it is folded into the props dict.
+// Build the `events` TABLE directly (k_make_table, so the consumer needs no `+`
+// flip). Returns an empty-row table when no events occurred. Columns are released
+// by the caller after they are folded into the table.
 fn buildEvents() ?K {
   const n: i32 = @intCast(g_nev);
-  const c_kind = KI(n);
+  const c_kind = KS(n);   // symbol column: `text `key `mouse `scroll
   const c_code = KI(n);
   const c_mods = KI(n);
   const c_down = KI(n);
@@ -170,7 +179,7 @@ fn buildEvents() ?K {
   const c_y = KF(n);
   const c_amt = KF(n);
   if (g_nev != 0) {
-    const pk = kip(c_kind).?;
+    const pk = ksp(c_kind).?;
     const pc = kip(c_code).?;
     const pm = kip(c_mods).?;
     const pd = kip(c_down).?;
@@ -178,7 +187,7 @@ fn buildEvents() ?K {
     const py = kfp(c_y).?;
     const pa = kfp(c_amt).?;
     for (g_events[0..g_nev], 0..) |e, i| {
-      pk[i] = e.kind;
+      pk[i] = e.kind;   // already the interned kind symbol id
       pc[i] = e.code;
       pm[i] = e.mods;
       pd[i] = e.down;
@@ -189,9 +198,9 @@ fn buildEvents() ?K {
   }
   const keys = [7][*:0]const u8{ "kind", "code", "mods", "down", "x", "y", "amt" };
   const vals = [7]?K{ c_kind, c_code, c_mods, c_down, c_x, c_y, c_amt };
-  const dict = k_make_dict(7, &keys, &vals);
+  const table = k_make_table(7, &keys, &vals);
   ku(c_kind); ku(c_code); ku(c_mods); ku(c_down); ku(c_x); ku(c_y); ku(c_amt);
-  return dict;
+  return table;
 }
 
 // ── gpu_fill ──────────────────────────────────────────────────────────────────
@@ -615,32 +624,22 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   zglfw.getCursorPos(window, &mx, &my);
   const t: f32 = @floatCast(zglfw.getTime() - start_time);
 
-  // Build props dict and call loop_fn
-  const prop_keys = [13][*:0]const u8{ "width", "height", "mx", "my", "time", "kw", "ka", "ks", "kd", "scroll", "rmb", "lmb", "events" };
+  // Build props dict and call loop_fn. Continuous state is width/height/mx/my/time;
+  // all discrete input (keys, text, mouse buttons, scroll) arrives via `events`.
+  const prop_keys = [6][*:0]const u8{ "width", "height", "mx", "my", "time", "events" };
   const v_w = kf(fw); const v_h = kf(fh);
   const v_mx = kf(@floatCast(mx * dpr_x)); const v_my = kf(@floatCast(my * dpr_y));
   const v_t = kf(t);
-  const v_kw = kf(if (g_key_w) 1.0 else 0.0);
-  const v_ka = kf(if (g_key_a) 1.0 else 0.0);
-  const v_ks = kf(if (g_key_s) 1.0 else 0.0);
-  const v_kd = kf(if (g_key_d) 1.0 else 0.0);
-  const v_sc = kf(@floatCast(g_scroll));
-  g_scroll = 0.0;
-  const rmb_state = zglfw.getMouseButton(window, zglfw.MouseButtonRight);
-  const v_rmb = kf(if (rmb_state == zglfw.Press) 1.0 else 0.0);
-  const lmb_state = zglfw.getMouseButton(window, zglfw.MouseButtonLeft);
-  const v_lmb = kf(if (lmb_state == zglfw.Press) 1.0 else 0.0);
   const v_events = buildEvents();
   g_nev = 0;
-  const prop_vals = [13]?K{ v_w, v_h, v_mx, v_my, v_t, v_kw, v_ka, v_ks, v_kd, v_sc, v_rmb, v_lmb, v_events };
+  const prop_vals = [6]?K{ v_w, v_h, v_mx, v_my, v_t, v_events };
 
-  if (k_make_dict(13, &prop_keys, &prop_vals)) |pk| {
+  if (k_make_dict(6, &prop_keys, &prop_vals)) |pk| {
     const result = k_call(loop_fn, pk);
     ku(result);
     ku(pk);
   }
   ku(v_w); ku(v_h); ku(v_mx); ku(v_my); ku(v_t);
-  ku(v_kw); ku(v_ka); ku(v_ks); ku(v_kd); ku(v_sc); ku(v_rmb); ku(v_lmb);
   ku(v_events);
 
   renderer.flush(pass, fw, fh, t) catch {};
@@ -1332,6 +1331,7 @@ fn inkInit(reg: *anyopaque) void {
   g_api = .{
     .k_call      = r.k_call,
     .k_make_dict = r.k_make_dict,
+    .k_make_table = r.k_make_table,
     .kf          = r.kf,
     .ki          = r.ki,
     .kn          = r.kn,
@@ -1341,6 +1341,9 @@ fn inkInit(reg: *anyopaque) void {
     .ki_val      = r.ki_val,
     .KI          = r.KI,
     .KF          = r.KF,
+    .KS          = r.KS,
+    .ksp         = r.ksp,
+    .kintern     = r.kintern,
     .ku          = r.ku,
   };
   // Register callable functions by name (works dlopen'd or statically linked).
