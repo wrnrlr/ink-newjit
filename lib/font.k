@@ -18,6 +18,10 @@
 / Outline extraction and text shaping are rebuilt on top of this in a later
 / step (the old tatfi-backed font.shape/font.outline/font.metrics are retired).
 
+\d font
+  scale: {[f;sz] sz % FontUpm f}
+
+\d
 so:"./zig-out/lib/libfont.dylib"
 font.read:so 2:(`ReadFont;1)      / "path" → L of face dicts
 cffOutline0:so 2:(`cffOutline;1) / (charstring_C; gsubrs_L; lsubrs_L; scale_f) → L of flat F contours (CFF outlines)
@@ -39,7 +43,7 @@ FontGlyph: {[f;cp] c: f`cmap; cps: c`cp; $[cp in cps; (c`gid) cps?cp; 0]}
 FontUpm: {[f] f[`head]`upm}
 
 / Em→pixel scale factor at a given pixel size.
-font.scale: {[f;sz] sz % FontUpm f}
+/ font.scale: {[f;sz] sz % FontUpm f}
 
 / ── outline flattening (glyf TrueType outlines → polyline contours) ────────────
 /

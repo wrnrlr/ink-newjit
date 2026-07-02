@@ -77,7 +77,7 @@ cacheGlyph: {[gid]
   v:$[0=#cs;0#0.;0.+tessellate(,/{x,0n,0n}'cs)];
   CKEYS,::gid;CVALS,::,v;
   v}
-glyphLocal: {[gid]$[(CKEYS?gid)<#CKEYS;CVALS i;cacheGlyph gid]}
+glyphLocal: {[gid] i: CKEYS?gid; $[i<#CKEYS; CVALS i; cacheGlyph gid]}
 
 / The current row's glyph ids and baseline live in globals so the mapped builder
 / captures no vector (a vector captured into a '-mapped projection hits the
