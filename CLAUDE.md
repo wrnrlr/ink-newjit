@@ -82,7 +82,7 @@ doc/               # spec.md, triage.md, changelog.md, future.md
 - No `>=`/`<=` operators — `x<=y` parses as `x<(=y)`. Use `~(x>y)` and `~(x<y)`.
 - `_` is always the Drop/WeedOut/Delete verb; never a name character.
 - Evaluation is strictly right-to-left; no operator precedence.
-- Newlines inside `(...)` inject null elements — keep list literals on one line.
+- Newlines separate items inside `(...)` `[...]` `$[...]` just like `;`, but never inject a null — items can be written one-per-line, with or without a trailing `;`, and blank lines are ignored. Only `;;` and a trailing `;` inject a null element (the intended way to elide). (This was fixed in "Fix bracket and newline syntax"; a multi-line `$[...]` no longer hangs either.)
 - `,/()` returns a unit, not an empty list — use `$[#x;,/x;!0]` when folding possibly-empty lists.
 - Lambdas do **not** close over parent scope. Use `/:` patterns instead of nested closures.
 - Namespaces: `\d ns` opens namespace `ns` (all members public); `\d ns a b` makes only `a`,`b` public (rest private, reachable only within `ns`); bare `\d` resets to global. Resolution is compile-time — names mangle to `ns.member` global keys (zero runtime cost). A bare name inside `ns` resolves to `ns.name` if that member exists, else the global.

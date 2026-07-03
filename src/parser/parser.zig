@@ -343,8 +343,12 @@ pub const Parser = struct {
   }
 
   fn parseSeq(self: *Parser, end_tt: TT) ParseError!ast.Seq {
-    // Inside lambda bodies (end_tt='}'), newlines are statement separators.
-    // Inside brackets/parens (end_tt=']'/'}'), only ';' separates args; newlines are whitespace.
+    // Consecutive expressions become separate elements regardless of what
+    // delimits them, so a newline always separates items. What differs is
+    // null-injection: only a ';' (`counts`) can add a blank (`;;`, a trailing
+    // ';'). Inside a lambda body ('}') a newline also counts, so blank
+    // statements are possible; inside (...) / [...] a newline never injects a
+    // null — items may be written one-per-line with or without a trailing ';'.
     const nl_is_sep = end_tt == .@"}";
     var stmts = try std.ArrayList(*Node).initCapacity(self.al(), 0);
     var last_sep = false;
