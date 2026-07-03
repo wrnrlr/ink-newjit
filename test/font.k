@@ -47,9 +47,9 @@ f: faces 0
 
 / ── name (records → columns + decoded strings) ───────────────────────────────
 
-"Fira Code"  ~ FontFamily f
-"Regular"    ~ FontSubfamily f
-"Fira Code Regular" ~ FontFullName f
+"Fira Code"  ~ font.family f
+"Regular"    ~ font.subfamily f
+"Fira Code Regular" ~ font.fullName f
 "name ok"
 
 / ── OS/2 ─────────────────────────────────────────────────────────────────────
@@ -61,14 +61,17 @@ f: faces 0
 / ── cmap (best Unicode subtable → cp/gid) ────────────────────────────────────
 
 0 < #(f`cmap)`cp
-1 = FontGlyph[f;65]        / 'A'
-0 = FontGlyph[f;0xFFFF]    / unmapped
+1 = font.glyph[f;65]        / 'A'
+0 = font.glyph[f;0xFFFF]    / unmapped
 "cmap ok"
 
 / ── metric helpers ───────────────────────────────────────────────────────────
 
-1950 = FontUpm f
+1950 = font.upm f
 (font.scale[f;48.]) ~ 48. % 1950
+/ metrics = scale * (ascent; descent; lineGap) — a 3-vector, non-empty.
+3 = #font.metrics[f;48.]
+(font.metrics[f;48.]) ~ (font.scale[f;48.]) * f[`hhea]`ascent`descent`lineGap
 "metrics ok"
 
 / ── TTC → multiple faces ─────────────────────────────────────────────────────

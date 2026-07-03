@@ -108,10 +108,57 @@ pub const Compiler = struct {
   }
 
   pub fn compile(self: *Compiler, node: *ast.Node, is_tail: bool) anyerror!void {
+    // Pre-register the namespace members assigned in this compilation unit so
+    // forward/self/mutual references (recursion inside `\d ns`) resolve to the
+    // member rather than falling back to a blank global. See prescanMembers.
+    if (node.* == .terse) try self.prescanMembers(node.terse.stmts);
     const root_id = try self.compileNode(node, is_tail);
     if (self.scope.parent == null) {
       try self.runOptimizer(&self.scope.ir, root_id);
       try self.lower();
+    }
+  }
+
+  // Walk the top-level statements, tracking `\d` transitions, and pre-create a
+  // global slot for every `ns.member` assigned here. resolveGlobalRef then sees
+  // the member as existing even when referenced before its definition, so a
+  // recursive `f:{…f…}` (or mutually recursive pair) inside a namespace binds to
+  // `ns.f` instead of a blank global.  Only bare (undotted) assignment targets
+  // become members; anything else keeps its normal global/namespace resolution.
+  fn prescanMembers(self: *Compiler, stmts: []ast.Stmt) !void {
+    var ns: ?[]const u8 = self.namespace;
+    for (stmts) |stmt| {
+      switch (stmt.node.*) {
+        .command => |cmd| {
+          if (std.mem.eql(u8, cmd.verb, "d")) {
+            const t = std.mem.trim(u8, cmd.args, " \t");
+            if (t.len == 0) ns = null else {
+              var it = std.mem.tokenizeAny(u8, t, " \t");
+              ns = try self.interned(it.next().?);
+            }
+          }
+        },
+        .bind => |b| try self.prescanTarget(b.v, ns),
+        .pending => |p| try self.prescanTarget(p.v, ns),
+        else => {},
+      }
+    }
+  }
+
+  // Register the assignment target(s) in `v` (a plain var or a `(a;b;…)` list
+  // destructuring) as members of namespace `ns`, if any.
+  fn prescanTarget(self: *Compiler, v: *ast.Node, ns: ?[]const u8) !void {
+    const namespace = ns orelse return;
+    if (v.* == .literal and v.literal == .@"var") {
+      const name = v.literal.@"var";
+      if (nsOf(name) == null) _ = try self.getOrAddGlobal(try self.qualify(namespace, name));
+    } else if (v.* == .list) {
+      if (v.list.seq) |seq| for (seq) |item| {
+        if (item.* == .literal and item.literal == .@"var") {
+          const name = item.literal.@"var";
+          if (nsOf(name) == null) _ = try self.getOrAddGlobal(try self.qualify(namespace, name));
+        }
+      };
     }
   }
 
