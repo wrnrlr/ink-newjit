@@ -4,7 +4,6 @@
 / a single TTF/OTF yields a one-element list — uniform API across flavours).
 / Each face dict is keyed by normalized table name → that table's value:
 /   head  maxp  hhea  hmtx  loca  post  name  OS2  cmap  cvt  fpgm  prep  gasp
-
 \d font read outline outlines shape scale metrics upm glyph nameID family subfamily fullName
   so:"./zig-out/lib/libfont.dylib"
   read:so 2:(`ReadFont; 1)            / "path" → L of face dicts
@@ -17,7 +16,6 @@
   subfamily:{[f] nameID[f;2]}
   fullName:{[f] nameID[f;4]}
   / Single codepoint → glyph id via the cmap (0=.notdef when unmapped).
-  glyph:{[f;cp] c: f`cmap; cps: c`cp; $[cp in cps; (c`gid) cps?cp; 0]}
   glyph:{[f;cp] c: f`cmap; cps: c`cp; $[cp in cps; (c`gid) cps?cp; 0]}
   / A whole char string → glyph ids (no ligatures/kerning). Vectorized: `?` gives
   / #cps for an absent codepoint, indexing the appended .notdef gid 0.
@@ -62,7 +60,7 @@
   simpleC:{[g]
     pts: +(0.+(g`x); 0.+(g`y));
     starts: 0,1+-1_(g`ends);
-    +((starts _ pts); (starts _ g`on))}
+    +((starts_pts); (starts_g`on))}
   contours: {[g] $[0=#g`ends; (); simpleC g]}
   / ── composite glyphs + recursion (face dict `f` threaded as a plain arg) ───
   xform: {[xx;xy;yx;yy;dx;dy;c]
@@ -80,7 +78,6 @@
   / scale to pixels + flip y (font y-up → screen y-down) → flat F [x,y,x,y,…].
   emit: {[sc;c] xs: {x 0}'c; ys: {x 1}'c; ,/ +((sc*xs); (-sc)*ys)}
   outline: {[f;sc;gid] emit[sc]' resolve[f;gid]}
-
 / ── font.cff2 — PostScript / CFF Type-2 charstring outlines (in Zig) ────────
 / Returns the same shape as the glyf path (pixel-scaled, y-flipped). Only
 / `outline` is public.

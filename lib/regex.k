@@ -8,7 +8,11 @@
 /   regex.sub[prog;str;rep]    replace first match
 /   regex.suball[prog;str;rep] replace all matches
 /
-/ Everything else is a private member of the `regex` namespace.
+/ The pipeline is split into private sub-namespaces:
+/   regex.token    pattern string → token stream
+/   regex.postfix  token stream → postfix (concat insertion + shunting yard)
+/   regex.nfa      postfix → NFA program (Thompson construction)
+/   regex.vm       run an NFA program against a string (Pike VM)
 /
 / Supported syntax:
 /   . * + ? | ( ) [ ] [^] [a-z] \d \w \s \D \W \S ^ $
@@ -17,63 +21,46 @@
 / All instructions use explicit next-PC in arg2 (no fall-through).
 / Program dict: [ops;a1;a2;cls;start]
 
+/ ── public API ────────────────────────────────────────────────────────────────
 \d regex compile test find all sub suball
 
-/ ── forward-declared mutable state ───────────────────────────────────────────
-/ These module globals are written only inside lambda bodies via `::`. Declaring
-/ them at the top of the namespace makes the compiler's member pre-pass register
-/ each as `regex.<name>`, so reads and writes resolve to the same qualified slot
-/ (a bare `::` assign always mangles to the namespace; a read only mangles once
-/ the qualified global exists). Values here are placeholders — every public entry
-/ point resets the state it uses before reading it.
-rA1:0; rA2:0; raN:0; raProg:0; raResult:0; raStr:0; rCls:0
-rcpTypes:0; rcpVals:0; rePos:0; reSyPrec:0; reSyT:0; reSyV:0
-rfN:0; rfProg:0; rFrags:0; rfResult:0; rfStr:0; ricN:0; rict:0
-ricTypes:0; ricv:0; ricVals:0; rmA1:0; rmA2:0; rmCls:0; rmOps:0
-rmSlen:0; rmStr:0; rOps:0; rpOps:0; rpOutT:0; rpOutV:0; rpSrcT:0
-rpSrcV:0; rsaRep:0; rtCls:0; rtCurCls:0; rti:0; rtN:0; rtNeg:0
-rtPat:0; rtTypes:0; rtVals:0
+fProg:()!(); fStr:""; fN:0; fRes:!0
+aProg:()!(); aStr:""; aN:0; aRes:()
+subRep:""
 
-/ ── public API ────────────────────────────────────────────────────────────────
-findCond: {(~x>rfN)&~#rfResult}
-allCond: {~x>raN}
 splice: {[str;s;l;rep] (s#str),rep,((s+l)_str)}
 
-matchCond: {(x@2)<rmSlen}
-
-matchAt: {[prog;str;start]
-  rmOps::prog`ops; rmA1::prog`a1; rmA2::prog`a2
-  rmCls::prog`cls; rmStr::"",str; rmSlen::#rmStr
-  initPcs: $[start>rmSlen; !0; rmEpsClosure[,prog`start;start]]
-  lm: $[rmHasMatch[initPcs]; start; -1]
-  st: (initPcs;lm;start)
-  r: matchCond{rmAdvance[x]}/st
-  r@1
-}
-
-
+findCond: {(~x>fN)&~#fRes}
 findStep: {[pos]
-  r: matchAt[rfProg;rfStr;pos]
-  $[~r=-1; rfResult::(pos;r-pos); 0]
+  r: vm.matchAt[fProg;fStr;pos]
+  $[~r=-1; fRes::(pos;r-pos); 0]
   pos+1
 }
-raAppend: {[pos;endPos]
-  raResult::raResult,,(pos;endPos-pos)
+
+allCond: {~x>aN}
+allAppend: {[pos;endPos]
+  aRes::aRes,,(pos;endPos-pos)
   $[endPos>pos; endPos; pos+1]
 }
 
-test: {[prog;str] (matchAt[prog;str;0])=#str}
+compile: {[pat]
+  toks: token.scan[pat]
+  pf: postfix.build[toks@0;toks@1]
+  nfa.build[pf@0;pf@1;toks@2]
+}
+
+test: {[prog;str] (vm.matchAt[prog;str;0])=#str}
 
 find: {[prog;str]
-  rfProg::prog; rfStr::"",str; rfN::#rfStr; rfResult::!0
+  fProg::prog; fStr::"",str; fN::#fStr; fRes::!0
   findCond{findStep[x]}/0
-  rfResult
+  fRes
 }
 
 all: {[prog;str]
-  raProg::prog; raStr::"",str; raN::#raStr; raResult::()
-  allCond{r:matchAt[raProg;raStr;x]; $[~r=-1; raAppend[x;r]; x+1]}/0
-  raResult
+  aProg::prog; aStr::"",str; aN::#aStr; aRes::()
+  allCond{r:vm.matchAt[aProg;aStr;x]; $[~r=-1; allAppend[x;r]; x+1]}/0
+  aRes
 }
 
 sub: {[prog;str;rep]
@@ -83,245 +70,270 @@ sub: {[prog;str;rep]
 
 suball: {[prog;str;rep]
   ms: all[prog;str]
-  rsaRep::rep
-  $[#ms; {splice[x;y@0;y@1;rsaRep]}/[str;|ms]; str]
+  subRep::rep
+  $[#ms; {splice[x;y@0;y@1;subRep]}/[str;|ms]; str]
 }
-
-/ ── character classes (256-element boolean vectors, indexed by char code) ─────
-reDigit: (~(48>!256))&~((!256)>57)
-reAlpha: ((~(65>!256))&~((!256)>90))|(~(97>!256))&~((!256)>122)
-reWord: reDigit|reAlpha|(!256)=95
-reSpace: ((!256)=32)|((!256)=9)|((!256)=10)|((!256)=13)
 
 / ── tokenizer ─────────────────────────────────────────────────────────────────
 / Token types: 0=CHAR 1=ANY 2=CLASS 3=STAR 4=PLUS 5=QUEST 6=OR 7=LPAREN 8=RPAREN 9=SOL 10=EOL
+\d regex.token scan
 
-rtEmitAdv: {[t;v] rtTypes::rtTypes,t; rtVals::rtVals,v; rti::rti+1; 0}
-rtEmitCls: {[cls] rtTypes::rtTypes,2; rtVals::rtVals,#rtCls; rtCls::rtCls,,cls; rti::rti+1; 0}
-rtEscLit: {[cv] rtTypes::rtTypes,0; rtVals::rtVals,cv; rti::rti+1; 0}
+pat:""; n:0; pos:0; types:!0; vals:!0; cls:(); curCls:256#,0b; neg:0b
 
-rtEscape: {
-  rti::rti+1
-  c: `i$(rtPat@rti)
-  $[c=100; rtEmitCls[reDigit];
-    c=68;  rtEmitCls[~reDigit];
-    c=119; rtEmitCls[reWord];
-    c=87;  rtEmitCls[~reWord];
-    c=115; rtEmitCls[reSpace];
-    c=83;  rtEmitCls[~reSpace];
-    rtEscLit[c]]
+/ character classes (256-element boolean vectors, indexed by char code)
+digit: (~(48>!256))&~((!256)>57)
+alpha: ((~(65>!256))&~((!256)>90))|(~(97>!256))&~((!256)>122)
+word:  digit|alpha|(!256)=95
+space: ((!256)=32)|((!256)=9)|((!256)=10)|((!256)=13)
+
+emitAdv: {[t;v] types::types,t; vals::vals,v; pos::pos+1; 0}
+emitCls: {[c] types::types,2; vals::vals,#cls; cls::cls,,c; pos::pos+1; 0}
+escLit:  {[cv] types::types,0; vals::vals,cv; pos::pos+1; 0}
+
+escape: {
+  pos::pos+1
+  c: `i$(pat@pos)
+  $[c=100; emitCls[digit];
+    c=68;  emitCls[~digit];
+    c=119; emitCls[word];
+    c=87;  emitCls[~word];
+    c=115; emitCls[space];
+    c=83;  emitCls[~space];
+    escLit[c]]
 }
 
 / Character class [...]
-rtCcRange: {[lo] hi: `i$(rtPat@(rti+2)); rtCurCls::rtCurCls|(~(lo>!256))&~((!256)>hi); rti::rti+3; 0}
-rtCcSingle: {[lo] rtCurCls::@[rtCurCls;lo;:;1b]; rti::rti+1; 0}
-rtCcStep: {
-  lo: `i$(rtPat@rti)
-  $[((rti+2)<rtN)&((`i$(rtPat@(rti+1)))=45)&~((`i$(rtPat@(rti+2)))=93);
-    rtCcRange[lo];
-    rtCcSingle[lo]]
+ccRange:  {[lo] hi: `i$(pat@(pos+2)); curCls::curCls|(~(lo>!256))&~((!256)>hi); pos::pos+3; 0}
+ccSingle: {[lo] curCls::@[curCls;lo;:;1b]; pos::pos+1; 0}
+ccStep: {
+  lo: `i$(pat@pos)
+  $[((pos+2)<n)&((`i$(pat@(pos+1)))=45)&~((`i$(pat@(pos+2)))=93);
+    ccRange[lo];
+    ccSingle[lo]]
 }
-rtCcCond: {~(`i$(rtPat@rti))=93}
-rtCharClass: {
-  rti::rti+1
-  rtNeg:: (`i$(rtPat@rti))=94
-  $[rtNeg; rti::rti+1; 0]
-  rtCurCls:: 256#(,0b)
-  rtCcCond{rtCcStep[]; x+1}/0
-  $[rtNeg; rtCurCls::~rtCurCls; 0]
-  rtTypes::rtTypes,2
-  rtVals::rtVals,#rtCls
-  rtCls::rtCls,,rtCurCls
-  rti::rti+1
+ccCond: {~(`i$(pat@pos))=93}
+charClass: {
+  pos::pos+1
+  neg:: (`i$(pat@pos))=94
+  $[neg; pos::pos+1; 0]
+  curCls:: 256#,0b
+  ccCond{ccStep[]; x+1}/0
+  $[neg; curCls::~curCls; 0]
+  types::types,2
+  vals::vals,#cls
+  cls::cls,,curCls
+  pos::pos+1
   0
 }
 
-rtTokStep: {
-  c: `i$(rtPat@rti)
-  $[c=92;  rtEscape[];
-    c=46;  rtEmitAdv[1;0];
-    c=42;  rtEmitAdv[3;0];
-    c=43;  rtEmitAdv[4;0];
-    c=63;  rtEmitAdv[5;0];
-    c=124; rtEmitAdv[6;0];
-    c=40;  rtEmitAdv[7;0];
-    c=41;  rtEmitAdv[8;0];
-    c=94;  rtEmitAdv[9;0];
-    c=36;  rtEmitAdv[10;0];
-    c=91;  rtCharClass[];
-    rtEmitAdv[0;c]]
+tokStep: {
+  c: `i$(pat@pos)
+  $[c=92;  escape[];
+    c=46;  emitAdv[1;0];
+    c=42;  emitAdv[3;0];
+    c=43;  emitAdv[4;0];
+    c=63;  emitAdv[5;0];
+    c=124; emitAdv[6;0];
+    c=40;  emitAdv[7;0];
+    c=41;  emitAdv[8;0];
+    c=94;  emitAdv[9;0];
+    c=36;  emitAdv[10;0];
+    c=91;  charClass[];
+    emitAdv[0;c]]
 }
 
-rtTokCond: {rti<rtN}
-ReTok: {[pat]
-  rtPat::"",pat; rtN::#rtPat; rti::0
-  rtTypes::!0; rtVals::!0; rtCls::()
-  rtTokCond{rtTokStep[]; x+1}/0
-  (rtTypes;rtVals;rtCls)
+tokCond: {pos<n}
+scan: {[p]
+  pat::"",p; n::#pat; pos::0
+  types::!0; vals::!0; cls::()
+  tokCond{tokStep[]; x+1}/0
+  (types;vals;cls)
 }
 
-/ ── insert explicit CONCAT (type 12) ─────────────────────────────────────────
-ricCanEnd: 0 1 2 3 4 5 8 9 10
-ricCanStart: 0 1 2 7 9 10
-ricStep: {[i]
-  t: ricTypes@i; v: ricVals@i
-  prev: *|rict
-  nc: (prev in ricCanEnd)&t in ricCanStart
-  rict:: rict,$[nc;(12;t);,t]
-  ricv:: ricv,$[nc;(0;v);,v]
+/ ── token stream → postfix ───────────────────────────────────────────────────
+/ First insert explicit CONCAT (type 12), then run the shunting-yard.
+\d regex.postfix build
+
+cTypes:!0; cVals:!0; cN:0; ct:!0; cv:!0
+srcT:!0; srcV:!0; outT:!0; outV:!0; opStk:!0; prec:0; syT:0; syV:0
+
+/ insert explicit CONCAT (type 12)
+canEnd:   0 1 2 3 4 5 8 9 10
+canStart: 0 1 2 7 9 10
+concatStep: {[i]
+  t: cTypes@i; v: cVals@i
+  prev: *|ct
+  nc: (prev in canEnd)&t in canStart
+  ct:: ct,$[nc;(12;t);,t]
+  cv:: cv,$[nc;(0;v);,v]
   0
 }
-reInsertConcatDo: {[types;vals]
-  ricTypes::types; ricVals::vals; ricN::#ricTypes
-  rict::,ricTypes@0; ricv::,ricVals@0
-  $[ricN>1; ricStep'1+!ricN-1; 0]
-  (rict;ricv)
+insertConcatDo: {[types;vals]
+  cTypes::types; cVals::vals; cN::#cTypes
+  ct::,cTypes@0; cv::,cVals@0
+  $[cN>1; concatStep'1+!cN-1; 0]
+  (ct;cv)
 }
-reInsertConcat: {[types;vals]
-  $[#types; reInsertConcatDo[types;vals]; (types;vals)]
-}
-
-/ ── shunting-yard → postfix ───────────────────────────────────────────────────
-rePrecedence: {$[x=12; 2; x=6; 1; 0]}
-
-reSyPopToOut: {
-  op: *|rpOps; rpOps::(-1)_rpOps
-  rpOutT::rpOutT,op; rpOutV::rpOutV,0
-  0
+insertConcat: {[types;vals]
+  $[#types; insertConcatDo[types;vals]; (types;vals)]
 }
 
-reSyRparenCond: {(#rpOps)&~(*|rpOps)=7}
-reSyRparen: {
-  reSyRparenCond{reSyPopToOut[]; x+1}/0
-  $[#rpOps; rpOps::(-1)_rpOps; 0]
-  0
-}
+/ shunting-yard → postfix
+precedence: {$[x=12; 2; x=6; 1; 0]}
 
-reSyBinopCond: {(#rpOps)&(~(*|rpOps)=7)&~(rePrecedence[*|rpOps])<reSyPrec}
-reSyBinop: {
-  reSyPrec::$[reSyT=12; 2; 1]
-  reSyBinopCond{reSyPopToOut[]; x+1}/0
-  rpOps::rpOps,reSyT
+popToOut: {
+  op: *|opStk; opStk::(-1)_opStk
+  outT::outT,op; outV::outV,0
   0
 }
 
-reSyAtom: {rpOutT::rpOutT,reSyT; rpOutV::rpOutV,reSyV; 0}
-
-reSyStep: {[i]
-  reSyT::rpSrcT@i; reSyV::rpSrcV@i
-  $[reSyT in 0 1 2 3 4 5 9 10; reSyAtom[];
-    reSyT=7; {rpOps::rpOps,7; 0}[];
-    reSyT=8; reSyRparen[];
-    reSyBinop[]]
+rparenCond: {(#opStk)&~(*|opStk)=7}
+rparen: {
+  rparenCond{popToOut[]; x+1}/0
+  $[#opStk; opStk::(-1)_opStk; 0]
+  0
 }
 
-reToPostfix: {[types;vals]
-  rpSrcT::types; rpSrcV::vals
-  rpOutT::!0; rpOutV::!0; rpOps::!0
-  reSyStep'!#rpSrcT
-  rpOutT::rpOutT,|rpOps
-  rpOutV::rpOutV,(#rpOps)#0
-  rpOps::!0
-  (rpOutT;rpOutV)
+binopCond: {(#opStk)&(~(*|opStk)=7)&~(precedence[*|opStk])<prec}
+binop: {
+  prec::$[syT=12; 2; 1]
+  binopCond{popToOut[]; x+1}/0
+  opStk::opStk,syT
+  0
+}
+
+atom: {outT::outT,syT; outV::outV,syV; 0}
+
+syStep: {[i]
+  syT::srcT@i; syV::srcV@i
+  $[syT in 0 1 2 3 4 5 9 10; atom[];
+    syT=7; {opStk::opStk,7; 0}[];
+    syT=8; rparen[];
+    binop[]]
+}
+
+toPostfix: {[types;vals]
+  srcT::types; srcV::vals
+  outT::!0; outV::!0; opStk::!0
+  syStep'!#srcT
+  outT::outT,|opStk
+  outV::outV,(#opStk)#0
+  opStk::!0
+  (outT;outV)
+}
+
+build: {[types;vals]
+  tv: insertConcat[types;vals]
+  toPostfix[tv@0;tv@1]
 }
 
 / ── Thompson NFA compiler (postfix → bytecode) ───────────────────────────────
 / Fragment = (start; patches) where patches encodes patch points.
 / Encoding: pc*2+bit, bit 0=arg1 1=arg2.
+\d regex.nfa build
 
-rEmitInst: {[op;a1;a2] i:#rOps; rOps::rOps,op; rA1::rA1,a1; rA2::rA2,a2; i}
+ops:!0; arg1:!0; arg2:!0; clsTab:(); frags:(); pTypes:!0; pVals:!0
 
-rPatchAll: {[patches;target]
+emit: {[op;a1;a2] i:#ops; ops::ops,op; arg1::arg1,a1; arg2::arg2,a2; i}
+
+patchAll: {[patches;target]
   idx: patches div 2; ab: patches mod 2
   a1i: idx@&~ab; a2i: idx@&ab
-  $[#a1i; rA1::@[rA1;a1i;:;target]; 0]
-  $[#a2i; rA2::@[rA2;a2i;:;target]; 0]
+  $[#a1i; arg1::@[arg1;a1i;:;target]; 0]
+  $[#a2i; arg2::@[arg2;a2i;:;target]; 0]
   0
 }
 
-rPush: {[f] rFrags::rFrags,,f; 0}
-rPop: {f:rFrags@(#rFrags)-1; rFrags::(-1)_rFrags; f}
+push: {[f] frags::frags,,f; 0}
+pop:  {f:frags@(#frags)-1; frags::(-1)_frags; f}
 
-rcpAtom: {[op;v] pc:rEmitInst[op;v;-1]; rPush[(pc; ,(pc*2)+1)]}
-rcpConcat: {f2:rPop[]; f1:rPop[]; rPatchAll[f1@1;f2@0]; rPush[(f1@0;f2@1)]}
-rcpAlt: {f2:rPop[]; f1:rPop[]; s:rEmitInst[3;f1@0;f2@0]; rPush[(s;(f1@1),(f2@1))]}
-rcpStar: {f:rPop[]; s:rEmitInst[3;f@0;-1]; rPatchAll[f@1;s]; rPush[(s;,(s*2)+1)]}
-rcpPlus: {f:rPop[]; s:rEmitInst[3;f@0;-1]; rPatchAll[f@1;s]; rPush[(f@0;,(s*2)+1)]}
-rcpQuest: {f:rPop[]; s:rEmitInst[3;f@0;-1]; rPush[(s;(f@1),(s*2)+1)]}
+atom:   {[op;v] pc:emit[op;v;-1]; push[(pc; ,(pc*2)+1)]}
+concat: {f2:pop[]; f1:pop[]; patchAll[f1@1;f2@0]; push[(f1@0;f2@1)]}
+alt:    {f2:pop[]; f1:pop[]; s:emit[3;f1@0;f2@0]; push[(s;(f1@1),(f2@1))]}
+star:   {f:pop[]; s:emit[3;f@0;-1]; patchAll[f@1;s]; push[(s;,(s*2)+1)]}
+plus:   {f:pop[]; s:emit[3;f@0;-1]; patchAll[f@1;s]; push[(f@0;,(s*2)+1)]}
+quest:  {f:pop[]; s:emit[3;f@0;-1]; push[(s;(f@1),(s*2)+1)]}
 
-rcpCompStep: {[i]
-  t: rcpTypes@i; v: rcpVals@i
-  $[t=0;  rcpAtom[0;v];
-    t=1;  rcpAtom[1;0];
-    t=2;  rcpAtom[2;v];
-    t=9;  rcpAtom[6;0];
-    t=10; rcpAtom[7;0];
-    t=3;  rcpStar[];
-    t=4;  rcpPlus[];
-    t=5;  rcpQuest[];
-    t=12; rcpConcat[];
-    t=6;  rcpAlt[];
+compStep: {[i]
+  t: pTypes@i; v: pVals@i
+  $[t=0;  atom[0;v];
+    t=1;  atom[1;0];
+    t=2;  atom[2;v];
+    t=9;  atom[6;0];
+    t=10; atom[7;0];
+    t=3;  star[];
+    t=4;  plus[];
+    t=5;  quest[];
+    t=12; concat[];
+    t=6;  alt[];
     0]
 }
 
-rcpFinish: {
-  f: *|rFrags
-  m: rEmitInst[5;0;0]
-  rPatchAll[f@1;m]
-  [ops:rOps;a1:rA1;a2:rA2;cls:rCls;start:f@0]
+finish: {
+  f: *|frags
+  m: emit[5;0;0]
+  patchAll[f@1;m]
+  [ops:ops;a1:arg1;a2:arg2;cls:clsTab;start:f@0]
 }
-rcpFinishEmpty: {
-  m: rEmitInst[5;0;0]
-  [ops:rOps;a1:rA1;a2:rA2;cls:rCls;start:m]
-}
-
-reCompPost: {[types;vals;cls]
-  rOps::!0; rA1::!0; rA2::!0; rCls::cls; rFrags::()
-  rcpTypes::types; rcpVals::vals
-  rcpCompStep'!#rcpTypes
-  $[#rFrags; rcpFinish[]; rcpFinishEmpty[]]
+finishEmpty: {
+  m: emit[5;0;0]
+  [ops:ops;a1:arg1;a2:arg2;cls:clsTab;start:m]
 }
 
-/ ── public compile ────────────────────────────────────────────────────────────
-compile: {[pat]
-  toks: ReTok[pat]
-  tv: reInsertConcat[toks@0;toks@1]
-  pf: reToPostfix[tv@0;tv@1]
-  reCompPost[pf@0;pf@1;toks@2]
+build: {[types;vals;cls]
+  ops::!0; arg1::!0; arg2::!0; clsTab::cls; frags::()
+  pTypes::types; pVals::vals
+  compStep'!#pTypes
+  $[#frags; finish[]; finishEmpty[]]
 }
 
-/ ── NFA execution ─────────────────────────────────────────────────────────────
+/ ── NFA execution (Pike VM) ──────────────────────────────────────────────────
+\d regex.vm matchAt
 
-rmEpsClosure: {[pcs;pos]
-  rePos::pos
+ops:!0; a1:!0; a2:!0; cls:(); s:""; slen:0; epos:0
+
+matchCond: {(x@2)<slen}
+
+epsClosure: {[pcs;pos]
+  epos::pos
   expanded: {
-    o: rmOps@x
-    next: ((rmA1@x)@&o=3),((rmA2@x)@&o=3),((rmA1@x)@&o=4),((rmA2@x)@&(o=6)&rePos=0),((rmA2@x)@&(o=7)&rePos=rmSlen)
+    o: ops@x
+    next: ((a1@x)@&o=3),((a2@x)@&o=3),((a1@x)@&o=4),((a2@x)@&(o=6)&epos=0),((a2@x)@&(o=7)&epos=slen)
     ?x,next
   }/pcs
-  o: rmOps@expanded
+  o: ops@expanded
   expanded@&(o<3)|o=5
 }
 
-rmHasMatch: {$[#x; 0<#&(rmOps@x)=5; 0b]}
+hasMatch: {$[#x; 0<#&(ops@x)=5; 0b]}
 
-rmStep: {[pcs;pos]
-  o: rmOps@pcs; chCode: `i$(rmStr@pos)
-  matchChar: (o=0)&(rmA1@pcs)=chCode
+step: {[pcs;pos]
+  o: ops@pcs; chCode: `i$(s@pos)
+  matchChar: (o=0)&(a1@pcs)=chCode
   matchAny: o=1
-  matched: $[#rmCls;
-    matchChar|matchAny|((o=2)&(+(rmCls@((rmA1@pcs) mod #rmCls)))@chCode);
+  matched: $[#cls;
+    matchChar|matchAny|((o=2)&(+(cls@((a1@pcs) mod #cls)))@chCode);
     matchChar|matchAny]
-  nextPcs: (rmA2@pcs)@&matched
-  $[#nextPcs; rmEpsClosure[nextPcs;pos+1]; !0]
+  nextPcs: (a2@pcs)@&matched
+  $[#nextPcs; epsClosure[nextPcs;pos+1]; !0]
 }
 
-rmStepAndUpdate: {[pcs;pos;prevLm]
-  np: rmStep[pcs;pos]
-  nm: $[(#np)&rmHasMatch[np]; pos+1; prevLm]
+stepUpdate: {[pcs;pos;prevLm]
+  np: step[pcs;pos]
+  nm: $[(#np)&hasMatch[np]; pos+1; prevLm]
   (np;nm;pos+1)
 }
 
-rmAdvance: {[st]
-  $[#st@0; rmStepAndUpdate[st@0;st@2;st@1]; (st@0;st@1;rmSlen)]
+advance: {[st]
+  $[#st 0; stepUpdate[st 0;st 2;st 1]; (st 0;st 1;slen)]
+}
+
+matchAt: {[prog;str;start]
+  ops::prog`ops; a1::prog`a1; a2::prog`a2
+  cls::prog`cls; s::"",str; slen::#s
+  initPcs: $[start>slen; !0; epsClosure[,prog`start;start]]
+  lm: $[hasMatch[initPcs]; start; -1]
+  st: (initPcs;lm;start)
+  r: matchCond{advance[x]}/st
+  r@1
 }
