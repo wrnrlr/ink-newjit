@@ -972,12 +972,19 @@ pub const Compiler = struct {
   }
 
   // Resolve a variable *reference* to a global slot, applying namespace rules.
-  //   qualified `ns.m`  → that global; error if private and referenced from
-  //                       outside `ns` (strict privacy).
+  //   qualified `a.m`   → resolved RELATIVE to the current namespace first
+  //                       (`cur.a.m`) when such a member exists, so inside
+  //                       `\d font` a `cff2.outline` reaches `font.cff2.outline`;
+  //                       otherwise the absolute `a.m`, with a strict-privacy
+  //                       error if it is private and referenced from outside `a`.
   //   bare `m` in `ns`  → `ns.m` if that member exists, else global `m`.
   //   bare `m` globally → global `m`.
   fn resolveGlobalRef(self: *Compiler, name: []const u8) !u16 {
     if (nsOf(name)) |ns| {
+      if (self.namespace) |cur| {
+        const rel = try self.qualify(cur, name);
+        if (self.globals.contains(rel)) return self.getOrAddGlobal(rel);
+      }
       const inside = if (self.namespace) |cur| std.mem.eql(u8, cur, ns) else false;
       if (!inside and self.private_members.contains(name)) return error.PrivateName;
       return self.getOrAddGlobal(name);
