@@ -1,12 +1,14 @@
 / regex.k — Pure-k regex engine (Thompson NFA / Pike VM)
 /
 / Public API:
-/   ReCompile[pat]           compile regex pattern string to NFA program
-/   ReTest[prog;str]         1b if full match
-/   ReFind[prog;str]         (start;len) of first match, or !0
-/   ReAll[prog;str]          list of (start;len) for all non-overlapping matches
-/   ReSub[prog;str;rep]      replace first match
-/   ReSubAll[prog;str;rep]   replace all matches
+/   regex.compile[pat]         compile regex pattern string to NFA program
+/   regex.test[prog;str]       1b if full match
+/   regex.find[prog;str]       (start;len) of first match, or !0
+/   regex.all[prog;str]        list of (start;len) for all non-overlapping matches
+/   regex.sub[prog;str;rep]    replace first match
+/   regex.suball[prog;str;rep] replace all matches
+/
+/ Everything else is a private member of the `regex` namespace.
 /
 / Supported syntax:
 /   . * + ? | ( ) [ ] [^] [a-z] \d \w \s \D \W \S ^ $
@@ -15,26 +17,43 @@
 / All instructions use explicit next-PC in arg2 (no fall-through).
 / Program dict: [ops;a1;a2;cls;start]
 
+\d regex compile test find all sub suball
+
+/ ── forward-declared mutable state ───────────────────────────────────────────
+/ These module globals are written only inside lambda bodies via `::`. Declaring
+/ them at the top of the namespace makes the compiler's member pre-pass register
+/ each as `regex.<name>`, so reads and writes resolve to the same qualified slot
+/ (a bare `::` assign always mangles to the namespace; a read only mangles once
+/ the qualified global exists). Values here are placeholders — every public entry
+/ point resets the state it uses before reading it.
+rA1:0; rA2:0; raN:0; raProg:0; raResult:0; raStr:0; rCls:0
+rcpTypes:0; rcpVals:0; rePos:0; reSyPrec:0; reSyT:0; reSyV:0
+rfN:0; rfProg:0; rFrags:0; rfResult:0; rfStr:0; ricN:0; rict:0
+ricTypes:0; ricv:0; ricVals:0; rmA1:0; rmA2:0; rmCls:0; rmOps:0
+rmSlen:0; rmStr:0; rOps:0; rpOps:0; rpOutT:0; rpOutV:0; rpSrcT:0
+rpSrcV:0; rsaRep:0; rtCls:0; rtCurCls:0; rti:0; rtN:0; rtNeg:0
+rtPat:0; rtTypes:0; rtVals:0
+
 / ── public API ────────────────────────────────────────────────────────────────
-reFindCond: {(~x>rfN)&~#rfResult}
-raAllCond: {~x>raN}
-reSplice: {[str;s;l;rep] (s#str),rep,((s+l)_str)}
+findCond: {(~x>rfN)&~#rfResult}
+allCond: {~x>raN}
+splice: {[str;s;l;rep] (s#str),rep,((s+l)_str)}
 
-rmMatchCond: {(x@2)<rmSlen}
+matchCond: {(x@2)<rmSlen}
 
-ReMatchAt: {[prog;str;start]
+matchAt: {[prog;str;start]
   rmOps::prog`ops; rmA1::prog`a1; rmA2::prog`a2
   rmCls::prog`cls; rmStr::"",str; rmSlen::#rmStr
   initPcs: $[start>rmSlen; !0; rmEpsClosure[,prog`start;start]]
   lm: $[rmHasMatch[initPcs]; start; -1]
   st: (initPcs;lm;start)
-  r: rmMatchCond{rmAdvance[x]}/st
+  r: matchCond{rmAdvance[x]}/st
   r@1
 }
 
 
-reFindStep: {[pos]
-  r: ReMatchAt[rfProg;rfStr;pos]
+findStep: {[pos]
+  r: matchAt[rfProg;rfStr;pos]
   $[~r=-1; rfResult::(pos;r-pos); 0]
   pos+1
 }
@@ -43,29 +62,29 @@ raAppend: {[pos;endPos]
   $[endPos>pos; endPos; pos+1]
 }
 
-ReTest: {[prog;str] (ReMatchAt[prog;str;0])=#str}
+test: {[prog;str] (matchAt[prog;str;0])=#str}
 
-ReFind: {[prog;str]
+find: {[prog;str]
   rfProg::prog; rfStr::"",str; rfN::#rfStr; rfResult::!0
-  reFindCond{reFindStep[x]}/0
+  findCond{findStep[x]}/0
   rfResult
 }
 
-ReAll: {[prog;str]
+all: {[prog;str]
   raProg::prog; raStr::"",str; raN::#raStr; raResult::()
-  raAllCond{r:ReMatchAt[raProg;raStr;x]; $[~r=-1; raAppend[x;r]; x+1]}/0
+  allCond{r:matchAt[raProg;raStr;x]; $[~r=-1; raAppend[x;r]; x+1]}/0
   raResult
 }
 
-ReSub: {[prog;str;rep]
-  m: ReFind[prog;str]
-  $[#m; reSplice[str;m@0;m@1;rep]; str]
+sub: {[prog;str;rep]
+  m: find[prog;str]
+  $[#m; splice[str;m@0;m@1;rep]; str]
 }
 
-ReSubAll: {[prog;str;rep]
-  ms: ReAll[prog;str]
+suball: {[prog;str;rep]
+  ms: all[prog;str]
   rsaRep::rep
-  $[#ms; {reSplice[x;y@0;y@1;rsaRep]}/[str;|ms]; str]
+  $[#ms; {splice[x;y@0;y@1;rsaRep]}/[str;|ms]; str]
 }
 
 / ── character classes (256-element boolean vectors, indexed by char code) ─────
@@ -264,7 +283,7 @@ reCompPost: {[types;vals;cls]
 }
 
 / ── public compile ────────────────────────────────────────────────────────────
-ReCompile: {[pat]
+compile: {[pat]
   toks: ReTok[pat]
   tv: reInsertConcat[toks@0;toks@1]
   pf: reToPostfix[tv@0;tv@1]
