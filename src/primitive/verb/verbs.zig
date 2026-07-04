@@ -13,9 +13,41 @@ const calc = @import("calc.zig");
 const sort = @import("sort.zig");
 const member = @import("member.zig");
 
-// Dispatch tables: monad keyed by Op1, dyad keyed by Op2.
+// Dispatch tables: monad keyed by Op1, dyad split in two stages.
+//
+// Stage 1 (quick_table): the quick dyads (+ - * % = | & < >, Op2 codes below
+// QUICK_COUNT) over the flat scalar/vector types, shift-indexed as
+// op<<8 | xcode<<4 | ycode. Default slots hold the per-op structural fallback
+// (h.containerDyad: dict recursion, list broadcast, else type error), so the
+// hot table never grows when a new type is added — new types dispatch through
+// stage 2 until they earn dense codes here.
+//
+// Stage 2 (dyad_table): the remaining ops over the full K × K space, keyed by
+// (op - QUICK_COUNT) with typeError2 defaults, exactly as before.
 pub const monad_table = makeMonadArray(Monads);
+pub const quick_table = makeQuickArray(Dyads);
 pub const dyad_table  = makeDyadArray(Dyads);
+
+pub const S1_STRIDE = 16; // power of two: the stage-1 key is pure shifts/ors
+const stage1_types = [_]K{ .b, .i, .f, .s, .c, .B, .I, .F, .S, .C };
+const S1_OTHER: u8 = stage1_types.len; // sentinel code: hits the fallback slots
+
+/// K.code() → dense stage-1 type code (S1_OTHER for container/exotic types).
+pub const stage1code: [K.COUNT]u8 = blk: {
+  var t: [K.COUNT]u8 = .{S1_OTHER} ** K.COUNT;
+  for (stage1_types, 0..) |k, i| t[k.code()] = i;
+  break :blk t;
+};
+
+comptime {
+  std.debug.assert(S1_STRIDE == 16); // dispatch2 hardcodes op<<8 | x<<4 | y
+  std.debug.assert(S1_OTHER < S1_STRIDE);
+  // The quick range must be exactly the arith + logic + grade ops.
+  for (Op2.arith ++ Op2.logic ++ [_]Op2{ .@"<", .@">" }) |o|
+    std.debug.assert(o.code() < Op2.QUICK_COUNT);
+  std.debug.assert(Op2.QUICK_COUNT == 9);
+  std.debug.assert(Op2.@"~".code() >= Op2.QUICK_COUNT);
+}
 
 const h = @import("helper.zig");
 const at = h.arithmetic_types;
@@ -268,16 +300,45 @@ fn makeMonadArray(comptime Defs: type) [Op1.COUNT * K.COUNT]VM.Monad {
   return table;
 }
 
-fn makeDyadArray(comptime Defs: type) [Op2.COUNT * K.COUNT * K.COUNT]VM.Dyad {
+fn makeQuickArray(comptime Defs: type) [Op2.QUICK_COUNT * S1_STRIDE * S1_STRIDE]VM.Dyad {
   @setEvalBranchQuota(10000000);
-  var table: [Op2.COUNT * K.COUNT * K.COUNT]VM.Dyad = .{typeError2} ** (Op2.COUNT * K.COUNT * K.COUNT);
+  var table: [Op2.QUICK_COUNT * S1_STRIDE * S1_STRIDE]VM.Dyad = undefined;
+  for (0..Op2.QUICK_COUNT) |oc| {
+    const fallback = h.containerFallback(@enumFromInt(oc));
+    for (0..S1_STRIDE * S1_STRIDE) |j| table[oc * S1_STRIDE * S1_STRIDE + j] = fallback;
+  }
   for (std.meta.declarations(Defs)) |decl| {
     const Verb = @field(Defs, decl.name);
     const op2 = opOf(Verb, Op2) orelse continue;
+    if (op2.code() >= Op2.QUICK_COUNT) continue;
     for (std.meta.fields(Verb)) |f| {
       const sig = parseSig(f.name);
       if (sig.len == 2) {
-        const key = op2.code() * K.COUNT * K.COUNT + sig[0].code() * K.COUNT + sig[1].code();
+        const xc = stage1code[sig[0].code()];
+        const yc = stage1code[sig[1].code()];
+        if (xc == S1_OTHER or yc == S1_OTHER)
+          @compileError("quick-op slot outside stage-1 types: " ++ decl.name ++ "." ++ f.name);
+        const key = op2.code() * S1_STRIDE * S1_STRIDE + xc * S1_STRIDE + yc;
+        table[key] = f.defaultValue().?;
+      }
+    }
+  }
+  return table;
+}
+
+const DYAD2_COUNT = Op2.COUNT - Op2.QUICK_COUNT;
+
+fn makeDyadArray(comptime Defs: type) [DYAD2_COUNT * K.COUNT * K.COUNT]VM.Dyad {
+  @setEvalBranchQuota(10000000);
+  var table: [DYAD2_COUNT * K.COUNT * K.COUNT]VM.Dyad = .{typeError2} ** (DYAD2_COUNT * K.COUNT * K.COUNT);
+  for (std.meta.declarations(Defs)) |decl| {
+    const Verb = @field(Defs, decl.name);
+    const op2 = opOf(Verb, Op2) orelse continue;
+    if (op2.code() < Op2.QUICK_COUNT) continue;
+    for (std.meta.fields(Verb)) |f| {
+      const sig = parseSig(f.name);
+      if (sig.len == 2) {
+        const key = (op2.code() - Op2.QUICK_COUNT) * K.COUNT * K.COUNT + sig[0].code() * K.COUNT + sig[1].code();
         table[key] = f.defaultValue().?;
       }
     }

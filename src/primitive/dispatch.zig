@@ -18,7 +18,16 @@ pub fn dispatch1(vm: *VM, op: Op1, x: V) V {
 pub fn dispatch2(vm: *VM, op: Op2, x: V, y: V) V {
   const xt = x.tag();
   const yt = y.tag();
-  const key = op.code() * K.COUNT * K.COUNT + xt.code() * K.COUNT + yt.code();
+  const oc = op.code();
+  if (oc < Op2.QUICK_COUNT) {
+    // Stage 1: dense shift-indexed table over the flat types. Container and
+    // exotic operands map to the sentinel code, whose slot holds the per-op
+    // structural fallback (dict recursion / list broadcast / type error).
+    const key = (oc << 8) | (@as(usize, verbs.stage1code[xt.code()]) << 4) | verbs.stage1code[yt.code()];
+    return verbs.quick_table[key](vm, x, y);
+  }
+  // Stage 2: full K × K table for the remaining ops.
+  const key = (oc - Op2.QUICK_COUNT) * K.COUNT * K.COUNT + xt.code() * K.COUNT + yt.code();
   return verbs.dyad_table[key](vm, x, y);
 }
 

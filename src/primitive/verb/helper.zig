@@ -100,19 +100,23 @@ pub fn makeDyad(
       }
     }
   }
-  const all_k = comptime blk: {
-    const fields = @typeInfo(K).@"enum".fields;
-    var ts: [fields.len]K = undefined;
-    for (fields, 0..) |f, i| ts[i] = @enumFromInt(f.value);
-    break :blk ts;
-  };
-  for (all_k) |xk| {
-    for (all_k) |yk| {
-      if (dyadContainerKernel(xk, yk, operator)) |handler| {
-        names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-        field_types = field_types ++ .{VM.Dyad};
-        const attr: Attr = .{ .default_value_ptr = @ptrCast(&handler) };
-        attrs = attrs ++ .{attr};
+  // Quick ops don't enumerate container slots: their stage-1 table's default
+  // entry routes container/exotic operands to containerDyad at runtime.
+  if (operator.code() >= Op2.QUICK_COUNT) {
+    const all_k = comptime blk: {
+      const fields = @typeInfo(K).@"enum".fields;
+      var ts: [fields.len]K = undefined;
+      for (fields, 0..) |f, i| ts[i] = @enumFromInt(f.value);
+      break :blk ts;
+    };
+    for (all_k) |xk| {
+      for (all_k) |yk| {
+        if (dyadContainerKernel(xk, yk, operator)) |handler| {
+          names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
+          field_types = field_types ++ .{VM.Dyad};
+          const attr: Attr = .{ .default_value_ptr = @ptrCast(&handler) };
+          attrs = attrs ++ .{attr};
+        }
       }
     }
   }
@@ -289,92 +293,91 @@ fn dyadKernel(
   }.kernel;
 }
 
-// ── Container kernel generators ───────────────────────────────────────────────
-// Generates a broadcasting kernel for (xk, yk) when at least one is L/m/M.
-// Returns null for pure scalar/vector pairs — those are handled by dyadKernel.
-// Cases (checked in order, each returns on match):
+// ── Container dispatch (stage 2) ──────────────────────────────────────────────
+// One runtime structural resolver shared by every op that broadcasts over
+// containers. Cases (checked in order, each returns on match):
 //   dict × dict  → key equality check, recurse on values, preserve x's dict type
 //   dict × other → recurse on dict values vs y (includes dict × list)
 //   other × dict → recurse on x vs dict values (includes list × dict)
 //   list × other or other × list → element-wise with length broadcasting
+//   anything else → type error
+pub fn containerDyad(vm: *VM, op2: Op2, x: V, y: V) V {
+  if (x.isDict() and y.isDict()) {
+    const dx = dictOf(x);
+    const dy = dictOf(y);
+    if (!dx.av().eq(dy.av())) return V{ .err = .length };
+    const vals = dispatch.dispatch2(vm, op2, dx.bv(), dy.bv());
+    return rewrapDict(vm, x.tag(), dx.av(), vals);
+  }
+  if (x.isDict()) {
+    const d = dictOf(x);
+    const vals = dispatch.dispatch2(vm, op2, d.bv(), y);
+    return rewrapDict(vm, x.tag(), d.av(), vals);
+  }
+  if (y.isDict()) {
+    const d = dictOf(y);
+    const vals = dispatch.dispatch2(vm, op2, x, d.bv());
+    return rewrapDict(vm, y.tag(), d.av(), vals);
+  }
+  if (x.tag() == .L or y.tag() == .L) {
+    const xn = x.len();
+    const yn = y.len();
+    const n = if (xn == 1) yn else if (yn == 1) xn else if (xn == yn) xn else return V{ .err = .length };
+    const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
+    @memset(res.slice(), .blank);
+    for (res.slice(), 0..) |*r, i| {
+      // Broadcast a count-1 operand by extracting its single element (.at(0)),
+      // not by ref'ing the whole value: a length-1 *list* ref'd whole would
+      // re-enter this same resolver with identical args and loop forever. .at(0)
+      // on an atom returns the atom itself, so this is correct for both.
+      const xv = x.at(if (xn == 1) 0 else i);
+      defer xv.deinit(vm.alloc);
+      const yv = y.at(if (yn == 1) 0 else i);
+      defer yv.deinit(vm.alloc);
+      const rv = dispatch.dispatch2(vm, op2, xv, yv);
+      if (rv.tag() == .err) {
+        (V{ .L = res }).deinit(vm.alloc);
+        return rv;
+      }
+      r.* = rv;
+    }
+    return promote(vm.alloc, res);
+  }
+  return V{ .err = .@"type" };
+}
+
+fn dictOf(v: V) Dict {
+  return switch (v) { .m, .M => |d| d, else => unreachable };
+}
+
+/// Rebuild a dict/table from recursed values, preserving the original tag.
+/// Takes ownership of vals; propagates an error value unchanged.
+fn rewrapDict(vm: *VM, t: K, keys: V, vals: V) V {
+  if (vals.tag() == .err) return vals;
+  const d = Dict.init(vm.alloc, keys.ref(), vals) catch {
+    vals.deinit(vm.alloc);
+    return V{ .err = .memory };
+  };
+  return if (t == .m) V{ .m = d } else V{ .M = d };
+}
+
+/// The per-op stage-2 kernel: a thin wrapper deferring to containerDyad.
+/// Shared by every container slot of a stage-2 op and used as the stage-1
+/// table's default entry.
+pub fn containerFallback(comptime op2: Op2) VM.Dyad {
+  return &struct {
+    fn kernel(vm: *VM, x: V, y: V) V { return containerDyad(vm, op2, x, y); }
+  }.kernel;
+}
+
+// Registers the (xk, yk) slot for the shared container fallback when at least
+// one side is L/m/M. Returns null for pure scalar/vector pairs — those are
+// handled by dyadKernel.
 pub fn dyadContainerKernel(
   comptime xk: K,
   comptime yk: K,
   comptime operator: Op2,
 ) ?VM.Dyad {
-  const op2 = operator;
-  const xIsDict = comptime xk.isMap();
-  const yIsDict = comptime yk.isMap();
-  const xIsList = comptime (xk == .L);
-  const yIsList = comptime (yk == .L);
-  if (!(xIsDict or yIsDict or xIsList or yIsList)) return null;
-
-  if (comptime xIsDict and yIsDict) {
-    return &struct {
-      fn k(vm: *VM, x: V, y: V) V {
-        const dx = @field(x, @tagName(xk));
-        const dy = @field(y, @tagName(yk));
-        if (!dx.av().eq(dy.av())) return V{ .err = .length };
-        const vals = dispatch.dispatch2(vm, op2, dx.bv(), dy.bv());
-        if (vals.tag() == .err) return vals;
-        return @unionInit(V, @tagName(xk), Dict.init(vm.alloc, dx.av().ref(), vals) catch {
-          vals.deinit(vm.alloc);
-          return V{ .err = .memory };
-        });
-      }
-    }.k;
-  }
-  if (comptime xIsDict) {
-    return &struct {
-      fn k(vm: *VM, x: V, y: V) V {
-        const d = @field(x, @tagName(xk));
-        const vals = dispatch.dispatch2(vm, op2, d.bv(), y);
-        if (vals.tag() == .err) return vals;
-        return @unionInit(V, @tagName(xk), Dict.init(vm.alloc, d.av().ref(), vals) catch {
-          vals.deinit(vm.alloc);
-          return V{ .err = .memory };
-        });
-      }
-    }.k;
-  }
-  if (comptime yIsDict) {
-    return &struct {
-      fn k(vm: *VM, x: V, y: V) V {
-        const d = @field(y, @tagName(yk));
-        const vals = dispatch.dispatch2(vm, op2, x, d.bv());
-        if (vals.tag() == .err) return vals;
-        return @unionInit(V, @tagName(yk), Dict.init(vm.alloc, d.av().ref(), vals) catch {
-          vals.deinit(vm.alloc);
-          return V{ .err = .memory };
-        });
-      }
-    }.k;
-  }
-  // at least one is L, neither is dict — element-wise with length broadcasting
-  return &struct {
-    fn k(vm: *VM, x: V, y: V) V {
-      const xn = x.len();
-      const yn = y.len();
-      const n = if (xn == 1) yn else if (yn == 1) xn else if (xn == yn) xn else return V{ .err = .length };
-      const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
-      @memset(res.slice(), .blank);
-      for (res.slice(), 0..) |*r, i| {
-        // Broadcast a count-1 operand by extracting its single element (.at(0)),
-        // not by ref'ing the whole value: a length-1 *list* ref'd whole would
-        // re-enter this same kernel with identical args and loop forever. .at(0)
-        // on an atom returns the atom itself, so this is correct for both.
-        const xv = x.at(if (xn == 1) 0 else i);
-        defer xv.deinit(vm.alloc);
-        const yv = y.at(if (yn == 1) 0 else i);
-        defer yv.deinit(vm.alloc);
-        const rv = dispatch.dispatch2(vm, op2, xv, yv);
-        if (rv.tag() == .err) {
-          (V{ .L = res }).deinit(vm.alloc);
-          return rv;
-        }
-        r.* = rv;
-      }
-      return promote(vm.alloc, res);
-    }
-  }.k;
+  if (!(xk.isMap() or yk.isMap() or xk == .L or yk == .L)) return null;
+  return containerFallback(operator);
 }

@@ -60,10 +60,15 @@ pub const Op2 = enum(u8) {
   pub const COUNT = @typeInfo(Op2).@"enum".fields.len;
   pub const arith = [_]Op2{.@"+", .@"-", .@"*", .@"%"};
   pub const logic = [_]Op2{.@"=", .@"|", .@"&"};
+  /// Stage-1 ("quick") dyads: the first QUICK_COUNT ops (+ - * % = | & < >)
+  /// dispatch through the dense stage-1 table over the flat scalar/vector
+  /// types; container/exotic operands fall through to the structural stage-2
+  /// resolver. All other ops use the full stage-2 table.
+  pub const QUICK_COUNT: usize = @intFromEnum(Op2.@">") + 1;
   pub fn fromString(s: []const u8) ?Op2 { return std.meta.stringToEnum(Op2, s); }
   pub fn toString(self: Op2) []const u8 { return @tagName(self); }
   pub inline fn code(op: Op2) usize { return @intFromEnum(op); }
-  pub inline fn isQuick(comptime op: Op2) bool { return @intFromEnum(op) < @intFromEnum(Op2.@"&"); }
+  pub inline fn isQuick(op: Op2) bool { return @intFromEnum(op) < QUICK_COUNT; }
 };
 
 /// Triadic primitives. Apply3 bytecode (amend3/drill3).
@@ -172,8 +177,6 @@ pub const Fn = packed struct(u64) {
   /// For .derived: the adverb stored in `extra`.
   pub fn getAdverb(self: Fn) Adverb { return @enumFromInt(@as(u8, @truncate(self.extra))); }
   pub fn getLambdaIdx(self: Fn) u24 { return lambdaIdxOf(self.idx); }
-
-  // ── Constructors ────────────────────────────────────────────────────────────
 
   fn callable(idx: u32, fn_arity: u8) Fn {
     return .{ .kind = .callable, .arity = @intCast(fn_arity), .idx = @intCast(idx), .extra = 0 };

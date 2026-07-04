@@ -252,6 +252,7 @@ The parser, compiler, and runtime are all written in Zig 0.16.
   - `changelog.md` - change log
   - `future.md` - planned features
 - `lib` - language extensions
+  - `color`
   - `csv`
   - `font`
   - `json`
@@ -329,23 +330,23 @@ This directory contains the ink executable for all platforms, shared libraries a
 - Eyes example: `./zig-out/bin/ink test/eyes.k`
 - Artifact sizes: `du -h zig-out/*/*`
 
+## Ink Library
+
+
 # Open Problems
 
 ## Auto-loading
-Public identifiers defined in `lib/*.k` are auto-loaded on first use — no manual `2:` import needed. A definition is public when it either starts with an uppercase letter (e.g. `ReadCsv`) or is a dotted name namespaced under the file's stem (e.g. `regex.match` in `regex.k`). For example, just write `ReadCsv "data.csv"` and the CSV library loads automatically.
-
-The loader (`src/modules.zig`) scans `lib/*.k` at startup, indexes all public definitions (uppercase `[A-Z][A-Za-z0-9]*:` and dotted `<stem>.…:`), and calls `vm.load` for the relevant file the first time a matching identifier appears in source.
+Public identifiers defined in `lib/*.k` are auto-loaded on first use — no manual `2:` import needed.
+The loader (`src/modules.zig`) scans `lib/*.k` at startup, indexes all public definitions, and calls `vm.load` for the relevant file the first time a matching identifier appears in source.
 
 Available auto-loaded libraries:
-- `lib/csv.k` — `ReadCsv`
+- `lib/csv.k` — `csv.read`
 - `lib/parquet.k` — `ReadParquet`
 - `lib/gpu.k` — `RunWindow`, `FillFrame`, `Tessellate`, `CompileSpirV`, `DrawShader`, `RunShader`, `CompileWgsl`, `CompileMesh`, `DrawMesh`
 - `lib/spirv.k` — `FragmentShader`, `VertexShader`
 - `lib/font.k` — font functions
 - `lib/json.k` — JSON functions
 
-## Module system is incomplete
-`\l file.k` loads a file but namespace access from ngn/k doesn't work: `\d mod`, `mod.A`, `.mod`, etc. Current code uses `2:"code.k"` for file loading. A proper module system requires names to support dots.
 
 ## Language gotchas
 - **Underscores in names:** `_` is always Drop/WeedOut. `foo_bar` parses as `foo _ bar`. Use camelCase.
