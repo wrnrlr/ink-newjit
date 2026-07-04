@@ -540,7 +540,58 @@ fn adverbApplication(gpa: Alloc, src: []const u8, adv: lex.Token) AdverbApp {
 }
 
 const DefKind = enum { variable, function };
-const Def = struct { name: []const u8, start: usize, end: usize, kind: DefKind, toplevel: bool };
+// `ns` is the namespace this binding lives in (opened by a `\d` directive), or
+// null for global scope; a bare `member:` inside `\d ns` therefore defines the
+// qualified global `ns.member` (see `defFqn`). An explicitly-dotted target
+// (`ns.member:`) keeps `ns = null` — its `name` is already the full key, matching
+// the compiler's `resolveGlobalAssign`.
+const Def = struct { name: []const u8, start: usize, end: usize, kind: DefKind, toplevel: bool, ns: ?[]const u8 = null };
+
+// Parse a `\d …` namespace directive token. Returns the opened namespace (a slice
+// into `cmd`) wrapped once, or `?null` for a bare `\d` (reset to global); returns
+// the outer `null` when `cmd` is any other command. Mirrors the compiler's
+// `setNamespace`: the namespace is the first whitespace-delimited word after `\d`.
+fn parseDir(cmd: []const u8) ??[]const u8 {
+  if (!(cmd.len >= 2 and cmd[0] == '\\' and cmd[1] == 'd')) return null;
+  if (cmd.len > 2 and cmd[2] != ' ' and cmd[2] != '\t') return null; // e.g. `\debug`, not `\d`
+  const rest = std.mem.trim(u8, cmd[2..], " \t");
+  if (rest.len == 0) return @as(?[]const u8, null); // bare `\d` → global scope
+  const end = std.mem.indexOfAny(u8, rest, " \t") orelse rest.len;
+  return @as(?[]const u8, rest[0..end]);
+}
+
+// Active namespace at byte offset `off`: the namespace opened by the last `\d`
+// directive before it (null = global). Mirrors the compiler's compile-time
+// namespace tracking so reference resolution matches the interpreter.
+fn nsAtOffset(src: []const u8, off: usize) ?[]const u8 {
+  var l = Lexer.init(src);
+  var ns: ?[]const u8 = null;
+  while (true) {
+    const t = l.next();
+    if (t.tt == .eof or t.start >= off) break;
+    if (t.tt == .command) if (parseDir(t.slice(src))) |inner| { ns = inner; };
+  }
+  return ns;
+}
+
+// Fully-qualified key of a definition — `ns.name` for a namespace member, else
+// the bare name — written into `buf`.
+fn defFqn(d: Def, buf: []u8) []const u8 {
+  if (d.ns) |ns| return std.fmt.bufPrint(buf, "{s}.{s}", .{ ns, d.name }) catch d.name;
+  return d.name;
+}
+
+// Nearest in-file definition whose fully-qualified name equals `target`,
+// preferring the last one at or before the cursor (same heuristic as before).
+fn findDef(defs: []const Def, target: []const u8, cursor: usize) ?Def {
+  var best: ?Def = null;
+  var fbuf: [512]u8 = undefined;
+  for (defs) |d| {
+    if (!std.mem.eql(u8, defFqn(d, &fbuf), target)) continue;
+    if (best == null or d.start <= cursor) best = d;
+  }
+  return best;
+}
 
 // Collect bindings: an `iden` immediately followed by `:` (or `::`).  Also marks
 // whether the binding is at top level (statement head, bracket depth 0) and
@@ -552,6 +603,7 @@ fn collectDefs(gpa: Alloc, src: []const u8) !std.ArrayList(Def) {
   var prev: ?lex.Token = null;
   var prev_head = false; // was `prev` the first token of its statement?
   var first = true;
+  var ns: ?[]const u8 = null; // namespace opened by the most recent `\d`
   while (true) {
     const t = l.next();
     if (t.tt == .eof) break;
@@ -560,18 +612,24 @@ fn collectDefs(gpa: Alloc, src: []const u8) !std.ArrayList(Def) {
     switch (t.tt) {
       .@"(", .@"{", .@"[", .@"$[", .@"[[]", .@"[[" => depth += 1,
       .@")", .@"}", .@"]" => depth -= 1,
+      .command => if (parseDir(t.slice(src))) |inner| { ns = inner; },
       else => {},
     }
     if (t.tt == .@":") {
       if (prev) |pt| if (pt.tt == .iden) {
         // Peek whether the value is a lambda → classify as a function.
         const is_fn = l.peekNext().tt == .@"{";
+        const name = pt.slice(src);
+        // A bare `member:` inside `\d ns` belongs to that namespace; an
+        // explicitly-dotted `ns.member:` is already its own full key.
+        const has_dot = std.mem.indexOfScalar(u8, name, '.') != null;
         try defs.append(gpa, .{
-          .name = pt.slice(src),
+          .name = name,
           .start = pt.start,
           .end = pt.end,
           .kind = if (is_fn) .function else .variable,
           .toplevel = prev_head and depth == 0,
+          .ns = if (has_dot) null else ns,
         });
       };
     }
@@ -616,9 +674,11 @@ fn indexFile(s: *Server, abs_path: []const u8) void {
   defer if (!uri_used) s.gpa.free(uri);
   for (defs.items) |d| {
     if (!d.toplevel) continue;
-    const gop = s.windex.getOrPut(d.name) catch continue;
+    var fbuf: [512]u8 = undefined;
+    const fqn = defFqn(d, &fbuf); // `ns.member` for namespace members
+    const gop = s.windex.getOrPut(fqn) catch continue;
     if (!gop.found_existing) {
-      gop.key_ptr.* = s.gpa.dupe(u8, d.name) catch continue;
+      gop.key_ptr.* = s.gpa.dupe(u8, fqn) catch continue;
       gop.value_ptr.* = .empty;
     }
     const loc_uri = if (uri_used) (s.gpa.dupe(u8, uri) catch continue) else uri;
@@ -1061,21 +1121,34 @@ fn handleDefinition(s: *Server, id: ?json.Value, params: ?json.Value) !void {
   if (t.tt != .iden) return replyResult(s, id, "null", .{});
   const word = t.slice(src);
 
+  // Resolve exactly like the compiler's `resolveGlobalRef`: from inside a `\d ns`
+  // scope, try the RELATIVE key `ns.word` first (so a `glyf.outline` reference in
+  // `\d font` reaches `font.glyf.outline`, and a bare `outline` reaches
+  // `font.outline`), then fall back to the ABSOLUTE/global `word`.
+  const cur = nsAtOffset(src, t.start);
+  var qbuf: [512]u8 = undefined;
+  const rel: ?[]const u8 = if (cur) |c|
+    (std.fmt.bufPrint(&qbuf, "{s}.{s}", .{ c, word }) catch null)
+  else
+    null;
+
   // 1. In-file: prefer the nearest definition at or before the cursor.
   var defs = try collectDefs(s.gpa, src);
   defer defs.deinit(s.gpa);
-  var best: ?Def = null;
-  for (defs.items) |d| {
-    if (!std.mem.eql(u8, d.name, word)) continue;
-    if (best == null or d.start <= t.start) best = d;
-  }
-  if (best) |d| {
+  const hit: ?Def = (if (rel) |r| findDef(defs.items, r, t.start) else null) orelse
+    findDef(defs.items, word, t.start);
+  if (hit) |d| {
     const a = offsetToPos(src, d.start);
     const b = offsetToPos(src, d.end);
     return replyLocation(s, id, org, uri, a.line, a.col, b.line, b.col);
   }
 
-  // 2. Cross-file: consult the workspace index (modules, libs, other files).
+  // 2. Cross-file: consult the workspace index (modules, libs, other files),
+  // trying the relative key before the absolute one.
+  if (rel) |r| if (s.windex.get(r)) |locs| if (locs.items.len > 0) {
+    const l0 = locs.items[0];
+    return replyLocation(s, id, org, l0.uri, l0.sl, l0.sc, l0.el, l0.ec);
+  };
   if (s.windex.get(word)) |locs| {
     if (locs.items.len > 0) {
       const l0 = locs.items[0];
@@ -1278,8 +1351,9 @@ fn handleDocumentSymbol(s: *Server, id: ?json.Value, params: ?json.Value) !void 
     first = false;
     // SymbolKind: Function=12, Variable=13
     const kind: u8 = if (d.kind == .function) 12 else 13;
+    var fbuf: [512]u8 = undefined;
     try s.out.appendSlice(s.gpa, "{\"name\":\"");
-    try escapeInto(&s.out, s.gpa, d.name);
+    try escapeInto(&s.out, s.gpa, defFqn(d, &fbuf));
     try p(s, "\",\"kind\":{d},\"range\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}},\"selectionRange\":{{\"start\":{{\"line\":{d},\"character\":{d}}},\"end\":{{\"line\":{d},\"character\":{d}}}}}}}",
       .{ kind, a.line, a.col, b.line, b.col, a.line, a.col, b.line, b.col });
   }
