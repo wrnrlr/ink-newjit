@@ -4,7 +4,7 @@ const K = @import("../noun/class.zig").K;
 const V = @import("../noun/value.zig").V;
 const N = @import("../noun/array.zig").N;
 
-const promotable = [_]K{ .b, .i, .f, .s, .c };
+const promotable = [_]K{ .b, .i, .f, .n, .s, .c };
 
 fn castAtom(comptime tk: K, v: V) tk.backing() {
   return switch (tk) {
@@ -20,6 +20,7 @@ fn castAtom(comptime tk: K, v: V) tk.backing() {
       .f => |x| x,
       else => unreachable,
     },
+    .n => V.unwrap(v, .n),
     .s => V.unwrap(v, .s),
     .c => V.unwrap(v, .c),
     else => @compileError("not a promotable scalar"),
@@ -71,6 +72,7 @@ pub fn emptyOf(alloc: Alloc, k: K) V {
     .b, .B => V.wrap(.B, N(bool).init(alloc, 0) catch return V{ .err = .memory }),
     .i, .I => V.wrap(.I, N(i32).init(alloc, 0) catch return V{ .err = .memory }),
     .f, .F => V.wrap(.F, N(f32).init(alloc, 0) catch return V{ .err = .memory }),
+    .n, .N => V.wrap(.N, N(u32).init(alloc, 0) catch return V{ .err = .memory }),
     .s, .S => V.wrap(.S, N(u32).init(alloc, 0) catch return V{ .err = .memory }),
     .c, .C => V.wrap(.C, N(u8).init(alloc, 0) catch return V{ .err = .memory }),
     else => V{ .L = N(V).init(alloc, 0) catch return V{ .err = .memory } },

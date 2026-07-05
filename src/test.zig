@@ -1117,3 +1117,63 @@ test "comment" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("\"Hi\" /comment ", "\"Hi\"");
 }
+
+test "natural (n) dispatch" {
+  var t = try Tester.init(); defer t.deinit();
+  const dispatch = @import("primitive/dispatch.zig");
+  const vm = t.vm;
+  // stage-1 atoms: wraps like i, % divides as f32, & | are min/max
+  var r = dispatch.dispatch2(vm, .@"+", .{ .n = 2 }, .{ .n = 3 });
+  try testing.expect(r.tag() == .n and r.n == 5);
+  r = dispatch.dispatch2(vm, .@"-", .{ .n = 2 }, .{ .n = 3 });
+  try testing.expect(r.n == std.math.maxInt(u32));
+  r = dispatch.dispatch2(vm, .@"*", .{ .n = 6 }, .{ .n = 7 });
+  try testing.expect(r.n == 42);
+  r = dispatch.dispatch2(vm, .@"%", .{ .n = 1 }, .{ .n = 2 });
+  try testing.expect(r.tag() == .f and r.f == 0.5);
+  r = dispatch.dispatch2(vm, .@"&", .{ .n = 9 }, .{ .n = 3 });
+  try testing.expect(r.n == 3);
+  r = dispatch.dispatch2(vm, .@"|", .{ .n = 9 }, .{ .n = 3 });
+  try testing.expect(r.n == 9);
+  // stage-2 comparisons and match
+  r = dispatch.dispatch2(vm, .@"=", .{ .n = 3 }, .{ .n = 3 });
+  try testing.expect(r.tag() == .b and r.b);
+  r = dispatch.dispatch2(vm, .@"<", .{ .n = 3 }, .{ .n = 9 });
+  try testing.expect(r.b);
+  r = dispatch.dispatch2(vm, .@"~", .{ .n = 3 }, .{ .n = 3 });
+  try testing.expect(r.b);
+  r = dispatch.dispatch2(vm, .@"~", .{ .n = 3 }, .{ .i = 3 });
+  try testing.expect(!r.b);
+  // naturals never mix with other numerics implicitly
+  r = dispatch.dispatch2(vm, .@"+", .{ .n = 2 }, .{ .i = 3 });
+  try testing.expect(r.tag() == .err);
+  r = dispatch.dispatch2(vm, .@"+", .{ .f = 2.0 }, .{ .n = 3 });
+  try testing.expect(r.tag() == .err);
+  // vectors
+  const xv = try V.make(.N, u32, vm.alloc, &.{ 1, 2, 3 });
+  defer xv.deinit(vm.alloc);
+  const yv = try V.make(.N, u32, vm.alloc, &.{ 10, 20, 30 });
+  defer yv.deinit(vm.alloc);
+  const rv = dispatch.dispatch2(vm, .@"+", xv, yv);
+  defer rv.deinit(vm.alloc);
+  try testing.expect(rv.tag() == .N);
+  try testing.expectEqualSlices(u32, &.{ 11, 22, 33 }, rv.N.slice());
+}
+
+test "dyad dispatch structure" {
+  const verbs = @import("primitive/verb/verbs.zig");
+  const Op2 = @import("noun/operator.zig").Op2;
+  // offsets are monotone and cover all slots
+  try testing.expectEqual(@as(u16, 0), verbs.stage2off[0]);
+  for (1..verbs.stage2off.len) |i|
+    try testing.expect(verbs.stage2off[i] >= verbs.stage2off[i - 1]);
+  try testing.expectEqual(verbs.stage2keys.len, verbs.stage2off[verbs.DYAD2_COUNT]);
+  try testing.expectEqual(verbs.stage2keys.len, verbs.stage2fns.len);
+  // rows are sorted by key
+  for (0..verbs.DYAD2_COUNT) |row| {
+    var j: usize = verbs.stage2off[row];
+    while (j + 1 < verbs.stage2off[row + 1]) : (j += 1)
+      try testing.expect(verbs.stage2keys[j] < verbs.stage2keys[j + 1]);
+  }
+  try testing.expectEqual(Op2.QUICK_COUNT * verbs.S1_STRIDE * verbs.S1_STRIDE, verbs.quick_table.len);
+}

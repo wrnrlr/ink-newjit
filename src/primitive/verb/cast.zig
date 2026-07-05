@@ -18,9 +18,9 @@ pub const Cast = struct {
   _s_I: VM.Dyad = castInts,
   _s_F: VM.Dyad = castFloats,
 
-  _s_L: VM.Dyad = h.dyadContainerKernel(.s, .L, .@"$").?,
-  _s_m: VM.Dyad = h.dyadContainerKernel(.s, .m, .@"$").?,
-  _s_M: VM.Dyad = h.dyadContainerKernel(.s, .M, .@"$").?,
+  _s_L: VM.Dyad = h.containerFallback(.@"$"),
+  _s_m: VM.Dyad = h.containerFallback(.@"$"),
+  _s_M: VM.Dyad = h.containerFallback(.@"$"),
 };
 
 fn castChar(vm: *VM, x: V, y: V) V {

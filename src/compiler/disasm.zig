@@ -202,6 +202,7 @@ fn fmtValue(v: V, symbols: *const Pool, out: *std.Io.Writer) anyerror!void {
     .err     => |e| try out.print("!{s}", .{@tagName(e)}),
     .b       => |b| try out.print("{s}", .{if (b) "1b" else "0b"}),
     .i       => |i| try out.print("{d}", .{i}),
+    .n       => |nv| try out.print("{d}", .{nv}),
     .f       => |f| try out.print("{d}", .{f}),
     .c       => |c| try out.print("\"{c}\"", .{c}),
     .s       => |s| try out.print("`{s}", .{symbols.get(s)}),
@@ -211,6 +212,7 @@ fn fmtValue(v: V, symbols: *const Pool, out: *std.Io.Writer) anyerror!void {
 
     .B => |n| try out.print("B[{d}]", .{n.ptr.len}),
     .F => |n| try out.print("F[{d}]", .{n.ptr.len}),
+    .N => |n| try out.print("N[{d}]", .{n.ptr.len}),
     .S => |n| try out.print("S[{d}]", .{n.ptr.len}),
     .L => |n| try out.print("L[{d}]", .{n.ptr.len}),
 

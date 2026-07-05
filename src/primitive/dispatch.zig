@@ -20,15 +20,25 @@ pub fn dispatch2(vm: *VM, op: Op2, x: V, y: V) V {
   const yt = y.tag();
   const oc = op.code();
   if (oc < Op2.QUICK_COUNT) {
-    // Stage 1: dense shift-indexed table over the flat types. Container and
-    // exotic operands map to the sentinel code, whose slot holds the per-op
-    // structural fallback (dict recursion / list broadcast / type error).
+    // Stage 1: dense shift-indexed table over the numeric types. Container
+    // and exotic operands map to the sentinel code, whose slot holds the
+    // per-op structural fallback (dict recursion / list broadcast / error).
     const key = (oc << 8) | (@as(usize, verbs.stage1code[xt.code()]) << 4) | verbs.stage1code[yt.code()];
     return verbs.quick_table[key](vm, x, y);
   }
-  // Stage 2: full K × K table for the remaining ops.
-  const key = (oc - Op2.QUICK_COUNT) * K.COUNT * K.COUNT + xt.code() * K.COUNT + yt.code();
-  return verbs.dyad_table[key](vm, x, y);
+  // Stage 2: binary-search the op's sparse sorted row; a miss hits the op's
+  // fallback (container broadcast for = | & < > mod div, else type error).
+  const row = oc - Op2.QUICK_COUNT;
+  const key: u16 = @intCast(xt.code() * K.COUNT + yt.code());
+  var lo: usize = verbs.stage2off[row];
+  var hi: usize = verbs.stage2off[row + 1];
+  while (lo < hi) {
+    const mid = (lo + hi) / 2;
+    const k = verbs.stage2keys[mid];
+    if (k == key) return verbs.stage2fns[mid](vm, x, y);
+    if (k < key) lo = mid + 1 else hi = mid;
+  }
+  return verbs.stage2fb[row](vm, x, y);
 }
 
 pub fn dispatch3(vm: *VM, op: Op3, x: V, y: V, z: V) V {

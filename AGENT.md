@@ -38,23 +38,40 @@ Train: *|
 Sum: +/;
 ```
 
-## Types `` ` `i`f`s`c`m`I`F`S`C`M`L ``
+## Types `` ` `n`i`f`s`c`N`I`F`S`C`m`M`L ``
+- Natural numbers (no syntax support yet) `` 1u 2u 3u 0Nu 0Wu ``
+  - null value `0Nu`
+  - infinities `` 0Wu ``
+  - type symbol `` `u ``.
 - Integer - numbers like `-2 0 1 0N`
   - null value `0N`
+  - infinities `` -0W 0W ``
   - type symbol `` `i ``.
+  - backed by 32bit signed integer.
 - Float - floating point numbers `0.1 2. -3.`
-  - null value `0n`, positive/negative infinity `` 0w -0w ``
+  - null value ``, positive/negative infinity `` 0w -0w ``
+  - infinities `` -0w 0w ``
   - type symbol `` `f ``.
-- Symbol - interned names, e.g. `` `id`Red100 ``, type symbol `` `s ``.
+  - backed by 32bit float.
+- Symbol
+  - interned names, e.g. `` `px ``
+  - empty/null symbol is just a single backtick `` ` ``
+  - type symbol `` `s ``.
 - Char - single u8 character; whitespace is interpreted as empty `" "`. E.g. `"H"`, type symbol `` `c ``.
 - Integers - vector of integers
-  - null value `` &0 ``
+  - empty value `` &0 ``
   - type symbol `` `I ``
 - Floats - vector of floats
+  - empty value `` 0#0.0 ``
   - type symbol `` `F ``
-- Symbols - array of symbols, type symbol `` `S ``.
-- Chars - string of characters (`[]u8`), type symbol `` `C ``.
-- List - heterogeneous list; empty list is `` () ``, type symbol `` `L ``.
+- Symbols
+  - array of symbols, type symbol `` `S ``.
+  - empty value `` 0#` ``
+- Chars
+  - type symbol `` `C ``
+  - empty value `` "" ``
+  - backed by an array of u8.
+- List - heterogeneous list; empty list is `` ,() ``, type symbol `` `L ``.
 - Dict
   - The syntax `` [a:1; b:2; c: 3] `` is equivalent to `` `a`b`c!1 2 3 ``
   - Empty dict `` [] ``
@@ -257,13 +274,6 @@ The parser, compiler, and runtime are all written in Zig 0.16.
   - `font`
   - `json`
   - `gpu`
-    - `fill.wgsl`
-    - `gpu.k` Load RunWindow, FillFrame from `libgpu.dylib`
-    - `gpu.zig`
-    - `main.zig` 
-    - `render.zig`
-    - `spirv.k` - FragmentShader, VertexShader
-    - `triangulate.zig`
   - `md5`
 - `src` - core language components
   - `noun/` - basic building blocks
@@ -306,7 +316,7 @@ The parser, compiler, and runtime are all written in Zig 0.16.
 ## Common Idioms
 - First n even numbers: `` {2*!x} ``
 - Capitalize first letter of each word: `` {s:~" "=x;@[x;&s>0,-1_s;`c$-32+]}"hi an" ``
-- Flatten list `` ,/(1 0 0; 0 1 0) `` -> `1 0 0 0 1 0`.
+- Raze - flatten list `` ,/(1 0 0; 0 1 0) `` -> `1 0 0 0 1 0`.
 - No `<=`/`>=` operators `x <= y` parses as `x < (= y)`, use `~(x > y)` and `~(x < y)`.
 - Reshape array into 2 columns and infer size of rows `0N 2#x`
 - Connect to server `` h: > "127.0.0.1:5001" ``

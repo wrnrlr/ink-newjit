@@ -60,11 +60,11 @@ pub const Op2 = enum(u8) {
   pub const COUNT = @typeInfo(Op2).@"enum".fields.len;
   pub const arith = [_]Op2{.@"+", .@"-", .@"*", .@"%"};
   pub const logic = [_]Op2{.@"=", .@"|", .@"&"};
-  /// Stage-1 ("quick") dyads: the first QUICK_COUNT ops (+ - * % = | & < >)
-  /// dispatch through the dense stage-1 table over the flat scalar/vector
-  /// types; container/exotic operands fall through to the structural stage-2
-  /// resolver. All other ops use the full stage-2 table.
-  pub const QUICK_COUNT: usize = @intFromEnum(Op2.@">") + 1;
+  /// Stage-1 ("quick") dyads: the arithmetic ops (+ - * %, the first
+  /// QUICK_COUNT enum values) dispatch through the dense stage-1 table over
+  /// the numeric scalar/vector types; container/exotic operands fall through
+  /// to the structural resolver. All other ops use the sparse stage-2 rows.
+  pub const QUICK_COUNT: usize = @intFromEnum(Op2.@"%") + 1;
   pub fn fromString(s: []const u8) ?Op2 { return std.meta.stringToEnum(Op2, s); }
   pub fn toString(self: Op2) []const u8 { return @tagName(self); }
   pub inline fn code(op: Op2) usize { return @intFromEnum(op); }

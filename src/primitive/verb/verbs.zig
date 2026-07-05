@@ -15,21 +15,23 @@ const member = @import("member.zig");
 
 // Dispatch tables: monad keyed by Op1, dyad split in two stages.
 //
-// Stage 1 (quick_table): the quick dyads (+ - * % = | & < >, Op2 codes below
-// QUICK_COUNT) over the flat scalar/vector types, shift-indexed as
-// op<<8 | xcode<<4 | ycode. Default slots hold the per-op structural fallback
-// (h.containerDyad: dict recursion, list broadcast, else type error), so the
-// hot table never grows when a new type is added — new types dispatch through
-// stage 2 until they earn dense codes here.
+// Stage 1 (quick_table): the arithmetic dyads (+ - * %, Op2 codes below
+// QUICK_COUNT) over the numeric scalar/vector types {b i f n B I F N},
+// shift-indexed as op<<8 | xcode<<4 | ycode. Default slots hold the per-op
+// structural fallback (h.containerDyad: dict recursion, list broadcast, else
+// type error), so the hot table never grows when a new type is added — a new
+// type dispatches through stage 2 until it earns a dense code here.
 //
-// Stage 2 (dyad_table): the remaining ops over the full K × K space, keyed by
-// (op - QUICK_COUNT) with typeError2 defaults, exactly as before.
+// Stage 2 (stage2slots/stage2off): every other op as a sparse sorted row of
+// (typepair key → kernel) slots, binary-searched by dispatch2. A miss hits
+// the op's row fallback (stage2fb): containerDyad for the broadcasting ops
+// (= | & < > mod div), type error otherwise. Memory grows with implemented
+// slots, not with ops × K.COUNT².
 pub const monad_table = makeMonadArray(Monads);
 pub const quick_table = makeQuickArray(Dyads);
-pub const dyad_table  = makeDyadArray(Dyads);
 
 pub const S1_STRIDE = 16; // power of two: the stage-1 key is pure shifts/ors
-const stage1_types = [_]K{ .b, .i, .f, .s, .c, .B, .I, .F, .S, .C };
+const stage1_types = [_]K{ .b, .i, .f, .n, .B, .I, .F, .N };
 const S1_OTHER: u8 = stage1_types.len; // sentinel code: hits the fallback slots
 
 /// K.code() → dense stage-1 type code (S1_OTHER for container/exotic types).
@@ -39,14 +41,74 @@ pub const stage1code: [K.COUNT]u8 = blk: {
   break :blk t;
 };
 
+pub const DYAD2_COUNT = Op2.COUNT - Op2.QUICK_COUNT;
+const ROW = K.COUNT * K.COUNT;
+/// Non-quick ops whose type-pair misses broadcast over containers instead of
+/// erroring (they are the makeDyad-built element-wise ops).
+const broadcast_ops = [_]Op2{ .@"=", .@"|", .@"&", .@"<", .@">", .mod, .div };
+
+const scratch = makeStage2Scratch(Dyads);
+
+// All registered stage-2 slots, sorted by (op row, typepair key). Keys and
+// kernels live in parallel arrays so the binary search scans a dense u16
+// array and touches the pointer array exactly once, on the hit.
+pub const stage2keys: [countSlots(&scratch)]u16 = blk: {
+  @setEvalBranchQuota(1000000);
+  var out: [countSlots(&scratch)]u16 = undefined;
+  var idx: usize = 0;
+  for (scratch, 0..) |mf, j| {
+    if (mf != null) {
+      out[idx] = @intCast(j % ROW);
+      idx += 1;
+    }
+  }
+  break :blk out;
+};
+
+pub const stage2fns: [countSlots(&scratch)]VM.Dyad = blk: {
+  @setEvalBranchQuota(1000000);
+  var out: [countSlots(&scratch)]VM.Dyad = undefined;
+  var idx: usize = 0;
+  for (scratch) |mf| {
+    if (mf) |fun| {
+      out[idx] = fun;
+      idx += 1;
+    }
+  }
+  break :blk out;
+};
+
+/// Per-op row bounds into stage2slots (row = op.code() - QUICK_COUNT).
+pub const stage2off: [DYAD2_COUNT + 1]u16 = blk: {
+  @setEvalBranchQuota(1000000);
+  var off: [DYAD2_COUNT + 1]u16 = undefined;
+  var idx: u16 = 0;
+  off[0] = 0;
+  for (0..DYAD2_COUNT) |row| {
+    for (scratch[row * ROW .. (row + 1) * ROW]) |mf| {
+      if (mf != null) idx += 1;
+    }
+    off[row + 1] = idx;
+  }
+  break :blk off;
+};
+
+/// Per-op miss handler for stage-2 rows.
+pub const stage2fb: [DYAD2_COUNT]VM.Dyad = blk: {
+  var t: [DYAD2_COUNT]VM.Dyad = .{typeError2} ** DYAD2_COUNT;
+  for (broadcast_ops) |o| t[o.code() - Op2.QUICK_COUNT] = h.containerFallback(o);
+  // ~ registers only same-tag slots; every mismatched pair is simply false.
+  t[Op2.@"~".code() - Op2.QUICK_COUNT] = &@import("match.zig").matchFalse;
+  break :blk t;
+};
+
 comptime {
   std.debug.assert(S1_STRIDE == 16); // dispatch2 hardcodes op<<8 | x<<4 | y
   std.debug.assert(S1_OTHER < S1_STRIDE);
-  // The quick range must be exactly the arith + logic + grade ops.
-  for (Op2.arith ++ Op2.logic ++ [_]Op2{ .@"<", .@">" }) |o|
-    std.debug.assert(o.code() < Op2.QUICK_COUNT);
-  std.debug.assert(Op2.QUICK_COUNT == 9);
-  std.debug.assert(Op2.@"~".code() >= Op2.QUICK_COUNT);
+  // The quick range must be exactly the arithmetic ops.
+  for (Op2.arith) |o| std.debug.assert(o.code() < Op2.QUICK_COUNT);
+  std.debug.assert(Op2.QUICK_COUNT == 4);
+  for (broadcast_ops) |o| std.debug.assert(o.code() >= Op2.QUICK_COUNT);
 }
 
 const h = @import("helper.zig");
@@ -66,6 +128,12 @@ pub fn _I_I(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.I
 pub fn _F_F(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Float2,  h.Float2,  f, &at); }
 pub fn _X2(comptime op: Op2, comptime f: type) type { return h._X(Op2, op, f); }
 pub fn _Cmp(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.Upcast2, h.Bool2, f, &at); }
+
+// Natural (n, u32-backed) arithmetic. Naturals never mix with the other
+// numerics implicitly — only n⊕n slots exist; mixed pairs hit the fallback.
+const nat_types = [_]K{ .n, .N };
+fn Nat2(comptime _: type, comptime _: type) type { return u32; }
+pub fn _U_U(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, Nat2, Nat2, f, &nat_types); }
 
 // Comparison over like-typed operands with no numeric upcast: the result stays
 // in the operand's backing type (u8 for chars, u32 for interned symbols), so the
@@ -222,6 +290,17 @@ const Dyads = struct {
   pub const @"N|N" = _N_N(.@"|", calc.MaxOp);
   pub const @"B&B" = _B_B(.@"&", calc.AndOp);
   pub const @"B|B" = _B_B(.@"|", calc.OrOp);
+
+  // Natural (u32) arithmetic — wraps like i; % divides as f32.
+  pub const @"n+n" = _U_U(.@"+", calc.AddOp);
+  pub const @"n-n" = _U_U(.@"-", calc.SubOp);
+  pub const @"n*n" = _U_U(.@"*", calc.MulOp);
+  pub const @"n%n" = h.makeDyad(.@"%", h.Float2, h.Float2, calc.DivOp, &nat_types);
+  pub const @"n&n" = _U_U(.@"&", calc.MinOp);
+  pub const @"n|n" = _U_U(.@"|", calc.MaxOp);
+  pub const @"n=n" = _CmpSame(.@"=", EqualOp, &nat_types);
+  pub const @"n<n" = _CmpSame(.@"<", LessOp,  &nat_types);
+  pub const @"n>n" = _CmpSame(.@">", MoreOp,  &nat_types);
   
   pub const @"X=X" = _Cmp(.@"=", EqualOp);
   pub const @"X<X" = _Cmp(.@"<", LessOp);
@@ -326,24 +405,29 @@ fn makeQuickArray(comptime Defs: type) [Op2.QUICK_COUNT * S1_STRIDE * S1_STRIDE]
   return table;
 }
 
-const DYAD2_COUNT = Op2.COUNT - Op2.QUICK_COUNT;
-
-fn makeDyadArray(comptime Defs: type) [DYAD2_COUNT * K.COUNT * K.COUNT]VM.Dyad {
+// Dense scratch matrix used only at comptime to apply declaration-order
+// overrides (later decls win) before flattening into the sparse sorted rows.
+fn makeStage2Scratch(comptime Defs: type) [DYAD2_COUNT * ROW]?VM.Dyad {
   @setEvalBranchQuota(10000000);
-  var table: [DYAD2_COUNT * K.COUNT * K.COUNT]VM.Dyad = .{typeError2} ** (DYAD2_COUNT * K.COUNT * K.COUNT);
+  var t: [DYAD2_COUNT * ROW]?VM.Dyad = .{null} ** (DYAD2_COUNT * ROW);
   for (std.meta.declarations(Defs)) |decl| {
     const Verb = @field(Defs, decl.name);
     const op2 = opOf(Verb, Op2) orelse continue;
     if (op2.code() < Op2.QUICK_COUNT) continue;
     for (std.meta.fields(Verb)) |f| {
       const sig = parseSig(f.name);
-      if (sig.len == 2) {
-        const key = (op2.code() - Op2.QUICK_COUNT) * K.COUNT * K.COUNT + sig[0].code() * K.COUNT + sig[1].code();
-        table[key] = f.defaultValue().?;
-      }
+      if (sig.len == 2)
+        t[(op2.code() - Op2.QUICK_COUNT) * ROW + sig[0].code() * K.COUNT + sig[1].code()] = f.defaultValue().?;
     }
   }
-  return table;
+  return t;
+}
+
+fn countSlots(comptime t: []const ?VM.Dyad) usize {
+  @setEvalBranchQuota(1000000);
+  var c: usize = 0;
+  for (t) |mf| { if (mf != null) c += 1; }
+  return c;
 }
 
 fn parseSig(comptime name: []const u8) []const K {

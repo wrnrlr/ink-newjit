@@ -12,12 +12,13 @@ const all_k_types = blk: {
   break :blk ts;
 };
 
-fn matchFalse  (_: *VM, _: V, _: V) V { return .{ .b = false }; }
+pub fn matchFalse(_: *VM, _: V, _: V) V { return .{ .b = false }; }
 fn matchBlank  (_: *VM, _: V, _: V) V { return .{ .b = true }; }
 fn matchErr    (_: *VM, x: V, y: V) V { return .{ .b = x.err == y.err }; }
 fn matchB      (_: *VM, x: V, y: V) V { return .{ .b = x.b == y.b }; }
 fn matchI      (_: *VM, x: V, y: V) V { return .{ .b = x.i == y.i }; }
 fn matchF      (_: *VM, x: V, y: V) V { return .{ .b = x.f == y.f }; }
+fn matchN      (_: *VM, x: V, y: V) V { return .{ .b = x.n == y.n }; }
 fn matchS      (_: *VM, x: V, y: V) V { return .{ .b = x.s == y.s }; }
 fn matchC      (_: *VM, x: V, y: V) V { return .{ .b = x.c == y.c }; }
 fn matchFunc   (_: *VM, x: V, y: V) V { return .{ .b = @as(u64, @bitCast(x.o)) == @as(u64, @bitCast(y.o)) }; }
@@ -60,6 +61,7 @@ fn getMatchHandler(comptime k: K) VM.Dyad {
     .b       => &matchB,
     .i       => &matchI,
     .f       => &matchF,
+    .n       => &matchN,
     .s       => &matchS,
     .c       => &matchC,
     .o    => &matchFunc,
@@ -71,6 +73,7 @@ fn getMatchHandler(comptime k: K) VM.Dyad {
     .B       => matchVec(.B),
     .I       => matchVec(.I),
     .F       => matchVec(.F),
+    .N       => matchVec(.N),
     .S       => matchVec(.S),
     .C       => matchVec(.C),
   };
@@ -84,14 +87,14 @@ fn makeMatch() type {
   var attrs: []const h.Attr = &.{
     .{ .default_value_ptr = @ptrCast(&op_default) },
   };
+  // Only the diagonal is registered: mismatched tags hit the stage-2 row
+  // fallback, which verbs.zig points at matchFalse for ~.
   for (all_k_types) |xk| {
-    for (all_k_types) |yk| {
-      const handler: VM.Dyad = if (xk == yk) getMatchHandler(xk) else &matchFalse;
-      names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-      field_types = field_types ++ .{VM.Dyad};
-      const attr: h.Attr = .{ .default_value_ptr = @ptrCast(&handler) };
-      attrs = attrs ++ .{attr};
-    }
+    const handler: VM.Dyad = getMatchHandler(xk);
+    names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(xk)};
+    field_types = field_types ++ .{VM.Dyad};
+    const attr: h.Attr = .{ .default_value_ptr = @ptrCast(&handler) };
+    attrs = attrs ++ .{attr};
   }
   const n = names.len;
   return @Struct(.auto, null, names[0..n], &(field_types[0..n].*), &(attrs[0..n].*));

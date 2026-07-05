@@ -5,7 +5,7 @@
 //   [value: recursive]
 //
 // Each value:
-//   [type tag: 1 byte = K.serCode() compact index 0–17]
+//   [type tag: 1 byte = K.serCode() compact index 0–19]
 //   [payload]
 //
 // Atoms:
@@ -14,6 +14,7 @@
 //   b:     1 byte (0=false, 1=true)
 //   i:     8 bytes LE i32
 //   f:     8 bytes (f32 bit pattern, LE u32)
+//   n:     4 bytes LE u32 (natural)
 //   s:     4 bytes LE u32 len + len bytes UTF-8 string
 //   c:     1 bytes LE u8 codepoint
 //
@@ -21,6 +22,7 @@
 //   B: 4 bytes n + n*1 byte (0/1 per element)
 //   I: 4 bytes n + n*8 bytes raw i32 LE
 //   F: 4 bytes n + n*8 bytes raw f32 LE
+//   N: 4 bytes n + n*4 bytes raw u32 LE
 //   S: 4 bytes n + n*(4 bytes len + len bytes)
 //   C: 4 bytes n + n bytes raw u8
 //
@@ -38,7 +40,7 @@ const N = @import("../noun/array.zig").N;
 const Dict = @import("../noun/dict.zig").Dict;
 const Err = value.Err;
 
-const VERSION: u8 = 0x03;
+const VERSION: u8 = 0x04;
 
 // Serialization
 pub fn serialize(alloc: Alloc, pool: *const Pool, v: V) !V {
@@ -58,6 +60,7 @@ fn serVal(buf: *std.ArrayList(u8), alloc: Alloc, pool: *const Pool, v: V) anyerr
     .b     => |b| try buf.append(alloc, if (b) 1 else 0),
     .i     => |i| try writeI32(buf, alloc, i),
     .f     => |f| try writeU32(buf, alloc, @bitCast(f)),
+    .n     => |nat| try writeU32(buf, alloc, nat),
     .s     => |s| try writeStr(buf, alloc, pool.get(s)),
     .c     => |c| try writeU8(buf, alloc, c),
     .B => |n| {
@@ -69,6 +72,10 @@ fn serVal(buf: *std.ArrayList(u8), alloc: Alloc, pool: *const Pool, v: V) anyerr
       try buf.appendSlice(alloc, std.mem.sliceAsBytes(n.slice()));
     },
     .F => |n| {
+      try writeU32(buf, alloc, @intCast(n.ptr.len));
+      try buf.appendSlice(alloc, std.mem.sliceAsBytes(n.slice()));
+    },
+    .N => |n| {
       try writeU32(buf, alloc, @intCast(n.ptr.len));
       try buf.appendSlice(alloc, std.mem.sliceAsBytes(n.slice()));
     },
@@ -146,6 +153,7 @@ fn desVal(alloc: Alloc, pool: *Pool, bytes: []const u8, pos: *usize) anyerror!V 
       const bits = try rdU32(bytes, pos);
       break :blk .{ .f = @bitCast(bits) };
     },
+    .n => .{ .n = try rdU32(bytes, pos) },
     .s => blk: {
       const str = try rdStr(alloc, bytes, pos);
       defer alloc.free(str);
@@ -182,6 +190,16 @@ fn desVal(alloc: Alloc, pool: *Pool, bytes: []const u8, pos: *usize) anyerror!V 
       @memcpy(std.mem.sliceAsBytes(vec.slice()), bytes[pos.*..][0..byte_len]);
       pos.* += byte_len;
       break :blk .{ .F = vec };
+    },
+    .N => blk: {
+      const n = try rdU32(bytes, pos);
+      const vec = try N(u32).init(alloc, n);
+      errdefer vec.deinit(alloc);
+      const byte_len = n * @sizeOf(u32);
+      if (pos.* + byte_len > bytes.len) return error.UnexpectedEof;
+      @memcpy(std.mem.sliceAsBytes(vec.slice()), bytes[pos.*..][0..byte_len]);
+      pos.* += byte_len;
+      break :blk .{ .N = vec };
     },
     .S => blk: {
       const n = try rdU32(bytes, pos);

@@ -92,6 +92,16 @@ pub const TerseFormatter = struct {
         try w.writeAll("\"");
       },
       .b => |a| try w.print("{d}b", .{@as(u8, if (a) 1 else 0)}),
+      .n => |a| try formatNat(a, w),
+      .N => |vec| {
+        const s = vec.slice();
+        if (s.len == 0) { try w.writeAll("&0"); return; }
+        if (s.len == 1) try w.writeAll(",");
+        for (s, 0..) |e, i| {
+          if (i > 0) try w.writeAll(" ");
+          try formatNat(e, w);
+        }
+      },
       .s => |a| {
         if (a < self.vm.symbolCount()) {
           try w.print("`{s}", .{self.vm.getSymbol(a)});
@@ -271,6 +281,12 @@ pub const TerseFormatter = struct {
         try self.formatAtom(T, e, w);
       }
     }
+  }
+
+  // Naturals print as bare digits (the type has no literal syntax yet).
+  fn formatNat(a: u32, w: anytype) anyerror!void {
+    if (a == std.math.maxInt(u32)) try w.writeAll("0N")
+    else try w.print("{d}", .{a});
   }
 
   fn formatDictKey(self: *Self, k: V, w: anytype) anyerror!void {

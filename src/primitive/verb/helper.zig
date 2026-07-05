@@ -100,26 +100,6 @@ pub fn makeDyad(
       }
     }
   }
-  // Quick ops don't enumerate container slots: their stage-1 table's default
-  // entry routes container/exotic operands to containerDyad at runtime.
-  if (operator.code() >= Op2.QUICK_COUNT) {
-    const all_k = comptime blk: {
-      const fields = @typeInfo(K).@"enum".fields;
-      var ts: [fields.len]K = undefined;
-      for (fields, 0..) |f, i| ts[i] = @enumFromInt(f.value);
-      break :blk ts;
-    };
-    for (all_k) |xk| {
-      for (all_k) |yk| {
-        if (dyadContainerKernel(xk, yk, operator)) |handler| {
-          names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-          field_types = field_types ++ .{VM.Dyad};
-          const attr: Attr = .{ .default_value_ptr = @ptrCast(&handler) };
-          attrs = attrs ++ .{attr};
-        }
-      }
-    }
-  }
   const n = names.len;
   return @Struct(.auto, null, names[0..n], &(field_types[0..n].*), &(attrs[0..n].*));
 }
@@ -145,13 +125,13 @@ pub fn Char1(comptime _: type) type { return u8; }
 
 pub fn resultKind1(comptime xk: K, comptime RT: fn (type) type) K {
   const R = RT(xk.backing());
-  const scalar: K = if (R == f32) .f else if (R == bool) .b else if (R == u8) .c else .i;
+  const scalar: K = if (R == f32) .f else if (R == bool) .b else if (R == u8) .c else if (R == u32) .n else .i;
   return if (xk.isVec()) scalar.container() else scalar;
 }
 
 pub fn resultKind2(comptime xk: K, comptime yk: K, comptime RT: fn (type, type) type) K {
   const R = RT(xk.backing(), yk.backing());
-  const scalar: K = if (R == f32) .f else if (R == bool) .b else .i;
+  const scalar: K = if (R == f32) .f else if (R == bool) .b else if (R == u32) .n else .i;
   return if (xk.isVec() or yk.isVec()) scalar.container() else scalar;
 }
 
@@ -184,6 +164,7 @@ fn Caster(comptime C: type) type {
       if (T == bool) return if (C == f32) (if (v) @as(f32, 1.0) else 0.0) else @intFromBool(v);
       if (T == i32 and C == f32) return @floatFromInt(v);
       if (T == f32 and C == i32) return @intFromFloat(v);
+      if (T == u32 and C == f32) return @floatFromInt(v);
       unreachable;
     }
   };
@@ -361,23 +342,11 @@ fn rewrapDict(vm: *VM, t: K, keys: V, vals: V) V {
   return if (t == .m) V{ .m = d } else V{ .M = d };
 }
 
-/// The per-op stage-2 kernel: a thin wrapper deferring to containerDyad.
-/// Shared by every container slot of a stage-2 op and used as the stage-1
-/// table's default entry.
+/// The per-op miss handler for broadcasting ops: a thin wrapper deferring to
+/// containerDyad. Used as the stage-1 table's default slot and as the stage-2
+/// row fallback for the non-quick broadcasting ops (= | & < > mod div).
 pub fn containerFallback(comptime op2: Op2) VM.Dyad {
   return &struct {
     fn kernel(vm: *VM, x: V, y: V) V { return containerDyad(vm, op2, x, y); }
   }.kernel;
-}
-
-// Registers the (xk, yk) slot for the shared container fallback when at least
-// one side is L/m/M. Returns null for pure scalar/vector pairs — those are
-// handled by dyadKernel.
-pub fn dyadContainerKernel(
-  comptime xk: K,
-  comptime yk: K,
-  comptime operator: Op2,
-) ?VM.Dyad {
-  if (!(xk.isMap() or yk.isMap() or xk == .L or yk == .L)) return null;
-  return containerFallback(operator);
 }
