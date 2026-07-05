@@ -244,6 +244,37 @@ pub fn build(b: *std.Build) !void {
   const shp_step = b.step("shp", "Build the shapefile extension shared library");
   shp_step.dependOn(&b.addInstallArtifact(shp_lib, .{}).step);
 
+  // --- Image extensions (one shared library per format, sharing lib/image/*) ---
+  // libimage holds the format-agnostic helpers (sniff + resample); libpng,
+  // libjpeg, … each bundle only their decoder so `ink bundle` links just what a
+  // program uses. Every ext root imports kabi and the shared image sources.
+  const image_exts = .{
+    .{ "image", "lib/image/image_ext.zig" },
+    .{ "png", "lib/image/png_ext.zig" },
+    .{ "jpeg", "lib/image/jpeg_ext.zig" },
+    .{ "bmp", "lib/image/bmp_ext.zig" },
+    .{ "tga", "lib/image/tga_ext.zig" },
+    .{ "gif", "lib/image/gif_ext.zig" },
+    .{ "hdr", "lib/image/hdr_ext.zig" },
+    .{ "pic", "lib/image/pic_ext.zig" },
+  };
+  const image_step = b.step("images", "Build all image extension shared libraries");
+  inline for (image_exts) |pair| {
+    const mod = b.createModule(.{
+      .root_source_file = b.path(pair[1]),
+      .target = target, .optimize = optimize, .link_libc = true,
+    });
+    mod.addImport("kabi", kabi_mod);
+    const lib = b.addLibrary(.{ .name = pair[0], .root_module = mod, .linkage = .dynamic });
+    b.installArtifact(lib);
+    const step = b.step(pair[0], "Build the " ++ pair[0] ++ " image extension shared library");
+    step.dependOn(&b.addInstallArtifact(lib, .{}).step);
+    image_step.dependOn(&b.addInstallArtifact(lib, .{}).step);
+    // Static archive too, so `ink bundle` can link only the formats a program uses.
+    const slib = b.addLibrary(.{ .name = pair[0], .root_module = mod, .linkage = .static });
+    static_step.dependOn(&b.addInstallArtifact(slib, .{}).step);
+  }
+
   // --- Static .a libraries for `ink bundle` (linked, not dlopen'd) ---
   // The interpreter core as a linkable archive (exposes the C-ABI
   // `ink_run_bundle` entry; no `main`), plus a static .a per light extension.
