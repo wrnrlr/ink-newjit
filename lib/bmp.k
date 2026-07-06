@@ -1,3 +1,8 @@
+/
+# Hello
++++
+\
+
 / lib/bmp.k — BMP image module (native libbmp extension).
 /
 / Two views of a BMP:
