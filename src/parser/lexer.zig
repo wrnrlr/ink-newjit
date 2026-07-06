@@ -42,6 +42,19 @@ fn isKeywordOp(s: []const u8) bool {
 // Part of speech can be a prase, noun, or a verb
 const Tag = enum { phrase, noun, verb };
 
+// True if the line directly above the '/' at `open` is itself a line comment
+// (its first non-blank character is '/'). Such a '/' is a blank divider inside a
+// run of comments, not a block-comment opener — this keeps a lone '/' among
+// line comments from accidentally pairing with a later lone '\'.
+fn prevLineIsComment(src: []const u8, open: u32) bool {
+  if (open == 0 or src[open - 1] != '\n') return false; // BOF or not at line start
+  var b = open - 1; // the '\n' ending the previous line
+  while (b > 0 and src[b - 1] != '\n') b -= 1; // start of the previous line
+  var i = b;
+  while (i < open - 1 and (src[i] == ' ' or src[i] == '\t')) i += 1;
+  return i < open - 1 and src[i] == '/';
+}
+
 // True if a block-comment terminator — a line consisting solely of '\' in
 // column 0 — exists after the opening '/' at `open`. Scans line by line from
 // the line following `open`.
@@ -123,13 +136,14 @@ pub const Lexer = struct {
     if (c == '/' and (had_space or self.tag == .phrase)) {
       // Block comment: a line consisting of exactly '/' opens a block that runs
       // until a line consisting of exactly '\'. Both delimiters must sit in
-      // column 0 and be alone on their line. A lone '/' with no matching '\'
-      // close is NOT a block opener — it stays an ordinary (empty) line comment
-      // (the common idiom of a blank '/' divider inside a run of comments). This
-      // also keeps the lexer in step with the tree-sitter grammar.
+      // column 0 and be alone on their line. A lone '/' is NOT a block opener
+      // (it stays an ordinary empty line comment) when either the line above it
+      // is itself a comment — the blank '/' divider idiom inside a run of
+      // comments — or no matching '\' close follows.
       const at_col0 = (start == 0 or self.src[start - 1] == '\n');
       const slash_alone = (start + 1 >= self.src.len or self.src[start + 1] == '\n');
-      if (at_col0 and slash_alone and blockClosePresent(self.src, start)) {
+      if (at_col0 and slash_alone and
+        !prevLineIsComment(self.src, start) and blockClosePresent(self.src, start)) {
         self.adv(); // consume '/'
         while (self.i < self.src.len and self.CR() != '\n') self.adv();
         while (self.i < self.src.len) {
@@ -583,6 +597,30 @@ test "lexer slash not block when not alone" {
   try std.testing.expectEqualStrings("/foo", t1.slice(src));
   try std.testing.expectEqual(TT.sep, lex.next().tt);
   try std.testing.expectEqual(TT.int, lex.next().tt);
+}
+
+test "lexer divider not swallowed by later backslash" {
+  // The '/' on line 2 is a divider inside a comment run; it must NOT open a
+  // block comment just because a lone '\' appears later (line 5). `val` stays
+  // real code.
+  const src = "/ head\n/\n/ more\nval:5\n/\nblk\n\\\nval";
+  var lex = Lexer.init(src);
+  try std.testing.expectEqual(TT.comment, lex.next().tt); // / head
+  try std.testing.expectEqual(TT.sep, lex.next().tt);
+  const div = lex.next();
+  try std.testing.expectEqual(TT.comment, div.tt);        // /  (divider, not block)
+  try std.testing.expectEqualStrings("/", div.slice(src));
+  try std.testing.expectEqual(TT.sep, lex.next().tt);
+  try std.testing.expectEqual(TT.comment, lex.next().tt); // / more
+  try std.testing.expectEqual(TT.sep, lex.next().tt);
+  try std.testing.expectEqual(TT.iden, lex.next().tt);    // val
+  try std.testing.expectEqual(TT.@":", lex.next().tt);    // :
+  try std.testing.expectEqual(TT.int, lex.next().tt);     // 5
+  try std.testing.expectEqual(TT.sep, lex.next().tt);
+  // line 5 '/' — prev line is code, close follows -> genuine block comment
+  const blk = lex.next();
+  try std.testing.expectEqual(TT.comment, blk.tt);
+  try std.testing.expectEqualStrings("/\nblk\n\\", blk.slice(src));
 }
 
 test "lexer symbol" {
