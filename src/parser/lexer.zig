@@ -106,6 +106,25 @@ pub const Lexer = struct {
 
     // Comment: / with whitespace before it (or at start / after sep)
     if (c == '/' and (had_space or self.tag == .phrase)) {
+      // Block comment: a line consisting of exactly '/' opens a block that runs
+      // until a line consisting of exactly '\' (or EOF). Both delimiters must
+      // sit in column 0 and be alone on their line.
+      const at_col0 = (start == 0 or self.src[start - 1] == '\n');
+      const slash_alone = (start + 1 >= self.src.len or self.src[start + 1] == '\n');
+      if (at_col0 and slash_alone) {
+        self.adv(); // consume '/'
+        while (self.i < self.src.len and self.CR() != '\n') self.adv();
+        while (self.i < self.src.len) {
+          self.adv(); // consume '\n' -> now at column 0 of next line
+          const ls = self.i;
+          const term = (ls < self.src.len and self.src[ls] == '\\') and
+            (ls + 1 >= self.src.len or self.src[ls + 1] == '\n');
+          while (self.i < self.src.len and self.CR() != '\n') self.adv();
+          if (term) break;
+        }
+        self.tag = .phrase;
+        return .{ .tt = .comment, .start = start, .end = self.i };
+      }
       while (self.i < self.src.len and self.CR() != '\n')
         self.adv();
       self.tag = .phrase;
@@ -494,6 +513,38 @@ test "lexer inline comment" {
   try std.testing.expectEqual(TT.op,     lex.next().tt); // !
   try std.testing.expectEqual(TT.int,    lex.next().tt); // 3
   try std.testing.expectEqual(TT.comment,lex.next().tt); // /inline (after space)
+}
+
+test "lexer block comment" {
+  const src = "/\nignored 1 2 3\nstill \"ignored\n\\\n1";
+  var lex = Lexer.init(src);
+  const t1 = lex.next();
+  try std.testing.expectEqual(TT.comment, t1.tt);
+  try std.testing.expectEqualStrings("/\nignored 1 2 3\nstill \"ignored\n\\", t1.slice(src));
+  try std.testing.expectEqual(TT.sep, lex.next().tt);
+  try std.testing.expectEqual(TT.int, lex.next().tt);
+}
+
+test "lexer block comment to eof" {
+  const src = "1\n/\nnever terminated";
+  var lex = Lexer.init(src);
+  try std.testing.expectEqual(TT.int, lex.next().tt);
+  try std.testing.expectEqual(TT.sep, lex.next().tt);
+  const t = lex.next();
+  try std.testing.expectEqual(TT.comment, t.tt);
+  try std.testing.expectEqualStrings("/\nnever terminated", t.slice(src));
+  try std.testing.expectEqual(TT.eof, lex.next().tt);
+}
+
+test "lexer slash not block when not alone" {
+  // '/foo' at column 0 is a normal single-line comment, not a block opener.
+  const src = "/foo\n1";
+  var lex = Lexer.init(src);
+  const t1 = lex.next();
+  try std.testing.expectEqual(TT.comment, t1.tt);
+  try std.testing.expectEqualStrings("/foo", t1.slice(src));
+  try std.testing.expectEqual(TT.sep, lex.next().tt);
+  try std.testing.expectEqual(TT.int, lex.next().tt);
 }
 
 test "lexer symbol" {
