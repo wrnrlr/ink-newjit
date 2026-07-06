@@ -15,4 +15,15 @@ The public command also needs support in the zig parser and tree-sitter parser.
 
 ## Improve tooling
 Fix the following in the zed-ink extension and tree-sitter-ink parser.
-- Add syntax highlightning for conditional statements `$[b;t;f]`. It should be the same color (yellow) as the boolean literals `01b`.
+
+## Resolve group vs freq
+
+## Early returns
+Implement early returns in a lambda using `:` (like the ngn/k).
+
+## Ink Agent Skills
+Add skills for the following task profiles.
+- Ink development agent: skills, tools, ebnf, idioms.
+  - parse tool
+  - bytecode tool
+  - snapshot tool

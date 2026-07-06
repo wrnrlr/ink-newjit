@@ -23,19 +23,28 @@ Ink (sometimes called terse) is an array programming language based on k.
 - Newlines inside `(...)` inject null elements - keep list literals on one line.
 - `,/()` returns a unit, not an empty list - use `$[#x;,/x;!0]` when folding possibly-empty lists.
 
+# Ink Tutorial
+Ink is an array programming language with k 
+
+```k
+ints: -2 1 0 0N
+types: `i`f`s`c`m`I`F`S`C`M`L / symbols 
+list: (0b;1;2.3;`c)
+dict: [id:1;name:"Bob"]
+f: {x+y} / lambda with inplicit arguments
+g: {[a;b]#a,b} / lambda with explicit arguments
+train: *|
+sum: +/;
+inc: 1+ / partial
+```
+
 # Language Reference
 ## Grammar
 Nouns can be combined into expressions using verbs and adverbs.
 Expressions are evaluated right-to-left. There are no special precedence rules for operators.
 
-```k
-Integers: -2 1 0 0N
-Types: `i`f`s`c`m`I`F`S`C`M`L
-List: (0b;1;2.3;`c)
-Lambda: {[a;b]#a,b}
-Dict: [id:1;name:"Bob"]
-Train: *|
-Sum: +/;
+```
+
 ```
 
 ## Types `` ` `n`i`f`s`c`N`I`F`S`C`m`M`L ``
