@@ -132,7 +132,7 @@ fn nodeToV(vm: *VM, node: *Node) anyerror!V {
       errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
       try list.append(alloc, try sym(vm, "term"));
       try list.append(alloc, try nodeToV(vm, t.f));
-      try list.append(alloc, try sym(vm, "adverb"));
+      try list.append(alloc, try sym(vm, t.a));
       return transfer(alloc, &list);
     },
     .group => |g| {
