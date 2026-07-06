@@ -17,14 +17,14 @@
   sniff:  so 2:(`ImgSniff; 1)
   scale0: so 2:(`ImgScale; 1)
 
-  read: {[p] f: sniff p;
-    $[f=`png;  png.read  p
-      f=`jpeg; jpeg.read p
-      f=`bmp;  bmp.read  p
-      f=`gif;  gif.read  p
-      f=`tga;  tga.read  p
-      f=`hdr;  hdr.read  p
-      f=`pic;  pic.read  p
+  read: {[path] f: sniff path;
+    $[f=`png;  png.read  path
+      f=`jpeg; jpeg.read path
+      f=`bmp;  bmp.decode path
+      f=`gif;  gif.read  path
+      f=`tga;  tga.read  path
+      f=`hdr;  hdr.read  path
+      f=`pic;  pic.read  path
       '"image.read: unknown image format"]}
 
   / Resize an image dict to nw×nh (bilinear, integer channels).
@@ -32,8 +32,8 @@
     `width`height`comp`data!(nw; nh; img`comp; d)}
 
   / Encode by file extension.
-  write: {[p;img] e: -4#p;
-    $[e~".png"; png.write[p;img]
-      e~".bmp"; bmp.write[p;img]
+  write: {[path;img] e: -4#path;
+    $[e~".png"; png.write[path;img]
+      e~".bmp"; bmp.write[path;img]
       '"image.write: no encoder for that extension"]}
 \d

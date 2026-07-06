@@ -4,6 +4,10 @@
 ///
 ///   decode(alloc, file)                 → common.Image (3 or 4 channels, 8-bit)
 ///   encode(alloc, w, h, comp, pixels)   → owned []u8 (a valid .bmp file)
+///
+/// The extension also uses `readStruct`/`writeStruct`/`compressionName` to expose
+/// the raw file layout (magic + file header + DIB + masks + palette + raw pixel
+/// bytes) as an ink dict, so array code can pick apart or rebuild a BMP directly.
 
 const std = @import("std");
 const Reader = @import("reader.zig").Reader;
@@ -12,6 +16,190 @@ const common = @import("common.zig");
 const Alloc = std.mem.Allocator;
 const Error = common.Error;
 const Image = common.Image;
+
+// ── structural read (raw file layout, no pixel decode) ─────────────────────────
+
+/// BMP compression code (BI_*) → ink symbol name. Codes are not contiguous
+/// (0..6 then 11..13), hence a switch rather than an index.
+pub fn compressionName(c: u32) [*:0]const u8 {
+  return switch (c) {
+    0 => "rgb",
+    1 => "rle8",
+    2 => "rle4",
+    3 => "bitfields",
+    4 => "jpeg",
+    5 => "png",
+    6 => "alphabitfields",
+    11 => "cmyk",
+    12 => "cmykrle8",
+    13 => "cmykrle4",
+    else => "unknown",
+  };
+}
+
+/// The whole BMP file taken apart. Slices alias the caller's file buffer.
+pub const Struct = struct {
+  file_size: u32,
+  reserved: u32,
+  offset: u32,
+  dib_size: u32,
+  width: i32,
+  height: i32,
+  planes: u16,
+  depth: u16,
+  compression: u32,
+  image_size: u32,
+  xppm: i32,
+  yppm: i32,
+  colors: u32,
+  important: u32,
+  mask_r: u32 = 0,
+  mask_g: u32 = 0,
+  mask_b: u32 = 0,
+  mask_a: u32 = 0,
+  has_masks: bool = false,
+  pal_count: usize = 0,
+  pal_stride: usize = 4, // 4 for INFO+, 3 for CORE
+  palette: []const u8 = &.{}, // raw palette bytes as stored (BGR[A])
+  pixels: []const u8 = &.{}, // raw pixel array from `offset` to EOF
+};
+
+pub fn readStruct(file: []const u8) Error!Struct {
+  var r = Reader.init(file);
+  if (r.get8() != 'B' or r.get8() != 'M') return Error.Corrupt;
+  var s: Struct = undefined;
+  s.file_size = r.get32le();
+  const res1 = r.get16le();
+  const res2 = r.get16le();
+  s.reserved = res1 | (res2 << 16);
+  s.offset = r.get32le();
+  s.dib_size = r.get32le();
+
+  var extra_masks: usize = 0;
+  s.has_masks = false;
+  s.mask_r = 0;
+  s.mask_g = 0;
+  s.mask_b = 0;
+  s.mask_a = 0;
+  if (s.dib_size == 12) { // BITMAPCOREHEADER
+    s.width = @intCast(r.get16le());
+    s.height = @intCast(r.get16le());
+    s.planes = @intCast(r.get16le());
+    s.depth = @intCast(r.get16le());
+    s.compression = 0;
+    s.image_size = 0;
+    s.xppm = 0;
+    s.yppm = 0;
+    s.colors = 0;
+    s.important = 0;
+    s.pal_stride = 3;
+  } else {
+    if (s.dib_size != 40 and s.dib_size != 52 and s.dib_size != 56 and s.dib_size != 108 and s.dib_size != 124) return Error.Unsupported;
+    s.width = @bitCast(r.get32le());
+    s.height = @bitCast(r.get32le());
+    s.planes = @intCast(r.get16le());
+    s.depth = @intCast(r.get16le());
+    s.compression = r.get32le();
+    s.image_size = r.get32le();
+    s.xppm = @bitCast(r.get32le());
+    s.yppm = @bitCast(r.get32le());
+    s.colors = r.get32le();
+    s.important = r.get32le();
+    s.pal_stride = 4;
+    if (s.dib_size == 40 and (s.compression == 3 or s.compression == 6)) {
+      s.mask_r = r.get32le();
+      s.mask_g = r.get32le();
+      s.mask_b = r.get32le();
+      extra_masks = 12;
+      if (s.compression == 6) {
+        s.mask_a = r.get32le();
+        extra_masks = 16;
+      }
+      s.has_masks = true;
+    } else if (s.dib_size >= 52) {
+      s.mask_r = r.get32le();
+      s.mask_g = r.get32le();
+      s.mask_b = r.get32le();
+      if (s.dib_size >= 56) s.mask_a = r.get32le();
+      s.has_masks = true;
+    }
+  }
+
+  const header_end: usize = 14 + s.dib_size + extra_masks;
+  if (header_end > file.len) return Error.Corrupt;
+
+  // palette (indexed images only)
+  if (s.depth <= 8) {
+    var cnt: usize = if (s.colors != 0) s.colors else (@as(usize, 1) << @intCast(s.depth));
+    const avail = (@as(usize, s.offset) -| header_end) / s.pal_stride;
+    if (avail < cnt) cnt = avail;
+    s.pal_count = cnt;
+    const pbytes = cnt * s.pal_stride;
+    s.palette = if (header_end + pbytes <= file.len) file[header_end .. header_end + pbytes] else &.{};
+  } else {
+    s.pal_count = 0;
+    s.palette = &.{};
+  }
+
+  s.pixels = if (s.offset <= file.len) file[@min(s.offset, file.len)..] else &.{};
+  return s;
+}
+
+/// Serialize a BMP from raw parts: always emits a BITMAPFILEHEADER +
+/// BITMAPINFOHEADER (40), plus BI_BITFIELDS masks when `compression` is 3/6, a
+/// BGRA palette (from RGBA `palette_rgba`), then `pixels` verbatim. Round-trips
+/// pixel data losslessly (the header is normalized to v3, not byte-preserved).
+pub fn writeStruct(
+  alloc: Alloc,
+  width: i32,
+  height: i32,
+  depth: u16,
+  compression: u32,
+  masks: [4]u32,
+  palette_rgba: []const u8, // n*4 RGBA
+  pixels: []const u8,
+) Error![]u8 {
+  const pal_count = palette_rgba.len / 4;
+  const mask_bytes: usize = if (compression == 6) 16 else if (compression == 3) 12 else 0;
+  const pal_bytes = pal_count * 4;
+  const offset: usize = 14 + 40 + mask_bytes + pal_bytes;
+  const total = offset + pixels.len;
+
+  const out = alloc.alloc(u8, total) catch return Error.OutOfMemory;
+  errdefer alloc.free(out);
+  @memset(out, 0);
+  out[0] = 'B';
+  out[1] = 'M';
+  std.mem.writeInt(u32, out[2..6], @intCast(total), .little);
+  std.mem.writeInt(u32, out[10..14], @intCast(offset), .little);
+  std.mem.writeInt(u32, out[14..18], 40, .little); // dib size
+  std.mem.writeInt(i32, out[18..22], width, .little);
+  std.mem.writeInt(i32, out[22..26], height, .little);
+  std.mem.writeInt(u16, out[26..28], 1, .little); // planes
+  std.mem.writeInt(u16, out[28..30], depth, .little);
+  std.mem.writeInt(u32, out[30..34], compression, .little);
+  std.mem.writeInt(u32, out[34..38], @intCast(pixels.len), .little);
+  std.mem.writeInt(u32, out[46..50], @intCast(pal_count), .little);
+
+  var pos: usize = 54;
+  if (mask_bytes >= 12) {
+    std.mem.writeInt(u32, out[pos..][0..4], masks[0], .little);
+    std.mem.writeInt(u32, out[pos + 4 ..][0..4], masks[1], .little);
+    std.mem.writeInt(u32, out[pos + 8 ..][0..4], masks[2], .little);
+    if (mask_bytes == 16) std.mem.writeInt(u32, out[pos + 12 ..][0..4], masks[3], .little);
+    pos += mask_bytes;
+  }
+  var i: usize = 0;
+  while (i < pal_count) : (i += 1) {
+    out[pos + 0] = palette_rgba[i * 4 + 2]; // B
+    out[pos + 1] = palette_rgba[i * 4 + 1]; // G
+    out[pos + 2] = palette_rgba[i * 4 + 0]; // R
+    out[pos + 3] = palette_rgba[i * 4 + 3]; // A
+    pos += 4;
+  }
+  @memcpy(out[offset..], pixels);
+  return out;
+}
 
 pub fn isBmp(file: []const u8) bool {
   if (file.len < 18) return false;

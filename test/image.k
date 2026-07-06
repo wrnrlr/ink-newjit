@@ -49,3 +49,29 @@ mk: {[w;h]
 img: mk[16;16]
 made: png.write["/tmp/checker.png"; img]
 (made; #img`data)
+
+/ ── BMP as raw file structure (magic → header → dib → masks → palette → pixels) ─
+/ Unlike bmp.decode (→ RGBA image), bmp.read hands back the on-disk layout so
+/ array code can pick it apart. `magic is first as a per-format marker.
+bmp.write["/tmp/demo.bmp"; thumb]      / write a real BMP to read structurally
+s: bmp.read "/tmp/demo.bmp"
+!s                                      / which sections are present
+s`dib                                   / width/height/depth/compression(symbol)/…
+bmp.stride s                            / padded row width in bytes
+
+/ edit raw pixels in place, then write the structure back (pixels round-trip)
+s[`pixels]: `c$ (#s`pixels) # 0          / paint it black
+bmp.write["/tmp/black.bmp"; s]
+blk: bmp.decode "/tmp/black.bmp"
+(`allblack; 0 = |/ blk`data)
+
+/ build a 2×2 palettized (8-bit) BMP from scratch — palette is an (n;4) RGBA matrix
+pal: (2;4)# 0 0 0 255  255 255 255 255    / index 0 black, 1 white
+p8: `magic`header`dib`palette`pixels!(
+  "BM";
+  `size`reserved`offset!(0;0;0);          / recomputed by the writer
+  `width`height`depth`compression!(2;2;8;`rgb);
+  pal;
+  `c$ 1 0 0 0  0 1 0 0)                    / indices, 2 rows, stride 4 (2px+2pad)
+bmp.write["/tmp/pal.bmp"; p8]
+(bmp.decode "/tmp/pal.bmp")`data
