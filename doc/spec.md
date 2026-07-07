@@ -153,6 +153,7 @@ A digram is an adverb is written with 2 values on the left hand side: Zip `x F'`
 - Arguments `` `argv[] `` - list of cmd line args (also in global variable x)
 - Enviroment Variables `` `env[] `` - dict of env variables
 - Random Number `` `prng[] ``
+- Inverse trig `` `asin@x ``, `` `acos@x ``, `` `atan@x `` (element-wise), and `` `atan2@(y;x) `` (broadcasts scalar⊕vector)
 - Exit `` `exit@i ``
 ## Commands
 A command always start at the beginning of a line with `\`.

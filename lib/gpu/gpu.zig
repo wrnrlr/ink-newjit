@@ -1181,10 +1181,33 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
       j += wc;
     }
   }
+  // A fragment shader samples a texture when it declares an OpVariable in the
+  // UniformConstant storage class (0) — that's the sampled image / sampler (see
+  // FragmentShaderTex in spirv.k). Such a mesh gets a texture+sampler bind group
+  // at @group(1); it also implies the uniform group at @group(0) so the draw
+  // path always binds group 0 (earth's vertex shader supplies the camera block).
+  var has_texture = false;
+  {
+    const ws = frg_words[0..@intCast(fn_)];
+    var j: usize = 5;
+    while (j < ws.len) {
+      const w0 = ws[j];
+      const wc: usize = w0 >> 16;
+      if (wc == 0) break;
+      if ((w0 & 0xffff) == 59 and j + 3 < ws.len and ws[j + 3] == 0) has_texture = true;
+      j += wc;
+    }
+  }
+  if (has_texture) has_uniform = true;
   const layout = if (has_instance)
     r.device.createPipelineLayout(.{
       .bind_group_layout_count = 1,
       .bind_group_layouts = &[_]wgpu.BindGroupLayout{r.mesh_inst_bgl},
+    })
+  else if (has_texture)
+    r.device.createPipelineLayout(.{
+      .bind_group_layout_count = 2,
+      .bind_group_layouts = &[_]wgpu.BindGroupLayout{ r.mesh_bgl, r.mesh_tex_bgl },
     })
   else if (has_uniform)
     r.device.createPipelineLayout(.{
@@ -1214,6 +1237,7 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
   r.mesh_strides.append(r.allocator, layout_info.stride_floats) catch return ki(0);
   r.mesh_has_uniform.append(r.allocator, has_uniform) catch return ki(0);
   r.mesh_is_instanced.append(r.allocator, has_instance) catch return ki(0);
+  r.mesh_has_texture.append(r.allocator, has_texture) catch return ki(0);
   return ki(@intCast(r.mesh_pipelines.items.len));
 }
 
@@ -1223,7 +1247,6 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
 // handle_k: a mesh pipeline handle from gpuMesh.
 // Uploads the geometry to a PERSISTENT vertex buffer (retained — once, not per
 // frame) and returns a geometry handle (>0) for gpuDrawInstanced.
-
 export fn gpuUploadMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
   const r = g_renderer orelse return ki(0);
   const vf = kfp(verts_k) orelse return ki(0);
@@ -1244,7 +1267,6 @@ export fn gpuUploadMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
 // data_k:  flat f32 instance data — count × K vec4s, read in-shader via
 //   gl_InstanceIndex (see InstancedVertexShader).  Draws the geometry once with
 //   `count` instances.
-
 export fn gpuDrawInstanced(geom_k: ?K, count_k: ?K, data_k: ?K) callconv(.c) ?K {
   const r = g_renderer orelse return ki(0);
   const geom = ki_val(geom_k);
@@ -1275,7 +1297,7 @@ export fn gpuDrawMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
 
   const n_floats: usize = @intCast(@divTrunc(vn, @as(i32, @intCast(stride))) * @as(i32, @intCast(stride)));
   const floats = vf[0..n_floats];
-  r.drawMesh(floats, stride, @intCast(handle - 1), [_]f32{0} ** render.MESH_UNI_FLOATS) catch {};
+  r.drawMesh(floats, stride, @intCast(handle - 1), [_]f32{0} ** render.MESH_UNI_FLOATS, -1) catch {};
   return ki(0);
 }
 
@@ -1284,7 +1306,6 @@ export fn gpuDrawMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
 // Like gpuDrawMesh, plus a per-draw uniform block.  uni_k is a flat f32 vector
 // (up to 32 floats = 8 vec4s) copied into @group(0) @binding(0); a vertex/fragment
 // shader built with VertexShaderU reads slot i as its i-th declared vec4 uniform.
-
 export fn gpuDrawMeshU(verts_k: ?K, handle_k: ?K, uni_k: ?K) callconv(.c) ?K {
   const r = g_renderer orelse return ki(0);
   const vf = kfp(verts_k) orelse return ki(0);
@@ -1304,8 +1325,89 @@ export fn gpuDrawMeshU(verts_k: ?K, handle_k: ?K, uni_k: ?K) callconv(.c) ?K {
 
   const n_floats: usize = @intCast(@divTrunc(vn, @as(i32, @intCast(stride))) * @as(i32, @intCast(stride)));
   const floats = vf[0..n_floats];
-  r.drawMesh(floats, stride, @intCast(handle - 1), uni) catch {};
+  r.drawMesh(floats, stride, @intCast(handle - 1), uni, -1) catch {};
   return ki(0);
+}
+
+// ── gpuDrawMeshT ────────────────────────────────────────────────────────────────
+//
+// Like gpuDrawMeshU, plus a texture handle (from gpuTexture) bound at @group(1).
+// The mesh's fragment shader (FragmentShaderTex) samples it via sample[uv].
+// ht_k packs (meshHandle; texHandle) as a 2-int vector — the FFI bridge tops out
+// at arity 3, so mesh + texture handles ride together (see lib/gpu.k DrawMeshT).
+export fn gpuDrawMeshT(verts_k: ?K, ht_k: ?K, uni_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const vf = kfp(verts_k) orelse return ki(0);
+  const vn = kn(verts_k);
+  const hp = kip(ht_k) orelse return ki(0);
+  if (kn(ht_k) < 2) return ki(0);
+  const handle = hp[0];
+  const tex_handle = hp[1];
+  if (handle <= 0 or handle > r.mesh_strides.items.len) return ki(0);
+  const stride = r.mesh_strides.items[@intCast(handle - 1)];
+  if (stride == 0 or vn < @as(i32, @intCast(stride))) return ki(0);
+
+  var uni = [_]f32{0} ** render.MESH_UNI_FLOATS;
+  if (kfp(uni_k)) |up| {
+    const un = kn(uni_k);
+    const m: usize = @min(@as(usize, @intCast(@max(un, 0))), render.MESH_UNI_FLOATS);
+    var j: usize = 0;
+    while (j < m) : (j += 1) uni[j] = up[j];
+  }
+
+  const tex_idx: i32 = if (tex_handle > 0) tex_handle - 1 else -1; // 1-based → 0-based
+
+  const n_floats: usize = @intCast(@divTrunc(vn, @as(i32, @intCast(stride))) * @as(i32, @intCast(stride)));
+  const floats = vf[0..n_floats];
+  r.drawMesh(floats, stride, @intCast(handle - 1), uni, tex_idx) catch {};
+  return ki(0);
+}
+
+// ── gpuTexture ──────────────────────────────────────────────────────────────────
+//
+// Upload an image to a GPU texture for sampling in a mesh fragment shader.
+// whc_k: 3-int vector (width; height; comp).  data_k: int vector of
+// w*h*comp interleaved samples 0..255 (top-left first) — i.e. an image dict's
+// `width`height`comp`data.  Returns a 1-based texture handle for gpuDrawMeshT.
+// Source channels are expanded to RGBA (gray → replicated, no-alpha → opaque).
+export fn gpuTexture(whc_k: ?K, data_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const wp = kip(whc_k) orelse return ki(0);
+  if (kn(whc_k) < 3) return ki(0);
+  const w = wp[0];
+  const h = wp[1];
+  const comp = wp[2];
+  if (w <= 0 or h <= 0 or comp <= 0) return ki(0);
+  const dp = kip(data_k) orelse return ki(0);
+  const dn = kn(data_k);
+  const wu: usize = @intCast(w);
+  const hu: usize = @intCast(h);
+  const cu: usize = @intCast(comp);
+  const npix = wu * hu;
+  if (dn < @as(i32, @intCast(npix * cu))) return ki(0);
+
+  const rgba = r.allocator.alloc(u8, npix * 4) catch return ki(0);
+  defer r.allocator.free(rgba);
+  const clamp = struct {
+    fn f(v: i32) u8 { return @intCast(@min(@as(i32, 255), @max(@as(i32, 0), v))); }
+  }.f;
+  var p: usize = 0;
+  while (p < npix) : (p += 1) {
+    const s = p * cu;
+    const d = p * 4;
+    if (cu >= 3) {
+      rgba[d + 0] = clamp(dp[s + 0]);
+      rgba[d + 1] = clamp(dp[s + 1]);
+      rgba[d + 2] = clamp(dp[s + 2]);
+      rgba[d + 3] = if (cu >= 4) clamp(dp[s + 3]) else 255;
+    } else {
+      const g = clamp(dp[s + 0]); // grayscale (+ optional alpha)
+      rgba[d + 0] = g; rgba[d + 1] = g; rgba[d + 2] = g;
+      rgba[d + 3] = if (cu == 2) clamp(dp[s + 1]) else 255;
+    }
+  }
+  const idx = r.uploadTexture(@intCast(w), @intCast(h), rgba) catch return ki(0);
+  return ki(@intCast(idx + 1));
 }
 
 // ── gpuWgsl ───────────────────────────────────────────────────────────────────
@@ -1359,6 +1461,8 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuDrawInstanced", @ptrCast(&gpuDrawInstanced), 3);
   r.k_register("gpuDrawMesh", @ptrCast(&gpuDrawMesh), 2);
   r.k_register("gpuDrawMeshU", @ptrCast(&gpuDrawMeshU), 3);
+  r.k_register("gpuDrawMeshT", @ptrCast(&gpuDrawMeshT), 3);
+  r.k_register("gpuTexture", @ptrCast(&gpuTexture), 2);
   r.k_register("gpuWgsl", @ptrCast(&gpuWgsl), 1);
 }
 

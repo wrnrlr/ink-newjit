@@ -26,6 +26,12 @@ RunShader2:   so 2: (`gpuCompute2;  3)   / (spirv_I; in1_F; in2_F) → output_F 
 CompileMesh:  so 2: (`gpuMesh;      2)   / (vtx_I; frg_I) → handle : compile vertex+fragment SPIR-V mesh pipeline
 DrawMesh:     so 2: (`gpuDrawMesh;  2)   / (verts_F; handle) → 0 : draw mesh; vertex stride follows the shader's declared inputs
 DrawMeshU:    so 2: (`gpuDrawMeshU; 3)   / (verts_F; handle; uni_F) → 0 : draw mesh + per-draw uniform block (8 vec4 slots; see VertexShaderU)
+gpuDrawMeshT0: so 2: (`gpuDrawMeshT; 3)  / (verts_F; (handle;texHandle)_I; uni_F) → 0 : draw mesh + uniform + texture@group(1)
+gpuTexture0:   so 2: (`gpuTexture;  2)   / ((w;h;comp)_I; data_I) → texHandle : upload an image to a sampled GPU texture
+/ Draw a mesh with a per-draw uniform block AND a texture (see FragmentShaderTex).
+DrawMeshT: {[verts; handle; uni; tex] gpuDrawMeshT0[verts; (handle;tex); uni]}
+/ Upload an image dict (`width`height`comp`data, e.g. from image.read) as a texture.
+Texture: {[img] w:img`width; h:img`height; c:img`comp; d:img`data; gpuTexture0[(w;h;c); d]}
 / UploadMesh / DrawInstanced (retained geometry + instancing) live in lib/instancing.k
 
 / Solid-color fragment uniforms (44 floats matching fill.wgsl FragUniforms).

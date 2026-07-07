@@ -241,3 +241,23 @@ comparison kernels themselves were fine on genuine typed empties:
 
 Now `` `key=(some empty `S) `` → empty, `E@&…` on a 0-row table keeps typed
 columns, and the editor/camera need no empty-frame guards.
+
+## 8. `,/x` (raze via over) is O(n²) on long lists
+
+Symptom: `,/icoTris` in `test/earth.k` — razing a 20480-element list of small
+vectors — takes ~2.1s, while the JPEG decode feeding it is only ~33ms and the
+subsequent transpose ~1ms. Timings scale with the square of the item count
+(5120 items ≈ 130ms, 20480 ≈ 2.1s).
+
+Cause: `over` with a builtin dyad (`src/primitive/adverb/fold.zig:59`) runs the
+generic fold loop, calling the `,` concat verb n-1 times. Each concat allocates
+a fresh array and copies the whole growing accumulator, so total work is
+1+2+…+n = O(n²). The lambda path just above (fold.zig:45-57) already uses move
+semantics (accum rc==1 → in-place append → O(n) amortised); the builtin path
+does not.
+
+Fix ideas: (a) route `,/` to a dedicated single-pass raze (sum lengths, allocate
+once, memcpy each item), or (b) give the builtin-dyad fold path the same
+move/in-place-append fast path the lambda path has (let `,` append into an
+rc==1 accumulator). Worked around in earth.k for now by keeping the vertex count
+low (texture supplies the detail, not geometry).

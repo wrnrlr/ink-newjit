@@ -190,6 +190,14 @@ test "arithmetic" {
   try t.check("sin 0.0", "0.0");
   try t.check("sin 1.0", "0.84147096");
   try t.check("cos 0.0", "1.0");
+  // Inverse-trig helpers on the `sym@x call path (src/runtime/syms.zig)
+  try t.check("`asin@0.0", "0.0");
+  try t.check("`asin@1.0", "1.5707964");
+  try t.check("`acos@1.0", "0.0");
+  try t.check("`atan@0.0", "0.0");
+  try t.check("`asin@(0.0 1.0)", "0.0 1.5707964");
+  try t.check("`atan2@(1.0;1.0)", "0.7853982");
+  try t.check("`atan2@(0.0 1.0; 1.0 0.0)", "0.0 1.5707964");
   try t.check("abs -4.0", "4.0"); // TODO abs 0N crashes
   // try t.check("min 5 3 4 8 2", "2");
   // try t.check("min 5", "!class");

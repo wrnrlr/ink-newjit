@@ -17,6 +17,7 @@
 / Lambdas can have local bindings: {[uv] d: sqrt[...]; (d;d;d;1.0)}
 FragmentShader: {[ioTypes; fn]
   Nid::Nfixed; Buf::(); Con::()
+  TexVar:: 0                        / no texture section (see FragmentShaderTex)
 
   lam: lamOf fn
   argNames: lamArgs lam
@@ -35,6 +36,45 @@ FragmentShader: {[ioTypes; fn]
   env: argNames!loadedPairs
 
   / Compile body: statement rows, process bind nodes for locals
+  stmts: lamBody lam
+  rp: compSeq[stmts; env; outTySym]
+  result: rp[0]
+
+  emitBuf opStore[outId; result]
+
+  locs: !#argNames
+  buildMod[outId; inVarIds; inTys; inPtrs; outPtr; locs]
+}
+
+/ ── FragmentShaderTex[ioTypes; fn] → SPIR-V word list ───────────────────────
+/ Like FragmentShader, plus one sampled 2-D texture bound at @group(1): binding 0
+/ is the image (`texture_2d<f32>`), binding 1 the sampler.  The body samples it
+/ with  sample[uv]  → v4 (see compSample).  The host wires the texture with
+/ gpuTexture + DrawMeshT.  Interpolate the UV as a v2 vertex varying.
+FragmentShaderTex: {[ioTypes; fn]
+  Nid::Nfixed; Buf::(); Con::()
+
+  lam: lamOf fn
+  argNames: lamArgs lam
+
+  outTySym: ioTypes[`out]
+  outTy:  Tid[outTySym]
+  outPtr: PtrOut[outTySym]
+  inTySyms: ioTypes' argNames
+  inTys:  Tid'  inTySyms
+  inPtrs: PtrIn' inTySyms
+
+  inVarIds: {[x] newId[]}' argNames
+  outId: newId[]
+
+  / Allocate the texture ids and publish them so compSample can emit the loads.
+  Timg2::   newId[]; Tsamp2::  newId[]; TsImg::   newId[]
+  PUCimg::  newId[]; PUCsamp:: newId[]
+  TexVar::  newId[]; SampVar:: newId[]
+
+  loadedPairs: inVarIds loadOnePair' inTySyms
+  env: argNames!loadedPairs
+
   stmts: lamBody lam
   rp: compSeq[stmts; env; outTySym]
   result: rp[0]
@@ -317,6 +357,18 @@ UTuni:: 0
 UPv4::  0
 UVar::  0
 
+/ FragmentShaderTex texture scratch: SPIR-V ids for the sampled image / sampler
+/ types, their UniformConstant pointer types, and the two global variables.
+/ TexVar>0 signals buildMod to emit the texture section; set per shader, read by
+/ compSample (ink lambdas can't see enclosing locals, so these live as globals).
+Timg2::   0   / OpTypeImage (f32, 2D, sampled)
+Tsamp2::  0   / OpTypeSampler
+TsImg::   0   / OpTypeSampledImage
+PUCimg::  0   / OpTypePointer UniformConstant → image
+PUCsamp:: 0   / OpTypePointer UniformConstant → sampler
+TexVar::  0   / OpVariable UniformConstant image   (set 1, binding 0)
+SampVar:: 0   / OpVariable UniformConstant sampler (set 1, binding 1)
+
 newId:   {[] r:Nid; Nid::Nid+1; r}
 emitCon: {[ws] Con,:: ,ws}
 emitBuf: {[ws] Buf,:: ,ws}
@@ -487,15 +539,27 @@ compApplyIdx: {[fr; i; env; oty]
   (r; `f32)
 }
 
+/ sample[uv] → texture lookup: OpSampledImage(image,sampler) then
+/ OpImageSampleImplicitLod at the interpolated uv. Only valid inside a
+/ FragmentShaderTex (TexVar/… hold the sampled-image ids). Returns v4.
+compSample: {[i; env]
+  args: kF[i;`arg]
+  uv: compNode[args[0]; env; `v2]
+  li: newId[]; emitBuf opLoad[Timg2; li; TexVar]
+  ls: newId[]; emitBuf opLoad[Tsamp2; ls; SampVar]
+  ci: newId[]; emitBuf (0x00050056; TsImg; ci; li; ls)      / OpSampledImage 86
+  r:  newId[]; emitBuf (0x00050057; Tv4; r; ci; uv[0])       / OpImageSampleImplicitLod 87
+  (r; `v4)
+}
+
 / Explicit apply: f[a;b;c]
-/ Handles: math function calls AND composite indexing (v[0])
+/ Handles: texture sampling, math function calls AND composite indexing (v[0])
 compApply: {[i; env; oty]
   fr:     kF1[i;`f]
   fnName: kVal fr
-  isMath: fnName in mathFns
-  $[isMath
-    ; compFnCall[fnName; i; env; oty]
-    ; compApplyIdx[fr; i; env; oty]]
+  $[fnName~`sample;    compSample[i; env]
+    fnName in mathFns;  compFnCall[fnName; i; env; oty]
+    compApplyIdx[fr; i; env; oty]]
 }
 
 / Tuple → vec2/vec3/vec4 via OpCompositeConstruct
@@ -592,6 +656,15 @@ buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
   varIn:  ,/ inPtrs varInOne' inVarIds
   varOut: (0x0004003B; outPtr; outId; 3)
 
+  / FragmentShaderTex texture section (emitted only when TexVar was allocated):
+  / DescriptorSet/Binding decorations, image/sampler/sampled-image types + their
+  / UniformConstant pointers, and the two global variables.  All one line each —
+  / newlines inside (...) inject null words.
+  hasTex:   TexVar>0
+  decTex:   $[hasTex; (0x00040047;TexVar;34;1),(0x00040047;TexVar;33;0),(0x00040047;SampVar;34;1),(0x00040047;SampVar;33;1); !0]
+  texTypes: $[hasTex; (0x00090019;Timg2;Tf32;1;0;0;0;1;0),(0x0002001A;Tsamp2),(0x0003001B;TsImg;Timg2),(0x00040020;PUCimg;0;Timg2),(0x00040020;PUCsamp;0;Tsamp2); !0]
+  varTex:   $[hasTex; (0x0004003B;PUCimg;TexVar;0),(0x0004003B;PUCsamp;SampVar;0); !0]
+
   label: newId[]
   fn:  (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
   ret: (0x000100FD; 0x00010038)
@@ -599,7 +672,7 @@ buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
   conWds: $[#Con; ,/Con; !0]
   bodWds: $[#Buf; ,/Buf; !0]
 
-  ,/(hdr; cap; ext; mem; ep; exm; decIn; decOut; types; varIn; varOut; conWds; fn; bodWds; ret)
+  ,/(hdr; cap; ext; mem; ep; exm; decIn; decOut; decTex; types; texTypes; varIn; varOut; varTex; conWds; fn; bodWds; ret)
 }
 
 / ── Compute stencil ──────────────────────────────────────────────────────────

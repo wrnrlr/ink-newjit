@@ -29,8 +29,14 @@ Functional programming with APL2
 ```
 
 ## Dev Enviroment
-```
+```sh
 watchexec -r -e k -- ./zig-out/bin/ink test/planes.k
+```
+
+build docs
+```sh
+make docs
+bunx serve out
 ```
 
 ### Nix

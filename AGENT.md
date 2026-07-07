@@ -255,6 +255,7 @@ Some adverbs are digrams, like While `f f/` and Stencil `i f'`, they have 2 left
 - Arguments `` `argv[] `` - list of cmd-line args (also in global `x`)
 - Environment variables `` `env[] `` - dict of env variables
 - Random number `` `prng[] ``
+- Inverse trig `` `asin@x ``, `` `acos@x ``, `` `atan@x `` (element-wise over F vectors), `` `atan2@(y;x) `` (broadcasts scalar⊕vector) — no verb glyph, added for equirectangular UV mapping (see `test/earth.k`)
 - Exit `` `exit@i ``
 
 ## Native Extension
