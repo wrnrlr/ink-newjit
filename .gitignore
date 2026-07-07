@@ -5,6 +5,7 @@ doc/otf/**
 .zig-cache/
 zig-out/
 zig-pkg/
+out/
 patches/**/.zig-cache/
 patches/**/zig-pkg/
 *.dylib

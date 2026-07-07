@@ -56,4 +56,6 @@ Maybe we can use the plus together with a number as the syntax for the new natur
 ## New operators for colors: cube-root `cbrt`
 
 ## Paralle each adverb
-Maybe we can use the digram 
+Maybe we can use the digram form of the each adverb for parallel each.
+There is already stencil and window, we can add `` `ncpu f'!1000 `` to mean
+that the function f should be applied to `!1000` distributed over number of cpu cores.

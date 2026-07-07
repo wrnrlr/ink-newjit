@@ -22,7 +22,7 @@ HOST := $(HOST_OS)-$(HOST_ARCH)
 # Jupyter kernel, and native FFI extensions are unavailable there.
 PLATFORMS := macos-arm64 macos-x64 linux-arm64 linux-x64 windows-arm64 windows-x64
 
-.PHONY: test build release all static-all install data demo qa info clean
+.PHONY: test build release all static-all install data demo qa info clean docs docs-snap
 
 test:
 	time zig build test
@@ -131,5 +131,16 @@ data:
 	./data/taxi.sh -meta
 	./data/taxi.sh -trip 2026
 
+# Capture demo screenshots into out/demo (needs a built binary + GPU dylib).
+docs-snap: build
+	sh docs/snap.sh
+
+# Build the static documentation site into ./out (upload the folder to Cloudflare).
+# Runs docs-snap first so the demo gallery is populated; `bun docs/build.mjs`
+# alone rebuilds the HTML from whatever screenshots already exist.
+docs: docs-snap
+	bun docs/build.mjs
+	@echo "Docs built -> out/  (serve: bunx serve out  |  deploy: upload ./out)"
+
 clean:
-	rm -rf zig-out
+	rm -rf zig-out out

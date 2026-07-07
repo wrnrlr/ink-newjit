@@ -3,20 +3,19 @@
 //
 // Sources, all wired into one uploadable ./out folder:
 //   doc/*.md              -> /doc/<name>      (guides & reference prose)
-//   src/**.zig            -> /api/ink         (core runtime API)
-//   lib/<mod>/**.zig      -> /api/<mod>       (native extension modules)
+//   lib/*.k               -> /api/<name>      (k library module reference)
 //   out/demo/<name>.png   -> /demo/<name>     (rendered demos + k source)
 //
 // Run with:  bun docs/build.mjs   (or `make docs`, which also captures demos)
 
 import {
-  readdirSync, statSync, readFileSync, writeFileSync,
+  readdirSync, readFileSync, writeFileSync,
   mkdirSync, rmSync, existsSync, cpSync,
 } from "node:fs";
 import { join, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderMarkdown, escapeHtml, slug } from "./md.mjs";
-import { extractModule } from "./zig.mjs";
+import { extractK } from "./kdoc.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -50,15 +49,12 @@ const docs = readdirSync(p("doc"))
     return { name, file: f, title: mdTitle(md, name), md };
   });
 
-// API modules: core `ink` from src, plus each lib subdir that has .zig files.
-const apiMods = [{ name: "ink", label: "ink (core)", dir: p("src"), blurb: "The core runtime: value model, parser, primitives, VM." }];
-for (const ent of readdirSync(p("lib")).sort()) {
-  const dir = p("lib", ent);
-  if (!statSync(dir).isDirectory()) continue;
-  const mod = extractModule(dir, ROOT);
-  if (mod.length) apiMods.push({ name: ent, label: ent, dir, blurb: `Native \`${ent}\` extension module.` });
-}
-for (const m of apiMods) m.files = extractModule(m.dir, ROOT);
+// Library reference: one page per k module in lib/*.k.
+const mods = readdirSync(p("lib"))
+  .filter((f) => f.endsWith(".k"))
+  .sort()
+  .map((f) => extractK(p("lib", f), f.replace(/\.k$/, "")))
+  .filter((m) => m.defs.length || m.overview.length);
 
 // Demos: whatever snap.sh produced under out/demo (png + optional .k source).
 const demoDir = join(OUT, "demo");
@@ -88,8 +84,8 @@ function nav(active, root) {
   return [
     group("Documentation",
       docs.map((d) => item(`doc/${d.name}.html`, d.title, active === `doc/${d.name}`))),
-    group("API Reference",
-      apiMods.map((m) => item(`api/${m.name}.html`, m.label, active === `api/${m.name}`))),
+    group("Library",
+      mods.map((m) => item(`api/${m.name}.html`, m.name, active === `api/${m.name}`))),
     group("Demos",
       [item("demo/index.html", "Gallery", active === "demo/index"),
        ...demos.map((d) => item(`demo/${d.name}.html`, d.name, active === `demo/${d.name}`))]),
@@ -143,45 +139,58 @@ for (const d of docs) {
 
 // --- render API pages --------------------------------------------------------
 
-const KIND_LABEL = { export: "export", fn: "fn", struct: "struct", enum: "enum", union: "union", const: "const", var: "var", type: "type" };
-
-function renderModule(m) {
+function renderMod(m) {
   const toc = [];
-  let body = `<h1>${escapeHtml(m.label)} <span class="api-tag">API</span></h1>\n`;
-  body += `<p class="lede">${renderMarkdown(m.blurb).html.replace(/^<p>|<\/p>\n?$/g, "")}</p>\n`;
+  let body = `<h1><code>${escapeHtml(m.name)}</code> <span class="api-tag">module</span></h1>\n`;
+  if (m.blurb) body += `<p class="lede">${escapeHtml(m.blurb)}</p>\n`;
 
-  const totalDecls = m.files.reduce((n, f) => n + f.decls.length, 0);
-  body += `<p class="api-meta">${m.files.length} source files · ${totalDecls} public declarations</p>\n`;
+  // Overview: the leading comment block, whitespace preserved (it often lists
+  // the public API and supported syntax in aligned columns).
+  const rest = m.blurb ? m.overview.slice(1) : m.overview;
+  const overview = rest.join("\n").replace(/^\n+|\n+$/g, "");
+  if (overview.trim()) body += `<pre class="module-doc">${escapeHtml(overview)}</pre>\n`;
 
-  for (const f of m.files) {
-    const id = slug(f.path);
-    toc.push({ level: 2, text: f.path, id });
-    body += `<section class="api-file"><h2 id="${id}"><code>${escapeHtml(f.path)}</code><a class="anchor" href="#${id}">#</a></h2>\n`;
-    if (f.doc) body += `<div class="doc-body file-doc">${renderMarkdown(f.doc).html}</div>\n`;
-    if (f.decls.length) {
-      body += `<div class="decls">\n`;
-      for (const d of f.decls) {
-        const k = KIND_LABEL[d.kind] || d.kind;
-        let sig = d.sig.replace(/^(pub|export)\s+/, "");
-        if (d.kind === "fn" || d.kind === "export") sig = sig.replace(/^fn\s+/, "");
-        else if (["struct", "enum", "union"].includes(d.kind))
-          sig = sig.replace(/\s*=\s*(extern\s+|packed\s+)?(struct|enum(\([^)]*\))?|union)\b.*$/, "").replace(/^(const|var)\s+/, "");
-        body += `<div class="decl${d.nested ? " nested" : ""}">`;
-        body += `<div class="decl-sig"><span class="kind kind-${d.kind}">${k}</span> <code>${escapeHtml(sig)}</code></div>`;
-        if (d.doc) body += `<div class="doc-body decl-doc">${renderMarkdown(d.doc).html}</div>`;
-        body += `</div>\n`;
-      }
+  body += `<p class="api-meta"><code>lib/${m.name}.k</code> · ${m.defs.length} definitions</p>\n`;
+
+  const documented = m.defs.filter((d) => d.doc || d.trailing || d.kind === "fn");
+  const plain = m.defs.filter((d) => !(d.doc || d.trailing || d.kind === "fn"));
+
+  if (documented.length) {
+    toc.push({ level: 2, text: "Definitions", id: "definitions" });
+    body += `<h2 id="definitions">Definitions <a class="anchor" href="#definitions">#</a></h2>\n<div class="decls">\n`;
+    for (const d of documented) {
+      const id = slug("def-" + d.name);
+      const sig = d.params != null
+        ? `${d.name}[${d.params}]`
+        : d.name;
+      body += `<div class="decl" id="${id}">`;
+      body += `<div class="decl-sig"><span class="kind kind-${d.kind === "fn" ? "fn" : "value"}">${d.kind}</span> <code>${escapeHtml(sig)}</code>`;
+      if (d.public) body += ` <span class="pub-tag">public</span>`;
+      body += `</div>`;
+      const prose = [d.doc, d.trailing && !d.doc ? d.trailing : ""].filter(Boolean).join("\n");
+      if (prose) body += `<div class="doc-body decl-doc">${renderMarkdown(prose).html}</div>`;
+      body += `<pre class="decl-src"><code class="language-k">${escapeHtml(d.source)}</code></pre>`;
       body += `</div>\n`;
     }
-    body += `</section>\n`;
+    body += `</div>\n`;
   }
+
+  if (plain.length) {
+    toc.push({ level: 2, text: "Values", id: "values" });
+    body += `<h2 id="values">Values <a class="anchor" href="#values">#</a></h2>\n`;
+    body += `<p class="api-meta">Constants and data defined without documentation.</p>\n`;
+    body += `<div class="value-grid">\n`;
+    for (const d of plain) body += `<code class="value-name">${escapeHtml(d.name)}</code>`;
+    body += `</div>\n`;
+  }
+
   return { body, toc };
 }
 
-for (const m of apiMods) {
-  const { body, toc } = renderModule(m);
+for (const m of mods) {
+  const { body, toc } = renderMod(m);
   write(`api/${m.name}.html`, page({
-    title: m.label, active: `api/${m.name}`, root: "../",
+    title: m.name, active: `api/${m.name}`, root: "../",
     content: body, toc,
   }));
 }
@@ -191,7 +200,7 @@ for (const m of apiMods) {
 for (const d of demos) {
   let body = `<h1>${escapeHtml(d.name)}</h1>\n`;
   if (d.caption) body += `<p class="lede">${escapeHtml(d.caption)}</p>\n`;
-  body += `<figure class="demo-shot"><img src="${d.png}" alt="${escapeHtml(d.name)} demo"></figure>\n`;
+  body += `<figure class="demo-shot"><img src="../demo/${d.png}" alt="${escapeHtml(d.name)} demo"></figure>\n`;
   body += `<p class="demo-run"><code>ink test/${d.name}.k</code></p>\n`;
   if (d.src) body += `<h2 id="source">Source <a class="anchor" href="#source">#</a></h2>\n<pre><code class="language-k">${escapeHtml(d.src)}</code></pre>\n`;
   write(`demo/${d.name}.html`, page({
@@ -206,7 +215,7 @@ for (const d of demos) {
   if (demos.length) {
     body += `<div class="gallery">\n`;
     for (const d of demos) {
-      body += `<a class="card" href="${d.name}.html"><div class="card-img"><img src="${d.png}" alt="${escapeHtml(d.name)}" loading="lazy"></div><div class="card-body"><div class="card-title">${escapeHtml(d.name)}</div>${d.caption ? `<div class="card-cap">${escapeHtml(d.caption)}</div>` : ""}</div></a>\n`;
+      body += `<a class="card" href="../demo/${d.name}.html"><div class="card-img"><img src="../demo/${d.png}" alt="${escapeHtml(d.name)}" loading="lazy"></div><div class="card-body"><div class="card-title">${escapeHtml(d.name)}</div>${d.caption ? `<div class="card-cap">${escapeHtml(d.caption)}</div>` : ""}</div></a>\n`;
     }
     body += `</div>\n`;
   } else {
@@ -232,8 +241,8 @@ for (const d of demos) {
 <section class="home-section"><h2>Documentation</h2><div class="home-grid">
 ${docs.slice(0, 12).map((d) => card(`doc/${d.name}.html`, d.title, `doc/${d.name}.md`)).join("\n")}
 </div></section>
-<section class="home-section"><h2>API Reference</h2><div class="home-grid">
-${apiMods.map((m) => card(`api/${m.name}.html`, m.label, m.blurb.replace(/`/g, ""))).join("\n")}
+<section class="home-section"><h2>Library</h2><div class="home-grid">
+${mods.map((m) => card(`api/${m.name}.html`, m.name, m.blurb || `lib/${m.name}.k`)).join("\n")}
 </div></section>
 <section class="home-section"><h2>Demos</h2><div class="home-grid">
 ${demos.slice(0, 12).map((d) => card(`demo/${d.name}.html`, d.name, d.caption || `test/${d.name}.k`)).join("\n") || `<p class="empty">Run <code>make docs</code> to render demos.</p>`}
@@ -246,6 +255,6 @@ ${demos.slice(0, 12).map((d) => card(`demo/${d.name}.html`, d.name, d.caption ||
 cpSync(join(HERE, "style.css"), join(OUT, "style.css"));
 cpSync(join(HERE, "app.js"), join(OUT, "app.js"));
 
-const pages = docs.length + apiMods.length + demos.length + 2;
+const pages = docs.length + mods.length + demos.length + 2;
 console.log(`Built ${pages} pages -> ${OUT}`);
-console.log(`  ${docs.length} docs · ${apiMods.length} API modules · ${demos.length} demos`);
+console.log(`  ${docs.length} docs · ${mods.length} library modules · ${demos.length} demos`);

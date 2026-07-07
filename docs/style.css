@@ -181,12 +181,24 @@ img { max-width: 100%; height: auto; border-radius: 8px; }
   border: 1px solid var(--border); border-radius: var(--radius);
   padding: .7rem .9rem; background: var(--bg-soft);
 }
-.decl.nested { margin-left: 1.25rem; border-left: 3px solid var(--border); }
 .decl-sig { display: flex; align-items: baseline; gap: .55rem; flex-wrap: wrap; }
-.decl-sig code { background: none; border: none; padding: 0; font-size: .88rem; color: var(--fg); }
-.decl-doc { margin-top: .4rem; font-size: .9rem; color: var(--fg-soft); }
+.decl-sig code { background: none; border: none; padding: 0; font-size: .92rem; font-weight: 600; color: var(--fg); }
+.decl-doc { margin-top: .45rem; font-size: .92rem; color: var(--fg-soft); }
 .decl-doc p:first-child { margin-top: 0; }
 .decl-doc p:last-child { margin-bottom: 0; }
+.decl-src { margin: .6rem 0 0; background: var(--bg); }
+.decl-src code { font-size: .82rem; }
+.pub-tag {
+  font-family: var(--mono); font-size: .64rem; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; padding: .12em .45em; border-radius: 5px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.module-doc {
+  background: var(--bg-soft); color: var(--fg-soft); font-size: .82rem;
+  line-height: 1.5; white-space: pre-wrap;
+}
+.value-grid { display: flex; flex-wrap: wrap; gap: .4rem; margin: .8rem 0; }
+.value-name { font-size: .82rem; }
 .kind {
   font-family: var(--mono); font-size: .68rem; font-weight: 700;
   text-transform: uppercase; letter-spacing: .04em;
@@ -197,7 +209,7 @@ img { max-width: 100%; height: auto; border-radius: 8px; }
 .kind-struct { background: #e6f6ea; color: #1a7f37; }
 .kind-enum { background: #fdeede; color: #bc6a00; }
 .kind-union { background: #f3e8ff; color: #8250df; }
-.kind-const, .kind-var, .kind-type { background: var(--bg-sunk); color: var(--fg-soft); }
+.kind-value, .kind-const, .kind-var, .kind-type { background: var(--bg-sunk); color: var(--fg-soft); }
 [data-theme="dark"] .kind-export,
 [data-theme="dark"] .kind-fn { background: #12243d; color: #6cb2ff; }
 [data-theme="dark"] .kind-struct { background: #10261a; color: #4ac26b; }
