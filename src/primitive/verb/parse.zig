@@ -27,205 +27,6 @@ fn transfer(alloc: std.mem.Allocator, list: *std.ArrayList(V)) !V {
   return V{ .L = n };
 }
 
-fn seqToV(vm: *VM, head: []const u8, nodes: []const *Node) !V {
-  const alloc = vm.alloc;
-  var list = try std.ArrayList(V).initCapacity(alloc, nodes.len + 1);
-  errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-  try list.append(alloc, try sym(vm, head));
-  for (nodes, 0..) |item, i| {
-    if (i > 0) try list.append(alloc, try sym(vm, "div"));
-    try list.append(alloc, try nodeToV(vm, item));
-  }
-  return transfer(alloc, &list);
-}
-
-fn nodeToV(vm: *VM, node: *Node) anyerror!V {
-  const alloc = vm.alloc;
-  switch (node.*) {
-    .terse => |t| {
-      var list = try std.ArrayList(V).initCapacity(alloc, t.stmts.len + 1);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "terse"));
-      for (t.stmts, 0..) |stmt, i| {
-        if (i > 0) try list.append(alloc, try sym(vm, "sep"));
-        if (stmt.node.* != .blank)
-          try list.append(alloc, try nodeToV(vm, stmt.node));
-      }
-      return transfer(alloc, &list);
-    },
-    .literal => |lit| {
-      const type_name: []const u8 = switch (lit) {
-        .b => "bool",  .B => "bools",
-        .i => "int",   .I => "ints",
-        .f => "float", .F => "floats",
-        .c, .C => "string",
-        .s => "symbol", .S => "symbols",
-        .@"var" => "var",
-      };
-      var list = try std.ArrayList(V).initCapacity(alloc, 3);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "literal"));
-      try list.append(alloc, try sym(vm, type_name));
-      switch (lit) {
-        .@"var" => |v| try list.append(alloc, try sym(vm, v)),
-        .f      => |f| try list.append(alloc, V{ .f = f }),
-        .i      => |i| try list.append(alloc, V{ .i = i }),
-        .b      => |b| try list.append(alloc, V{ .b = b }),
-        .s      => |s| try list.append(alloc, try sym(vm, s)),
-        .c      => |c| try list.append(alloc, try sym(vm, c)),
-        .F      => |f| try list.append(alloc, try V.Floats(alloc, f)),
-        .I      => |i| try list.append(alloc, try V.Ints(alloc, i)),
-        .B      => |b| try list.append(alloc, .{ .B = try N(bool).n1(alloc, b) }),
-        .S      => |s| {
-          const arr = try N(u32).init(alloc, s.len);
-          for (s, arr.slice()) |str, *dst| dst.* = try vm.intern(str);
-          try list.append(alloc, V{ .S = arr });
-        },
-        .C      => |c| try list.append(alloc, try V.Chars(alloc, c)),
-      }
-      return transfer(alloc, &list);
-    },
-    .op         => |op_str| return sym(vm, op_str),
-    .io    => |io_str| return sym(vm, io_str),
-    .adverb_val => return sym(vm, "adverb_val"),
-    .monad      => return sym(vm, "monad"),
-    .blank      => return sym(vm, "blank"),
-    .command    => return sym(vm, "command"),
-    .transit => |t| {
-      var list = try std.ArrayList(V).initCapacity(alloc, 4);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "transit"));
-      try list.append(alloc, try nodeToV(vm, t.a));
-      try list.append(alloc, try nodeToV(vm, t.v));
-      try list.append(alloc, try nodeToV(vm, t.b));
-      return transfer(alloc, &list);
-    },
-    .apposit => |a| {
-      var list = try std.ArrayList(V).initCapacity(alloc, 3);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "apposit"));
-      try list.append(alloc, try nodeToV(vm, a.f));
-      try list.append(alloc, try nodeToV(vm, a.a));
-      return transfer(alloc, &list);
-    },
-    .bind => |b| {
-      var list = try std.ArrayList(V).initCapacity(alloc, 4);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "bind"));
-      try list.append(alloc, try nodeToV(vm, b.v));
-      if (b.f) |_| try list.append(alloc, try sym(vm, "op"));
-      if (b.a) |a| try list.append(alloc, try nodeToV(vm, a));
-      return transfer(alloc, &list);
-    },
-    .right => |r| {
-      var list = try std.ArrayList(V).initCapacity(alloc, 2);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "right"));
-      try list.append(alloc, try nodeToV(vm, r.clause));
-      return transfer(alloc, &list);
-    },
-    .term => |t| {
-      var list = try std.ArrayList(V).initCapacity(alloc, 3);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "term"));
-      try list.append(alloc, try nodeToV(vm, t.f));
-      try list.append(alloc, try sym(vm, t.a));
-      return transfer(alloc, &list);
-    },
-    .group => |g| {
-      var list = try std.ArrayList(V).initCapacity(alloc, 2);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "group"));
-      try list.append(alloc, try nodeToV(vm, g.stmt));
-      return transfer(alloc, &list);
-    },
-    .list => |l| {
-      if (l.seq) |seq| {
-        var list = try std.ArrayList(V).initCapacity(alloc, 2);
-        errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-        try list.append(alloc, try sym(vm, "list"));
-        try list.append(alloc, try seqToV(vm, "seq", seq));
-        return transfer(alloc, &list);
-      } else {
-        return sym(vm, "list");
-      }
-    },
-    .lambda => |l| {
-      var list = try std.ArrayList(V).initCapacity(alloc, 3);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "lambda"));
-      if (l.a) |args| {
-        var inner = try std.ArrayList(V).initCapacity(alloc, args.len + 1);
-        errdefer { for (inner.items) |v| v.deinit(alloc); inner.deinit(alloc); }
-        try inner.append(alloc, try sym(vm, "args"));
-        for (args, 0..) |arg, i| {
-          if (i > 0) try inner.append(alloc, try sym(vm, "div"));
-          if (arg.is_some) try inner.append(alloc, try sym(vm, arg.value));
-        }
-        try list.append(alloc, try transfer(alloc, &inner));
-      }
-      if (l.b) |seq| try list.append(alloc, try seqToV(vm, "seq", seq));
-      return transfer(alloc, &list);
-    },
-    .apply => |a| {
-      var list = try std.ArrayList(V).initCapacity(alloc, 3);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "apply"));
-      try list.append(alloc, try nodeToV(vm, a.f));
-      if (a.a) |seq| try list.append(alloc, try seqToV(vm, "seq", seq));
-      return transfer(alloc, &list);
-    },
-    .dict => |d| {
-      var list = try std.ArrayList(V).initCapacity(alloc, (if (d.items) |it| it.len else 0) + 1);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "dict"));
-      if (d.items) |items| {
-        for (items) |item| {
-          var inner = try std.ArrayList(V).initCapacity(alloc, 3);
-          errdefer { for (inner.items) |v| v.deinit(alloc); inner.deinit(alloc); }
-          try inner.append(alloc, try sym(vm, "item"));
-          try inner.append(alloc, try sym(vm, keyType(item.k)));
-          try inner.append(alloc, try nodeToV(vm, item.v));
-          try list.append(alloc, try transfer(alloc, &inner));
-        }
-      }
-      return transfer(alloc, &list);
-    },
-    .table => |d| {
-      var list = try std.ArrayList(V).initCapacity(alloc, (if (d.items) |it| it.len else 0) + 1);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "table"));
-      if (d.items) |items| {
-        for (items) |item| {
-          var inner = try std.ArrayList(V).initCapacity(alloc, 3);
-          errdefer { for (inner.items) |v| v.deinit(alloc); inner.deinit(alloc); }
-          try inner.append(alloc, try sym(vm, "item"));
-          try inner.append(alloc, try sym(vm, keyType(item.k)));
-          try inner.append(alloc, try nodeToV(vm, item.v));
-          try list.append(alloc, try transfer(alloc, &inner));
-        }
-      }
-      return transfer(alloc, &list);
-    },
-    .cond => |c| {
-      var list = try std.ArrayList(V).initCapacity(alloc, c.stmts.len + 1);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "cond"));
-      for (c.stmts) |s| try list.append(alloc, try nodeToV(vm, s));
-      return transfer(alloc, &list);
-    },
-    .intrans => |it| {
-      var list = try std.ArrayList(V).initCapacity(alloc, 3);
-      errdefer { for (list.items) |v| v.deinit(alloc); list.deinit(alloc); }
-      try list.append(alloc, try sym(vm, "intrans"));
-      try list.append(alloc, try nodeToV(vm, it.a));
-      try list.append(alloc, try nodeToV(vm, it.v));
-      return transfer(alloc, &list);
-    },
-    else => return sym(vm, "?"),
-  }
-}
-
 // ── CST table serializer ─────────────────────────────────────────────────────
 // Emits the parse tree as an apter-tree "table": a dict of equal-length column
 // vectors, one row per node, in pre-order (parent row precedes its children, so
@@ -383,36 +184,60 @@ fn colS(a: std.mem.Allocator, list: *std.ArrayList(u32)) !V { const v = try V.Sy
 
 // Parse `src` and return the CST as a dict of column vectors (flip with `+` for
 // a row-wise table). This is the array-native counterpart to the nested `parse`.
-pub fn tableFromSource(vm: *VM, src: []const u8) V {
-  var p = parser_mod.Parser.init(vm.alloc);
-  defer p.deinit();
-  const node = p.parse(src) catch return V{ .err = .domain };
+fn deinitCols(alloc: std.mem.Allocator, cols: *Cols) void {
+  for (cols.value.items) |v| v.deinit(alloc);
+  cols.parent.deinit(alloc); cols.kind.deinit(alloc); cols.field.deinit(alloc);
+  cols.start.deinit(alloc); cols.len.deinit(alloc); cols.value.deinit(alloc);
+  cols.depth.deinit(alloc);
+}
 
-  // Byte→codepoint prefix: cp[i] = codepoint index of byte offset i.
-  const cp = vm.alloc.alloc(u32, src.len + 1) catch return V{ .err = .memory };
-  defer vm.alloc.free(cp);
+// Parse `src` into `cols`: one row per node (pre-order), then comment rows each
+// attached to the innermost node whose span contains it. cp maps byte→codepoint.
+fn fillCols(vm: *VM, p: *parser_mod.Parser, cp: []const u32, src: []const u8, cols: *Cols) !void {
+  const node = try p.parse(src);
+  _ = try emit(vm, p, cp, cols, node, -1, try vm.intern(""), 0);
+
+  const cmt = try vm.intern("comment");
+  const nreal = cols.parent.items.len; // node rows only; comments never nest
+  for (p.comments.items) |span| {
+    const cs: i32 = @intCast(cp[span[0]]);
+    const ce: i32 = @intCast(cp[span[1]]);
+    var host: usize = 0;                // default: root terse
+    var best: i32 = std.math.maxInt(i32);
+    for (0..nreal) |r| {
+      const rs = cols.start.items[r];
+      const rl = cols.len.items[r];
+      // Smallest containing span wins; on a tie, the later (deeper, pre-order)
+      // row wins, so a comment nests in the innermost block, not its terse/group.
+      if (rs <= cs and ce <= rs + rl and rl <= best) { best = rl; host = r; }
+    }
+    try cols.parent.append(vm.alloc, @intCast(host));
+    try cols.kind.append(vm.alloc, cmt);
+    try cols.field.append(vm.alloc, cmt);
+    try cols.start.append(vm.alloc, cs);
+    try cols.len.append(vm.alloc, ce - cs);
+    try cols.value.append(vm.alloc, try V.Chars(vm.alloc, src[span[0]..span[1]]));
+    try cols.depth.append(vm.alloc, cols.depth.items[host] + 1);
+  }
+}
+
+// Byte→codepoint prefix: result[i] = codepoint index of byte offset i.
+fn cpPrefix(alloc: std.mem.Allocator, src: []const u8) ![]u32 {
+  const cp = try alloc.alloc(u32, src.len + 1);
   var c: u32 = 0;
   for (src, 0..) |b, i| { cp[i] = c; if (b & 0xC0 != 0x80) c += 1; }
   cp[src.len] = c;
+  return cp;
+}
+
+pub fn tableFromSource(vm: *VM, src: []const u8) V {
+  var p = parser_mod.Parser.init(vm.alloc);
+  defer p.deinit();
+  const cp = cpPrefix(vm.alloc, src) catch return V{ .err = .memory };
+  defer vm.alloc.free(cp);
 
   var cols = Cols{};
-  _ = emit(vm, &p, cp, &cols, node, -1, vm.intern("") catch 0, 0) catch return V{ .err = .memory };
-
-  // Comments are dropped from the tree; append them as `comment rows under the
-  // root terse (row 0), carrying their source range and raw text, for syntax
-  // highlighting and doc tooling. Appended after the tree so parent(0) < row.
-  {
-    const cmt = vm.intern("comment") catch 0;
-    for (p.comments.items) |span| {
-      cols.parent.append(vm.alloc, 0) catch return V{ .err = .memory };
-      cols.kind.append(vm.alloc, cmt) catch return V{ .err = .memory };
-      cols.field.append(vm.alloc, cmt) catch return V{ .err = .memory };
-      cols.start.append(vm.alloc, @intCast(cp[span[0]])) catch return V{ .err = .memory };
-      cols.len.append(vm.alloc, @intCast(cp[span[1]] - cp[span[0]])) catch return V{ .err = .memory };
-      cols.value.append(vm.alloc, V.Chars(vm.alloc, src[span[0]..span[1]]) catch return V{ .err = .memory }) catch return V{ .err = .memory };
-      cols.depth.append(vm.alloc, 1) catch return V{ .err = .memory };
-    }
-  }
+  fillCols(vm, &p, cp, src, &cols) catch return V{ .err = .domain };
 
   const parent = colI(vm.alloc, &cols.parent) catch return V{ .err = .memory };
   const kind   = colS(vm.alloc, &cols.kind) catch return V{ .err = .memory };
@@ -435,11 +260,74 @@ pub fn tableFromSource(vm: *VM, src: []const u8) V {
   return V{ .m = d };
 }
 
-fn keyType(k: []const u8) []const u8 {
-  if (k.len == 0) return "var";
-  const c = k[0];
-  if (std.ascii.isDigit(c) or c == '-') return "int";
-  if (c == '`') return "symbol";
-  if (c == '"') return "string";
-  return "var";
+// ── S-expression tree view ───────────────────────────────────────────────────
+// A tree-sitter-style textual rendering of the CST for humans / LLM agents:
+//   (terse [0, 0] - [5, 0]
+//     (comment [0, 0] - [0, 33])
+//     (bind [3, 0] - [3, 10]
+//       v: (var [3, 0] - [3, 1]) ...))
+// Field labels (v:/a:/f:/…) precede each child except the positional `stmt`.
+// Positions are [row, col] in codepoints; ranges are omitted unless requested.
+const RowCol = struct { row: u32, col: u32 };
+
+fn lineStarts(alloc: std.mem.Allocator, src: []const u8) ![]u32 {
+  var ls: std.ArrayList(u32) = .empty;
+  errdefer ls.deinit(alloc);
+  try ls.append(alloc, 0);
+  var c: u32 = 0;
+  for (src) |b| { if (b & 0xC0 != 0x80) c += 1; if (b == '\n') try ls.append(alloc, c); }
+  return ls.toOwnedSlice(alloc);
+}
+
+fn rowcol(line_start: []const u32, off: u32) RowCol {
+  var lo: usize = 0;
+  var hi: usize = line_start.len;
+  while (lo < hi) { const mid = (lo + hi) / 2; if (line_start[mid] <= off) lo = mid + 1 else hi = mid; }
+  const l = lo - 1;
+  return .{ .row = @intCast(l), .col = off - line_start[l] };
+}
+
+fn cmpByStart(cols: *Cols, a: usize, b: usize) bool { return cols.start.items[a] < cols.start.items[b]; }
+
+fn printNode(vm: *VM, cols: *Cols, w: *std.Io.Writer, row: usize, indent: usize, line_start: []const u32, ranges: bool) !void {
+  try w.writeAll("(");
+  try w.writeAll(vm.getSymbol(cols.kind.items[row]));
+  if (ranges) {
+    const s: u32 = @intCast(cols.start.items[row]);
+    const e: u32 = @intCast(cols.start.items[row] + cols.len.items[row]);
+    const sp = rowcol(line_start, s);
+    const ep = rowcol(line_start, e);
+    try w.print(" [{d}, {d}] - [{d}, {d}]", .{ sp.row, sp.col, ep.row, ep.col });
+  }
+  // Children = rows whose parent is this row, in source order.
+  var kids: std.ArrayList(usize) = .empty;
+  defer kids.deinit(vm.alloc);
+  const me: i32 = @intCast(row);
+  for (cols.parent.items, 0..) |par, r| { if (par == me and r != row) try kids.append(vm.alloc, r); }
+  std.sort.insertion(usize, kids.items, cols, cmpByStart);
+  for (kids.items) |ch| {
+    try w.writeAll("\n");
+    for (0..indent + 2) |_| try w.writeAll(" ");
+    const f = vm.getSymbol(cols.field.items[ch]);
+    if (f.len > 0 and !std.mem.eql(u8, f, "stmt")) { try w.writeAll(f); try w.writeAll(": "); }
+    try printNode(vm, cols, w, ch, indent + 2, line_start, ranges);
+  }
+  try w.writeAll(")");
+}
+
+// Parse `src` and render the CST as an S-expression to `w`. `ranges` adds
+// [row, col] source spans to every node.
+pub fn sexprFromSource(vm: *VM, src: []const u8, w: *std.Io.Writer, ranges: bool) !void {
+  var p = parser_mod.Parser.init(vm.alloc);
+  defer p.deinit();
+  const cp = try cpPrefix(vm.alloc, src);
+  defer vm.alloc.free(cp);
+  var cols = Cols{};
+  defer deinitCols(vm.alloc, &cols);
+  try fillCols(vm, &p, cp, src, &cols);
+  const ls = try lineStarts(vm.alloc, src);
+  defer vm.alloc.free(ls);
+  if (cols.parent.items.len == 0) return;
+  try printNode(vm, &cols, w, 0, 0, ls, ranges);
+  try w.writeAll("\n");
 }

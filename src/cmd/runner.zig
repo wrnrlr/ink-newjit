@@ -358,10 +358,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
     return disasm.run(vm, file);
   };
 
-  // `ink parse [script.k]` — parse the file (or stdin) and print the CST table.
+  // `ink parse [-r] [-t] [script.k]` — parse the file (or stdin) and print the
+  // CST as an S-expression tree (default) or column table (-t).
   if (script_path) |sp| if (std.mem.eql(u8, sp, "parse")) {
-    const file: ?[]const u8 = if (extra_args.items.len > 0) extra_args.items[0] else null;
-    return cmdparse.run(vm, file);
+    return cmdparse.run(vm, extra_args.items);
   };
 
   if (script_path == null and stdin_is_tty) return runRepl(allocator, vm, &loader);
