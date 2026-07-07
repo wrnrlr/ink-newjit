@@ -33,6 +33,16 @@ pub const InstCall = struct {
   data_len: usize, // f32 length of this draw's instance block
 };
 
+// A retained mesh drawn once with a per-draw uniform block (@group(0)) and an
+// optional texture (@group(1)) — the non-instanced counterpart of InstCall.
+// Geometry lives in a persistent buffer (uploadGeom), so only the small uniform
+// block is written per frame; the vertex data is never re-uploaded.
+pub const GeomCall = struct {
+  geom_idx: usize,
+  uniform: [MESH_UNI_FLOATS]f32 = [_]f32{0} ** MESH_UNI_FLOATS,
+  tex_idx: i32 = -1,
+};
+
 // Mesh vertices are stored as raw f32. The per-vertex layout (stride and
 // attributes) is whatever the mesh pipeline's vertex shader declares — see
 // gpuMesh, which derives it from the SPIR-V — so meshes are not tied to one
@@ -126,6 +136,7 @@ pub const Renderer = struct {
   geom_pipeline: ArrayList(usize),      // pipeline index per geometry
   inst_data: ArrayList(f32),            // this frame's instance data (all instanced draws)
   inst_calls: ArrayList(InstCall),
+  geom_calls: ArrayList(GeomCall),      // this frame's retained uniform+texture draws
 
   pub fn init(
     allocator: Alloc,
@@ -194,6 +205,7 @@ pub const Renderer = struct {
       .geom_pipeline = try ArrayList(usize).initCapacity(allocator, 4),
       .inst_data = try ArrayList(f32).initCapacity(allocator, 4096),
       .inst_calls = try ArrayList(InstCall).initCapacity(allocator, 16),
+      .geom_calls = try ArrayList(GeomCall).initCapacity(allocator, 16),
       .mesh_vertex_buffer = device.createBuffer(.{
       .label = "mesh vertex buffer",
       .usage = .{ .vertex = true, .copy_dst = true },
@@ -266,6 +278,7 @@ pub const Renderer = struct {
     self.geom_pipeline.deinit(self.allocator);
     self.inst_data.deinit(self.allocator);
     self.inst_calls.deinit(self.allocator);
+    self.geom_calls.deinit(self.allocator);
     self.mesh_vertex_buffer.release();
     self.mesh_calls.deinit(self.allocator);
     self.mesh_verts.deinit(self.allocator);
@@ -422,6 +435,14 @@ pub const Renderer = struct {
   });
   }
 
+  // Queue a draw of a retained geometry with a per-draw uniform block and an
+  // optional texture (tex_idx < 0 = none).  The vertex buffer is the persistent
+  // one from uploadGeom — nothing but the uniform block is written per frame.
+  pub fn queueGeom(self: *Renderer, geom_idx: usize, uni: [MESH_UNI_FLOATS]f32, tex_idx: i32) !void {
+  if (geom_idx >= self.geom_buffers.items.len) return;
+  try self.geom_calls.append(self.allocator, .{ .geom_idx = geom_idx, .uniform = uni, .tex_idx = tex_idx });
+  }
+
   // Submit all mesh draw calls in a new render pass that loads the existing colour
   // layer and adds depth-tested geometry on top.
   pub fn flushMeshes(
@@ -435,8 +456,9 @@ pub const Renderer = struct {
       self.mesh_verts.clearRetainingCapacity();
       self.inst_calls.clearRetainingCapacity();
       self.inst_data.clearRetainingCapacity();
+      self.geom_calls.clearRetainingCapacity();
     }
-    if (self.mesh_verts.items.len == 0 and self.inst_calls.items.len == 0) return;
+    if (self.mesh_verts.items.len == 0 and self.inst_calls.items.len == 0 and self.geom_calls.items.len == 0) return;
   
     const verts = self.mesh_verts.items;
     const write_count = @min(verts.len, MESH_BUFFER_FLOATS);
@@ -501,6 +523,40 @@ pub const Renderer = struct {
       }
       defer if (tex_bg) |bg| bg.release();
       pass.draw(@intCast(mc.count), 1, 0, 0);
+    }
+
+    // Retained draws: persistent geometry + per-draw uniform (@group0) + optional
+    // texture (@group1).  Same bind groups as the mesh loop, but the vertex buffer
+    // is the persistent one, so nothing but the uniform block is written per frame.
+    for (self.geom_calls.items) |gc| {
+      if (gc.geom_idx >= self.geom_buffers.items.len) continue;
+      const pidx = self.geom_pipeline.items[gc.geom_idx];
+      if (pidx >= self.mesh_pipelines.items.len) continue;
+      const gcount = self.geom_counts.items[gc.geom_idx];
+      pass.setPipeline(self.mesh_pipelines.items[pidx]);
+      pass.setVertexBuffer(0, self.geom_buffers.items[gc.geom_idx], 0, @as(usize, gcount) * self.mesh_strides.items[pidx] * @sizeOf(f32));
+      var uni_bg: ?wgpu.BindGroup = null;
+      if (uni_call < MAX_MESH_UNI_CALLS) {
+      const off = uni_call * MESH_UNI_SLOT;
+      self.queue.writeBuffer(self.mesh_uniform_buffer, off, f32, gc.uniform[0..]);
+      const be = [_]wgpu.BindGroupEntry{.{ .binding = 0, .buffer = self.mesh_uniform_buffer, .offset = off, .size = MESH_UNI_FLOATS * @sizeOf(f32) }};
+      uni_bg = self.device.createBindGroup(.{ .layout = self.mesh_bgl, .entry_count = be.len, .entries = &be });
+      pass.setBindGroup(0, uni_bg.?, null);
+      uni_call += 1;
+      }
+      defer if (uni_bg) |bg| bg.release();
+      var tex_bg: ?wgpu.BindGroup = null;
+      if (gc.tex_idx >= 0 and @as(usize, @intCast(gc.tex_idx)) < self.tex_views.items.len) {
+      const ti: usize = @intCast(gc.tex_idx);
+      const be = [_]wgpu.BindGroupEntry{
+        .{ .binding = 0, .texture_view = self.tex_views.items[ti], .size = 0 },
+        .{ .binding = 1, .sampler = self.tex_samplers.items[ti], .size = 0 },
+      };
+      tex_bg = self.device.createBindGroup(.{ .layout = self.mesh_tex_bgl, .entry_count = be.len, .entries = &be });
+      pass.setBindGroup(1, tex_bg.?, null);
+      }
+      defer if (tex_bg) |bg| bg.release();
+      pass.draw(gcount, 1, 0, 0);
     }
 
     // Instanced draws: each retained geometry is drawn once with instanceCount

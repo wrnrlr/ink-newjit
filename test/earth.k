@@ -114,17 +114,22 @@ earthFrag: FragmentShaderTex[[wNor:`v3; wUv:`v2; out:`v4]; {[wNor;wUv]
 
 / ── Window loop ──────────────────────────────────────────────────────────────
 / Start tilted a little so the globe reads as 3-D from the first frame.
+/ The ~60k-float mesh and the texture are uploaded ONCE to persistent GPU buffers
+/ (earthGeom / earthTex); each frame ships only the 8-float camera uniform, not the
+/ vertex data — see lib/gpu.k UploadMesh + DrawGeomT.
 cam::         CamAt[0.92; 0.39; 0.97; 0.24]
 earthHandle:: 0
+earthGeom::   0
 earthTex::    0
 
 window.run[{[props]
-  $[earthHandle=0; earthHandle:: CompileMesh[earthVtx; earthFrag]; 0]
-  $[earthTex=0;    earthTex::    Texture[img];                    0]
+  $[earthHandle=0; earthHandle:: CompileMesh[earthVtx; earthFrag];  0]
+  $[earthGeom=0;   earthGeom::   UploadMesh[earthMesh; earthHandle]; 0]
+  $[earthTex=0;    earthTex::    Texture[img];                      0]
   cam:: CamUpdate[cam; props]
   ca: cam`rotCa; sa: cam`rotSa; xca: cam`xCa; xsa: cam`xSa
   zoom: cam`zoom; camX: cam`camX; camZ: cam`camZ
   asp: (props`height)%props`width
   uni: (ca;sa;xca;xsa; zoom;camX;camZ;asp)
-  DrawMeshT[earthMesh; earthHandle; uni; earthTex]
+  DrawGeomT[earthGeom; uni; earthTex]
 }; 0]

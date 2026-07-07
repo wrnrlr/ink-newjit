@@ -1280,6 +1280,35 @@ export fn gpuDrawInstanced(geom_k: ?K, count_k: ?K, data_k: ?K) callconv(.c) ?K 
   return ki(0);
 }
 
+// ── gpuDrawGeomT ────────────────────────────────────────────────────────────────
+//
+// Draw a RETAINED geometry (uploaded once via gpuUploadMesh) with a per-draw
+// uniform block (@group0) and an optional texture (@group1) — the non-instanced,
+// upload-once counterpart of gpuDrawMeshT.  The pipeline must be a normal
+// VertexShaderU + FragmentShaderTex mesh (see lib/gpu.k DrawGeomT).
+//   geom_k: geometry handle from gpuUploadMesh
+//   uni_k:  flat f32 uniform vector (≤32 floats)
+//   tex_k:  texture handle from gpuTexture (0 = none)
+
+export fn gpuDrawGeomT(geom_k: ?K, uni_k: ?K, tex_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const geom = ki_val(geom_k);
+  if (geom <= 0 or geom > r.geom_buffers.items.len) return ki(0);
+
+  var uni = [_]f32{0} ** render.MESH_UNI_FLOATS;
+  if (kfp(uni_k)) |up| {
+    const un = kn(uni_k);
+    const m: usize = @min(@as(usize, @intCast(@max(un, 0))), render.MESH_UNI_FLOATS);
+    var j: usize = 0;
+    while (j < m) : (j += 1) uni[j] = up[j];
+  }
+
+  const tex_handle = ki_val(tex_k);
+  const tex_idx: i32 = if (tex_handle > 0) tex_handle - 1 else -1;
+  r.queueGeom(@intCast(geom - 1), uni, tex_idx) catch {};
+  return ki(0);
+}
+
 // ── gpuDrawMesh ───────────────────────────────────────────────────────────────
 //
 // verts_k: flat f32 array matching the pipeline's vertex layout (the per-vertex
@@ -1462,6 +1491,7 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuDrawMesh", @ptrCast(&gpuDrawMesh), 2);
   r.k_register("gpuDrawMeshU", @ptrCast(&gpuDrawMeshU), 3);
   r.k_register("gpuDrawMeshT", @ptrCast(&gpuDrawMeshT), 3);
+  r.k_register("gpuDrawGeomT", @ptrCast(&gpuDrawGeomT), 3);
   r.k_register("gpuTexture", @ptrCast(&gpuTexture), 2);
   r.k_register("gpuWgsl", @ptrCast(&gpuWgsl), 1);
 }

@@ -30,6 +30,12 @@ gpuDrawMeshT0: so 2: (`gpuDrawMeshT; 3)  / (verts_F; (handle;texHandle)_I; uni_F
 gpuTexture0:   so 2: (`gpuTexture;  2)   / ((w;h;comp)_I; data_I) → texHandle : upload an image to a sampled GPU texture
 / Draw a mesh with a per-draw uniform block AND a texture (see FragmentShaderTex).
 DrawMeshT: {[verts; handle; uni; tex] gpuDrawMeshT0[verts; (handle;tex); uni]}
+/ Retained (upload-once) counterpart: UploadMesh the geometry to a persistent
+/ buffer, then DrawGeomT it each frame with only the uniform+texture — the vertex
+/ data is never re-uploaded.  UploadMesh also lives in lib/instancing.k.
+UploadMesh:    so 2: (`gpuUploadMesh; 2)  / (verts_F; meshHandle) → geomHandle : geometry → persistent vertex buffer
+gpuDrawGeomT0: so 2: (`gpuDrawGeomT;  3)  / (geom; uni_F; texHandle) → 0 : draw retained geom + uniform + texture
+DrawGeomT: {[geom; uni; tex] gpuDrawGeomT0[geom; uni; tex]}
 / Upload an image dict (`width`height`comp`data, e.g. from image.read) as a texture.
 Texture: {[img] w:img`width; h:img`height; c:img`comp; d:img`data; gpuTexture0[(w;h;c); d]}
 / UploadMesh / DrawInstanced (retained geometry + instancing) live in lib/instancing.k
