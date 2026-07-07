@@ -18,9 +18,8 @@
 FragmentShader: {[ioTypes; fn]
   Nid::Nfixed; Buf::(); Con::()
 
-  lam: *|parse $fn
-  argsNode: lam[1]
-  argNames: argsNode@&~argsNode in `args`div
+  lam: lamOf fn
+  argNames: lamArgs lam
 
   outTySym: ioTypes[`out]
   outTy:  Tid[outTySym]
@@ -35,9 +34,8 @@ FragmentShader: {[ioTypes; fn]
   loadedPairs: inVarIds loadOnePair' inTySyms
   env: argNames!loadedPairs
 
-  / Compile body: strip seq/div markers, process bind nodes for locals
-  bodySeq: lam[2]
-  stmts: bodySeq@&~bodySeq in `seq`div
+  / Compile body: statement rows, process bind nodes for locals
+  stmts: lamBody lam
   rp: compSeq[stmts; env; outTySym]
   result: rp[0]
 
@@ -66,9 +64,8 @@ VertexShader: {[inTypes; varyTypes; fn] VertexShaderU[inTypes; varyTypes; (); fn
 VertexShaderU: {[inTypes; varyTypes; uniNames; fn]
   Nid::Nfixed; Buf::(); Con::()
 
-  lam:      last parse $fn
-  argsNode: lam[1]
-  argNames: argsNode@&~argsNode in `args`div
+  lam:      lamOf fn
+  argNames: lamArgs lam
 
   inTySyms: inTypes' argNames
   inPtrs:   PtrIn'   inTySyms
@@ -112,13 +109,12 @@ VertexShaderU: {[inTypes; varyTypes; uniNames; fn]
   env:     $[nUni>0; (argNames,uniNames)!(loadedPairs,uniPairs); argNames!loadedPairs]
 
   / Compile body stmts (all but last) to build env, then handle return tuple
-  bodySeq:  lam[2]
-  stmts:    bodySeq@&~bodySeq in `seq`div
+  stmts:    lamBody lam
   env2:     compSeqEnv[-1_stmts; env]
   lastStmt: last stmts
 
   / If varyings exist the last stmt is a list node; else it's the glPos expression
-  outElems: $[(nVary>0) & (lastStmt[0]~`list); lastStmt[1]@&~lastStmt[1] in `seq`div; ,lastStmt]
+  outElems: $[(nVary>0) & ((kKind lastStmt)~`list); kF[lastStmt;`elem]; ,lastStmt]
 
   / Compile and store gl_Position through the Block struct member pointer
   glPosVal:       compNode[outElems[0]; env2; `v4]
@@ -342,11 +338,25 @@ splat: {[vty; sid]
     emitBuf opCons4[rt;r;sid;sid;sid;sid]]
   r}
 
+/ ── CST table access ────────────────────────────────────────────────────────
+/ `parse` now returns an apter-tree table (dict of columns) instead of a nested
+/ list. Cst holds the current shader's tree; a node is a row index. Children of
+/ row i are the rows whose `parent` = i (in pre-order = source order), selectable
+/ by their `field` label.
+kKind: {[i] (Cst`kind) i}                    / node type symbol
+kVal:  {[i] (Cst`value) i}                   / literal payload / glyph / name
+kKids: {[i] &i=Cst`parent}                   / all child rows of i
+kF:    {[i;f] c:kKids i; c@&f=(Cst`field)c}  / child rows of i with field f
+kF1:   {[i;f] *kF[i;f]}                       / first such child (a row index)
+/ Parse a lambda value and return (lambda row; arg-name symbols; body stmt rows).
+lamOf:   {[fn] Cst:: parse $fn; *|kF[0;`stmt]}   / last stmt of root terse = lambda
+lamArgs: {[lam] (Cst`value)@kF[lam;`param]}
+lamBody: {[lam] kF[lam;`stmt]}
+
 / ── Layer 3: math function call compiler ───────────────────────────────────
-/ Compile f[a; b; c] where f is a known GLSL built-in.
-/ argsSeq = (`seq; arg0; `div; arg1; ...)
-compFnCall: {[name; argsSeq; env; oty]
-  args: argsSeq@&~argsSeq in `seq`div
+/ Compile f[a; b; c] where f is a known GLSL built-in. args are the `arg rows.
+compFnCall: {[name; i; env; oty]
+  args: kF[i;`arg]
   n:    #args
   a0:   compNode[args[0];env;`f32]
   a1:   $[n>1; compNode[args[1];env;`f32]; (0;`f32)]
@@ -382,8 +392,8 @@ compFnCall: {[name; argsSeq; env; oty]
 / Vector literal `127.1 311.7` → OpConstantComposite (v2/v3/v4 of f32).
 / Each component is emitted as its own f32 OpConstant first, then referenced.
 / This lets shaders write `dot[p; 127.1 311.7]` instead of `dot[p; (127.1;311.7)]`.
-compVecLit: {[node]
-  vals: 0.+node[2]
+compVecLit: {[i]
+  vals: 0.+kVal i
   n:    #vals
   ids:  {[v] r: newId[]; emitCon opConst[Tf32;r;v]; r}' vals
   rty:  $[n=2;`v2; n=3;`v3; `v4]
@@ -392,27 +402,27 @@ compVecLit: {[node]
   (r; rty)
 }
 
-compScalarLit: {[node; oty]
-  litTy: node[1]
+compScalarLit: {[i; oty]
+  litTy: kKind i
   useTy: $[(litTy~`int) & (oty~`f32); `float; litTy]
   t:   LitTid[useTy]
-  val: $[(litTy~`int) & (useTy~`float); 0.+node[2]; node[2]]
+  val: $[(litTy~`int) & (useTy~`float); 0.+kVal i; kVal i]
   r: newId[]
   emitCon opConst[t;r;val]
   (r; LitSym[useTy])
 }
 
-compLit: {[node; oty]
-  $[node[1] in `floats`ints; compVecLit[node]; compScalarLit[node;oty]]
+compLit: {[i; oty]
+  $[(kKind i) in `floats`ints; compVecLit[i]; compScalarLit[i;oty]]
 }
 
-compVar: {[node; env] env[node[2]]}
+compVar: {[i; env] env[kVal i]}
 
 / x<=y → ~(x>y),  x>=y → ~(x<y).  `flip` is the strict comparison to negate;
-/ node[3] is the apposit(`=; .) wrapper, so node[3][2] is the real operand.
-compLeGe: {[node; env; flip]
-  ap: compNode[node[1];    env; `f32]
-  bp: compNode[node[3][2]; env; `f32]
+/ the b operand is an apposit(`= …) wrapper, so its `a child is the real operand.
+compLeGe: {[i; env; flip]
+  ap: compNode[kF1[i;`a];          env; `f32]
+  bp: compNode[kF1[kF1[i;`b];`a];  env; `f32]
   rc: newId[]
   emitBuf dispBin[flip; `bool; rc; ap[1]; ap[0]; bp[1]; bp[0]]
   r:  newId[]
@@ -420,12 +430,12 @@ compLeGe: {[node; env; flip]
   (r; `bool)
 }
 
-compTransNorm: {[node; env; oty]
-  op: node[2]
+compTransNorm: {[i; env; oty]
+  op: kVal kF1[i;`v]
   / Feed the right hint to operands: numeric comparisons want f32, bool ops want bool
   opTy: $[op in `<`>`=`~; `f32; op in (`&;`|); `bool; oty]
-  ap: compNode[node[1]; env; opTy]
-  bp: compNode[node[3]; env; opTy]
+  ap: compNode[kF1[i;`a]; env; opTy]
+  bp: compNode[kF1[i;`b]; env; opTy]
   aty: ap[1]; bty: bp[1]
   rty: binRty[op; aty; bty; oty]
   / Bug fix: for +,-,% on vector ⊕ scalar, splat the scalar up to the vector type
@@ -444,12 +454,12 @@ compTransNorm: {[node; env; oty]
 / lexes as `x < (=y)` and `x>=y` as `x > (=y)` (monadic `=` on the right).
 / Detect that shape and emit the De Morgan equivalent so shaders can write
 / `a<=b` / `a>=b` directly instead of `~(a>b)` / `~(a<b)`.
-compTrans: {[node; env; oty]
-  op: node[2]; b: node[3]
-  isEq: (b[0]~`apposit) & (b[1]~`=)
-  $[(op~`<) & isEq; compLeGe[node; env; `>]
-    (op~`>) & isEq; compLeGe[node; env; `<]
-    compTransNorm[node; env; oty]]
+compTrans: {[i; env; oty]
+  op: kVal kF1[i;`v]; b: kF1[i;`b]
+  isEq: ((kKind b)~`apposit) & ((kVal kF1[b;`f])~`=)
+  $[(op~`<) & isEq; compLeGe[i; env; `>]
+    (op~`>) & isEq; compLeGe[i; env; `<]
+    compTransNorm[i; env; oty]]
 }
 
 / Monadic application written as juxtaposition: `floor px`, `sin px`, `-x`.
@@ -457,20 +467,21 @@ compTrans: {[node; env; oty]
 / (`literal;`var;`floor) for math names that aren't ink keywords — normalise
 / both to the bare symbol so dispUn matches (else floor/fract/sign/length/
 / normalize silently fall through to negate).
-compAppos: {[node; env; oty]
-  fn: node[1]
-  op: $[(fn[0]~`literal) & (fn[1]~`var); fn[2]; fn]
-  ap: compNode[node[2]; env; oty]
+/ Monadic application `floor px`, `-x`. The f slot is a var row (math name) or an
+/ op row (builtin verb); either way its `value holds the glyph/name for dispUn.
+compAppos: {[i; env; oty]
+  op: kVal kF1[i;`f]
+  ap: compNode[kF1[i;`a]; env; oty]
   r: newId[]
   emitBuf dispUn[op; ap[1]; r; ap[0]]
   rty: $[op~`length; `f32; op~`~; `bool; ap[1]]
   (r; rty)
 }
 
-/ Composite indexing fallback: v[i] → OpCompositeExtract
-compApplyIdx: {[fn; argsSeq; env; oty]
-  ap:  compNode[fn; env; oty]
-  idx: argsSeq[1][2]
+/ Composite indexing fallback: v[i] → OpCompositeExtract. `fr` is the f row.
+compApplyIdx: {[fr; i; env; oty]
+  ap:  compNode[fr; env; oty]
+  idx: kVal kF1[i;`arg]
   r:   newId[]
   emitBuf opXtract[Tf32; r; ap[0]; idx]
   (r; `f32)
@@ -478,20 +489,19 @@ compApplyIdx: {[fn; argsSeq; env; oty]
 
 / Explicit apply: f[a;b;c]
 / Handles: math function calls AND composite indexing (v[0])
-/ fn can be a symbol atom (`sqrt) or a (`literal;`var;name) node
-compApply: {[node; env; oty]
-  fn:     node[1]
-  fnName: $[(fn[0]~`literal) & (fn[1]~`var); fn[2]; fn]
+compApply: {[i; env; oty]
+  fr:     kF1[i;`f]
+  fnName: kVal fr
   isMath: fnName in mathFns
   $[isMath
-    ; compFnCall[fnName; node[2]; env; oty]
-    ; compApplyIdx[fn; node[2]; env; oty]]
+    ; compFnCall[fnName; i; env; oty]
+    ; compApplyIdx[fr; i; env; oty]]
 }
 
 / Tuple → vec2/vec3/vec4 via OpCompositeConstruct
 / Dispatch on element count.
-compList: {[node; env; oty]
-  elems: node[1]@&~node[1] in `seq`div
+compList: {[i; env; oty]
+  elems: kF[i;`elem]
   n:  #elems
   p0: compNode[elems[0];env;`f32]
   p1: compNode[elems[1];env;`f32]
@@ -507,29 +517,32 @@ compList: {[node; env; oty]
 }
 
 / $[c; then; else] and chained $[c1;t1;c2;t2;...;default] → OpSelect (eager both branches)
-/ Handles scalar bool condition selecting scalar or vector values.
-compCond: {[node; env; oty]
-  n:   #node
-  cp:  compNode[node[1]; env; `bool]
-  tp:  compNode[node[2]; env; oty]
-  ep:  $[n=4; compNode[node[3]; env; oty]; compCond[(,`cond), 3_node; env; oty]]
+/ Handles scalar bool condition selecting scalar or vector values. The cond's
+/ operands are its `stmt child rows, in source order.
+compCond: {[i; env; oty] compCondS[kF[i;`stmt]; env; oty]}
+compCondS: {[ss; env; oty]
+  n:   #ss
+  cp:  compNode[ss 0; env; `bool]
+  tp:  compNode[ss 1; env; oty]
+  ep:  $[n=3; compNode[ss 2; env; oty]; compCondS[2_ss; env; oty]]
   r:   newId[]
   rty: tp[1]
   emitBuf opSel[Tid[rty]; r; cp[0]; tp[0]; ep[0]]
   (r; rty)
 }
 
-/ AST node dispatcher
-compNode: {[node; env; oty]
-  tag: node[0]
-  $[tag~`literal;  $[node[1]~`var; compVar[node;env]; compLit[node;oty]]
-    tag~`transit;  compTrans[node;env;oty]
-    tag~`apposit;  compAppos[node;env;oty]
-    tag~`apply;    compApply[node;env;oty]
-    tag~`list;     compList[node;env;oty]
-    tag~`cond;     compCond[node;env;oty]
-    tag~`right;    compNode[node[1];env;oty]   / parenthesised expression
-    tag~`group;    compNode[node[1];env;oty]
+/ CST node dispatcher — dispatch on the row's kind, recurse into child rows.
+compNode: {[i; env; oty]
+  tag: kKind i
+  $[tag~`var;     compVar[i;env]
+    tag in `int`float`ints`floats`bool`string`symbol; compLit[i;oty]
+    tag~`transit;  compTrans[i;env;oty]
+    tag~`apposit;  compAppos[i;env;oty]
+    tag~`apply;    compApply[i;env;oty]
+    tag~`list;     compList[i;env;oty]
+    tag~`cond;     compCond[i;env;oty]
+    tag~`right;    compNode[kF1[i;`clause];env;oty]   / parenthesised expression
+    tag~`group;    compNode[kF1[i;`stmt];env;oty]
     (0; oty)]
 }
 
@@ -538,9 +551,9 @@ compNode: {[node; env; oty]
 / For bind nodes (y: expr), compile rhs and extend env with name→result.
 / Returns (id; ty_sym) of the last expression.
 compSeqTail: {[stmts; env; oty]
-  s:   stmts[0]
-  isb: (s[0]~`bind) & (3=#s)
-  e2:  $[isb; ((!env),s[1][2])!(env[!env],(,compNode[s[2];env;oty])); env]
+  s:   stmts 0
+  isb: ((kKind s)~`bind) & (0<#kF[s;`a])
+  e2:  $[isb; ((!env),kVal kF1[s;`v])!(env[!env],(,compNode[kF1[s;`a];env;oty])); env]
   compSeq[1_stmts;e2;oty]}
 
 compSeq: {[stmts; env; oty]
@@ -611,16 +624,15 @@ compCompute: {[fn]
   Ku32z: newId[]
   emitCon (0x0004002B; Tu32; Ku32z; 0)
 
-  lam: last parse $fn
-  argName: (lam[1]@&~lam[1] in `args`div)[0]
+  lam: lamOf fn
+  argName: (lamArgs lam)0
 
   gidId:    newId[]; emitBuf opLoad[Tv3u32; gidId; gidVar]
   gidXId:   newId[]; emitBuf opXtract[Tu32; gidXId; gidId; 0]
   inPtrId:  newId[]; emitBuf opAccChain[Pf32s; inPtrId; inBuf; Ku32z; gidXId]
   xId:      newId[]; emitBuf opLoad[Tf32; xId; inPtrId]
   env:      (,argName)!(,(xId; `f32))
-  bodySeq: lam[2]
-  stmts:   bodySeq@&~bodySeq in `seq`div
+  stmts:   lamBody lam
   rp:      compSeq[stmts; env; `f32]
   outPtrId: newId[]; emitBuf opAccChain[Pf32s; outPtrId; outBuf; Ku32z; gidXId]
   emitBuf opStore[outPtrId; rp[0]]
@@ -694,8 +706,8 @@ compCompute2: {[fn]
   Ku32z: newId[]
   emitCon (0x0004002B; Tu32; Ku32z; 0)
 
-  lam: last parse $fn
-  argNames: lam[1]@&~lam[1] in `args`div
+  lam: lamOf fn
+  argNames: lamArgs lam
 
   gidId:    newId[]; emitBuf opLoad[Tv3u32; gidId; gidVar]
   gidXId:   newId[]; emitBuf opXtract[Tu32; gidXId; gidId; 0]
@@ -704,8 +716,7 @@ compCompute2: {[fn]
   in2PtrId: newId[]; emitBuf opAccChain[Pf32s; in2PtrId; in2Buf; Ku32z; gidXId]
   yId:      newId[]; emitBuf opLoad[Tf32; yId; in2PtrId]
   env:      argNames!((xId; `f32); (yId; `f32))
-  bodySeq:  lam[2]
-  stmts:    bodySeq@&~bodySeq in `seq`div
+  stmts:    lamBody lam
   rp:       compSeq[stmts; env; `f32]
   outPtrId: newId[]; emitBuf opAccChain[Pf32s; outPtrId; outBuf; Ku32z; gidXId]
   emitBuf opStore[outPtrId; rp[0]]
@@ -761,9 +772,9 @@ varOutOne:   {[ptr;vid]    (0x0004003B;ptr;vid;3)}    / OpVariable Output storag
 / Helper: run stmts as binds building up env; return extended env (not last value).
 / Mirrors compSeqTail but returns env instead of the last compiled result.
 compSeqEnvTail: {[stmts; env]
-  s:   stmts[0]
-  isb: (s[0]~`bind) & (3=#s)
-  e2:  $[isb; ((!env),s[1][2])!(env[!env],(,compNode[s[2];env;`v4])); env]
+  s:   stmts 0
+  isb: ((kKind s)~`bind) & (0<#kF[s;`a])
+  e2:  $[isb; ((!env),kVal kF1[s;`v])!(env[!env],(,compNode[kF1[s;`a];env;`v4])); env]
   compSeqEnv[1_stmts; e2]}
 
 compSeqEnv: {[stmts; env]

@@ -21,7 +21,7 @@ pub const Command = struct { verb: []const u8, n: u32, args: []const u8 };
 
 pub const Item = struct { k: Var, v: *Node };
 pub const Items = []Item;
-pub const Arg = struct { is_some: bool, value: Var };
+pub const Arg = struct { is_some: bool, value: Var, start: u32 = 0, end: u32 = 0 };
 pub const Args = []Arg;
 pub const Seq = []*Node;
 pub const Stmt = struct { node: *Node, source: []const u8 };

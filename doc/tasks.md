@@ -22,8 +22,38 @@ Fix the following in the zed-ink extension and tree-sitter-ink parser.
 Implement early returns in a lambda using `:` (like the ngn/k).
 
 ## Ink Agent Skills
+Help me write skills for developing ink code based on this codebase.
 Add skills for the following task profiles.
-- Ink development agent: skills, tools, ebnf, idioms.
+- Ink development agent: skills, tools, ebnf, idioms, code style
   - parse tool
   - bytecode tool
   - snapshot tool
+- Ink native module development
+
+## Earth Example
+Make an example of a 3D rendering of the earth.
+
+## Flip int `` +3 ``
+What do do with flipping an int?
+There is no implementation for the flip verb for scalars.
+```
+~/Code/ink ink
+  +3
+!type
+  +3
+
+~/Code/ink k
+ngn/k, (c) 2019-2024 ngn, GNU AGPLv3. type \ for more info
+ +3
+,,3
+```
+Maybe we can use the plus together with a number as the syntax for the new natural number type. The plus works the same way as minus in the float and integers except for natural numbers we always write them beginning with a plus. ex `` +1 +2 +3 ``
+
+## Doc tool `ink doc`
+
+## Remove `.blank` type
+
+## New operators for colors: cube-root `cbrt`
+
+## Paralle each adverb
+Maybe we can use the digram 

@@ -18,6 +18,18 @@ pub const Parser = struct {
   src: []const u8,
   lex: Lexer,
   tok: Token,
+  // End byte-offset of the most recently consumed token (updated in advance).
+  // Lets a production close its span at the last token it ate without threading
+  // positions through every callee.
+  prev_end: u32 = 0,
+  // Optional per-node source spans (byte offsets [start,end]) for the CST table
+  // serializer. Populated only at leaf/bracketed/adverb producers; interior
+  // spans are composed from children. Arena-backed, cleared each parse().
+  spans: std.AutoHashMapUnmanaged(*Node, [2]u32) = .{},
+  // Comment token spans (byte offsets), in source order. The parser drops
+  // comments from the tree, so they are captured here for the CST table / doc
+  // tooling. Arena-backed, cleared each parse().
+  comments: std.ArrayList([2]u32) = .empty,
 
   pub fn init(backing: Alloc) Parser {
     var l = Lexer.init("");
@@ -31,7 +43,22 @@ pub const Parser = struct {
   pub fn deinit(self: *Parser) void { self.arena.deinit(); }
   pub fn free(_: Parser, _: *Node) void {}
   fn al(self: *Parser) Alloc { return self.arena.allocator(); }
-  fn advance(self: *Parser) void { self.tok = self.lex.next(); }
+  fn advance(self: *Parser) void {
+    if (self.tok.tt == .comment) self.comments.append(self.al(), .{ self.tok.start, self.tok.end }) catch {};
+    self.prev_end = self.tok.end;
+    self.tok = self.lex.next();
+  }
+  // Record node n's source span [start, prev_end] (prev_end = end of the last
+  // token this production consumed). recEnd sets the end explicitly.
+  fn rec(self: *Parser, n: *Node, start: u32) *Node {
+    self.spans.put(self.al(), n, .{ start, self.prev_end }) catch {};
+    return n;
+  }
+  fn recEnd(self: *Parser, n: *Node, start: u32, end: u32) *Node {
+    self.spans.put(self.al(), n, .{ start, end }) catch {};
+    return n;
+  }
+  fn startOf(self: *Parser, n: *Node) ?u32 { return if (self.spans.get(n)) |s| s[0] else null; }
   fn skipComments(self: *Parser) void { while (self.tok.tt == .comment) self.advance(); }
   fn is(self: *Parser, tt: TT) bool { return self.tok.tt == tt; }
   fn slice(self: *Parser) []const u8 { return self.tok.slice(self.src); }
@@ -59,7 +86,9 @@ pub const Parser = struct {
   fn chainAdverbs(self: *Parser, v: *Node) ParseError!*Node {
     var verb = v;
     while (self.is(.adverb)) {
-      verb = try self.node(.{ .term = .{ .f = verb, .a = self.slice() } });
+      const st = self.startOf(verb) orelse self.tok.start;
+      const adv_end = self.tok.end;
+      verb = self.recEnd(try self.node(.{ .term = .{ .f = verb, .a = self.slice() } }), st, adv_end);
       self.advance();
     }
     return verb;
@@ -67,7 +96,9 @@ pub const Parser = struct {
   // Wrap verb in a single term node if an adverb follows (used in infix position).
   fn applyAdverb(self: *Parser, v: *Node) ParseError!*Node {
     if (!self.is(.adverb)) return v;
-    const t = try self.node(.{ .term = .{ .f = v, .a = self.slice() } });
+    const st = self.startOf(v) orelse self.tok.start;
+    const adv_end = self.tok.end;
+    const t = self.recEnd(try self.node(.{ .term = .{ .f = v, .a = self.slice() } }), st, adv_end);
     self.advance();
     return t;
   }
@@ -77,11 +108,14 @@ pub const Parser = struct {
       .io => .{ .io = tok.slice(self.src) },
       else => .blank,
     };
-    return self.node(v);
+    return self.recEnd(try self.node(v), tok.start, tok.end);
   }
 
   pub fn parse(self: *Parser, src: []const u8) ParseError!*Node {
     _ = self.arena.reset(.retain_capacity);
+    self.spans = .{}; // arena reset above freed its backing store
+    self.comments = .empty;
+    self.prev_end = 0;
     self.src = src;
     self.lex = Lexer.init(src);
     self.tok = self.lex.next();
@@ -242,20 +276,24 @@ pub const Parser = struct {
   }
 
   fn parseNoun(self: *Parser) ParseError!*Node {
-    return switch (self.tok.tt) {
-      .int, .float, .bit, .bits, .string, .symbol, .iden => self.parseLiteralOrVector(),
-      .@"(" => self.parseGroupOrList(),
-      .@"{" => self.parseLambda(),
-      .@"[" => self.parseDictOrArgs(),
-      .@"[[]" => self.parseTable(),
-      .@"[[" => self.parseUTable(),
-      .@"$[" => self.parseCond(),
+    const start = self.tok.start;
+    const n: *Node = switch (self.tok.tt) {
+      .int, .float, .bit, .bits, .string, .symbol, .iden => try self.parseLiteralOrVector(),
+      .@"(" => try self.parseGroupOrList(),
+      .@"{" => try self.parseLambda(),
+      .@"[" => try self.parseDictOrArgs(),
+      .@"[[]" => try self.parseTable(),
+      .@"[[" => try self.parseUTable(),
+      .@"$[" => try self.parseCond(),
       .adverb_val => blk: {
         const adv = self.slice(); self.advance();
-        break :blk self.node(.{ .adverb_val = adv });
+        break :blk try self.node(.{ .adverb_val = adv });
       },
-      else => self.node(.blank),
+      else => try self.node(.blank),
     };
+    // Every noun (literal or bracketed form) spans from its first token to the
+    // last token consumed — for brackets that includes the closing delimiter.
+    return self.rec(n, start);
   }
 
   fn parseLiteralOrVector(self: *Parser) ParseError!*Node {
@@ -398,17 +436,17 @@ pub const Parser = struct {
     while (!self.is(.@"]") and !self.is(.eof)) {
       self.skipComments();
       if (self.is(.sep)) {
-        if (awaiting) try args.append(self.al(), .{ .is_some = false, .value = "" });
+        if (awaiting) try args.append(self.al(), .{ .is_some = false, .value = "", .start = self.tok.start, .end = self.tok.start });
         awaiting = true; self.advance(); continue;
       }
       if (self.is(.iden) and awaiting) {
-        try args.append(self.al(), .{ .is_some = true, .value = self.slice() });
+        try args.append(self.al(), .{ .is_some = true, .value = self.slice(), .start = self.tok.start, .end = self.tok.end });
         awaiting = false;
       }
       self.advance();
     }
     if (awaiting and args.items.len > 0)
-      try args.append(self.al(), .{ .is_some = false, .value = "" });
+      try args.append(self.al(), .{ .is_some = false, .value = "", .start = self.tok.start, .end = self.tok.start });
     _ = self.eat(.@"]");
     return args.toOwnedSlice(self.al());
   }
@@ -468,11 +506,12 @@ pub const Parser = struct {
   }
 
   fn parseApply(self: *Parser, f: *Node) ParseError!*Node {
+    const st = self.startOf(f) orelse self.tok.start;
     self.advance(); // consume '['
-    if (self.eat(.@"]")) return self.node(.{ .apply = .{ .f = f, .a = null } });
+    if (self.eat(.@"]")) return self.recEnd(try self.node(.{ .apply = .{ .f = f, .a = null } }), st, self.prev_end);
     const seq = try self.parseSeq(.@"]");
     _ = self.eat(.@"]");
-    return self.node(.{ .apply = .{ .f = f, .a = seq } });
+    return self.recEnd(try self.node(.{ .apply = .{ .f = f, .a = seq } }), st, self.prev_end);
   }
 
   // Handles f[[dict;...];arg2;...] where [[ was lexed as a single token.

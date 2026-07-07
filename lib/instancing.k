@@ -35,9 +35,8 @@ loadInstMember: {[j] jc:newId[]; emitCon opConst[Ti32;jc;j]; ix:newId[]; emitBuf
 InstancedVertexShader: {[inTypes; varyTypes; instNames; fn]
   Nid::Nfixed; Buf::(); Con::()
 
-  lam:      last parse $fn
-  argsNode: lam[1]
-  argNames: argsNode@&~argsNode in `args`div
+  lam:      lamOf fn
+  argNames: lamArgs lam
 
   inTySyms: inTypes' argNames
   inPtrs:   PtrIn'   inTySyms
@@ -76,11 +75,10 @@ InstancedVertexShader: {[inTypes; varyTypes; instNames; fn]
   env: $[nInst>0; (argNames,instNames)!(loadedPairs,instPairs); argNames!loadedPairs]
 
   / Body
-  bodySeq:  lam[2]
-  stmts:    bodySeq@&~bodySeq in `seq`div
+  stmts:    lamBody lam
   env2:     compSeqEnv[-1_stmts; env]
   lastStmt: last stmts
-  outElems: $[(nVary>0) & (lastStmt[0]~`list); lastStmt[1]@&~lastStmt[1] in `seq`div; ,lastStmt]
+  outElems: $[(nVary>0) & ((kKind lastStmt)~`list); kF[lastStmt;`elem]; ,lastStmt]
 
   glPosVal:       compNode[outElems[0]; env2; `v4]
   glPosMemberPtr: newId[]

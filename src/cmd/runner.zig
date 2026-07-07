@@ -10,6 +10,7 @@ const lsp = @import("lsp.zig");
 const jupyter = @import("jupyter.zig");
 const help = @import("help.zig");
 const disasm = @import("disasm.zig");
+const cmdparse = @import("parse.zig");
 const bundle = @import("bundle.zig");
 const Lexer = @import("../parser/lexer.zig").Lexer;
 
@@ -355,6 +356,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
       std.process.exit(1);
     };
     return disasm.run(vm, file);
+  };
+
+  // `ink parse [script.k]` — parse the file (or stdin) and print the CST table.
+  if (script_path) |sp| if (std.mem.eql(u8, sp, "parse")) {
+    const file: ?[]const u8 = if (extra_args.items.len > 0) extra_args.items[0] else null;
+    return cmdparse.run(vm, file);
   };
 
   if (script_path == null and stdin_is_tty) return runRepl(allocator, vm, &loader);

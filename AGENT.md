@@ -28,6 +28,7 @@ Ink is an array programming language with k
 
 ```k
 ints: -2 1 0 0N
+particle:`px`py`vx`vy / array of symbols for position and velocity
 types: `i`f`s`c`m`I`F`S`C`M`L / symbols 
 list: (0b;1;2.3;`c)
 dict: [id:1;name:"Bob"]
@@ -36,10 +37,14 @@ g: {[a;b]#a,b} / lambda with explicit arguments
 train: *|
 sum: +/;
 inc: 1+ / partial
+p1:particle!1. 2. 0. 0.2
 ```
 
 # Language Reference
-## Grammar
+
+## Lexical Grammar
+
+## Syntactical Grammar
 Nouns can be combined into expressions using verbs and adverbs.
 Expressions are evaluated right-to-left. There are no special precedence rules for operators.
 
