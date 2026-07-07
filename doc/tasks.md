@@ -5,6 +5,7 @@ I want to change to way the module system works with auto-loading,
 namespaces, variable resolution and fully qualified names.
 From now on every k file in `./lib` should declared it's own namespace with the same name as the file. So image.k becomes the namespace image.
 There should be one exception for the `./lib/_.k` file it should be added to the global namespace.
+Other k files loaded with `\l file.k` should also be in an auto 
 This means the ./src/cmd/module.zig and others should change.
 Make sure the bundeling keeps working. The ./tools/zed-ink extension should also update.
 The lsp should also be changed to it resolved the right variables.
