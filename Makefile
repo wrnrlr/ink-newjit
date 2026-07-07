@@ -133,13 +133,13 @@ data:
 
 # Capture demo screenshots into out/demo (needs a built binary + GPU dylib).
 docs-snap: build
-	sh docs/snap.sh
+	sh public/snap.sh
 
 # Build the static documentation site into ./out (upload the folder to Cloudflare).
-# Runs docs-snap first so the demo gallery is populated; `bun docs/build.mjs`
+# Runs docs-snap first so the demo gallery is populated; `bun public/build.mjs`
 # alone rebuilds the HTML from whatever screenshots already exist.
 docs: docs-snap
-	bun docs/build.mjs
+	bun public/build.mjs
 	@echo "Docs built -> out/  (serve: bunx serve out  |  deploy: upload ./out)"
 
 clean:

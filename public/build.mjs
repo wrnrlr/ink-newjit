@@ -3,10 +3,10 @@
 //
 // Sources, all wired into one uploadable ./out folder:
 //   doc/*.md              -> /doc/<name>      (guides & reference prose)
-//   lib/*.k               -> /api/<name>      (k library module reference)
+//   lib/*.k               -> /lib/<name>      (k library module reference; index at /lib)
 //   out/demo/<name>.png   -> /demo/<name>     (rendered demos + k source)
 //
-// Run with:  bun docs/build.mjs   (or `make docs`, which also captures demos)
+// Run with:  bun public/build.mjs   (or `make docs`, which also captures demos)
 
 import {
   readdirSync, readFileSync, writeFileSync,
@@ -73,6 +73,65 @@ if (existsSync(demoDir)) {
     });
 }
 
+// --- library topics ----------------------------------------------------------
+
+// Hand-curated grouping of lib/*.k modules by subject for the landing page and
+// the /lib overview.  Any module not listed here falls into "Other" so nothing
+// is ever silently dropped.
+const TOPICS = [
+  { title: "Graphics & Rendering", mods: ["gpu", "spirv", "draw", "pbr", "camera", "instancing", "layout", "color"] },
+  { title: "Fonts & Text", mods: ["font", "regex", "fts"] },
+  { title: "Image Formats", mods: ["image", "png", "jpeg", "gif", "bmp", "tga", "hdr", "pic"] },
+  { title: "3D Assets", mods: ["gltf", "fbx", "usd"] },
+  { title: "Math & Linear Algebra", mods: ["math", "lin", "svd", "pga", "fft", "stats"] },
+  { title: "Data & Storage", mods: ["csv", "json", "parquet", "recs"] },
+  { title: "Agents", mods: ["agent"] },
+];
+// Blurbs for modules whose source has no header comment to mine.
+const BLURB = {
+  agent: "Minimal LLM agent loop with tool-use scaffolding.",
+  bmp: "BMP image reader and writer.",
+  color: "Color spaces (HSL, OKLCh) and the Tailwind palette.",
+  math: "Number-theory and combinatorics helpers.",
+  fts: "Full-text search over an inverted index.",
+};
+const blurbOf = (m) => m.blurb || BLURB[m.name] || `lib/${m.name}.k`;
+
+const byName = new Map(mods.map((m) => [m.name, m]));
+
+// Render the by-topic library grid.  `heading` is the tag used per topic; the
+// returned toc lists each topic for the overview page's table of contents.
+function libraryTopics(root, heading = "h3") {
+  const used = new Set();
+  const groups = [...TOPICS.map((t) => ({ title: t.title, items: t.mods.map((n) => byName.get(n)).filter(Boolean) }))];
+  groups.forEach((g) => g.items.forEach((m) => used.add(m.name)));
+  const other = mods.filter((m) => !used.has(m.name));
+  if (other.length) groups.push({ title: "Other", items: other });
+
+  const toc = [];
+  let out = "";
+  for (const g of groups) {
+    if (!g.items.length) continue;
+    const id = slug("topic-" + g.title);
+    toc.push({ level: 2, text: g.title, id });
+    out += `<section class="lib-topic"><${heading} id="${id}">${escapeHtml(g.title)}</${heading}>\n<div class="home-grid">\n`;
+    out += g.items.map((m) => modCard(`${root}lib/${m.name}.html`, m.name, blurbOf(m))).join("\n");
+    out += `\n</div></section>\n`;
+  }
+  return { out, toc };
+}
+
+const modCard = (href, title, sub) =>
+  `<a class="home-card" href="${href}"><div class="home-card-title">${escapeHtml(title)}</div><div class="home-card-sub">${escapeHtml(sub)}</div></a>`;
+
+// Render the demo gallery (image cards).  Shared by the landing page and demo pages.
+function galleryHtml(root) {
+  if (!demos.length) return `<p class="empty">Run <code>make docs</code> to render demos.</p>`;
+  return `<div class="gallery">\n` + demos.map((d) =>
+    `<a class="card" href="${root}demo/${d.name}.html"><div class="card-img"><img src="${root}demo/${d.png}" alt="${escapeHtml(d.name)}" loading="lazy"></div><div class="card-body"><div class="card-title">${escapeHtml(d.name)}</div>${d.caption ? `<div class="card-cap">${escapeHtml(d.caption)}</div>` : ""}</div></a>`
+  ).join("\n") + `\n</div>`;
+}
+
 // --- page shell --------------------------------------------------------------
 
 function nav(active, root) {
@@ -85,15 +144,16 @@ function nav(active, root) {
     group("Documentation",
       docs.map((d) => item(`doc/${d.name}.html`, d.title, active === `doc/${d.name}`))),
     group("Library",
-      mods.map((m) => item(`api/${m.name}.html`, m.name, active === `api/${m.name}`))),
+      [item("lib/index.html", "Overview", active === "lib/index" || active.startsWith("lib/"))]),
     group("Demos",
-      [item("demo/index.html", "Gallery", active === "demo/index"),
+      [item("index.html#demos", "Gallery", false),
        ...demos.map((d) => item(`demo/${d.name}.html`, d.name, active === `demo/${d.name}`))]),
   ].join("");
 }
 
 function page({ title, active, root, content, toc }) {
-  const tocHtml = toc && toc.length
+  const hasToc = toc && toc.length;
+  const tocHtml = hasToc
     ? `<nav class="toc"><div class="toc-title">On this page</div>${
         toc.map((h) => `<a href="#${h.id}" class="lvl${h.level}">${escapeHtml(h.text)}</a>`).join("")
       }</nav>`
@@ -116,7 +176,7 @@ function page({ title, active, root, content, toc }) {
 </header>
 <div class="layout">
   <aside class="sidebar">${nav(active, root)}</aside>
-  <main class="content">
+  <main class="content${hasToc ? "" : " wide"}">
     <article>${content}</article>
     ${tocHtml}
   </main>
@@ -137,12 +197,14 @@ for (const d of docs) {
   }));
 }
 
-// --- render API pages --------------------------------------------------------
+// --- render library pages ----------------------------------------------------
 
 function renderMod(m) {
   const toc = [];
-  let body = `<h1><code>${escapeHtml(m.name)}</code> <span class="api-tag">module</span></h1>\n`;
-  if (m.blurb) body += `<p class="lede">${escapeHtml(m.blurb)}</p>\n`;
+  let body = `<p class="crumb"><a href="index.html">Library</a> / ${escapeHtml(m.name)}</p>\n`;
+  body += `<h1><code>${escapeHtml(m.name)}</code> <span class="api-tag">module</span></h1>\n`;
+  const blurb = blurbOf(m);
+  if (blurb && !blurb.startsWith("lib/")) body += `<p class="lede">${escapeHtml(blurb)}</p>\n`;
 
   // Overview: the leading comment block, whitespace preserved (it often lists
   // the public API and supported syntax in aligned columns).
@@ -189,10 +251,19 @@ function renderMod(m) {
 
 for (const m of mods) {
   const { body, toc } = renderMod(m);
-  write(`api/${m.name}.html`, page({
-    title: m.name, active: `api/${m.name}`, root: "../",
+  write(`lib/${m.name}.html`, page({
+    title: m.name, active: `lib/${m.name}`, root: "../",
     content: body, toc,
   }));
+}
+
+// library overview at /lib
+{
+  const { out, toc } = libraryTopics("../", "h2");
+  let body = `<h1>Library</h1>\n`;
+  body += `<p class="lede">The ink standard library — ${mods.length} modules written in k under <code>lib/</code>, grouped by subject.</p>\n`;
+  body += out;
+  write("lib/index.html", page({ title: "Library", active: "lib/index", root: "../", content: body, toc }));
 }
 
 // --- render demo pages -------------------------------------------------------
@@ -209,27 +280,11 @@ for (const d of demos) {
   }));
 }
 
-// demo gallery index
-{
-  let body = `<h1>Demos</h1>\n<p class="lede">Programs from <code>test/</code> rendered headlessly with <code>ink -snap</code>.</p>\n`;
-  if (demos.length) {
-    body += `<div class="gallery">\n`;
-    for (const d of demos) {
-      body += `<a class="card" href="../demo/${d.name}.html"><div class="card-img"><img src="../demo/${d.png}" alt="${escapeHtml(d.name)}" loading="lazy"></div><div class="card-body"><div class="card-title">${escapeHtml(d.name)}</div>${d.caption ? `<div class="card-cap">${escapeHtml(d.caption)}</div>` : ""}</div></a>\n`;
-    }
-    body += `</div>\n`;
-  } else {
-    body += `<p class="empty">No demos captured. Run <code>make docs</code> (or <code>sh docs/snap.sh</code>) to render them.</p>\n`;
-  }
-  write("demo/index.html", page({ title: "Demos", active: "demo/index", root: "../", content: body, toc: [] }));
-}
-
 // --- home page ---------------------------------------------------------------
 
 {
-  const card = (href, title, sub) =>
-    `<a class="home-card" href="${href}"><div class="home-card-title">${escapeHtml(title)}</div><div class="home-card-sub">${escapeHtml(sub)}</div></a>`;
-  let body = `
+  const lib = libraryTopics("", "h3");
+  const body = `
 <section class="hero">
   <h1><span class="logo">ink</span></h1>
   <p class="tagline">A polysemic array programming language — an interpreter, compiler, and GPU toolkit in the spirit of k.</p>
@@ -238,15 +293,20 @@ for (const d of demos) {
     <a class="btn ghost" href="doc/spec.html">Language reference</a>
   </div>
 </section>
-<section class="home-section"><h2>Documentation</h2><div class="home-grid">
-${docs.slice(0, 12).map((d) => card(`doc/${d.name}.html`, d.title, `doc/${d.name}.md`)).join("\n")}
+
+<section class="home-section" id="docs"><h2>Documentation</h2><div class="home-grid">
+${docs.map((d) => modCard(`doc/${d.name}.html`, d.title, `doc/${d.name}.md`)).join("\n")}
 </div></section>
-<section class="home-section"><h2>Library</h2><div class="home-grid">
-${mods.map((m) => card(`api/${m.name}.html`, m.name, m.blurb || `lib/${m.name}.k`)).join("\n")}
-</div></section>
-<section class="home-section"><h2>Demos</h2><div class="home-grid">
-${demos.slice(0, 12).map((d) => card(`demo/${d.name}.html`, d.name, d.caption || `test/${d.name}.k`)).join("\n") || `<p class="empty">Run <code>make docs</code> to render demos.</p>`}
-</div></section>`;
+
+<section class="home-section" id="demos"><h2>Demos</h2>
+<p class="section-sub">Programs from <code>test/</code> rendered headlessly with <code>ink -snap</code>.</p>
+${galleryHtml("")}
+</section>
+
+<section class="home-section" id="library"><h2>Library</h2>
+<p class="section-sub">${mods.length} modules written in k under <code>lib/</code>. <a href="lib/index.html">Browse the full reference →</a></p>
+${lib.out}
+</section>`;
   write("index.html", page({ title: "ink documentation", active: "home", root: "", content: body, toc: [] }));
 }
 

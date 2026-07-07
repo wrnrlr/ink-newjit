@@ -1,3 +1,12 @@
+# Ink
+Ink is an array programming language 
+
+## Features
+- Fast 
+- Quick visual debugging with buildin screenshot command 
+- Bundle files into small statically-linked executable for easy deployment.
+- 
+
 [Mastering Data Visualization in VegaLite](https://www.youtube.com/playlist?list=PLe9dkYfBBHFktHd5Tn2FAlADEbQ70kUSp)
 
 ### Improvements
@@ -11,6 +20,7 @@ Functional programming with APL2
 
 - [ngn/k jit](https://codeberg.org/fiuzeri/k/src/commit/bac6dc52fa7ed56a4ab329b5cbb7fdafe0115814/b.c)
 - [Variadic functions in Q](https://bodonferenc.github.io/2026/05/13/Variadic-Functions.html)
+- [SIMD: making every cycle count](https://lv1.sh/blog/simd-making-every-cycle-count/)
 
 ```
  M:2 2#!4
@@ -84,4 +94,3 @@ watchexec -r -w test/cloth.k -- ./zig-out/bin/ink -unfocus -top -monitor 1 test/
 
 [[]id:!20;w:?20]
 ```
-
