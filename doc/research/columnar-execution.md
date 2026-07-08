@@ -37,7 +37,21 @@ root-to-output write closed the short-chain gap). The full register-fusion ceili
 `a+b*c`) needs straight-line codegen (JIT) — deliberately out of scope; the block interpreter
 captures the DRAM-traffic win without emitting machine code.
 
-Deferred: monadic ops, `%`/`sqrt`/transcendentals (need f32 typing), comparisons/bool trees.
+**Op coverage.** Fused: dyadic `+ - * & | %` and monadic `- (neg) sqr sqrt exp log sin cos`.
+`%` and the transcendentals are float-only (`KOp.floatOnly`) — the kernel is flagged and i32
+operands fall back to dispatch. The fuse threshold is `FUSE_MIN_OPS` (compiler.zig, default 2 —
+single ops are already SIMD). Expanded-op measurements (1e6, ms/1k, off→on):
+
+| expression | off | on | speedup |
+|---|---|---|---|
+| `a*a+b*b+c*c` (sum of squares) | 1055 | 750 | 1.41× |
+| `sqrt a*a+b*b` (magnitude) | 920 | 742 | 1.24× |
+| `a%b+c%a` (two divides) | 785 | 651 | 1.21× |
+| `(sin a)+cos b` (compute-bound) | 644 | 588 | 1.10× |
+
+The transcendental case gains least because it is compute-bound (Roofline: the ALU, not DRAM, is
+the limit), exactly where fusion helps least. Deferred: comparisons/bool trees (change element
+type mid-tree → need a bool-typed kernel path), `abs` (int branch not `@Vector`-safe).
 
 This note sketches what it would take to add MonetDB/X100-style **vectorized (batch-at-a-time)
 execution** to Ink's runtime: process pointwise verb chains over cache-sized chunks with adjacent

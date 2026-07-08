@@ -45,8 +45,8 @@ pub fn fusedMap(vm: *VM, k: *const Kernel, ops: []const V) V {
   };
   if (!vec) return fallback(vm, k, ops);          // all-scalar: rare, let dispatch handle
   if (allF) return runChunk(f32, vm, k, ops, n);
-  if (allI) return runChunk(i32, vm, k, ops, n);
-  return fallback(vm, k, ops);                     // mixed i32/f32: promote via dispatch
+  if (allI and !k.float_only) return runChunk(i32, vm, k, ops, n);
+  return fallback(vm, k, ops);                     // mixed i32/f32, or float-only op on i32
 }
 
 // An eval-stack entry is either a vector leaf (read directly from the operand —
@@ -60,6 +60,28 @@ inline fn srcSlice(comptime T: type, e: Src, ops: []const V, scratch: *[KDEPTH][
   };
 }
 
+// One dyadic op on scalars or @Vector lanes. Float-only ops are comptime-guarded
+// for i32 (never reached — the classifier falls those kernels back to dispatch).
+inline fn binOp(comptime T: type, comptime op: KOp, x: anytype, y: @TypeOf(x)) @TypeOf(x) {
+  return switch (op) {
+    .Add => calc.AddOp.f(x, y), .Sub => calc.SubOp.f(x, y), .Mul => calc.MulOp.f(x, y),
+    .Min => calc.MinOp.f(x, y), .Max => calc.MaxOp.f(x, y),
+    .Div => if (comptime T == f32) calc.DivOp.f(x, y) else unreachable,
+    else => unreachable,
+  };
+}
+inline fn monOp(comptime T: type, comptime op: KOp, x: anytype) @TypeOf(x) {
+  return switch (op) {
+    .Neg => calc.NegOp.f(x), .Sqr => calc.SqrOp.f(x),
+    .Sqrt => if (comptime T == f32) @sqrt(x) else unreachable,
+    .Exp => if (comptime T == f32) @exp(x) else unreachable,
+    .Log => if (comptime T == f32) @log(x) else unreachable,
+    .Sin => if (comptime T == f32) @sin(x) else unreachable,
+    .Cos => if (comptime T == f32) @cos(x) else unreachable,
+    else => unreachable,
+  };
+}
+
 // dst[i] = a[i] <op> b[i], SIMD + scalar tail. `op` comptime → straight-line body.
 inline fn binInto(comptime T: type, comptime op: KOp, dst: []T, a: []const T, b: []const T) void {
   var i: usize = 0;
@@ -67,15 +89,18 @@ inline fn binInto(comptime T: type, comptime op: KOp, dst: []T, a: []const T, b:
   while (i + LANES <= w) : (i += LANES) {
     const av: @Vector(LANES, T) = a[i..][0..LANES].*;
     const bv: @Vector(LANES, T) = b[i..][0..LANES].*;
-    dst[i..][0..LANES].* = switch (op) {
-      .Add => calc.AddOp.f(av, bv), .Sub => calc.SubOp.f(av, bv), .Mul => calc.MulOp.f(av, bv),
-      .Min => calc.MinOp.f(av, bv), .Max => calc.MaxOp.f(av, bv), .Col => unreachable,
-    };
+    dst[i..][0..LANES].* = binOp(T, op, av, bv);
   }
-  while (i < w) : (i += 1) dst[i] = switch (op) {
-    .Add => calc.AddOp.f(a[i], b[i]), .Sub => calc.SubOp.f(a[i], b[i]), .Mul => calc.MulOp.f(a[i], b[i]),
-    .Min => calc.MinOp.f(a[i], b[i]), .Max => calc.MaxOp.f(a[i], b[i]), .Col => unreachable,
-  };
+  while (i < w) : (i += 1) dst[i] = binOp(T, op, a[i], b[i]);
+}
+inline fn monInto(comptime T: type, comptime op: KOp, dst: []T, a: []const T) void {
+  var i: usize = 0;
+  const w = dst.len;
+  while (i + LANES <= w) : (i += LANES) {
+    const av: @Vector(LANES, T) = a[i..][0..LANES].*;
+    dst[i..][0..LANES].* = monOp(T, op, av);
+  }
+  while (i < w) : (i += 1) dst[i] = monOp(T, op, a[i]);
 }
 
 fn runChunk(comptime T: type, vm: *VM, k: *const Kernel, ops: []const V, n: usize) V {
@@ -101,13 +126,19 @@ fn runChunk(comptime T: type, vm: *VM, k: *const Kernel, ops: []const V, n: usiz
         }
         sp += 1;
       },
-      inline .Add, .Sub, .Mul, .Min, .Max => |op| {
+      inline .Add, .Sub, .Mul, .Min, .Max, .Div => |op| {
         sp -= 1;
         const a = srcSlice(T, stack[sp - 1], ops, &scratch, base, w);
         const b = srcSlice(T, stack[sp], ops, &scratch, base, w);
         // The root op writes straight to the output block; interiors to scratch.
         const target = if (ci == last) dst[base .. base + w] else scratch[sp - 1][0..w];
         binInto(T, op, target, a, b);
+        stack[sp - 1] = .{ .scr = @intCast(sp - 1) };
+      },
+      inline .Neg, .Sqr, .Sqrt, .Exp, .Log, .Sin, .Cos => |op| {
+        const a = srcSlice(T, stack[sp - 1], ops, &scratch, base, w);
+        const target = if (ci == last) dst[base .. base + w] else scratch[sp - 1][0..w];
+        monInto(T, op, target, a);
         stack[sp - 1] = .{ .scr = @intCast(sp - 1) };
       },
     };
@@ -120,17 +151,27 @@ fn runChunk(comptime T: type, vm: *VM, k: *const Kernel, ops: []const V, n: usiz
 fn fallback(vm: *VM, k: *const Kernel, ops: []const V) V {
   var st: [KDEPTH]V = undefined;
   var sp: usize = 0;
-  for (k.code) |ins| {
-    if (ins.op == .Col) { st[sp] = ops[ins.arg].ref(); sp += 1; continue; }
-    const o2: Op2 = switch (ins.op) {
-      .Add => .@"+", .Sub => .@"-", .Mul => .@"*", .Min => .@"&", .Max => .@"|", .Col => unreachable,
-    };
-    sp -= 1;
-    const r = dispatch.dispatch2(vm, o2, st[sp - 1], st[sp]);
-    st[sp - 1].deinit(vm.alloc);
-    st[sp].deinit(vm.alloc);
-    st[sp - 1] = r;
-  }
+  for (k.code) |ins| switch (ins.op) {
+    .Col => { st[sp] = ops[ins.arg].ref(); sp += 1; },
+    .Neg, .Sqr, .Sqrt, .Exp, .Log, .Sin, .Cos => {
+      const o1: Op1 = switch (ins.op) {
+        .Neg => .@"-", .Sqr => .sqr, .Sqrt => .sqrt, .Exp => .exp, .Log => .log, .Sin => .sin, .Cos => .cos, else => unreachable,
+      };
+      const r = dispatch.dispatch1(vm, o1, st[sp - 1]);
+      st[sp - 1].deinit(vm.alloc);
+      st[sp - 1] = r;
+    },
+    else => {
+      const o2: Op2 = switch (ins.op) {
+        .Add => .@"+", .Sub => .@"-", .Mul => .@"*", .Min => .@"&", .Max => .@"|", .Div => .@"%", else => unreachable,
+      };
+      sp -= 1;
+      const r = dispatch.dispatch2(vm, o2, st[sp - 1], st[sp]);
+      st[sp - 1].deinit(vm.alloc);
+      st[sp].deinit(vm.alloc);
+      st[sp - 1] = r;
+    },
+  };
   return st[0];
 }
 

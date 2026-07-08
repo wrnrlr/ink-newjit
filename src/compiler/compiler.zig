@@ -1096,7 +1096,7 @@ pub const Compiler = struct {
     // FusedMap: register the kernel program in the chunk, emit opcode + u16 index.
     if (inst.op == .FusedMap) {
       try chunk.writeOp(.FusedMap);
-      const kidx = try chunk.addKernel(inst.kcode.?, @intCast(inst.arg1), @intCast(inst.arg2));
+      const kidx = try chunk.addKernel(inst.kcode.?, @intCast(inst.arg1), @intCast(inst.arg2), inst.arg3 != 0);
       try chunk.write16(kidx);
       return;
     }
@@ -1227,19 +1227,34 @@ fn isFusableReducer(op: Op1) bool {
   return switch (op) { .@"+/", .@"*/", .@"&/", .@"|/" => true, else => false };
 }
 
-// ── FusedMap: collapse a maximal pointwise-arithmetic subtree ─────────────────
-// The type-closed dyadic ops that fuse into one @Vector pass (see fuse.zig).
+// ── FusedMap: collapse a maximal pointwise arithmetic subtree ─────────────────
+// Pointwise ops that fuse into one @Vector pass (see fuse.zig). Dyadic `%` and the
+// monadic transcendentals are float-only (KOp.floatOnly) → the kernel is flagged
+// so i32 operands fall back at runtime.
 fn fusableMapBin(arg1: u32) ?KOp {
   return switch (@as(Op2, @enumFromInt(arg1))) {
-    .@"+" => .Add, .@"-" => .Sub, .@"*" => .Mul, .@"&" => .Min, .@"|" => .Max,
+    .@"+" => .Add, .@"-" => .Sub, .@"*" => .Mul, .@"&" => .Min, .@"|" => .Max, .@"%" => .Div,
     else => null,
   };
 }
+fn fusableMapMon(arg1: u32) ?KOp {
+  return switch (@as(Op1, @enumFromInt(arg1))) {
+    .@"-" => .Neg, .sqr => .Sqr, .sqrt => .Sqrt, .exp => .Exp, .log => .Log, .sin => .Sin, .cos => .Cos,
+    else => null,
+  };
+}
+// The pointwise KOp this IR node contributes, or null if it isn't fusable.
+fn nodeKOp(inst: *const ir.IRInst) ?KOp {
+  if (inst.op == .Apply2 and inst.inputs.len == 2) return fusableMapBin(inst.arg1);
+  if (inst.op == .Apply1 and inst.inputs.len == 1) return fusableMapMon(inst.arg1);
+  return null;
+}
 fn isFusableMapNode(inst: *const ir.IRInst) bool {
-  return inst.op == .Apply2 and inst.inputs.len == 2 and fusableMapBin(inst.arg1) != null;
+  return nodeKOp(inst) != null;
 }
 
 const KMAX_DEPTH = 16;
+const FUSE_MIN_OPS = 2;   // fuse only chains of >=2 pointwise ops (single ops already SIMD)
 
 // Builds a postfix kernel by DFS over a pointwise subtree. Bails (returns false,
 // caller discards) on anything the safe fast subset doesn't cover: a shared leaf
@@ -1256,6 +1271,7 @@ const FuseBuilder = struct {
   sp: u32 = 0,
   maxsp: u32 = 0,
   nbin: u32 = 0,
+  float_only: bool = false,
 
   fn leafIndex(self: *FuseBuilder, id: ir.ValueId) !?u8 {
     for (self.leaves.items) |l| if (l == id) return null;  // shared leaf → bail
@@ -1267,7 +1283,8 @@ const FuseBuilder = struct {
 
   fn build(self: *FuseBuilder, id: ir.ValueId, is_root: bool) !bool {
     const inst = self.ir.get(id);
-    const absorb = isFusableMapNode(inst) and (is_root or self.uc[id] == 1);
+    const kop = nodeKOp(inst);
+    const absorb = kop != null and (is_root or self.uc[id] == 1);
     if (!absorb) {                                   // leaf
       if (self.uc[id] != 1) return false;            // shared/multi-use leaf → bail
       const li = (try self.leafIndex(id)) orelse return false;
@@ -1276,14 +1293,14 @@ const FuseBuilder = struct {
       if (self.sp > self.maxsp) self.maxsp = self.sp;
       return true;
     }
-    const a = inst.inputs[0];
-    const b = inst.inputs[1];
-    if (a == ir.NO_VALUE or b == ir.NO_VALUE) return false;
-    if (a >= self.ir.instructions.items.len or b >= self.ir.instructions.items.len) return false;
-    if (!try self.build(a, false)) return false;
-    if (!try self.build(b, false)) return false;
-    try self.code.append(self.alloc, .{ .op = fusableMapBin(inst.arg1).?, .arg = 0 });
-    self.sp -= 1;              // 2 → 1
+    const k = kop.?;
+    if (k.floatOnly()) self.float_only = true;
+    for (inst.inputs) |in| {
+      if (in == ir.NO_VALUE or in >= self.ir.instructions.items.len) return false;
+      if (!try self.build(in, false)) return false;
+    }
+    try self.code.append(self.alloc, .{ .op = k, .arg = 0 });
+    self.sp -= k.arity() - 1;   // arity → 1 (monadic: 0 net; dyadic: -1)
     self.nbin += 1;
     if (!is_root) try self.interior.append(self.alloc, id);
     return true;
@@ -1327,7 +1344,7 @@ fn fuseMaps(alloc: Alloc, scope_ir: *ir.IR) !bool {
     interior.clearRetainingCapacity();
     var b = FuseBuilder{ .ir = scope_ir, .uc = uc, .code = &code, .leaves = &leaves, .interior = &interior, .alloc = alloc };
     const ok = b.build(@intCast(id), true) catch false;
-    if (!ok or b.nbin < 2 or b.maxsp > KMAX_DEPTH or leaves.items.len > 255) continue;
+    if (!ok or b.nbin < FUSE_MIN_OPS or b.maxsp > KMAX_DEPTH or leaves.items.len > 255) continue;
 
     const kcode = try scope_ir.alloc.dupe(KInsn, code.items);
     const new_inputs = try scope_ir.alloc.dupe(ir.ValueId, leaves.items);
@@ -1335,6 +1352,7 @@ fn fuseMaps(alloc: Alloc, scope_ir: *ir.IR) !bool {
     inst.op = .FusedMap;
     inst.arg1 = @intCast(leaves.items.len);   // ncol
     inst.arg2 = b.maxsp;                       // eval-stack depth
+    inst.arg3 = if (b.float_only) 1 else 0;    // float-only flag
     inst.inputs = new_inputs;
     inst.kcode = kcode;
     for (interior.items) |iid| scope_ir.instructions.items[iid].is_dead = true;
