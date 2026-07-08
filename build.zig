@@ -257,6 +257,7 @@ pub fn build(b: *std.Build) !void {
     .{ "gif", "lib/image/gif_ext.zig" },
     .{ "hdr", "lib/image/hdr_ext.zig" },
     .{ "pic", "lib/image/pic_ext.zig" },
+    .{ "tiff", "lib/image/tiff_ext.zig" },
   };
   const image_step = b.step("images", "Build all image extension shared libraries");
   inline for (image_exts) |pair| {

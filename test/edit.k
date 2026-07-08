@@ -21,7 +21,7 @@
 2: "lib/font.k"
 2: "lib/gpu.k"
 
-FONT: (font.read "font/FiraCode-Regular.ttf") 0   / face 0 (FiraCode is monospaced)
+FONT:*font.read "font/FiraCode-Regular.ttf"
 
 / ── Metrics / layout ─────────────────────────────────────────────────────────
 SZ:     22.                        / glyph size in pixels

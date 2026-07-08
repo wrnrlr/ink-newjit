@@ -26,6 +26,7 @@ export fn ImgSniff(path_k: ?k.K) callconv(.c) ?k.K {
     .hdr => "hdr",
     .pic => "pic",
     .tga => "tga",
+    .tiff => "tiff",
     .unknown => "unknown",
   });
 }

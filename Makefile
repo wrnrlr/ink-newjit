@@ -22,7 +22,7 @@ HOST := $(HOST_OS)-$(HOST_ARCH)
 # Jupyter kernel, and native FFI extensions are unavailable there.
 PLATFORMS := macos-arm64 macos-x64 linux-arm64 linux-x64 windows-arm64 windows-x64
 
-.PHONY: test build release all static-all install data demo qa info clean docs docs-snap
+.PHONY: test build release all static-all install data demo qa bench info clean docs docs-snap
 
 test:
 	time zig build test
@@ -37,6 +37,11 @@ test:
 
 build:
 	time zig build -Doptimize=ReleaseFast -Dversion=$(VERSION)
+
+# Micro-benchmarks (ink vs ngn/k). Needs a ReleaseFast build (make build) and,
+# for the reference column, ngn/k at ~/.k/k. See doc/research/columnar-execution.md.
+bench:
+	sh bench/bench.sh
 
 release:
 	time zig build -Doptimize=ReleaseFast -Dversion=$(VERSION)

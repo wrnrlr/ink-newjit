@@ -10,11 +10,12 @@ const gif = @import("gif.zig");
 const tga = @import("tga.zig");
 const hdr = @import("hdr.zig");
 const pic = @import("pic.zig");
+const tiff = @import("tiff.zig");
 
 const Alloc = std.mem.Allocator;
 const Error = common.Error;
 
-pub const Format = enum { png, jpeg, gif, bmp, hdr, pic, tga, unknown };
+pub const Format = enum { png, jpeg, gif, bmp, hdr, pic, tga, tiff, unknown };
 
 fn isJpeg(f: []const u8) bool {
   return f.len >= 3 and f[0] == 0xFF and f[1] == 0xD8 and f[2] == 0xFF;
@@ -23,6 +24,7 @@ fn isJpeg(f: []const u8) bool {
 /// Identify a format from the leading bytes of a file (same order stb tries).
 pub fn sniff(f: []const u8) Format {
   if (png.isPng(f)) return .png;
+  if (tiff.isTiff(f)) return .tiff;
   if (bmp.isBmp(f)) return .bmp;
   if (gif.isGif(f)) return .gif;
   if (pic.isPic(f)) return .pic;

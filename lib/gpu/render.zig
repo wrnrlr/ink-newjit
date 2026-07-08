@@ -24,6 +24,12 @@ pub const MAX_MESH_UNI_CALLS: usize = 512;
 pub const MESH_INST_FLOATS: usize = 1_000_000;
 pub const INST_ALIGN_FLOATS: usize = 64;
 
+// Max textures a single mesh pipeline can sample (bound at @group(1), image k at
+// binding k, one shared sampler at binding tex_n).  A per-draw list of texture
+// handles rides in the call; -1 slots are unused.
+pub const MAX_TEX: usize = 8;
+const NO_TEX: [MAX_TEX]i32 = [_]i32{-1} ** MAX_TEX;
+
 // A retained, instanced draw: a geometry (persistent vertex buffer) drawn once
 // with instanceCount instances; instance data lives at inst_data[data_off..].
 pub const InstCall = struct {
@@ -31,17 +37,19 @@ pub const InstCall = struct {
   inst_count: u32,
   data_off: usize, // f32 offset into the renderer's inst_data
   data_len: usize, // f32 length of this draw's instance block
-  tex_idx: i32 = -1, // shared texture bound at @group(1) for all instances, or -1
+  tex: [MAX_TEX]i32 = NO_TEX, // texture handles bound at @group(1) (shared by all instances)
+  tex_n: u8 = 0,
 };
 
-// A retained mesh drawn once with a per-draw uniform block (@group(0)) and an
-// optional texture (@group(1)) — the non-instanced counterpart of InstCall.
+// A retained mesh drawn once with a per-draw uniform block (@group(0)) and
+// optional textures (@group(1)) — the non-instanced counterpart of InstCall.
 // Geometry lives in a persistent buffer (uploadGeom), so only the small uniform
 // block is written per frame; the vertex data is never re-uploaded.
 pub const GeomCall = struct {
   geom_idx: usize,
   uniform: [MESH_UNI_FLOATS]f32 = [_]f32{0} ** MESH_UNI_FLOATS,
-  tex_idx: i32 = -1,
+  tex: [MAX_TEX]i32 = NO_TEX,
+  tex_n: u8 = 0,
 };
 
 // Mesh vertices are stored as raw f32. The per-vertex layout (stride and
@@ -54,7 +62,8 @@ pub const MeshCall = struct {
   stride: usize, // f32s per vertex
   pipeline_idx: usize,
   uniform: [MESH_UNI_FLOATS]f32 = [_]f32{0} ** MESH_UNI_FLOATS,
-  tex_idx: i32 = -1, // uploaded-texture index to bind at @group(1), or -1 for none
+  tex: [MAX_TEX]i32 = NO_TEX, // texture handles bound at @group(1); tex_n = how many
+  tex_n: u8 = 0,
 };
 
 pub const ViewUniforms = extern struct {
@@ -124,9 +133,10 @@ pub const Renderer = struct {
   mesh_has_uniform: ArrayList(bool), // does pipeline i declare a uniform block? parallel to mesh_pipelines
   mesh_is_instanced: ArrayList(bool), // does pipeline i read an instance storage buffer? parallel to mesh_pipelines
   mesh_has_texture: ArrayList(bool), // does pipeline i sample a texture at @group(1)? parallel to mesh_pipelines
+  mesh_tex_n: ArrayList(usize), // how many textures pipeline i samples (parallel to mesh_pipelines)
+  mesh_tex_bgls: ArrayList(?wgpu.BindGroupLayout), // per-pipeline @group(1) layout (n textures + 1 sampler), null if none
   mesh_bgl: wgpu.BindGroupLayout, // shared layout for the mesh uniform block (binding 0)
   mesh_uniform_buffer: wgpu.Buffer,
-  mesh_tex_bgl: wgpu.BindGroupLayout, // shared layout for a sampled texture (binding 0) + sampler (binding 1)
   tex_views: ArrayList(wgpu.TextureView),  // uploaded texture views (see uploadTexture)
   tex_samplers: ArrayList(wgpu.Sampler),   // one sampler per uploaded texture, parallel to tex_views
   // Instancing: retained geometry (persistent vertex buffers) + per-frame instance data
@@ -165,6 +175,8 @@ pub const Renderer = struct {
       .mesh_has_uniform = try ArrayList(bool).initCapacity(allocator, 4),
       .mesh_is_instanced = try ArrayList(bool).initCapacity(allocator, 4),
       .mesh_has_texture = try ArrayList(bool).initCapacity(allocator, 4),
+      .mesh_tex_n = try ArrayList(usize).initCapacity(allocator, 4),
+      .mesh_tex_bgls = try ArrayList(?wgpu.BindGroupLayout).initCapacity(allocator, 4),
       .tex_views = try ArrayList(wgpu.TextureView).initCapacity(allocator, 4),
       .tex_samplers = try ArrayList(wgpu.Sampler).initCapacity(allocator, 4),
       .mesh_bgl = device.createBindGroupLayout(.{
@@ -172,14 +184,6 @@ pub const Renderer = struct {
       .entry_count = 1,
       .entries = &[_]wgpu.BindGroupLayoutEntry{
         zgpu.bufferEntry(0, .{ .vertex = true, .fragment = true }, .uniform, false, 0),
-      },
-      }),
-      .mesh_tex_bgl = device.createBindGroupLayout(.{
-      .label = "mesh texture bgl",
-      .entry_count = 2,
-      .entries = &[_]wgpu.BindGroupLayoutEntry{
-        .{ .binding = 0, .visibility = .{ .fragment = true }, .texture = .{ .sample_type = .float } },
-        zgpu.samplerEntry(1, .{ .fragment = true }, .filtering),
       },
       }),
       .mesh_uniform_buffer = device.createBuffer(.{
@@ -264,12 +268,14 @@ pub const Renderer = struct {
     self.mesh_has_uniform.deinit(self.allocator);
     self.mesh_is_instanced.deinit(self.allocator);
     self.mesh_has_texture.deinit(self.allocator);
+    self.mesh_tex_n.deinit(self.allocator);
+    for (self.mesh_tex_bgls.items) |b| if (b) |l| l.release();
+    self.mesh_tex_bgls.deinit(self.allocator);
     for (self.tex_views.items) |v| v.release();
     self.tex_views.deinit(self.allocator);
     for (self.tex_samplers.items) |s| s.release();
     self.tex_samplers.deinit(self.allocator);
     self.mesh_bgl.release();
-    self.mesh_tex_bgl.release();
     self.mesh_uniform_buffer.release();
     self.mesh_inst_bgl.release();
     self.mesh_inst_buffer.release();
@@ -363,14 +369,58 @@ pub const Renderer = struct {
     }
   }
 
+  // Pack a slice of texture handles into a fixed [MAX_TEX]i32 + count for a call.
+  fn packTex(tex: []const i32) struct { arr: [MAX_TEX]i32, n: u8 } {
+    var arr: [MAX_TEX]i32 = NO_TEX;
+    const n = @min(tex.len, MAX_TEX);
+    var k: usize = 0;
+    while (k < n) : (k += 1) arr[k] = tex[k];
+    return .{ .arr = arr, .n = @intCast(n) };
+  }
+
+  // Build the @group(1) texture bind group for a pipeline: n texture views
+  // (bindings 0..n-1) + one shared sampler (binding n, taken from the first
+  // texture).  Returns null if any handle is invalid.
+  fn makeTexBg(self: *Renderer, bgl: wgpu.BindGroupLayout, tex: []const i32, n: usize) ?wgpu.BindGroup {
+    if (n == 0 or n > MAX_TEX) return null;
+    var entries: [MAX_TEX + 1]wgpu.BindGroupEntry = undefined;
+    var samp: usize = 0;
+    var k: usize = 0;
+    while (k < n) : (k += 1) {
+      const h = tex[k];
+      if (h < 0 or @as(usize, @intCast(h)) >= self.tex_views.items.len) return null;
+      const hi: usize = @intCast(h);
+      entries[k] = .{ .binding = @intCast(k), .texture_view = self.tex_views.items[hi], .size = 0 };
+      if (k == 0) samp = hi;
+    }
+    entries[n] = .{ .binding = @intCast(n), .sampler = self.tex_samplers.items[samp], .size = 0 };
+    return self.device.createBindGroup(.{ .layout = bgl, .entry_count = @intCast(n + 1), .entries = &entries });
+  }
+
+  // If pipeline_idx samples textures, build its @group(1) bind group from `tex`
+  // (the call's handle array) and set it. Binds the pipeline's declared texture
+  // count. Returns the bind group so the caller can release it after the draw.
+  fn bindTex(self: *Renderer, pass: wgpu.RenderPassEncoder, pipeline_idx: usize, tex: []const i32) ?wgpu.BindGroup {
+    const tn = if (pipeline_idx < self.mesh_tex_n.items.len) self.mesh_tex_n.items[pipeline_idx] else 0;
+    if (tn == 0) return null;
+    const bgl = if (pipeline_idx < self.mesh_tex_bgls.items.len) self.mesh_tex_bgls.items[pipeline_idx] else null;
+    if (bgl) |l| if (self.makeTexBg(l, tex, tn)) |bg| {
+      pass.setBindGroup(1, bg, null);
+      return bg;
+    };
+    return null;
+  }
+
   // Queue a 3-D mesh draw call. `verts` is raw f32 vertex data; `stride` is the
-  // number of f32s per vertex (pipeline-specific, see gpuMesh).
-  pub fn drawMesh(self: *Renderer, verts: []const f32, stride: usize, pipeline_idx: usize, uni: [MESH_UNI_FLOATS]f32, tex_idx: i32) !void {
+  // number of f32s per vertex (pipeline-specific, see gpuMesh). `tex` is the list
+  // of texture handles to bind at @group(1).
+  pub fn drawMesh(self: *Renderer, verts: []const f32, stride: usize, pipeline_idx: usize, uni: [MESH_UNI_FLOATS]f32, tex: []const i32) !void {
     if (stride == 0) return;
     const offset = self.mesh_verts.items.len;
     try self.mesh_verts.appendSlice(self.allocator, verts);
+    const pt = packTex(tex);
     try self.mesh_calls.append(self.allocator, .{
-      .offset = offset, .count = verts.len / stride, .stride = stride, .pipeline_idx = pipeline_idx, .uniform = uni, .tex_idx = tex_idx,
+      .offset = offset, .count = verts.len / stride, .stride = stride, .pipeline_idx = pipeline_idx, .uniform = uni, .tex = pt.arr, .tex_n = pt.n,
     });
   }
 
@@ -424,24 +474,26 @@ pub const Renderer = struct {
   // Queue an instanced draw of a retained geometry: `data` is the flat vec4[]
   // instance block (inst_count instances × K vec4s).  The block is appended to
   // this frame's instance buffer on a 64-float boundary.
-  pub fn queueInstanced(self: *Renderer, geom_idx: usize, inst_count: u32, data: []const f32, tex_idx: i32) !void {
+  pub fn queueInstanced(self: *Renderer, geom_idx: usize, inst_count: u32, data: []const f32, tex: []const i32) !void {
   if (geom_idx >= self.geom_buffers.items.len) return;
   // pad to the storage-binding alignment so this block starts 256-byte aligned
   const rem = self.inst_data.items.len % INST_ALIGN_FLOATS;
   if (rem != 0) try self.inst_data.appendNTimes(self.allocator, 0, INST_ALIGN_FLOATS - rem);
   const off = self.inst_data.items.len;
   try self.inst_data.appendSlice(self.allocator, data);
+  const pt = packTex(tex);
   try self.inst_calls.append(self.allocator, .{
-    .geom_idx = geom_idx, .inst_count = inst_count, .data_off = off, .data_len = data.len, .tex_idx = tex_idx,
+    .geom_idx = geom_idx, .inst_count = inst_count, .data_off = off, .data_len = data.len, .tex = pt.arr, .tex_n = pt.n,
   });
   }
 
   // Queue a draw of a retained geometry with a per-draw uniform block and an
   // optional texture (tex_idx < 0 = none).  The vertex buffer is the persistent
   // one from uploadGeom — nothing but the uniform block is written per frame.
-  pub fn queueGeom(self: *Renderer, geom_idx: usize, uni: [MESH_UNI_FLOATS]f32, tex_idx: i32) !void {
+  pub fn queueGeom(self: *Renderer, geom_idx: usize, uni: [MESH_UNI_FLOATS]f32, tex: []const i32) !void {
   if (geom_idx >= self.geom_buffers.items.len) return;
-  try self.geom_calls.append(self.allocator, .{ .geom_idx = geom_idx, .uniform = uni, .tex_idx = tex_idx });
+  const pt = packTex(tex);
+  try self.geom_calls.append(self.allocator, .{ .geom_idx = geom_idx, .uniform = uni, .tex = pt.arr, .tex_n = pt.n });
   }
 
   // Submit all mesh draw calls in a new render pass that loads the existing colour
@@ -512,16 +564,7 @@ pub const Renderer = struct {
       uni_call += 1;
       }
       defer if (uni_bg) |bg| bg.release();
-      var tex_bg: ?wgpu.BindGroup = null;
-      if (mc.tex_idx >= 0 and @as(usize, @intCast(mc.tex_idx)) < self.tex_views.items.len) {
-      const ti: usize = @intCast(mc.tex_idx);
-      const be = [_]wgpu.BindGroupEntry{
-        .{ .binding = 0, .texture_view = self.tex_views.items[ti], .size = 0 },
-        .{ .binding = 1, .sampler = self.tex_samplers.items[ti], .size = 0 },
-      };
-      tex_bg = self.device.createBindGroup(.{ .layout = self.mesh_tex_bgl, .entry_count = be.len, .entries = &be });
-      pass.setBindGroup(1, tex_bg.?, null);
-      }
+      const tex_bg = self.bindTex(pass, mc.pipeline_idx, &mc.tex);
       defer if (tex_bg) |bg| bg.release();
       pass.draw(@intCast(mc.count), 1, 0, 0);
     }
@@ -546,16 +589,7 @@ pub const Renderer = struct {
       uni_call += 1;
       }
       defer if (uni_bg) |bg| bg.release();
-      var tex_bg: ?wgpu.BindGroup = null;
-      if (gc.tex_idx >= 0 and @as(usize, @intCast(gc.tex_idx)) < self.tex_views.items.len) {
-      const ti: usize = @intCast(gc.tex_idx);
-      const be = [_]wgpu.BindGroupEntry{
-        .{ .binding = 0, .texture_view = self.tex_views.items[ti], .size = 0 },
-        .{ .binding = 1, .sampler = self.tex_samplers.items[ti], .size = 0 },
-      };
-      tex_bg = self.device.createBindGroup(.{ .layout = self.mesh_tex_bgl, .entry_count = be.len, .entries = &be });
-      pass.setBindGroup(1, tex_bg.?, null);
-      }
+      const tex_bg = self.bindTex(pass, pidx, &gc.tex);
       defer if (tex_bg) |bg| bg.release();
       pass.draw(gcount, 1, 0, 0);
     }
@@ -574,17 +608,8 @@ pub const Renderer = struct {
       const bg = self.device.createBindGroup(.{ .layout = self.mesh_inst_bgl, .entry_count = be.len, .entries = &be });
       defer bg.release();
       pass.setBindGroup(0, bg, null);
-      // A textured instanced pipeline binds one shared texture at @group(1).
-      var tex_bg: ?wgpu.BindGroup = null;
-      if (ic.tex_idx >= 0 and @as(usize, @intCast(ic.tex_idx)) < self.tex_views.items.len) {
-      const ti: usize = @intCast(ic.tex_idx);
-      const tbe = [_]wgpu.BindGroupEntry{
-        .{ .binding = 0, .texture_view = self.tex_views.items[ti], .size = 0 },
-        .{ .binding = 1, .sampler = self.tex_samplers.items[ti], .size = 0 },
-      };
-      tex_bg = self.device.createBindGroup(.{ .layout = self.mesh_tex_bgl, .entry_count = tbe.len, .entries = &tbe });
-      pass.setBindGroup(1, tex_bg.?, null);
-      }
+      // A textured instanced pipeline binds the shared textures at @group(1).
+      const tex_bg = self.bindTex(pass, pidx, &ic.tex);
       defer if (tex_bg) |b| b.release();
       pass.draw(gcount, ic.inst_count, 0, 0);
     }
