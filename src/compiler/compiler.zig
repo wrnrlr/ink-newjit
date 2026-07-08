@@ -15,6 +15,8 @@ const Fn = opmod.Fn;
 const Alloc = std.mem.Allocator;
 const Chunk = @import("../runtime/tape.zig").Chunk;
 const OpCode = @import("../runtime/tape.zig").OpCode;
+const KOp = @import("../runtime/tape.zig").KOp;
+const KInsn = @import("../runtime/tape.zig").KInsn;
 const Pool = @import("../noun/symbol.zig").Pool;
 const Fs = @import("../runtime/registry.zig").Fs;
 const fold_mod = @import("../primitive/adverb/fold.zig");
@@ -1060,7 +1062,7 @@ pub const Compiler = struct {
         return 0;
       },
       .Jump, .JumpFalse, .JumpTrue => return 3,
-      .MakePartial, .ReduceZip => return 3,
+      .MakePartial, .ReduceZip, .FusedMap => return 3,
       else => return 1,
     }
   }
@@ -1088,6 +1090,14 @@ pub const Compiler = struct {
       try chunk.writeOp(.Const);
       const c_idx = try chunk.addConstant(inst.val.?.ref());
       try chunk.write16(c_idx);
+      return;
+    }
+
+    // FusedMap: register the kernel program in the chunk, emit opcode + u16 index.
+    if (inst.op == .FusedMap) {
+      try chunk.writeOp(.FusedMap);
+      const kidx = try chunk.addKernel(inst.kcode.?, @intCast(inst.arg1), @intCast(inst.arg2));
+      try chunk.write16(kidx);
       return;
     }
 
@@ -1217,6 +1227,122 @@ fn isFusableReducer(op: Op1) bool {
   return switch (op) { .@"+/", .@"*/", .@"&/", .@"|/" => true, else => false };
 }
 
+// ── FusedMap: collapse a maximal pointwise-arithmetic subtree ─────────────────
+// The type-closed dyadic ops that fuse into one @Vector pass (see fuse.zig).
+fn fusableMapBin(arg1: u32) ?KOp {
+  return switch (@as(Op2, @enumFromInt(arg1))) {
+    .@"+" => .Add, .@"-" => .Sub, .@"*" => .Mul, .@"&" => .Min, .@"|" => .Max,
+    else => null,
+  };
+}
+fn isFusableMapNode(inst: *const ir.IRInst) bool {
+  return inst.op == .Apply2 and inst.inputs.len == 2 and fusableMapBin(inst.arg1) != null;
+}
+
+const KMAX_DEPTH = 16;
+
+// Builds a postfix kernel by DFS over a pointwise subtree. Bails (returns false,
+// caller discards) on anything the safe fast subset doesn't cover: a shared leaf
+// (same ValueId twice — would need a Dup the stack scheduler doesn't give us),
+// a multi-use leaf, or a tree too deep/wide. Interior node ids are collected and
+// only marked dead by the caller once the whole build succeeds.
+const FuseBuilder = struct {
+  ir: *ir.IR,
+  uc: []const u32,
+  code: *std.ArrayList(KInsn),
+  leaves: *std.ArrayList(ir.ValueId),
+  interior: *std.ArrayList(ir.ValueId),
+  alloc: Alloc,
+  sp: u32 = 0,
+  maxsp: u32 = 0,
+  nbin: u32 = 0,
+
+  fn leafIndex(self: *FuseBuilder, id: ir.ValueId) !?u8 {
+    for (self.leaves.items) |l| if (l == id) return null;  // shared leaf → bail
+    if (self.leaves.items.len >= 255) return null;
+    const i: u8 = @intCast(self.leaves.items.len);
+    try self.leaves.append(self.alloc, id);
+    return i;
+  }
+
+  fn build(self: *FuseBuilder, id: ir.ValueId, is_root: bool) !bool {
+    const inst = self.ir.get(id);
+    const absorb = isFusableMapNode(inst) and (is_root or self.uc[id] == 1);
+    if (!absorb) {                                   // leaf
+      if (self.uc[id] != 1) return false;            // shared/multi-use leaf → bail
+      const li = (try self.leafIndex(id)) orelse return false;
+      try self.code.append(self.alloc, .{ .op = .Col, .arg = li });
+      self.sp += 1;
+      if (self.sp > self.maxsp) self.maxsp = self.sp;
+      return true;
+    }
+    const a = inst.inputs[0];
+    const b = inst.inputs[1];
+    if (a == ir.NO_VALUE or b == ir.NO_VALUE) return false;
+    if (a >= self.ir.instructions.items.len or b >= self.ir.instructions.items.len) return false;
+    if (!try self.build(a, false)) return false;
+    if (!try self.build(b, false)) return false;
+    try self.code.append(self.alloc, .{ .op = fusableMapBin(inst.arg1).?, .arg = 0 });
+    self.sp -= 1;              // 2 → 1
+    self.nbin += 1;
+    if (!is_root) try self.interior.append(self.alloc, id);
+    return true;
+  }
+};
+
+fn fuseMaps(alloc: Alloc, scope_ir: *ir.IR) !bool {
+  const insts = scope_ir.instructions.items;
+  if (insts.len == 0) return false;
+  const uc = try alloc.alloc(u32, insts.len);
+  defer alloc.free(uc);
+  @memset(uc, 0);
+  for (insts) |inst| {
+    if (inst.is_dead) continue;
+    for (inst.inputs) |idv| if (idv != ir.NO_VALUE and idv < uc.len) { uc[idv] += 1; };
+  }
+  // A fusable node is a root unless it is the single-use fusable input of another.
+  const absorbed = try alloc.alloc(bool, insts.len);
+  defer alloc.free(absorbed);
+  @memset(absorbed, false);
+  for (insts) |*inst| {
+    if (inst.is_dead or !isFusableMapNode(inst)) continue;
+    for (inst.inputs) |idv| {
+      if (idv == ir.NO_VALUE or idv >= insts.len) continue;
+      if (isFusableMapNode(scope_ir.get(idv)) and uc[idv] == 1) absorbed[idv] = true;
+    }
+  }
+
+  var code: std.ArrayList(KInsn) = .empty;
+  defer code.deinit(alloc);
+  var leaves: std.ArrayList(ir.ValueId) = .empty;
+  defer leaves.deinit(alloc);
+  var interior: std.ArrayList(ir.ValueId) = .empty;
+  defer interior.deinit(alloc);
+
+  var changed = false;
+  for (insts, 0..) |*inst, id| {
+    if (inst.is_dead or !isFusableMapNode(inst) or absorbed[id]) continue;
+    code.clearRetainingCapacity();
+    leaves.clearRetainingCapacity();
+    interior.clearRetainingCapacity();
+    var b = FuseBuilder{ .ir = scope_ir, .uc = uc, .code = &code, .leaves = &leaves, .interior = &interior, .alloc = alloc };
+    const ok = b.build(@intCast(id), true) catch false;
+    if (!ok or b.nbin < 2 or b.maxsp > KMAX_DEPTH or leaves.items.len > 255) continue;
+
+    const kcode = try scope_ir.alloc.dupe(KInsn, code.items);
+    const new_inputs = try scope_ir.alloc.dupe(ir.ValueId, leaves.items);
+    scope_ir.alloc.free(inst.inputs);
+    inst.op = .FusedMap;
+    inst.arg1 = @intCast(leaves.items.len);   // ncol
+    inst.arg2 = b.maxsp;                       // eval-stack depth
+    inst.inputs = new_inputs;
+    inst.kcode = kcode;
+    for (interior.items) |iid| scope_ir.instructions.items[iid].is_dead = true;
+    changed = true;
+  }
+  return changed;
+}
+
 fn isFusableBin(op: Op2) bool {
   return switch (op) {
     .@"+", .@"-", .@"*", .@"&", .@"|", .@"<", .@">", .@"=" => true,
@@ -1236,6 +1362,7 @@ fn isBuiltinDyad(inst: *const ir.IRInst, op: Op2) bool {
 fn optimize(alloc: Alloc, scope_ir: *ir.IR, root_id: ir.ValueId) !void {
   while (try constantFolding(alloc, scope_ir) or
          try peepholeIdioms(alloc, scope_ir) or
+         try fuseMaps(alloc, scope_ir) or
          try dce(alloc, scope_ir, root_id)) {}
 }
 

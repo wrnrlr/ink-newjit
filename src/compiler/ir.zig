@@ -1,7 +1,9 @@
 const std = @import("std");
 const V = @import("../noun/value.zig").V;
 const ArrayFlags = @import("../noun/array.zig").ArrayFlags;
-const OpCode = @import("../runtime/tape.zig").OpCode;
+const tape = @import("../runtime/tape.zig");
+const OpCode = tape.OpCode;
+const KInsn = tape.KInsn;
 
 pub const ValueId = u32;
 pub const NO_VALUE: ValueId = 0xffffffff;
@@ -13,6 +15,7 @@ pub const IRInst = struct {
   arg3: u32 = 0,
   val: ?V = null,
   inputs: []const ValueId = &.{},
+  kcode: ?[]KInsn = null,     // FusedMap postfix program (arg1=ncol, arg2=depth)
   is_dead: bool = false,
   is_pure: bool = false,
   is_last: bool = false,      // last use of this local variable slot
@@ -20,6 +23,7 @@ pub const IRInst = struct {
   pub fn deinit(self: IRInst, alloc: std.mem.Allocator) void {
     if (self.val) |v| v.deinit(alloc);
     if (self.inputs.len > 0) alloc.free(self.inputs);
+    if (self.kcode) |c| alloc.free(c);
   }
 
   pub fn isEffectful(self: IRInst) bool {

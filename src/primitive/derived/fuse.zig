@@ -12,6 +12,127 @@ const V = @import("../../noun/value.zig").V;
 const Op1 = @import("../../noun/operator.zig").Op1;
 const Op2 = @import("../../noun/operator.zig").Op2;
 const dispatch = @import("../dispatch.zig");
+const tape = @import("../../runtime/tape.zig");
+const KOp = tape.KOp;
+const KInsn = tape.KInsn;
+const Kernel = tape.Kernel;
+const N = @import("../../noun/array.zig").N;
+const K = @import("../../noun/class.zig").K;
+const calc = @import("../verb/calc.zig");
+
+// ── Fused elementwise map (FusedMap opcode) ───────────────────────────────────
+// Evaluate a postfix arithmetic program (built by the compiler from a maximal
+// pointwise subtree) over the leaf operands `ops`, in one chunked pass. Fast
+// @Vector path when every operand is a same-type numeric vector/scalar; otherwise
+// the postfix program is replayed via normal dispatch (materialising each
+// intermediate) so the result is byte-identical to the unfused verb chain.
+const LANES = 8;
+const KDEPTH = 16;               // max eval-stack depth (compiler refuses deeper trees)
+const BLOCK = 256;               // cache-block: interpret once per KOp per block, each KOp a
+                                 // tight SIMD loop over L1-resident scratch (X100 vectorization).
+
+pub fn fusedMap(vm: *VM, k: *const Kernel, ops: []const V) V {
+  var n: usize = 0;              // common vector length (0 = no vector seen)
+  var vec = false;
+  var allF = true;
+  var allI = true;
+  for (ops) |o| switch (o.tag()) {
+    .F => { vec = true; allI = false; if (n == 0) n = o.F.ptr.len else if (n != o.F.ptr.len) return fallback(vm, k, ops); },
+    .I => { vec = true; allF = false; if (n == 0) n = o.I.ptr.len else if (n != o.I.ptr.len) return fallback(vm, k, ops); },
+    .f => allI = false,
+    .i => allF = false,
+    else => return fallback(vm, k, ops),
+  };
+  if (!vec) return fallback(vm, k, ops);          // all-scalar: rare, let dispatch handle
+  if (allF) return runChunk(f32, vm, k, ops, n);
+  if (allI) return runChunk(i32, vm, k, ops, n);
+  return fallback(vm, k, ops);                     // mixed i32/f32: promote via dispatch
+}
+
+// An eval-stack entry is either a vector leaf (read directly from the operand —
+// no copy) or a materialized scratch block (an intermediate result).
+const Src = union(enum) { leaf: u8, scr: u8 };
+
+inline fn srcSlice(comptime T: type, e: Src, ops: []const V, scratch: *[KDEPTH][BLOCK]T, base: usize, w: usize) []const T {
+  return switch (e) {
+    .leaf => |i| @field(ops[i], if (T == f32) "F" else "I").slice()[base .. base + w],
+    .scr => |s| scratch[s][0..w],
+  };
+}
+
+// dst[i] = a[i] <op> b[i], SIMD + scalar tail. `op` comptime → straight-line body.
+inline fn binInto(comptime T: type, comptime op: KOp, dst: []T, a: []const T, b: []const T) void {
+  var i: usize = 0;
+  const w = dst.len;
+  while (i + LANES <= w) : (i += LANES) {
+    const av: @Vector(LANES, T) = a[i..][0..LANES].*;
+    const bv: @Vector(LANES, T) = b[i..][0..LANES].*;
+    dst[i..][0..LANES].* = switch (op) {
+      .Add => calc.AddOp.f(av, bv), .Sub => calc.SubOp.f(av, bv), .Mul => calc.MulOp.f(av, bv),
+      .Min => calc.MinOp.f(av, bv), .Max => calc.MaxOp.f(av, bv), .Col => unreachable,
+    };
+  }
+  while (i < w) : (i += 1) dst[i] = switch (op) {
+    .Add => calc.AddOp.f(a[i], b[i]), .Sub => calc.SubOp.f(a[i], b[i]), .Mul => calc.MulOp.f(a[i], b[i]),
+    .Min => calc.MinOp.f(a[i], b[i]), .Max => calc.MaxOp.f(a[i], b[i]), .Col => unreachable,
+  };
+}
+
+fn runChunk(comptime T: type, vm: *VM, k: *const Kernel, ops: []const V, n: usize) V {
+  const out = N(T).init(vm.alloc, n) catch return V{ .err = .memory };
+  const dst = out.slice();
+  const vk: K = if (T == f32) .F else .I;
+  var scratch: [KDEPTH][BLOCK]T = undefined;   // intermediate results (L1-resident)
+  var stack: [KDEPTH]Src = undefined;
+  const last = k.code.len - 1;                  // root op index (kernel is non-empty, nbin>=2)
+  var base: usize = 0;
+  while (base < n) : (base += BLOCK) {
+    const w = @min(BLOCK, n - base);
+    var sp: usize = 0;
+    for (k.code, 0..) |ins, ci| switch (ins.op) {
+      .Col => {
+        const o = ops[ins.arg];
+        if (o.tag() == vk) {
+          stack[sp] = .{ .leaf = ins.arg };              // vector: read direct, no copy
+        } else {                                          // scalar: splat into scratch once
+          const s = @field(o, if (T == f32) "f" else "i");
+          for (scratch[sp][0..w]) |*d| d.* = s;
+          stack[sp] = .{ .scr = @intCast(sp) };
+        }
+        sp += 1;
+      },
+      inline .Add, .Sub, .Mul, .Min, .Max => |op| {
+        sp -= 1;
+        const a = srcSlice(T, stack[sp - 1], ops, &scratch, base, w);
+        const b = srcSlice(T, stack[sp], ops, &scratch, base, w);
+        // The root op writes straight to the output block; interiors to scratch.
+        const target = if (ci == last) dst[base .. base + w] else scratch[sp - 1][0..w];
+        binInto(T, op, target, a, b);
+        stack[sp - 1] = .{ .scr = @intCast(sp - 1) };
+      },
+    };
+  }
+  return V.wrap(vk, out);
+}
+
+// Replay the postfix program with the normal dyadic dispatch — identical to the
+// unfused chain. Used for any operand shape the fast path doesn't cover.
+fn fallback(vm: *VM, k: *const Kernel, ops: []const V) V {
+  var st: [KDEPTH]V = undefined;
+  var sp: usize = 0;
+  for (k.code) |ins| {
+    if (ins.op == .Col) { st[sp] = ops[ins.arg].ref(); sp += 1; continue; }
+    const o2: Op2 = switch (ins.op) {
+      .Add => .@"+", .Sub => .@"-", .Mul => .@"*", .Min => .@"&", .Max => .@"|", .Col => unreachable,
+    };
+    sp -= 1;
+    const r = dispatch.dispatch2(vm, o2, st[sp - 1], st[sp]);
+    st[sp - 1].deinit(vm.alloc);
+    st[sp].deinit(vm.alloc);
+    st[sp - 1] = r;
+  }
+  return st[0];
+}
 
 pub fn reduceZip(vm: *VM, red: Op1, bin: Op2, x: V, y: V) V {
   const xt = x.tag();

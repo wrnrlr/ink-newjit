@@ -351,6 +351,7 @@ pub const VM = struct {
         .Apply1    => try vm.doApply(1, call1),
         .Apply2    => try vm.doApply(2, call2),
         .ReduceZip => try vm.doApply(2, reduceZip),
+        .FusedMap  => try vm.doFusedMap(),
         .Apply3    => try vm.doApply(3, call3),
         .Apply4    => try vm.doApply(4, call4),
         .Return => try vm.doReturn(),
@@ -532,6 +533,21 @@ pub const VM = struct {
   fn reduceZip(vm: *VM, op: u8, a: []V) V {
     const bin: opmod.Op2 = @enumFromInt(vm.readByte());
     return fuse.reduceZip(vm, @enumFromInt(op), bin, a[0], a[1]);
+  }
+
+  // Fused elementwise map: reads a u16 kernel index, consumes the kernel's
+  // `ncol` leaf operands off the stack, evaluates the postfix program in one
+  // chunked pass, and pushes the result.
+  fn doFusedMap(vm: *VM) !void {
+    const idx = vm.read16();
+    const k = &vm.current_chunk.kernels.items[idx];
+    const ncol: usize = k.ncol;
+    const s = vm.size();
+    const args = vm.stack[s - ncol .. s];
+    const r = fuse.fusedMap(vm, k, args);
+    for (args) |*v| v.deinit(vm.alloc);
+    vm.stack_len = s - ncol;
+    try vm.push(r);
   }
 
   // Generic apply: reads opcode, takes top N args, calls F, cleans up, pushes result.

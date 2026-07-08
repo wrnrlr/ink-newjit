@@ -11,12 +11,33 @@ pub const OpCode = enum(u8) {
 	AssignGlobal, AssignLocal,
 	ListAssignGlobal, ListAssignLocal,
 	Jump, JumpFalse, JumpTrue,
-	Apply1, Apply2, Apply3, Apply4, ReduceZip,
+	Apply1, Apply2, Apply3, Apply4, ReduceZip, FusedMap,
 	Return, Call, TailCall, Apply,
 	MakeList, MakePartial,
 	Derive, Command,
 
 	pub const COUNT = @typeInfo(OpCode).@"enum".fields.len;
+};
+
+// ── Fused elementwise map (FusedMap) ──────────────────────────────────────────
+// A maximal pointwise-arithmetic subtree (e.g. `a+b*c`) collapses into one
+// FusedMap: the leaves (a,b,c) are the stack operands, and `code` is a POSTFIX
+// program evaluated once per cache-sized chunk so intermediates never touch DRAM
+// (see doc/research/columnar-execution.md). The runtime takes a fast @Vector path
+// when every operand is a same-type numeric vector/scalar, else replays the
+// program via normal dispatch — so results are always identical to the unfused
+// chain. Arithmetic only for now (float-closed + i32); comparisons/bool excluded.
+pub const KOp = enum(u8) {
+  Col,                            // arg = operand index; push that leaf's lane
+  Add, Sub, Mul, Min, Max,        // dyadic type-closed (i32 and f32): pop 2, push 1
+};
+
+pub const KInsn = struct { op: KOp, arg: u8 = 0 };
+
+pub const Kernel = struct {
+  code: []KInsn,   // postfix program; last value left on the eval stack is the result
+  ncol: u8,        // number of stack operands (leaves)
+  depth: u8,       // max eval-stack depth needed
 };
 
 pub const BasicBlock = struct {
@@ -28,6 +49,7 @@ pub const Chunk = struct {
   alloc: Allocator,
   code: ArrayList(u8),
   constants: ArrayList(V),
+  kernels: std.ArrayListUnmanaged(Kernel) = .empty,
   blocks: Blocks = .empty,
 
   pub fn init(alloc: Allocator) !Chunk {
@@ -40,9 +62,19 @@ pub const Chunk = struct {
 
   pub fn deinit(self: *Chunk) void {
     for (self.constants.items) |*v| v.deinit(self.alloc);
+    for (self.kernels.items) |k| self.alloc.free(k.code);
     self.code.deinit(self.alloc);
     self.constants.deinit(self.alloc);
+    self.kernels.deinit(self.alloc);
     self.blocks.deinit(self.alloc);
+  }
+
+  // Store a kernel (dupes the code slice into chunk memory), return its index.
+  pub fn addKernel(self: *Chunk, code: []const KInsn, ncol: u8, depth: u8) !u16 {
+    const idx: u16 = @intCast(self.kernels.items.len);
+    const owned = try self.alloc.dupe(KInsn, code);
+    try self.kernels.append(self.alloc, .{ .code = owned, .ncol = ncol, .depth = depth });
+    return idx;
   }
 
   // Scan bytecode and populate self.blocks with basic block boundaries.
@@ -131,7 +163,7 @@ pub const Chunk = struct {
     const op: OpCode = @enumFromInt(code[ip]);
     return switch (op) {
       .Nop, .Gap, .Drop, .Return, .Command => 1,
-      .Const, .Int, .Jump, .JumpFalse, .JumpTrue, .MakePartial, .ReduceZip => 3,
+      .Const, .Int, .Jump, .JumpFalse, .JumpTrue, .MakePartial, .ReduceZip, .FusedMap => 3,
       .Global, .AssignGlobal => 3,                            // opcode + u16 global index
       .ListAssignGlobal => 2 + 2 * @as(usize, code[ip + 1]),  // count byte + n u16 indices
       .ListAssignLocal => 2 + @as(usize, code[ip + 1]),       // count byte + n u8 indices

@@ -1,7 +1,43 @@
 # An X100-style chunked/fused execution backend for Ink
 
-**Status:** design note / not implemented. Companion to the papers in `doc/papers/`
+**Status:** Increment 0 (SIMD kernels) shipped. Increment 1 (FusedMap) implemented — arithmetic
+`+ - * & |` chains. Companion to the papers in `doc/papers/`
 (`boncz_2005_x100.md`, `williams_2009_roofline.md`, `zukowski_2006_cache_compression.md`).
+
+## FusedMap — measured outcome (Increment 1, implemented)
+
+A maximal pointwise subtree of the type-closed dyadic ops (`+ - * & |`) collapses in the compiler
+(`fuseMaps` pass in `compiler.zig`) into one `FusedMap` bytecode op carrying a postfix kernel
+program (`tape.zig` `KOp`/`Kernel`); `fuse.zig` `fusedMap` evaluates it. Key implementation facts
+learned the hard way:
+
+- **An interpreted per-SIMD-register eval stack is a loss** — a runtime-indexed `[N]@Vector` stack
+  spills to memory every op, so `a+b*c` ran *slower* than the already-SIMD materialized path
+  (2877 vs 475 ms/1k). The fix is the real X100 shape: interpret over **cache-blocks** (256 elems),
+  each `KOp` a tight SIMD loop over L1 scratch, dispatch amortized over the block.
+- **Read vector leaves directly** (no copy into scratch) and **write the root op straight to the
+  output** — only genuine intermediates get a scratch block. Without these, block interpreting still
+  lost to materialized-SIMD.
+- Fast `@Vector` path when all operands are same-type (f32 or i32) vectors/scalars; **exact
+  dispatch replay fallback** otherwise, so results are byte-identical to the unfused chain (verified
+  vs ngn/k incl. i32 wrap, mixed types, length errors, right-associativity).
+
+Measured (1e6 f32, ms/1k, fusion off vs on):
+
+| expression | SIMD-materialized | FusedMap | speedup |
+|---|---|---|---|
+| `a+b*c` (2 op) | 585 | 550 | 1.06× |
+| `a+b*c+d` (3 op) | 730 | 700 | 1.04× |
+| `(a+b)*(a-b)+c` (4 op, repeated leaves) | 1188 | 730 | **1.63×** |
+
+Takeaway: once the leaf kernels are SIMD (Increment 0), fusion's win is **proportional to the
+materialization it removes** — marginal for short chains that COW already handles well, but large
+(1.6×+) for complex expressions with repeated subterms / long chains. It never regresses (the
+root-to-output write closed the short-chain gap). The full register-fusion ceiling (~357 for
+`a+b*c`) needs straight-line codegen (JIT) — deliberately out of scope; the block interpreter
+captures the DRAM-traffic win without emitting machine code.
+
+Deferred: monadic ops, `%`/`sqrt`/transcendentals (need f32 typing), comparisons/bool trees.
 
 This note sketches what it would take to add MonetDB/X100-style **vectorized (batch-at-a-time)
 execution** to Ink's runtime: process pointwise verb chains over cache-sized chunks with adjacent

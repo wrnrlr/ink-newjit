@@ -167,6 +167,15 @@ fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, o
         const bin: Op2 = @enumFromInt(code[ip]); ip += 1;
         try out.print("ReduceZip   {s} {s}\n", .{ red.toString(), bin.toString() });
       },
+      .FusedMap => {
+        const idx = readU16(code, ip); ip += 2;
+        if (idx < chunk.kernels.items.len) {
+          const k = chunk.kernels.items[idx];
+          try out.print("FusedMap    k{d} ncol={d} depth={d} [", .{ idx, k.ncol, k.depth });
+          for (k.code) |ins| try out.print("{s}{d} ", .{ @tagName(ins.op), ins.arg });
+          try out.print("]\n", .{});
+        } else try out.print("FusedMap    k{d}\n", .{idx});
+      },
       .Call     => { const n = code[ip]; ip += 1; try out.print("Call        {d}\n", .{n}); },
       .TailCall => { const n = code[ip]; ip += 1; try out.print("TailCall    {d}\n", .{n}); },
       .Apply    => { const n = code[ip]; ip += 1; try out.print("Apply       {d}\n", .{n}); },
