@@ -8,12 +8,42 @@ const ArrayFlags = @import("../../noun/array.zig").ArrayFlags;
 const h = @import("helper.zig");
 
 // Handles any combination where at least one side is .L.
+//
+// Fast path (xk is .L): if x has rc==1 and spare capacity (cap-len ≥ yl) we
+// write y into x.dataPtr()[xl..xl+yl] and bump x.len, returning x.ref(). This
+// makes `x = x, e` loops over general lists O(N) amortised — the same trick
+// homoKernel uses for typed vectors — so `,/x` (raze) no longer copies the
+// growing accumulator on every step (was O(N²)).
 fn listKernel(comptime xk: K, comptime yk: K) VM.Dyad {
   return &struct {
+    // Copy y's elements as boxed V slots into dst (which must have room for yl).
+    inline fn ycopy(dst: []V, y: V) void {
+      const yl: usize = y.len();
+      if (comptime yk == .L) {
+        for (y.L.slice(), dst[0..yl]) |v, *r| r.* = v.ref();
+      } else if (comptime yk.isVec()) {
+        for (0..yl) |i| dst[i] = y.at(i);
+      } else {
+        dst[0] = y.ref();
+      }
+    }
     fn f(vm: *VM, x: V, y: V) V {
       const xl: usize = x.len();
       const yl: usize = y.len();
-      const res = N(V).init(vm.alloc, xl + yl) catch return V{ .err = .memory };
+      // In-place append when x is a general list we own exclusively.
+      if (comptime xk == .L) {
+        const xn = x.L;
+        if (xn.ptr.rc == 1 and !xn.hasFlag(ArrayFlags.immutable) and
+            @as(usize, xn.ptr.cap) - @as(usize, xn.ptr.len) >= yl) {
+          ycopy(xn.dataPtr()[xl .. xl + yl], y);
+          xn.ptr.len = @intCast(xl + yl);
+          return x.ref();
+        }
+      }
+      const target = xl + yl;
+      // 2× target headroom (rounded up by initWithCap) so the next yl appends
+      // land in the in-place branch above.
+      const res = N(V).initWithCap(vm.alloc, target, target *| 2) catch return V{ .err = .memory };
       if (comptime xk == .L) {
         for (x.L.slice(), res.slice()[0..xl]) |v, *r| r.* = v.ref();
       } else if (comptime xk.isVec()) {
@@ -21,13 +51,7 @@ fn listKernel(comptime xk: K, comptime yk: K) VM.Dyad {
       } else {
         res.slice()[0] = x.ref();
       }
-      if (comptime yk == .L) {
-        for (y.L.slice(), res.slice()[xl..]) |v, *r| r.* = v.ref();
-      } else if (comptime yk.isVec()) {
-        for (0..yl) |i| res.slice()[xl + i] = y.at(i);
-      } else {
-        res.slice()[xl] = y.ref();
-      }
+      ycopy(res.slice()[xl..], y);
       return V{ .L = res };
     }
   }.f;
