@@ -44,8 +44,8 @@ pub fn fusedMap(vm: *VM, k: *const Kernel, ops: []const V) V {
     else => return fallback(vm, k, ops),
   };
   if (!vec) return fallback(vm, k, ops);          // all-scalar: rare, let dispatch handle
-  if (allF) return runChunk(f32, vm, k, ops, n);
-  if (allI and !k.float_only) return runChunk(i32, vm, k, ops, n);
+  if (allF) return if (k.result_bool) runChunk(f32, true, vm, k, ops, n) else runChunk(f32, false, vm, k, ops, n);
+  if (allI and !k.float_only) return if (k.result_bool) runChunk(i32, true, vm, k, ops, n) else runChunk(i32, false, vm, k, ops, n);
   return fallback(vm, k, ops);                     // mixed i32/f32, or float-only op on i32
 }
 
@@ -63,10 +63,17 @@ inline fn srcSlice(comptime T: type, e: Src, ops: []const V, scratch: *[KDEPTH][
 // One dyadic op on scalars or @Vector lanes. Float-only ops are comptime-guarded
 // for i32 (never reached — the classifier falls those kernels back to dispatch).
 inline fn binOp(comptime T: type, comptime op: KOp, x: anytype, y: @TypeOf(x)) @TypeOf(x) {
+  const Tx = @TypeOf(x);
   return switch (op) {
     .Add => calc.AddOp.f(x, y), .Sub => calc.SubOp.f(x, y), .Mul => calc.MulOp.f(x, y),
     .Min => calc.MinOp.f(x, y), .Max => calc.MaxOp.f(x, y),
     .Div => if (comptime T == f32) calc.DivOp.f(x, y) else unreachable,
+    // Comparisons yield 0/1 in T (so downstream Min/Max = AND/OR, arithmetic promotes).
+    .Lt, .Gt, .Eq => blk: {
+      const m = switch (op) { .Lt => x < y, .Gt => x > y, .Eq => x == y, else => unreachable };
+      if (comptime @typeInfo(Tx) == .vector) break :blk @select(T, m, @as(Tx, @splat(1)), @as(Tx, @splat(0)));
+      break :blk if (m) @as(T, 1) else @as(T, 0);
+    },
     else => unreachable,
   };
 }
@@ -103,8 +110,9 @@ inline fn monInto(comptime T: type, comptime op: KOp, dst: []T, a: []const T) vo
   while (i < w) : (i += 1) dst[i] = monOp(T, op, a[i]);
 }
 
-fn runChunk(comptime T: type, vm: *VM, k: *const Kernel, ops: []const V, n: usize) V {
-  const out = N(T).init(vm.alloc, n) catch return V{ .err = .memory };
+fn runChunk(comptime T: type, comptime OutBool: bool, vm: *VM, k: *const Kernel, ops: []const V, n: usize) V {
+  const OutT = if (OutBool) bool else T;
+  const out = N(OutT).init(vm.alloc, n) catch return V{ .err = .memory };
   const dst = out.slice();
   const vk: K = if (T == f32) .F else .I;
   var scratch: [KDEPTH][BLOCK]T = undefined;   // intermediate results (L1-resident)
@@ -126,24 +134,28 @@ fn runChunk(comptime T: type, vm: *VM, k: *const Kernel, ops: []const V, n: usiz
         }
         sp += 1;
       },
-      inline .Add, .Sub, .Mul, .Min, .Max, .Div => |op| {
+      inline .Add, .Sub, .Mul, .Min, .Max, .Div, .Lt, .Gt, .Eq => |op| {
         sp -= 1;
         const a = srcSlice(T, stack[sp - 1], ops, &scratch, base, w);
         const b = srcSlice(T, stack[sp], ops, &scratch, base, w);
-        // The root op writes straight to the output block; interiors to scratch.
-        const target = if (ci == last) dst[base .. base + w] else scratch[sp - 1][0..w];
+        // Non-bool root writes straight to output; else (and all interiors) to scratch.
+        const target = if (comptime OutBool) scratch[sp - 1][0..w] else (if (ci == last) dst[base .. base + w] else scratch[sp - 1][0..w]);
         binInto(T, op, target, a, b);
         stack[sp - 1] = .{ .scr = @intCast(sp - 1) };
       },
       inline .Neg, .Sqr, .Sqrt, .Exp, .Log, .Sin, .Cos => |op| {
         const a = srcSlice(T, stack[sp - 1], ops, &scratch, base, w);
-        const target = if (ci == last) dst[base .. base + w] else scratch[sp - 1][0..w];
+        const target = if (comptime OutBool) scratch[sp - 1][0..w] else (if (ci == last) dst[base .. base + w] else scratch[sp - 1][0..w]);
         monInto(T, op, target, a);
         stack[sp - 1] = .{ .scr = @intCast(sp - 1) };
       },
     };
+    if (OutBool) {   // convert the 0/1 result block to a B column
+      const res = srcSlice(T, stack[0], ops, &scratch, base, w);
+      for (0..w) |i| dst[base + i] = res[i] != 0;
+    }
   }
-  return V.wrap(vk, out);
+  return V.wrap(if (OutBool) .B else vk, out);
 }
 
 // Replay the postfix program with the normal dyadic dispatch — identical to the
@@ -163,7 +175,8 @@ fn fallback(vm: *VM, k: *const Kernel, ops: []const V) V {
     },
     else => {
       const o2: Op2 = switch (ins.op) {
-        .Add => .@"+", .Sub => .@"-", .Mul => .@"*", .Min => .@"&", .Max => .@"|", .Div => .@"%", else => unreachable,
+        .Add => .@"+", .Sub => .@"-", .Mul => .@"*", .Min => .@"&", .Max => .@"|", .Div => .@"%",
+        .Lt => .@"<", .Gt => .@">", .Eq => .@"=", else => unreachable,
       };
       sp -= 1;
       const r = dispatch.dispatch2(vm, o2, st[sp - 1], st[sp]);

@@ -50,8 +50,21 @@ single ops are already SIMD). Expanded-op measurements (1e6, ms/1k, off→on):
 | `(sin a)+cos b` (compute-bound) | 644 | 588 | 1.10× |
 
 The transcendental case gains least because it is compute-bound (Roofline: the ALU, not DRAM, is
-the limit), exactly where fusion helps least. Deferred: comparisons/bool trees (change element
-type mid-tree → need a bool-typed kernel path), `abs` (int branch not `@Vector`-safe).
+the limit), exactly where fusion helps least.
+
+**Comparison / boolean trees** now fuse too (`< > =` plus `&`/`|` combining them). The trick that
+kept the kernel monomorphic: booleans flow as **0/1 in the numeric type T**, so `<` yields 0/1 and
+`&`/`|` (already `Min`/`Max`) compute AND/OR on them — no separate bool eval stack. The compiler
+marks `Kernel.result_bool` when the root is structurally boolean (a comparison, or `&`/`|` of two
+boolean subtrees) and the runtime converts the final 0/1 block to a `B` column. Verified vs ngn/k
+and fused-vs-off (incl. mixed `(a+b)<c` and bool feeding arithmetic `(a<b)+c`); output type is a
+real `B`, not float 0/1. Measured (1e6 f32, off→on): `(a<b)&c<d` 1108→695 (1.59×),
+`((a<b)&c<d)|(a>c)&b>d` 2630→1022 (2.57×); `(0<a)&a<9` ~break-even (bool masks are 1 byte, so a
+one-column repeated tree has little materialization to remove). Bool-column `&`/`|` on `B` leaves
+(not comparison-derived) still fall back — those hit the fast path only via comparisons.
+
+Deferred: `abs` (int branch not `@Vector`-safe); the shared-leaf restriction (a value used twice
+in the tree bails rather than emitting a Dup).
 
 This note sketches what it would take to add MonetDB/X100-style **vectorized (batch-at-a-time)
 execution** to Ink's runtime: process pointwise verb chains over cache-sized chunks with adjacent

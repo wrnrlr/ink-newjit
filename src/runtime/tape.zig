@@ -31,21 +31,27 @@ pub const KOp = enum(u8) {
   Col,                            // arg = operand index; push that leaf's lane
   Add, Sub, Mul, Min, Max,        // dyadic type-closed (i32 and f32): pop 2, push 1
   Div,                            // dyadic float-only (%): pop 2, push 1
+  Lt, Gt, Eq,                     // dyadic comparison: pop 2 numeric, push 0/1 (in T)
   Neg, Sqr,                       // monadic type-closed: pop 1, push 1
   Sqrt, Exp, Log, Sin, Cos,       // monadic float-only: pop 1, push 1
 
   pub fn arity(k: KOp) u8 { return switch (k) { .Col => 0, .Neg, .Sqr, .Sqrt, .Exp, .Log, .Sin, .Cos => 1, else => 2 }; }
   // Ops only valid on f32 (a kernel containing any of these can't run the i32 fast path).
   pub fn floatOnly(k: KOp) bool { return switch (k) { .Div, .Sqrt, .Exp, .Log, .Sin, .Cos => true, else => false }; }
+  pub fn isCmp(k: KOp) bool { return switch (k) { .Lt, .Gt, .Eq => true, else => false }; }
 };
 
 pub const KInsn = struct { op: KOp, arg: u8 = 0 };
 
+// Booleans are carried through the kernel as 0/1 in the numeric type T (so `<`
+// yields 0/1 and `&`/`|` = Min/Max compute AND/OR); if `result_bool` the final
+// block is converted to a B column on the way out.
 pub const Kernel = struct {
   code: []KInsn,   // postfix program; last value left on the eval stack is the result
   ncol: u8,        // number of stack operands (leaves)
   depth: u8,       // max eval-stack depth needed
   float_only: bool = false,  // contains a float-only op → i32 operands must fall back
+  result_bool: bool = false, // root is a comparison / all-bool logic → output a B column
 };
 
 pub const BasicBlock = struct {
@@ -78,10 +84,10 @@ pub const Chunk = struct {
   }
 
   // Store a kernel (dupes the code slice into chunk memory), return its index.
-  pub fn addKernel(self: *Chunk, code: []const KInsn, ncol: u8, depth: u8, float_only: bool) !u16 {
+  pub fn addKernel(self: *Chunk, code: []const KInsn, ncol: u8, depth: u8, float_only: bool, result_bool: bool) !u16 {
     const idx: u16 = @intCast(self.kernels.items.len);
     const owned = try self.alloc.dupe(KInsn, code);
-    try self.kernels.append(self.alloc, .{ .code = owned, .ncol = ncol, .depth = depth, .float_only = float_only });
+    try self.kernels.append(self.alloc, .{ .code = owned, .ncol = ncol, .depth = depth, .float_only = float_only, .result_bool = result_bool });
     return idx;
   }
 
