@@ -1,4 +1,4 @@
-/ test/earth.k — a texture-mapped 3D Earth (PBR-ish, equirectangular UV)
+/ A texture-mapped 3D Earth (PBR-ish, equirectangular UV)
 /
 / An icosphere (icosahedron subdivided 4× → 5120 triangles) sampled from an
 / equirectangular Earth day-map. Each vertex carries a UV computed from its

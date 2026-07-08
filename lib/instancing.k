@@ -11,6 +11,10 @@
 / so non-instancing scenes stay under the 256-global ceiling). `so` is from gpu.k.
 UploadMesh:    so 2: (`gpuUploadMesh;  2)   / (verts_F; handle) → geom : geometry → persistent vertex buffer
 DrawInstanced: so 2: (`gpuDrawInstanced;3)  / (geom; count; inst_F) → 0 : one draw of `count` instances
+gpuDrawInstancedT0: so 2: (`gpuDrawInstancedT;3)  / (geom; (count;texH)_I; inst_F) → 0
+/ Instanced draw sampling one shared texture at @group(1) (InstancedVertexShader
+/ + FragmentShaderTex). All instances sample the same texture.
+DrawInstancedT: {[geom; num; tex; inst] gpuDrawInstancedT0[geom; (num;tex); inst]}
 
 / Per-shader scratch (set per compile, read by the top-level loadInstMember —
 / ink lambdas can't see enclosing locals): storage struct member-0 const id,

@@ -31,6 +31,7 @@ pub const InstCall = struct {
   inst_count: u32,
   data_off: usize, // f32 offset into the renderer's inst_data
   data_len: usize, // f32 length of this draw's instance block
+  tex_idx: i32 = -1, // shared texture bound at @group(1) for all instances, or -1
 };
 
 // A retained mesh drawn once with a per-draw uniform block (@group(0)) and an
@@ -423,7 +424,7 @@ pub const Renderer = struct {
   // Queue an instanced draw of a retained geometry: `data` is the flat vec4[]
   // instance block (inst_count instances × K vec4s).  The block is appended to
   // this frame's instance buffer on a 64-float boundary.
-  pub fn queueInstanced(self: *Renderer, geom_idx: usize, inst_count: u32, data: []const f32) !void {
+  pub fn queueInstanced(self: *Renderer, geom_idx: usize, inst_count: u32, data: []const f32, tex_idx: i32) !void {
   if (geom_idx >= self.geom_buffers.items.len) return;
   // pad to the storage-binding alignment so this block starts 256-byte aligned
   const rem = self.inst_data.items.len % INST_ALIGN_FLOATS;
@@ -431,7 +432,7 @@ pub const Renderer = struct {
   const off = self.inst_data.items.len;
   try self.inst_data.appendSlice(self.allocator, data);
   try self.inst_calls.append(self.allocator, .{
-    .geom_idx = geom_idx, .inst_count = inst_count, .data_off = off, .data_len = data.len,
+    .geom_idx = geom_idx, .inst_count = inst_count, .data_off = off, .data_len = data.len, .tex_idx = tex_idx,
   });
   }
 
@@ -573,6 +574,18 @@ pub const Renderer = struct {
       const bg = self.device.createBindGroup(.{ .layout = self.mesh_inst_bgl, .entry_count = be.len, .entries = &be });
       defer bg.release();
       pass.setBindGroup(0, bg, null);
+      // A textured instanced pipeline binds one shared texture at @group(1).
+      var tex_bg: ?wgpu.BindGroup = null;
+      if (ic.tex_idx >= 0 and @as(usize, @intCast(ic.tex_idx)) < self.tex_views.items.len) {
+      const ti: usize = @intCast(ic.tex_idx);
+      const tbe = [_]wgpu.BindGroupEntry{
+        .{ .binding = 0, .texture_view = self.tex_views.items[ti], .size = 0 },
+        .{ .binding = 1, .sampler = self.tex_samplers.items[ti], .size = 0 },
+      };
+      tex_bg = self.device.createBindGroup(.{ .layout = self.mesh_tex_bgl, .entry_count = tbe.len, .entries = &tbe });
+      pass.setBindGroup(1, tex_bg.?, null);
+      }
+      defer if (tex_bg) |b| b.release();
       pass.draw(gcount, ic.inst_count, 0, 0);
     }
   }

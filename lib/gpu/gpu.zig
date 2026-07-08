@@ -1198,8 +1198,13 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
       j += wc;
     }
   }
-  if (has_texture) has_uniform = true;
-  const layout = if (has_instance)
+  if (has_texture and !has_instance) has_uniform = true;
+  const layout = if (has_instance and has_texture)
+    r.device.createPipelineLayout(.{
+      .bind_group_layout_count = 2,
+      .bind_group_layouts = &[_]wgpu.BindGroupLayout{ r.mesh_inst_bgl, r.mesh_tex_bgl },
+    })
+  else if (has_instance)
     r.device.createPipelineLayout(.{
       .bind_group_layout_count = 1,
       .bind_group_layouts = &[_]wgpu.BindGroupLayout{r.mesh_inst_bgl},
@@ -1276,7 +1281,31 @@ export fn gpuDrawInstanced(geom_k: ?K, count_k: ?K, data_k: ?K) callconv(.c) ?K 
   const df = kfp(data_k) orelse return ki(0);
   const dn = kn(data_k);
   if (dn <= 0) return ki(0);
-  r.queueInstanced(@intCast(geom - 1), @intCast(count), df[0..@intCast(dn)]) catch {};
+  r.queueInstanced(@intCast(geom - 1), @intCast(count), df[0..@intCast(dn)], -1) catch {};
+  return ki(0);
+}
+
+// ── gpuDrawInstancedT ───────────────────────────────────────────────────────────
+//
+// Like gpuDrawInstanced, plus one shared texture (@group(1)) for every instance.
+// ct_k packs (count; texHandle) as a 2-int vector (the FFI tops out at arity 3).
+// The pipeline must be an InstancedVertexShader + FragmentShaderTex mesh; all
+// instances sample the same texture (e.g. a shared atlas). See lib/instancing.k.
+
+export fn gpuDrawInstancedT(geom_k: ?K, ct_k: ?K, data_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const geom = ki_val(geom_k);
+  if (geom <= 0 or geom > r.geom_buffers.items.len) return ki(0);
+  const cp = kip(ct_k) orelse return ki(0);
+  if (kn(ct_k) < 2) return ki(0);
+  const count = cp[0];
+  const tex_handle = cp[1];
+  if (count <= 0) return ki(0);
+  const df = kfp(data_k) orelse return ki(0);
+  const dn = kn(data_k);
+  if (dn <= 0) return ki(0);
+  const tex_idx: i32 = if (tex_handle > 0) tex_handle - 1 else -1;
+  r.queueInstanced(@intCast(geom - 1), @intCast(count), df[0..@intCast(dn)], tex_idx) catch {};
   return ki(0);
 }
 
@@ -1488,6 +1517,7 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuMesh", @ptrCast(&gpuMesh), 2);
   r.k_register("gpuUploadMesh", @ptrCast(&gpuUploadMesh), 2);
   r.k_register("gpuDrawInstanced", @ptrCast(&gpuDrawInstanced), 3);
+  r.k_register("gpuDrawInstancedT", @ptrCast(&gpuDrawInstancedT), 3);
   r.k_register("gpuDrawMesh", @ptrCast(&gpuDrawMesh), 2);
   r.k_register("gpuDrawMeshU", @ptrCast(&gpuDrawMeshU), 3);
   r.k_register("gpuDrawMeshT", @ptrCast(&gpuDrawMeshT), 3);
