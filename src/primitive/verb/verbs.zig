@@ -146,12 +146,29 @@ pub fn _CmpSame(comptime op: Op2, comptime f: type, comptime ts: []const K) type
 
 // ── Inlined from tiny single-file verbs ──────────────────────────────────────
 
-const LessOp  = struct { pub fn f(x: anytype, y: @TypeOf(x)) bool { return x < y; } };
-const MoreOp  = struct { pub fn f(x: anytype, y: @TypeOf(x)) bool { return x > y; } };
-const EqualOp = struct { pub fn f(x: anytype, y: @TypeOf(x)) bool { return x == y; } };
+// Comparison result type: scalar bool, or a bool-vector when x is a @Vector (so
+// the SIMD kernels in helper.zig can run x<y / x==y on lanes). `pub const simd`
+// marks them vector-safe; the gate there also restricts to i32/f32/bool operands,
+// so char/symbol/u32 comparisons keep taking the scalar path.
+fn CmpR(comptime T: type) type {
+  const info = @typeInfo(T);
+  return if (info == .vector) @Vector(info.vector.len, bool) else bool;
+}
+const LessOp  = struct { pub const simd = {}; pub fn f(x: anytype, y: @TypeOf(x)) CmpR(@TypeOf(x)) { return x < y; } };
+const MoreOp  = struct { pub const simd = {}; pub fn f(x: anytype, y: @TypeOf(x)) CmpR(@TypeOf(x)) { return x > y; } };
+const EqualOp = struct { pub const simd = {}; pub fn f(x: anytype, y: @TypeOf(x)) CmpR(@TypeOf(x)) { return x == y; } };
 const NotOp   = struct {
-  pub fn f(x: anytype) bool {
+  pub const simd = {};
+  pub fn f(x: anytype) CmpR(@TypeOf(x)) {
     const T = @TypeOf(x);
+    if (comptime @typeInfo(T) == .vector) {
+      const Ch = @typeInfo(T).vector.child;
+      const z: T = @splat(if (Ch == f32) 0.0 else 0);
+      const iszero = x == z;
+      // isNan(x) == (x != x); `~` of NaN is true, matching the scalar path.
+      if (comptime Ch == f32) return @select(bool, iszero, iszero, x != x);
+      return iszero;
+    }
     if (T == i32) return x == 0;
     if (T == f32) return x == 0.0 or std.math.isNan(x);
     unreachable;

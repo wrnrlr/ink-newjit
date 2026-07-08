@@ -170,6 +170,79 @@ fn Caster(comptime C: type) type {
   };
 }
 
+// ── SIMD elementwise kernels ──────────────────────────────────────────────────
+// Explicit @Vector loops for the pointwise ops. LLVM does not auto-vectorize the
+// scalar loops in ReleaseFast (measured), so these are the only way we get
+// NEON/SSE. Gated on: the op is @Vector-safe (marked `pub const simd`), and the
+// cast type C, result type R, and operand element types are all i32/f32/bool
+// (char/symbol/u32 columns fall back to scalar). C→R may differ — arithmetic has
+// R==C, comparisons have R==bool (F.f returns a bool-vector on vector operands),
+// bool `&`/`|` have C==R==bool. Results are bit-identical to the scalar path
+// because the same op body runs on the lanes; the scalar tail handles n%8.
+const LANES = 8;
+
+inline fn numOk(comptime T: type) bool { return T == i32 or T == f32; }
+inline fn simdT(comptime T: type) bool { return T == i32 or T == f32 or T == bool; }
+
+inline fn vcast(comptime From: type, comptime To: type, v: @Vector(LANES, From)) @Vector(LANES, To) {
+  if (From == To) return v;
+  if (From == i32 and To == f32) return @floatFromInt(v);
+  if (From == f32 and To == i32) return @intFromFloat(v);
+  if (From == bool and To == i32) return @intFromBool(v);
+  if (From == bool and To == f32) return @floatFromInt(@as(@Vector(LANES, i32), @intFromBool(v)));
+  @compileError("vcast: unsupported vector cast");
+}
+
+// dst may alias xs (in-place); safe since dst[i] depends only on src[i].
+inline fn vmap1(comptime XT: type, comptime C: type, comptime R: type, comptime F: type, dst: []R, xs: []const XT) void {
+  const cast = Caster(C).cast;
+  var i: usize = 0;
+  const n = dst.len;
+  while (i + LANES <= n) : (i += LANES) {
+    const xv: @Vector(LANES, XT) = xs[i..][0..LANES].*;
+    dst[i..][0..LANES].* = F.f(vcast(XT, C, xv));
+  }
+  while (i < n) : (i += 1) dst[i] = F.f(cast(xs[i]));
+}
+
+inline fn vmap2(comptime XT: type, comptime YT: type, comptime C: type, comptime R: type, comptime F: type, dst: []R, xs: []const XT, ys: []const YT) void {
+  const cast = Caster(C).cast;
+  var i: usize = 0;
+  const n = dst.len;
+  while (i + LANES <= n) : (i += LANES) {
+    const xv: @Vector(LANES, XT) = xs[i..][0..LANES].*;
+    const yv: @Vector(LANES, YT) = ys[i..][0..LANES].*;
+    dst[i..][0..LANES].* = F.f(vcast(XT, C, xv), vcast(YT, C, yv));
+  }
+  while (i < n) : (i += 1) dst[i] = F.f(cast(xs[i]), cast(ys[i]));
+}
+
+// scalar-left ⊕ vector-right; `xc` is the left operand already cast to C.
+inline fn vmapSV(comptime YT: type, comptime C: type, comptime R: type, comptime F: type, dst: []R, xc: C, ys: []const YT) void {
+  const cast = Caster(C).cast;
+  const sp: @Vector(LANES, C) = @splat(xc);
+  var i: usize = 0;
+  const n = dst.len;
+  while (i + LANES <= n) : (i += LANES) {
+    const yv: @Vector(LANES, YT) = ys[i..][0..LANES].*;
+    dst[i..][0..LANES].* = F.f(sp, vcast(YT, C, yv));
+  }
+  while (i < n) : (i += 1) dst[i] = F.f(xc, cast(ys[i]));
+}
+
+// vector-left ⊕ scalar-right; `yc` is the right operand already cast to C.
+inline fn vmapVS(comptime XT: type, comptime C: type, comptime R: type, comptime F: type, dst: []R, xs: []const XT, yc: C) void {
+  const cast = Caster(C).cast;
+  const sp: @Vector(LANES, C) = @splat(yc);
+  var i: usize = 0;
+  const n = dst.len;
+  while (i + LANES <= n) : (i += LANES) {
+    const xv: @Vector(LANES, XT) = xs[i..][0..LANES].*;
+    dst[i..][0..LANES].* = F.f(vcast(XT, C, xv), sp);
+  }
+  while (i < n) : (i += 1) dst[i] = F.f(cast(xs[i]), yc);
+}
+
 fn kernelAtom(
   comptime xk: K,
   comptime C: type,
@@ -192,16 +265,18 @@ fn kernelVec(
   vm: *VM, x: V,
 ) V {
   const XT = xk.backing();
-  const cast = Caster(C).cast;
   const vx = @field(x, @tagName(xk));
+  const simd = comptime @hasDecl(Impl, "simd") and simdT(C) and simdT(R) and simdT(XT);
   if (comptime R == XT and rk == xk) {
     if (vx.ptr.rc == 1) {
-      for (vx.slice()) |*xv| xv.* = Impl.f(cast(xv.*));
+      if (comptime simd) vmap1(XT, C, R, Impl, vx.slice(), vx.slice())
+      else for (vx.slice()) |*xv| xv.* = Impl.f(Caster(C).cast(xv.*));
       return x.ref();
     }
   }
   const out = N(R).init(vm.alloc, vx.ptr.len) catch return V{ .err = .memory };
-  for (vx.slice(), out.slice()) |xv, *r| r.* = Impl.f(cast(xv));
+  if (comptime simd) vmap1(XT, C, R, Impl, out.slice(), vx.slice())
+  else for (vx.slice(), out.slice()) |xv, *r| r.* = Impl.f(Caster(C).cast(xv));
   return V.wrap(rk, out);
 }
 
@@ -217,6 +292,10 @@ fn dyadKernel(
   const R  = ResultType(XT, YT);
   const rk = resultKind2(xk, yk, ResultType);
   const cast = Caster(C).cast;
+  // SIMD applies when the op is @Vector-safe and the cast type, result type, and
+  // the participating vector operands are all i32/f32/bool-backed. Atom operands
+  // are cast to C and splatted; the scalar atom⊕atom case is unaffected.
+  const simd = comptime @hasDecl(Impl, "simd") and simdT(C) and simdT(R);
   return &struct {
     fn kernel(vm: *VM, x: V, y: V) V {
       if (comptime xk.isAtom() and yk.isAtom()) {
@@ -224,49 +303,59 @@ fn dyadKernel(
         return V.wrap(rk, r);
       }
       if (comptime xk.isAtom() and yk.isVec()) {
+        const useSimd = comptime simd and simdT(YT);
         const xv = cast(V.unwrap(x, xk));
         const vy = V.unwrap(y, yk);
         if (comptime R == YT and rk == yk) {
           if (vy.ptr.rc == 1) {
-            for (vy.slice()) |*yv| yv.* = Impl.f(xv, cast(yv.*));
+            if (comptime useSimd) vmapSV(YT, C, R, Impl, vy.slice(), xv, vy.slice())
+            else for (vy.slice()) |*yv| yv.* = Impl.f(xv, cast(yv.*));
             return y.ref();
           }
         }
         const out = N(R).init(vm.alloc, vy.ptr.len) catch return V{ .err = .memory };
-        for (vy.slice(), out.slice()) |yv, *r| r.* = Impl.f(xv, cast(yv));
+        if (comptime useSimd) vmapSV(YT, C, R, Impl, out.slice(), xv, vy.slice())
+        else for (vy.slice(), out.slice()) |yv, *r| r.* = Impl.f(xv, cast(yv));
         return V.wrap(rk, out);
       }
       if (comptime xk.isVec() and yk.isAtom()) {
+        const useSimd = comptime simd and simdT(XT);
         const vx = V.unwrap(x, xk);
         const yv = cast(V.unwrap(y, yk));
         if (comptime R == XT and rk == xk) {
           if (vx.ptr.rc == 1) {
-            for (vx.slice()) |*xv| xv.* = Impl.f(cast(xv.*), yv);
+            if (comptime useSimd) vmapVS(XT, C, R, Impl, vx.slice(), vx.slice(), yv)
+            else for (vx.slice()) |*xv| xv.* = Impl.f(cast(xv.*), yv);
             return x.ref();
           }
         }
         const out = N(R).init(vm.alloc, vx.ptr.len) catch return V{ .err = .memory };
-        for (vx.slice(), out.slice()) |xv, *r| r.* = Impl.f(cast(xv), yv);
+        if (comptime useSimd) vmapVS(XT, C, R, Impl, out.slice(), vx.slice(), yv)
+        else for (vx.slice(), out.slice()) |xv, *r| r.* = Impl.f(cast(xv), yv);
         return V.wrap(rk, out);
       }
       if (comptime xk.isVec() and yk.isVec()) {
+        const useSimd = comptime simd and simdT(XT) and simdT(YT);
         const vx = @field(x, @tagName(xk));
         const vy = @field(y, @tagName(yk));
         if (vx.ptr.len != vy.ptr.len) return V{ .err = .length };
         if (comptime R == XT and rk == xk) {
           if (vx.ptr.rc == 1) {
-            for (vx.slice(), vy.slice()) |*xv, yv| xv.* = Impl.f(cast(xv.*), cast(yv));
+            if (comptime useSimd) vmap2(XT, YT, C, R, Impl, vx.slice(), vx.slice(), vy.slice())
+            else for (vx.slice(), vy.slice()) |*xv, yv| xv.* = Impl.f(cast(xv.*), cast(yv));
             return x.ref();
           }
         }
         if (comptime R == YT and rk == yk) {
           if (vy.ptr.rc == 1) {
-            for (vx.slice(), vy.slice()) |xv, *yv| yv.* = Impl.f(cast(xv), cast(yv.*));
+            if (comptime useSimd) vmap2(XT, YT, C, R, Impl, vy.slice(), vx.slice(), vy.slice())
+            else for (vx.slice(), vy.slice()) |xv, *yv| yv.* = Impl.f(cast(xv), cast(yv.*));
             return y.ref();
           }
         }
         const out = N(R).init(vm.alloc, vx.ptr.len) catch return V{ .err = .memory };
-        for (vx.slice(), vy.slice(), out.slice()) |xv, yv, *r| r.* = Impl.f(cast(xv), cast(yv));
+        if (comptime useSimd) vmap2(XT, YT, C, R, Impl, out.slice(), vx.slice(), vy.slice())
+        else for (vx.slice(), vy.slice(), out.slice()) |xv, yv, *r| r.* = Impl.f(cast(xv), cast(yv));
         return V.wrap(rk, out);
       }
       return V{ .err = .@"type" };

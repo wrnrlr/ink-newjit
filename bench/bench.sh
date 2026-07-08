@@ -1,4 +1,12 @@
 
+echo "ngn/k fused (a+b ; a+b*c ; (a+b)*(a-b)+c)"
+~/.k/k bench/fused.k 100000
+~/.k/k bench/fused.k 1000000
+
+echo "ink fused (a+b ; a+b*c ; (a+b)*(a-b)+c)  -- FusedMap target"
+./zig-out/bin/ink bench/fused.k 100000
+./zig-out/bin/ink bench/fused.k 1000000
+
 echo "ngn/k temp"
 ~/.k/k bench/temp.k
 
