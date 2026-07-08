@@ -13,47 +13,20 @@
 /   h: audio.load "gun.wav"                  / a controllable voice
 /   audio.start h                            / (re)trigger it
 /   audio.music "song.mp3"                   / streamed, looping background music
-/   audio.pos[h; 3 0 -2f]                    / place it in 3D; move the listener
-/   audio.listener 0 0 0f                    /   with audio.listener each frame
+/   audio.pos[h; 3 0 -2]                     / place it in 3D; move the listener
+/   audio.listener 0 0 0                     /   with audio.listener each frame
 /   audio.rec.start[]                        / start the mic
 /   s: audio.rec.read[]                      / drain samples (call in your loop)
 /   audio.save["take.wav"; audio.rec.channels[]; audio.rec.rate[]; s]
 /   clip: audio.decode "take.wav"            / load a file to a PCM dict
-
-\d audio play load stream music start stop unload state playing volume pitch pan loop seek pos vel dir spatial range master listener listenerDir listenerVel listenerUp decode encode save init
-  / Explicitly bring the engine up (otherwise it starts on first play/load).
-  init: {[] ffi.Init 0}
-
-  / Playing state as a labelled dict: `playing`atEnd`cursor`length (PCM frames).
-  state: {[h] `playing`atEnd`cursor`length ! ffi.st0 h}
-
-  / 1b while a voice is actively producing sound.
-  playing: {[h] 1=(ffi.st0 h)0}
-
-  / Streamed, looping background music started immediately.  Returns the handle.
-  music: {[path] h: ffi.stream path; ffi.loop[h;1]; start h; h}
-
-  / Save interleaved f32 PCM (as from audio.rec.read / audio.decode`data) to WAV.
-  save: {[path;channels;rate;data] ffi.encode (path; channels; rate; data)}
-
-/ ── recording (poll audio.rec.read from your loop) ──────────────────────────
-\d audio.rec open start stop info read channels rate available
-  / Start the mic at mono @ 48 kHz (the common case).
-  start: {[] ffi.recStart 1 48000}
-  / Start the mic with an explicit channel count and sample rate.
-  open:  {[channels;rate] ffi.recStart (channels; rate)}
-  stop:  {[] ffi.recStop 0}
-  / Labelled capture info: `channels`rate`available (available is in frames).
-  info:  {[] `channels`rate`available ! ffi.recInfo 0}
-  channels:  {[] (ffi.recInfo 0)0}
-  rate:      {[] (ffi.recInfo 0)1}
-  available: {[] (ffi.recInfo 0)2}
-  / Drain all buffered frames.  Interleaved F (length = frames*channels).
-  read:  {[] ffi.recRead 0}
+/
+/ Layout: raw one-to-one FFI bindings live in the `audio.ffi` sub-namespace; the
+/ public `audio.*` names below are thin aliases (pass-throughs) or convenience
+/ wrappers over them.  `audio.ffi` is declared first so those aliases resolve.
 
 \d audio.ffi
   so: "./zig-out/lib/libaudio.dylib"
-  
+
   Init:        so 2:(`AudioInit;      1)
   play:        so 2:(`AudioPlay;      1)   / "path" → 1b   one-shot fire-and-forget
   load:        so 2:(`AudioLoad;      1)   / "path" → h    (decoded into memory)
@@ -79,7 +52,70 @@
   listenerUp:  so 2:(`AudioListenerUp;  1) / xyz_F → 1b
   decode:      so 2:(`AudioDecode;    1)   / "path" → `channels`rate`frames`data
   encode:      so 2:(`AudioEncode;    1)   / (path;channels;rate;data) → 1b
-  recStart:    so 2:(`AudioRecStart; 1)   / (channels;rate)_I → 1b
-  recStop:     so 2:(`AudioRecStop;  1)   / x → 1b
-  recInfo:     so 2:(`AudioRecInfo;  1)   / x → (channels;rate;available)_I
-  recRead:     so 2:(`AudioRecRead;  1)   / maxFrames → F (interleaved)
+  recStart:    so 2:(`AudioRecStart;  1)   / (channels;rate)_I → 1b
+  recStop:     so 2:(`AudioRecStop;   1)   / x → 1b
+  recInfo:     so 2:(`AudioRecInfo;   1)   / x → (channels;rate;available)_I
+  recRead:     so 2:(`AudioRecRead;   1)   / maxFrames → F (interleaved)
+
+/ ── public API ─────────────────────────────────────────────────────────────
+\d audio play load stream music start stop unload state playing volume pitch pan loop seek pos vel dir spatial range master listener listenerDir listenerVel listenerUp decode encode save init
+
+  / Pass-throughs (parent→child `ffi.` refs; audio.ffi is already loaded above).
+  play:        ffi.play
+  load:        ffi.load
+  stream:      ffi.stream
+  start:       ffi.start
+  stop:        ffi.stop
+  unload:      ffi.unload
+  master:      ffi.master
+  volume:      ffi.volume
+  pitch:       ffi.pitch
+  pan:         ffi.pan
+  loop:        ffi.loop
+  seek:        ffi.seek
+  pos:         ffi.pos
+  vel:         ffi.vel
+  dir:         ffi.dir
+  spatial:     ffi.spatial
+  range:       ffi.range
+  listener:    ffi.listener
+  listenerDir: ffi.listenerDir
+  listenerVel: ffi.listenerVel
+  listenerUp:  ffi.listenerUp
+  decode:      ffi.decode
+  encode:      ffi.encode
+
+  / Explicitly bring the engine up (otherwise it starts on first play/load).
+  init: {[] ffi.Init 0}
+
+  / Playing state as a labelled dict: `playing`atEnd`cursor`length (PCM frames).
+  state: {[h] `playing`atEnd`cursor`length ! ffi.st0 h}
+
+  / 1b while a voice is actively producing sound.
+  playing: {[h] 1=(ffi.st0 h)0}
+
+  / Streamed, looping background music started immediately.  Returns the handle.
+  music: {[path] h: ffi.stream path; ffi.loop[h;1]; ffi.start h; h}
+
+  / Save interleaved f32 PCM (as from audio.rec.read / audio.decode`data) to WAV.
+  save: {[path;channels;rate;data] ffi.encode (path; channels; rate; data)}
+
+/ ── recording (poll audio.rec.read from your loop) ──────────────────────────
+/ NB: these are a sibling of audio.ffi, so relative `ffi.` doesn't resolve here —
+/ reach the bindings by their fully-qualified `audio.ffi.` names.
+\d audio.rec open start stop info read channels rate available
+
+  / Start the mic at mono @ 48 kHz (the common case).
+  start: {[] audio.ffi.recStart 1 48000}
+  / Start the mic with an explicit channel count and sample rate.
+  open:  {[channels;rate] audio.ffi.recStart (channels; rate)}
+  stop:  {[] audio.ffi.recStop 0}
+  / Labelled capture info: `channels`rate`available (available is in frames).
+  info:  {[] `channels`rate`available ! audio.ffi.recInfo 0}
+  channels:  {[] (audio.ffi.recInfo 0)0}
+  rate:      {[] (audio.ffi.recInfo 0)1}
+  available: {[] (audio.ffi.recInfo 0)2}
+  / Drain all buffered frames.  Interleaved F (length = frames*channels).
+  read:  {[] audio.ffi.recRead 0}
+
+\d
