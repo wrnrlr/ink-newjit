@@ -146,8 +146,7 @@ function nav(active, root) {
     group("Library",
       [item("lib/index.html", "Overview", active === "lib/index" || active.startsWith("lib/"))]),
     group("Demos",
-      [item("index.html#demos", "Gallery", false),
-       ...demos.map((d) => item(`demo/${d.name}.html`, d.name, active === `demo/${d.name}`))]),
+      [...demos.map((d) => item(`demo/${d.name}.html`, d.name, active === `demo/${d.name}`))]),
   ].join("");
 }
 

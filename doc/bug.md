@@ -111,3 +111,22 @@ Surfaced while stress-testing the (now-fixed) global limit. Same shape as the ol
 256-global issue: widen the `MakeList` count if it ever bites in practice (build the
 list incrementally / via `,/` over chunks as a workaround). Low priority — literals
 that large are rare.
+
+---
+
+## 7. `walk.k` value-iteration amend returns `!type` (pre-existing)
+
+`test/walk.k` section 2 (the plain N×N relaxation) errors:
+
+```k
+N:100;(r;c):1+!2#N-2;I:c+N*r;W:((-N),N,1,-1)+/:I
+f:{@[x;I;:;1.+.25*+/x@W]}
+f (N*N)#0.0        / → !type
+```
+
+`W` builds fine (`#W` ok); the fault is inside `f` — the amend
+`@[x;I;:;1.+.25*+/x@W]` (index-list gather `x@W`, reduce, then amend-assign back
+at indices `I`). Present in both the scalar and SIMD builds, so unrelated to the
+SIMD kernels. Sections 1 (random walk) and 3 (D4-symmetric iteration) run fine.
+Not yet triaged — likely the `@[x;idxvec;:;computed-vec]` amend path or the
+`x@W`/`+/:` gather over a matrix of indices.

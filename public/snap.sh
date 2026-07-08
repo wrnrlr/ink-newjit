@@ -19,17 +19,14 @@ fi
 
 # demo:capture-time(seconds)  — curated visual demos that render a frame
 DEMOS="
-circle:1
-drawing:1
-demo:1.5
-cloth:1.5
+cloth:3.5
 sphere:1
 eyes:0.6
-drive:1
 sword:1
 scene:1
 pbr:1
 typeset:0.5
+earth:0.5
 "
 
 captured=0

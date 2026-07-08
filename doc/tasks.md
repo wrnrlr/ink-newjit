@@ -31,9 +31,6 @@ Add skills for the following task profiles.
   - snapshot tool
 - Ink native module development
 
-## Earth Example
-Make an example of a 3D rendering of the earth.
-
 ## Flip int `` +3 ``
 What do do with flipping an int?
 There is no implementation for the flip verb for scalars.
