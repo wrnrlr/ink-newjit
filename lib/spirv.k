@@ -17,7 +17,7 @@
 / Lambdas can have local bindings: {[uv] d: sqrt[...]; (d;d;d;1.0)}
 FragmentShader: {[ioTypes; fn]
   Nid::Nfixed; Buf::(); Con::()
-  TexVar:: 0                        / no texture section (see FragmentShaderTex)
+  TexVars:: ()                      / no texture section (see FragmentShaderTexN)
 
   lam: lamOf fn
   argNames: lamArgs lam
@@ -46,12 +46,13 @@ FragmentShader: {[ioTypes; fn]
   buildMod[outId; inVarIds; inTys; inPtrs; outPtr; locs]
 }
 
-/ ── FragmentShaderTex[ioTypes; fn] → SPIR-V word list ───────────────────────
-/ Like FragmentShader, plus one sampled 2-D texture bound at @group(1): binding 0
-/ is the image (`texture_2d<f32>`), binding 1 the sampler.  The body samples it
-/ with  sample[uv]  → v4 (see compSample).  The host wires the texture with
-/ gpuTexture + DrawMeshT.  Interpolate the UV as a v2 vertex varying.
-FragmentShaderTex: {[ioTypes; fn]
+/ ── FragmentShaderTexN[ioTypes; nTex; fn] → SPIR-V word list ────────────────
+/ Like FragmentShader, plus nTex sampled 2-D textures at @group(1): image k is at
+/ binding k, and one shared sampler at binding nTex.  The body samples texture k
+/ with  sample[k; uv]  → v4 (sample[uv] is texture 0).  See compSample.  The host
+/ wires the textures with gpuTexture + DrawMeshT/DrawGeomT/DrawInstancedT, passing
+/ a list of texture handles.  Interpolate the UV(s) as v2 vertex varyings.
+FragmentShaderTexN: {[ioTypes; nTex; fn]
   Nid::Nfixed; Buf::(); Con::()
 
   lam: lamOf fn
@@ -68,9 +69,12 @@ FragmentShaderTex: {[ioTypes; fn]
   outId: newId[]
 
   / Allocate the texture ids and publish them so compSample can emit the loads.
+  / One image type / sampler type shared by all nTex images; one var per image
+  / plus one shared sampler var.
   Timg2::   newId[]; Tsamp2::  newId[]; TsImg::   newId[]
   PUCimg::  newId[]; PUCsamp:: newId[]
-  TexVar::  newId[]; SampVar:: newId[]
+  TexVars:: {[x] newId[]}' !nTex
+  SampVar:: newId[]
 
   loadedPairs: inVarIds loadOnePair' inTySyms
   env: argNames!loadedPairs
@@ -84,6 +88,9 @@ FragmentShaderTex: {[ioTypes; fn]
   locs: !#argNames
   buildMod[outId; inVarIds; inTys; inPtrs; outPtr; locs]
 }
+
+/ Single-texture convenience: sample[uv] samples the one texture.
+FragmentShaderTex: {[ioTypes; fn] FragmentShaderTexN[ioTypes; 1; fn]}
 
 / ── VertexShader[inTypes; varyTypes; fn] → SPIR-V word list ─────────────────
 / inTypes:   dict argName→typeSym  (vertex attribute inputs, e.g. `pos`nor!`v3`v3)
@@ -357,17 +364,22 @@ UTuni:: 0
 UPv4::  0
 UVar::  0
 
-/ FragmentShaderTex texture scratch: SPIR-V ids for the sampled image / sampler
-/ types, their UniformConstant pointer types, and the two global variables.
-/ TexVar>0 signals buildMod to emit the texture section; set per shader, read by
-/ compSample (ink lambdas can't see enclosing locals, so these live as globals).
+/ FragmentShaderTexN texture scratch: SPIR-V ids for the shared image / sampler
+/ types, their UniformConstant pointer types, one variable per image, and the one
+/ shared sampler variable.  #TexVars>0 signals buildMod to emit the texture
+/ section; set per shader, read by compSample (ink lambdas can't see enclosing
+/ locals, so these live as globals).
 Timg2::   0   / OpTypeImage (f32, 2D, sampled)
 Tsamp2::  0   / OpTypeSampler
 TsImg::   0   / OpTypeSampledImage
 PUCimg::  0   / OpTypePointer UniformConstant → image
 PUCsamp:: 0   / OpTypePointer UniformConstant → sampler
-TexVar::  0   / OpVariable UniformConstant image   (set 1, binding 0)
-SampVar:: 0   / OpVariable UniformConstant sampler (set 1, binding 1)
+TexVars:: ()  / OpVariable UniformConstant image ids (image k at set 1 binding k)
+SampVar:: 0   / OpVariable UniformConstant sampler (set 1, binding nTex)
+/ Per-image decoration / variable words (read global TexVars; ink lambdas can't
+/ close over locals, so these are top-level each-helpers).
+texDecOne: {[k] (0x00040047;TexVars[k];34;1),(0x00040047;TexVars[k];33;k)}
+texVarOne: {[k] (0x0004003B;PUCimg;TexVars[k];0)}
 
 newId:   {[] r:Nid; Nid::Nid+1; r}
 emitCon: {[ws] Con,:: ,ws}
@@ -539,13 +551,15 @@ compApplyIdx: {[fr; i; env; oty]
   (r; `f32)
 }
 
-/ sample[uv] → texture lookup: OpSampledImage(image,sampler) then
-/ OpImageSampleImplicitLod at the interpolated uv. Only valid inside a
-/ FragmentShaderTex (TexVar/… hold the sampled-image ids). Returns v4.
+/ sample[uv] (texture 0) or sample[k; uv] (texture k, k a literal) → texture
+/ lookup: OpSampledImage(image_k, shared sampler) then OpImageSampleImplicitLod at
+/ the interpolated uv. Only valid inside a FragmentShaderTexN. Returns v4.
 compSample: {[i; env]
   args: kF[i;`arg]
-  uv: compNode[args[0]; env; `v2]
-  li: newId[]; emitBuf opLoad[Timg2; li; TexVar]
+  two:  1<#args
+  ti:   $[two; kVal args[0]; 0]                   / texture index (literal) or 0
+  uv:   compNode[$[two; args[1]; args[0]]; env; `v2]
+  li: newId[]; emitBuf opLoad[Timg2; li; TexVars[ti]]
   ls: newId[]; emitBuf opLoad[Tsamp2; ls; SampVar]
   ci: newId[]; emitBuf (0x00050056; TsImg; ci; li; ls)      / OpSampledImage 86
   r:  newId[]; emitBuf (0x00050057; Tv4; r; ci; uv[0])       / OpImageSampleImplicitLod 87
@@ -660,10 +674,11 @@ buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
   / DescriptorSet/Binding decorations, image/sampler/sampled-image types + their
   / UniformConstant pointers, and the two global variables.  All one line each —
   / newlines inside (...) inject null words.
-  hasTex:   TexVar>0
-  decTex:   $[hasTex; (0x00040047;TexVar;34;1),(0x00040047;TexVar;33;0),(0x00040047;SampVar;34;1),(0x00040047;SampVar;33;1); !0]
+  nTex:     #TexVars
+  hasTex:   nTex>0
+  decTex:   $[hasTex; (,/texDecOne'!nTex),(0x00040047;SampVar;34;1),(0x00040047;SampVar;33;nTex); !0]
   texTypes: $[hasTex; (0x00090019;Timg2;Tf32;1;0;0;0;1;0),(0x0002001A;Tsamp2),(0x0003001B;TsImg;Timg2),(0x00040020;PUCimg;0;Timg2),(0x00040020;PUCsamp;0;Tsamp2); !0]
-  varTex:   $[hasTex; (0x0004003B;PUCimg;TexVar;0),(0x0004003B;PUCsamp;SampVar;0); !0]
+  varTex:   $[hasTex; (,/texVarOne'!nTex),(0x0004003B;PUCsamp;SampVar;0); !0]
 
   label: newId[]
   fn:  (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
