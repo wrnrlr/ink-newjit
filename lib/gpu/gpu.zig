@@ -514,6 +514,7 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
 
   const renderer = Renderer.init(alloc, gctx.device, gctx.queue, pipeline, bgl, 2_000_000) catch return ki(-1);
   defer renderer.deinit();
+  defer resetResidentCompute(alloc); // free resident buffers/pipelines before the device dies
 
   // Depth texture: created/resized lazily each time the framebuffer size changes.
   var depth_tex_opt: ?wgpu.Texture = null;
@@ -1048,6 +1049,290 @@ export fn gpuCompute2(words_k: ?K, in1_k: ?K, in2_k: ?K) callconv(.c) ?K {
   return result_k;
 }
 
+// ── Resident compute: persistent buffers + cached pipelines + bare dispatch ─────
+//
+// gpuCompute above recompiles the shader, recreates the pipeline, and
+// re-uploads + reads-back on every call — fine for a one-shot map, ruinous for an
+// iterative solver (Jacobi/SOR/XPBD do hundreds of steps). This path keeps the
+// data resident on the GPU across dispatches, and the pipeline compiled once:
+//   gpuBufferNew[F]                   -> bufHandle   alloc + upload a storage buffer
+//   gpuBufferRead[bufHandle]          -> F           read it back
+//   gpuBufferWrite[bufHandle; F]      -> 0           overwrite contents
+//   gpuComputeNew[spirv; nbind]       -> pipeHandle  compile + cache the pipeline
+//   gpuDispatch[pipe; bufHandles; nT] -> 0           bind buffers, dispatch, NO readback
+// Ping-pong (a->b, b->a) is a plain k loop over gpuDispatch swapping the buffer
+// list; you pay one readback at the end instead of one per iteration. Buffers are
+// bound at contiguous bindings 0..nbind-1 in the order given, matching the layout
+// compCompute/compCompute2 emit (in=0, out=1, in2=2).
+//
+// Handles are 1-based indices into these parallel registries. They live for the
+// process (the device outlives the window loop); we don't recycle slots.
+var g_sbuf:  std.ArrayList(wgpu.Buffer) = .empty;          // resident storage buffers
+var g_ssize: std.ArrayList(u64) = .empty;                  // byte size per buffer (parallel)
+var g_cpipe: std.ArrayList(wgpu.ComputePipeline) = .empty; // cached compute pipelines
+var g_cbgl:  std.ArrayList(wgpu.BindGroupLayout) = .empty; // bind-group layout per pipeline (parallel)
+var g_cnb:   std.ArrayList(usize) = .empty;                // storage bindings per pipeline (parallel)
+
+const MAX_BIND = 8;
+
+// Release all resident buffers + cached pipelines and reset the registries. Runs
+// at gpuRun teardown (while the device is still alive) so a later window.run
+// starts fresh and the DebugAllocator sees no leak.
+fn resetResidentCompute(alloc: std.mem.Allocator) void {
+  for (g_sbuf.items) |b| b.release();
+  for (g_cpipe.items) |p| p.release();
+  for (g_cbgl.items) |l| l.release();
+  g_sbuf.deinit(alloc);  g_ssize.deinit(alloc);
+  g_cpipe.deinit(alloc); g_cbgl.deinit(alloc); g_cnb.deinit(alloc);
+  g_sbuf = .empty;  g_ssize = .empty;
+  g_cpipe = .empty; g_cbgl = .empty; g_cnb = .empty;
+}
+
+// gpuBufferNew[F] -> handle : create a resident storage buffer seeded from F.
+export fn gpuBufferNew(data_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const fp = kfp(data_k) orelse return ki(0);
+  const n = kn(data_k);
+  if (n <= 0) return ki(0);
+  const nn: usize = @intCast(n);
+  const byte_size: u64 = @intCast(nn * @sizeOf(f32));
+  const buf = r.device.createBuffer(.{
+    .label = "sbuf",
+    .usage = .{ .storage = true, .copy_dst = true, .copy_src = true },
+    .size = byte_size,
+    .mapped_at_creation = .false,
+  });
+  r.queue.writeBuffer(buf, 0, f32, fp[0..nn]);
+  g_sbuf.append(r.allocator, buf) catch { buf.release(); return ki(0); };
+  g_ssize.append(r.allocator, byte_size) catch return ki(0);
+  return ki(@intCast(g_sbuf.items.len));
+}
+
+// gpuBufferWrite[handle; F] -> 0 : overwrite an existing buffer (clamped to its size).
+export fn gpuBufferWrite(h_k: ?K, data_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const h = ki_val(h_k);
+  if (h <= 0 or h > g_sbuf.items.len) return ki(0);
+  const idx: usize = @intCast(h - 1);
+  const fp = kfp(data_k) orelse return ki(0);
+  const n = kn(data_k);
+  if (n <= 0) return ki(0);
+  var nn: usize = @intCast(n);
+  const cap: usize = @intCast(g_ssize.items[idx] / @sizeOf(f32));
+  if (nn > cap) nn = cap;
+  r.queue.writeBuffer(g_sbuf.items[idx], 0, f32, fp[0..nn]);
+  return ki(0);
+}
+
+// gpuBufferRead[handle] -> F : copy a resident buffer back to a float vector.
+export fn gpuBufferRead(h_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const h = ki_val(h_k);
+  if (h <= 0 or h > g_sbuf.items.len) return ki(0);
+  const idx: usize = @intCast(h - 1);
+  const byte_size = g_ssize.items[idx];
+  const n: usize = @intCast(byte_size / @sizeOf(f32));
+  const staging = r.device.createBuffer(.{
+    .label = "sbuf_stage",
+    .usage = .{ .map_read = true, .copy_dst = true },
+    .size = byte_size,
+    .mapped_at_creation = .false,
+  });
+  defer staging.release();
+  const enc = r.device.createCommandEncoder(.{ .label = "bufread" });
+  defer enc.release();
+  enc.copyBufferToBuffer(g_sbuf.items[idx], 0, staging, 0, byte_size);
+  const cmd = enc.finish(.{});
+  defer cmd.release();
+  r.queue.submit(&[_]wgpu.CommandBuffer{cmd});
+  var done: bool = false;
+  staging.mapAsync(.{ .read = true }, 0, byte_size, computeMapCallback, &done);
+  while (!done) r.device.tick();
+  const out = KF(@intCast(n)) orelse { staging.unmap(); return ki(0); };
+  const of = kfp(out) orelse { ku(out); staging.unmap(); return ki(0); };
+  if (staging.getConstMappedRange(f32, 0, n)) |d| @memcpy(of[0..n], d);
+  staging.unmap();
+  return out;
+}
+
+// gpuBufferReadI[handle] -> I : same as gpuBufferRead but returns an int vector.
+// For atomic accumulators (StencilScatter) whose bytes are i32, not f32.
+export fn gpuBufferReadI(h_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const h = ki_val(h_k);
+  if (h <= 0 or h > g_sbuf.items.len) return ki(0);
+  const idx: usize = @intCast(h - 1);
+  const byte_size = g_ssize.items[idx];
+  const n: usize = @intCast(byte_size / @sizeOf(i32));
+  const staging = r.device.createBuffer(.{
+    .label = "sbuf_stagei",
+    .usage = .{ .map_read = true, .copy_dst = true },
+    .size = byte_size,
+    .mapped_at_creation = .false,
+  });
+  defer staging.release();
+  const enc = r.device.createCommandEncoder(.{ .label = "bufreadi" });
+  defer enc.release();
+  enc.copyBufferToBuffer(g_sbuf.items[idx], 0, staging, 0, byte_size);
+  const cmd = enc.finish(.{});
+  defer cmd.release();
+  r.queue.submit(&[_]wgpu.CommandBuffer{cmd});
+  var done: bool = false;
+  staging.mapAsync(.{ .read = true }, 0, byte_size, computeMapCallback, &done);
+  while (!done) r.device.tick();
+  const out = KI(@intCast(n)) orelse { staging.unmap(); return ki(0); };
+  const op = kip(out) orelse { ku(out); staging.unmap(); return ki(0); };
+  if (staging.getConstMappedRange(i32, 0, n)) |d| @memcpy(op[0..n], d);
+  staging.unmap();
+  return out;
+}
+
+// gpuComputeNew[spirv; nbind] -> handle : compile a compute pipeline once and cache
+// it with its bind-group layout. nbind = number of storage bindings the shader
+// declares at bindings 0..nbind-1 (2 for compCompute, 3 for compCompute2).
+export fn gpuComputeNew(words_k: ?K, nbind_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const ip = kip(words_k) orelse return ki(0);
+  const n_words = kn(words_k);
+  if (n_words < 5) return ki(0);
+  var nbind = ki_val(nbind_k);
+  if (nbind < 1) nbind = 2;
+  if (nbind > MAX_BIND) nbind = MAX_BIND;
+  const nb: usize = @intCast(nbind);
+  const words: [*]const u32 = @ptrCast(@alignCast(ip));
+
+  const spirv_desc = ShaderModuleSPIRVDescriptor{
+    .chain = .{ .next = null, .struct_type = .shader_module_spirv_descriptor },
+    .code_size = @intCast(n_words),
+    .code = words,
+  };
+  const cs = r.device.createShaderModule(.{ .next_in_chain = @ptrCast(&spirv_desc) });
+  defer cs.release();
+
+  var entries: [MAX_BIND]wgpu.BindGroupLayoutEntry = undefined;
+  var i: usize = 0;
+  while (i < nb) : (i += 1)
+    entries[i] = .{ .binding = @intCast(i), .visibility = .{ .compute = true }, .buffer = .{ .binding_type = .storage } };
+  const bgl = r.device.createBindGroupLayout(.{ .entry_count = @intCast(nb), .entries = &entries });
+
+  const pl = r.device.createPipelineLayout(.{
+    .bind_group_layout_count = 1,
+    .bind_group_layouts = &[_]wgpu.BindGroupLayout{bgl},
+  });
+  defer pl.release();
+
+  const pipe = r.device.createComputePipeline(.{
+    .layout = pl,
+    .compute = .{ .module = cs, .entry_point = "main" },
+  });
+  g_cpipe.append(r.allocator, pipe) catch { pipe.release(); bgl.release(); return ki(0); };
+  g_cbgl.append(r.allocator, bgl) catch return ki(0);
+  g_cnb.append(r.allocator, nb) catch return ki(0);
+  return ki(@intCast(g_cpipe.items.len));
+}
+
+// gpuDispatch[pipe; bufHandles; nThreads] -> 0 : bind the resident buffers (in
+// binding order) and run ceil(nThreads/64) workgroups. Records + submits one
+// compute pass; no readback (results stay on the GPU for the next dispatch).
+export fn gpuDispatch(pipe_k: ?K, bufs_k: ?K, nthreads_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const ph = ki_val(pipe_k);
+  if (ph <= 0 or ph > g_cpipe.items.len) return ki(0);
+  const pidx: usize = @intCast(ph - 1);
+  const nbind = g_cnb.items[pidx];
+  const bp = kip(bufs_k) orelse return ki(0);
+  const ngiven: usize = @intCast(kn(bufs_k));
+  if (ngiven < nbind) return ki(0);
+  const nthreads = ki_val(nthreads_k);
+  if (nthreads <= 0) return ki(0);
+
+  var entries: [MAX_BIND]wgpu.BindGroupEntry = undefined;
+  var i: usize = 0;
+  while (i < nbind) : (i += 1) {
+    const h = bp[i];
+    if (h <= 0 or h > g_sbuf.items.len) return ki(0);
+    const sidx: usize = @intCast(h - 1);
+    entries[i] = .{ .binding = @intCast(i), .buffer = g_sbuf.items[sidx], .size = g_ssize.items[sidx] };
+  }
+  const bg = r.device.createBindGroup(.{ .layout = g_cbgl.items[pidx], .entry_count = @intCast(nbind), .entries = &entries });
+  defer bg.release();
+
+  const enc = r.device.createCommandEncoder(.{ .label = "dispatch" });
+  defer enc.release();
+  {
+    const pass = enc.beginComputePass(null);
+    defer pass.release();
+    pass.setPipeline(g_cpipe.items[pidx]);
+    pass.setBindGroup(0, bg, null);
+    const groups: u32 = @intCast((@as(usize, @intCast(nthreads)) + 63) / 64);
+    pass.dispatchWorkgroups(groups, 1, 1);
+    pass.end();
+  }
+  const cmd = enc.finish(.{});
+  defer cmd.release();
+  r.queue.submit(&[_]wgpu.CommandBuffer{cmd});
+  return ki(0);
+}
+
+// gpuDispatchLoop[pipe; packed; reps] -> 0 : record `reps` compute passes into ONE
+// encoder+submit, alternating two bind-group configs — config A on even passes,
+// config B on odd. This is the batched-iteration primitive: the WebGPU queue
+// inserts a barrier between passes, so pass k's storage writes are visible to
+// pass k+1 with no host round-trip. Two uses fall out of the A/B alternation:
+//   Jacobi ping-pong : A=(in,out,params) B=(out,in,params) — swap the buffers.
+//   red-black SOR    : A=(state,paramsR) B=(state,paramsB) — swap parity params.
+// packed (int vector) = (nThreads; A-handles×nbind; B-handles×nbind); pipe's nbind
+// says how many. Result lands in whichever buffer the last pass wrote (caller reads it).
+export fn gpuDispatchLoop(pipe_k: ?K, packed_k: ?K, reps_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const ph = ki_val(pipe_k);
+  if (ph <= 0 or ph > g_cpipe.items.len) return ki(0);
+  const pidx: usize = @intCast(ph - 1);
+  const nbind = g_cnb.items[pidx];
+  const pp = kip(packed_k) orelse return ki(0);
+  const plen: usize = @intCast(kn(packed_k));
+  if (plen < 1 + 2 * nbind) return ki(0);
+  const nthreads = pp[0];
+  if (nthreads <= 0) return ki(0);
+  const reps = ki_val(reps_k);
+  if (reps <= 0) return ki(0);
+
+  var entA: [MAX_BIND]wgpu.BindGroupEntry = undefined;
+  var entB: [MAX_BIND]wgpu.BindGroupEntry = undefined;
+  var i: usize = 0;
+  while (i < nbind) : (i += 1) {
+    const ha = pp[1 + i];
+    const hb = pp[1 + nbind + i];
+    if (ha <= 0 or ha > g_sbuf.items.len) return ki(0);
+    if (hb <= 0 or hb > g_sbuf.items.len) return ki(0);
+    const ia: usize = @intCast(ha - 1);
+    const ib: usize = @intCast(hb - 1);
+    entA[i] = .{ .binding = @intCast(i), .buffer = g_sbuf.items[ia], .size = g_ssize.items[ia] };
+    entB[i] = .{ .binding = @intCast(i), .buffer = g_sbuf.items[ib], .size = g_ssize.items[ib] };
+  }
+  const bgA = r.device.createBindGroup(.{ .layout = g_cbgl.items[pidx], .entry_count = @intCast(nbind), .entries = &entA });
+  defer bgA.release();
+  const bgB = r.device.createBindGroup(.{ .layout = g_cbgl.items[pidx], .entry_count = @intCast(nbind), .entries = &entB });
+  defer bgB.release();
+
+  const enc = r.device.createCommandEncoder(.{ .label = "dispatchloop" });
+  defer enc.release();
+  const groups: u32 = @intCast((@as(usize, @intCast(nthreads)) + 63) / 64);
+  var k: i32 = 0;
+  while (k < reps) : (k += 1) {
+    const pass = enc.beginComputePass(null);
+    pass.setPipeline(g_cpipe.items[pidx]);
+    pass.setBindGroup(0, if (@rem(k, 2) == 0) bgA else bgB, null);
+    pass.dispatchWorkgroups(groups, 1, 1);
+    pass.end();
+    pass.release();
+  }
+  const cmd = enc.finish(.{});
+  defer cmd.release();
+  r.queue.submit(&[_]wgpu.CommandBuffer{cmd});
+  return ki(0);
+}
+
 // Derive a mesh vertex-buffer layout from a SPIR-V vertex shader by scanning its
 // Input variables. Relies on the fixed input-pointer type IDs assigned in
 // lib/gpu/spirv.k (PinF32=10, PinV2=14, PinV4=12, PinV3=18) and on input
@@ -1548,6 +1833,13 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuFillShader", @ptrCast(&gpuFillShader), 2);
   r.k_register("gpuCompute", @ptrCast(&gpuCompute), 2);
   r.k_register("gpuCompute2", @ptrCast(&gpuCompute2), 3);
+  r.k_register("gpuBufferNew", @ptrCast(&gpuBufferNew), 1);
+  r.k_register("gpuBufferWrite", @ptrCast(&gpuBufferWrite), 2);
+  r.k_register("gpuBufferRead", @ptrCast(&gpuBufferRead), 1);
+  r.k_register("gpuBufferReadI", @ptrCast(&gpuBufferReadI), 1);
+  r.k_register("gpuComputeNew", @ptrCast(&gpuComputeNew), 2);
+  r.k_register("gpuDispatch", @ptrCast(&gpuDispatch), 3);
+  r.k_register("gpuDispatchLoop", @ptrCast(&gpuDispatchLoop), 3);
   r.k_register("gpuMesh", @ptrCast(&gpuMesh), 2);
   r.k_register("gpuUploadMesh", @ptrCast(&gpuUploadMesh), 2);
   r.k_register("gpuDrawInstanced", @ptrCast(&gpuDrawInstanced), 3);

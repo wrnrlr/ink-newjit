@@ -23,6 +23,21 @@ CompileSpirV: so 2: (`gpuSpirv;     2)   / (spirv_I; 0) → handle : compile SPI
 DrawShader:   so 2: (`gpuFillShader;2)   / (verts_F; handle) → 0 : draw triangles with custom SPIR-V shader
 RunShader:    so 2: (`gpuCompute;   2)   / (spirv_I; input_F) → output_F : run compute shader
 RunShader2:   so 2: (`gpuCompute2;  3)   / (spirv_I; in1_F; in2_F) → output_F : 2-input compute
+/ Resident compute: keep data on the GPU across dispatches (iterative solvers).
+/ NewBuffer/ReadBuffer round-trip once; Dispatch runs a cached pipeline with no
+/ readback, so ping-pong is a plain k loop over Dispatch (see test/relax.k).
+NewBuffer:    so 2: (`gpuBufferNew;  1)   / F → bufHandle : alloc+upload a resident storage buffer
+WriteBuffer:  so 2: (`gpuBufferWrite;2)   / (bufHandle; F) → 0 : overwrite a resident buffer
+ReadBuffer:   so 2: (`gpuBufferRead; 1)   / bufHandle → F : read a resident buffer back to host
+ReadBufferI:  so 2: (`gpuBufferReadI;1)   / bufHandle → I : read a resident buffer back as ints (atomic accumulators)
+CompileCompute: so 2: (`gpuComputeNew; 2) / (spirv_I; nbind) → pipeHandle : compile+cache a compute pipeline
+Dispatch:     so 2: (`gpuDispatch;   3)   / (pipeHandle; bufHandles_I; nThreads) → 0 : bind buffers @0..; dispatch; no readback
+gpuDispatchLoop0: so 2: (`gpuDispatchLoop; 3) / (pipe; (nThreads,bufsA,bufsB)_I; reps) → 0 : reps passes in ONE encoder, A on even/B on odd
+/ Batched iteration in one submit (no per-step host round-trip). Alternates two
+/ bind configs: ping-pong Jacobi swaps buffers (a=(in;out;u) b=(out;in;u)); red-black
+/ SOR swaps parity params (a=(state;pR) b=(state;pB)). Result is in whichever the
+/ last pass wrote: even reps → a's output, odd reps → b's output.
+DispatchLoop: {[pipe;bufsA;bufsB;nThreads;reps] gpuDispatchLoop0[pipe; nThreads,bufsA,bufsB; reps]}
 CompileMesh:  so 2: (`gpuMesh;      2)   / (vtx_I; frg_I) → handle : compile vertex+fragment SPIR-V mesh pipeline
 DrawMesh:     so 2: (`gpuDrawMesh;  2)   / (verts_F; handle) → 0 : draw mesh; vertex stride follows the shader's declared inputs
 DrawMeshU:    so 2: (`gpuDrawMeshU; 3)   / (verts_F; handle; uni_F) → 0 : draw mesh + per-draw uniform block (8 vec4 slots; see VertexShaderU)
