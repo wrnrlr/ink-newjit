@@ -160,12 +160,11 @@ fn writeStdRaw(vm: *VM, comptime is_stdout: bool, data: []const u8) V {
     out.flush() catch return V{ .err = .io };
     return .blank;
   };
+  // Streaming (appending) write — a fresh file.writer() would positional-write
+  // from offset 0 each call, so successive writes would clobber each other.
   const io = std.Io.Threaded.global_single_threaded.io();
-  var wbuf: [4096]u8 = undefined;
   const file = if (is_stdout) std.Io.File.stdout() else std.Io.File.stderr();
-  var w = file.writer(io, &wbuf);
-  w.interface.writeAll(data) catch return V{ .err = .io };
-  w.interface.flush() catch return V{ .err = .io };
+  file.writeStreamingAll(io, data) catch return V{ .err = .io };
   return .blank;
 }
 
