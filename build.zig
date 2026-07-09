@@ -244,6 +244,31 @@ pub fn build(b: *std.Build) !void {
   const shp_step = b.step("shp", "Build the shapefile extension shared library");
   shp_step.dependOn(&b.addInstallArtifact(shp_lib, .{}).step);
 
+  // --- Audio extension (miniaudio) ---
+  // A C shim (lib/audio/shim.c) compiles the miniaudio single-header
+  // implementation and exposes a small integer-handle C ABI; audio.zig bridges
+  // it to the k-ABI. miniaudio dynamically loads the backend at runtime, so the
+  // only link-time deps are the macOS CoreAudio frameworks.
+  const audio_ext_mod = b.createModule(.{
+    .root_source_file = b.path("lib/audio/audio.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+  });
+  audio_ext_mod.addImport("kabi", kabi_mod);
+  audio_ext_mod.addIncludePath(b.path("lib/audio"));
+  audio_ext_mod.addCSourceFile(.{
+    .file = b.path("lib/audio/shim.c"),
+    .flags = &.{ "-std=c99", "-fno-sanitize=undefined" },
+  });
+  if (target.result.os.tag == .macos) {
+    audio_ext_mod.linkFramework("CoreFoundation", .{});
+    audio_ext_mod.linkFramework("CoreAudio",      .{});
+    audio_ext_mod.linkFramework("AudioToolbox",   .{});
+  }
+  const audio_lib = b.addLibrary(.{ .name = "audio", .root_module = audio_ext_mod, .linkage = .dynamic });
+  b.installArtifact(audio_lib);
+  const audio_step = b.step("audio", "Build the audio extension shared library");
+  audio_step.dependOn(&b.addInstallArtifact(audio_lib, .{}).step);
+
   // --- Image extensions (one shared library per format, sharing lib/image/*) ---
   // libimage holds the format-agnostic helpers (sniff + resample); libpng,
   // libjpeg, … each bundle only their decoder so `ink bundle` links just what a
