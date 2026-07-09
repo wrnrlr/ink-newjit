@@ -154,6 +154,35 @@ earthFrag: FragmentShaderTexN[[wNor:`v3; wTan:`v3; wUvF:`v3; wSun:`v3; out:`v4];
   (clamp[mix[r0;1.0;cl];0.;1.]; clamp[mix[g0;1.0;cl];0.;1.]; clamp[mix[b0;1.0;cl];0.;1.]; 1.0)
 }]
 
+/ ── Star / Milky-Way skybox ───────────────────────────────────────────────────
+/ A full-screen quad at far depth: each pixel is a view ray, rotated by the same
+/ yaw/pitch as the globe, converted to equirectangular UV and sampled from the sky
+/ map.  So the stars turn with the earth and sit at infinity (zoom doesn't move
+/ them).  Drawn before the earth, which then depth-tests in front.
+starQuad: -1. -1.  1. -1.  1. 1.  -1. -1.  1. 1.  -1. 1.
+STARFOV:  0.85                                   / how much sky fills the view
+
+starVtx: VertexShaderU[[pos:`v2]; [wRay:`v2;wRot:`v4]; `uRot`uView; {[pos]
+  cy:uRot[0]; sy:uRot[1]; cp:uRot[2]; sp:uRot[3]
+  asp:uView[0]; fov:uView[1]
+  ((pos[0]; pos[1]; 0.9999; 1.0); (pos[0]*fov%asp; pos[1]*fov); (cy;sy;cp;sp))
+}]
+
+starFrag: FragmentShaderTexN[[wRay:`v2; wRot:`v4; out:`v4]; 1; {[wRay;wRot]
+  cy:wRot[0]; sy:wRot[1]; cp:wRot[2]; sp:wRot[3]
+  dx:wRay[0]; dy:wRay[1]; dz:0.0-1.0
+  / rotate the view ray by yaw-about-Y then pitch-about-X (same as the globe)
+  rx:(cy*dx)+(sy*dz); rz:(cy*dz)-(sy*dx)
+  wx:rx; wy:(cp*dy)-(sp*rz); wz:(sp*dy)+(cp*rz)
+  il:1.0%sqrt[(wx*wx)+(wy*wy)+(wz*wz)]
+  nx:wx*il; ny:wy*il; nz:wz*il
+  u:  0.5+(atan2[nz;nx])%6.2831853
+  vv: 0.5-(asin[ny])%3.14159265
+  s: sample[0; (u;vv)]
+  b: 1.6                                           / lift the (very dark) sky map
+  (b*s[0]; b*s[1]; b*s[2]; 1.0)
+}]
+
 / ── Controls + window loop ────────────────────────────────────────────────────
 / All state is local (no camera module):
 /   Left-drag   spin the globe WITH the cursor — rotation speed = screen-pixels /
@@ -178,11 +207,17 @@ cloudsOn:: 1.
 earthHandle:: 0
 earthGeom::   0
 earthTex::    0
+starHandle::  0
+starGeom::    0
+starTex::     0
 
 window.run[{[props]
   $[earthHandle=0; earthHandle:: CompileMesh[earthVtx; earthFrag];  0]
   $[earthGeom=0;   earthGeom::   UploadMesh[earthMesh; earthHandle]; 0]
   $[0~earthTex;    earthTex::    {Texture x}'(imgDay;imgNight;imgClouds;imgSpec;imgNorm); 0]
+  $[starHandle=0;  starHandle::  CompileMesh[starVtx; starFrag];     0]
+  $[starGeom=0;    starGeom::    UploadMesh[starQuad; starHandle];   0]
+  $[0~starTex;     starTex::     ,Texture[imgStars];                 0]
 
   E: props`events
   w: props`width; h: props`height
@@ -209,6 +244,9 @@ window.run[{[props]
   ce: cos SUNEL
   Lx: (sin sunAz)*ce; Ly: sin SUNEL; Lz: (cos sunAz)*ce
   asp: h%w
+  / stars first (behind), then the earth depth-tests in front
+  starUni: (cos yaw; sin yaw; cos pitch; sin pitch; asp;STARFOV;0.;0.)
+  DrawGeomT[starGeom; starUni; starTex]
   uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;0.;0.;asp; cloudsOn;0.;0.;0.; Lx;Ly;Lz;0.)
   DrawGeomT[earthGeom; uni; earthTex]
 }; 0]
