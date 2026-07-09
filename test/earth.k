@@ -1,31 +1,35 @@
 / A texture-mapped 3D Earth (PBR-ish, equirectangular UV)
 / Textures from https://www.solarsystemscope.com/textures/
 /
-/ An icosphere (icosahedron subdivided 4× → 5120 triangles) sampled from an
-/ equirectangular Earth day-map. Each vertex carries a UV computed from its
-/ position — longitude = `atan2@(z;x), latitude = `asin@y — and the fragment
-/ shader samples the map at that UV per pixel, so continents stay sharp no matter
-/ how coarse the mesh is (the geometry only has to be round).
+/ An icosphere (icosahedron subdivided 4× → 5120 triangles) sampled from five
+/ equirectangular maps: day, night lights, clouds, a specular (ocean) mask and a
+/ tangent-space normal map.  Each vertex carries a UV computed from its position
+/ (longitude = `atan2@(z;x), latitude = `asin@y) and the fragment shader samples
+/ the maps per pixel, so continents stay sharp however coarse the mesh is.
 /
-/ This needs the SPIR-V texture path: gpuTexture uploads the image (lib/gpu.k
-/ Texture), FragmentShaderTex declares a sampled texture and reads it with
-/ sample[uv] (lib/spirv.k), and DrawMeshT binds it at @group(1).
+/ Uses the SPIR-V texture path: gpuTexture uploads each image (lib/gpu.k Texture),
+/ FragmentShaderTexN samples them with sample[k;uv] (lib/spirv.k), DrawGeomT binds
+/ them at @group(1).  The mesh + textures upload ONCE; each frame ships only a
+/ 12-float uniform (orientation + zoom + cloud toggle).
 /
-/ `atan2 / `asin are inverse-trig helpers on the `sym@x call path
-/ (src/runtime/syms.zig); they map over F vectors, so the per-vertex UV is one
-/ vectorised pass, no loop.
+/ Controls (self-contained — no camera module):
+/   Left-drag   — spin the globe (it follows the cursor); pitch is clamped so it
+/                 never flips over the poles
+/   Scroll      — zoom (orthographic; the globe never clips out)
+/   1           — toggle the cloud layer
 /
-/ Controls (lib/camera.k):
-/   Right-drag  — spin / tilt the globe      Scroll — zoom      WASD — pan
+/ The sun is fixed in view space, so the hemisphere facing you is always the lit
+/ one; rotating spins the geography under it.
 /
 / Run: zig build gpu && ink test/earth.k
-/ Snapshot: INK_SNAP=0.5 ink test/earth.k
 
 2: "lib/spirv.k"
 2: "lib/gpu.k"
-2: "lib/camera.k"   / orbit camera (right-drag rotate, scroll zoom, WASD pan)
 
 PI: 3.14159265
+
+/ Texture resolution: "2k" (fast start) or "8k" (sharp when zoomed in, heavier).
+TEXRES: "2k"
 
 / ── Icosphere geometry (see test/sphere.k) ───────────────────────────────────
 F: 1.618034                              / golden ratio
@@ -53,16 +57,18 @@ icoTris: sphSubAll[icoTris]                     / 20 → 80
 icoTris: sphSubAll[icoTris]                     / 80 → 320
 icoTris: sphSubAll[icoTris]                     / 320 → 1280
 icoTris: sphSubAll[icoTris]                     / 1280 → 5120
+icoTris: sphSubAll[icoTris]                     / 5120 → 20480 (smooth limb; raze is O(n) now)
 
-/ ── Textures: day, night, clouds, specular mask, normal map (equirectangular 2k)
-imgDay:    image.read "test/data/2k_earth_daymap.jpg"
-imgNight:  image.read "test/data/2k_earth_nightmap.jpg"
-imgClouds: image.read "test/data/2k_earth_clouds.jpg"
-imgSpec:   image.read "test/data/2k_earth_specular_map.tif"   / ocean=white, land=black
-imgNorm:   image.read "test/data/2k_earth_normal_map.tif"     / tangent-space bumps
+/ ── Textures: day, night, clouds, specular mask, normal map ───────────────────
+pfx:       "test/data/",TEXRES,"_earth_"
+imgDay:    image.read pfx,"daymap.jpg"
+imgNight:  image.read pfx,"nightmap.jpg"
+imgClouds: image.read pfx,"clouds.jpg"
+imgSpec:   image.read pfx,"specular_map.tif"   / ocean=white, land=black
+imgNorm:   image.read pfx,"normal_map.tif"     / tangent-space bumps
+imgStars:  image.read "test/data/",TEXRES,"_stars_milky_way.jpg"   / celestial sky
 
 / ── Per-vertex UV (equirectangular), one vectorised pass ──────────────────────
-/ P = (X;Y;Z) columns over every triangle corner.  Longitude → u, latitude → v.
 P: +,/icoTris
 X: P[0]; Y: P[1]; Z: P[2]
 Yc: -1.0|1.0&Y                                  / clamp for asin (avoid pole NaN)
@@ -70,57 +76,54 @@ u:  0.5-(`atan2@(Z;X))%(2.*PI)                  / longitude → u (0..1)
 v:  0.5-(`asin@Yc)%PI                           / latitude  → v (north at top)
 
 / Fix the ±180° seam: a triangle straddling u=0/1 would interpolate its UV across
-/ the whole map backwards (a zig-zag scar down the Pacific).  Detect such
-/ triangles (corner-u range > 0.5) and push their low-u corners past 1 so the UV
-/ stays continuous — the sampler's u-repeat wrap then samples the right pixels.
+/ the whole map backwards (a zig-zag scar down the Pacific).  Push each such
+/ triangle's low-u corners past 1 so the UV stays continuous (sampler u-repeat).
 n:   (#u)%3
-idx: 3*!n                                        / corner-0 index of each triangle
+idx: 3*!n
 c0:  u@idx; c1: u@idx+1; c2: u@idx+2
-seam: 0.5 < (c0|c1|c2)-(c0&c1&c2)               / does this triangle cross the seam?
+seam: 0.5 < (c0|c1|c2)-(c0&c1&c2)
 c0f: c0+(seam&(c0<0.5)); c1f: c1+(seam&(c1<0.5)); c2f: c2+(seam&(c2<0.5))
-us:  ,/+(c0f;c1f;c2f)                            / re-interleave to per-corner order
+us:  ,/+(c0f;c1f;c2f)
 
-/ Interleave into the vertex layout: pos(3) nor(3) uv(2), stride 8.
-/ Position equals normal on the unit sphere, so shading stays smooth.
+/ Vertex layout: pos(3) nor(3) uv(2), stride 8. Position = normal on the sphere.
 earthMesh: ,/ +(X;Y;Z;X;Y;Z;us;v)
 
-/ ── Vertex shader: rotate by the camera (in-shader), project isometric ────────
-/ Uniform slots (vec4): uCam=(ca;sa;xca;xsa)  uPan=(zoom;camX;camZ;aspect)
-/ uFlag=(cloudsOn;_;_;_).  aspect squeezes clip-x so the globe stays round; the
-/ clouds toggle rides through to the fragment as the wFlag varying.
-/ Varyings: wNor (rotated normal), wTan (rotated east tangent, for bump mapping),
-/ wUvF=(u; v; cloudsOn).  The tangent is the east direction cross(nor,up); it and
-/ the normal are rotated by the same camera matrix so the fragment's tangent frame
-/ stays consistent with the lighting.
-earthVtx: VertexShaderU[[pos:`v3;nor:`v3;uv:`v2]; [wNor:`v3;wTan:`v3;wUvF:`v3]; `uCam`uPan`uFlag; {[pos;nor;uv]
-  ca:uCam[0]; sa:uCam[1]; xca:uCam[2]; xsa:uCam[3]
-  zoom:uPan[0]; cx:uPan[1]; cz:uPan[2]; asp:uPan[3]
-  c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.85
-  x1:(ca*pos[0])-(sa*pos[2]); z1:(sa*pos[0])+(ca*pos[2])
-  y2:(xca*pos[1])-(xsa*z1);   z2:(xsa*pos[1])+(xca*z1)
-  Xc:(zoom*x1)-cx; Yc:zoom*y2; Zc:(zoom*z2)-cz
-  py0:(c45*Xc)+(s45*Zc); py2:(c45*Zc)-(s45*Xc)
-  px1:(c30*Yc)-(s30*py2); px2:(s30*Yc)+(c30*py2)
-  / rotate normal (yaw then tilt)
-  nx1:(ca*nor[0])-(sa*nor[2]); nz1:(sa*nor[0])+(ca*nor[2])
-  ny2:(xca*nor[1])-(xsa*nz1);  nz2:(xsa*nor[1])+(xca*nz1)
-  / east tangent in model space = normalize(cross(nor,(0,1,0))) = (nor.z;0;-nor.x)
+/ ── Vertex shader: orbit (yaw+pitch) then orthographic ────────────────────────
+/ Uniforms: uRot=(cosYaw;sinYaw;cosPitch;sinPitch)  uView=(zoom;_;_;aspect)
+/ uFlag=(cloudsOn;_;_;_)  uSun=(Lx;Ly;Lz;_) view-space sun direction.  The globe
+/ is rotated yaw-about-Y then pitch-about-X; the camera looks down -Z ortho so
+/ depth is independent of zoom (the globe never clips out).  Normal + east tangent
+/ get the same rotation for a consistent lighting/bump frame.  The sun rides
+/ through unrotated (it lives in view space, set by the arrow keys → arrows move
+/ the day, camera moves the view).  Varyings: wNor, wTan, wUvF=(u;v;cloudsOn), wSun.
+earthVtx: VertexShaderU[[pos:`v3;nor:`v3;uv:`v2]; [wNor:`v3;wTan:`v3;wUvF:`v3;wSun:`v3]; `uRot`uView`uFlag`uSun; {[pos;nor;uv]
+  yc:uRot[0]; ys:uRot[1]; pc:uRot[2]; ps:uRot[3]
+  zoom:uView[0]; asp:uView[3]
+  / rotate position: yaw about Y, then pitch about X
+  rx:(yc*pos[0])+(ys*pos[2]); rz:(yc*pos[2])-(ys*pos[0])
+  wx:rx; wy:(pc*pos[1])-(ps*rz); wz:(ps*pos[1])+(pc*rz)
+  / rotate normal the same way
+  mrx:(yc*nor[0])+(ys*nor[2]); mrz:(yc*nor[2])-(ys*nor[0])
+  nwx:mrx; nwy:(pc*nor[1])-(ps*mrz); nwz:(ps*nor[1])+(pc*mrz)
+  / east tangent = normalize(cross(nor,(0,1,0))) = (nor.z;0;-nor.x), then rotated
   t0x:nor[2]; t0z:0.0-nor[0]
   til:1.0%sqrt[(t0x*t0x)+(t0z*t0z)+0.0001]
   Tx:t0x*til; Tz:t0z*til
-  / rotate tangent by the same yaw+tilt (Ty=0)
-  tx1:(ca*Tx)-(sa*Tz); tz1:(sa*Tx)+(ca*Tz)
-  ty2:0.0-(xsa*tz1);   tz2:xca*tz1
-  ((asp*sc*py0; sc*px1; 0.5-px2*sc*0.5; 1.0); (nx1;ny2;nz2); (tx1;ty2;tz2); (uv[0];uv[1];uFlag[0]))
+  trx:(yc*Tx)+(ys*Tz); trz:(yc*Tz)-(ys*Tx)
+  twx:trx; twy:0.0-(ps*trz); twz:pc*trz
+  / orthographic: zoom scales screen XY; depth from wz only → no zoom clipping
+  ((asp*zoom*wx; zoom*wy; 0.5-0.45*wz; 1.0); (nwx;nwy;nwz); (twx;twy;twz); (uv[0];uv[1];uFlag[0]); (uSun[0];uSun[1];uSun[2]))
 }]
 
 / ── Fragment shader: PBR-ish earth — bump + specular + day/night + clouds ──────
 / Textures: 0 day, 1 night lights, 2 clouds, 3 specular mask, 4 normal map.
-/ The normal map perturbs the surface normal in tangent space (T=wTan, B=N×T),
-/ so relief catches light near the terminator.  N·L then drives a soft terminator
-/ (shaded day over night city lights); the specular mask gates an ocean sun-glint;
-/ clouds (white) overlay both, lit by the sun and toggled by wUvF.z.
-earthFrag: FragmentShaderTexN[[wNor:`v3; wTan:`v3; wUvF:`v3; out:`v4]; 5; {[wNor;wTan;wUvF]
+/ The normal map perturbs the surface normal in tangent space (T=wTan, B=N×T) so
+/ relief catches light near the terminator.  Sun L is fixed toward the viewer, so
+/ the facing hemisphere is lit; N·L drives a soft terminator (shaded day over
+/ night city lights); the specular mask gates an ocean sun-glint; clouds (white)
+/ overlay both, lit by the sun and toggled by wUvF.z.  Output is clamped so the
+/ glint/lights can't blow out to a white seam.
+earthFrag: FragmentShaderTexN[[wNor:`v3; wTan:`v3; wUvF:`v3; wSun:`v3; out:`v4]; 5; {[wNor;wTan;wUvF;wSun]
   uv:    (wUvF[0]; wUvF[1])
   flag:  wUvF[2]
   day:   sample[0; uv]
@@ -133,49 +136,79 @@ earthFrag: FragmentShaderTexN[[wNor:`v3; wTan:`v3; wUvF:`v3; out:`v4]; 5; {[wNor
   T:  normalize wTan
   B:  cross[N0; T]
   nx: 2.0*nmap[0]-1.0; ny: 1.0-2.0*nmap[1]; nz: 2.0*nmap[2]-1.0
-  N:  normalize[(nz*N0)+(0.7*((nx*T)+(ny*B)))]
-  L: normalize 0.6 0.5 0.55
-  Vd: normalize 0.2 0.25 1.0
+  N:  normalize[(nz*N0)+(0.85*((nx*T)+(ny*B)))]
+  L: normalize wSun                                / arrow-key sun (view space)
+  Vd: 0.0 0.0 1.0
   H: normalize L+Vd
-  lit: dot[N;L]
-  dayF: clamp[3.0*dot[N0;L]+0.4; 0.0; 1.0]        / terminator from geometric normal
-  sh:   0.22+0.9*max[0.0; lit]                     / day-side shading (ambient+diffuse)
+  lit:  dot[N;L]
+  glit: dot[N0;L]                                  / geometric N·L (terminator, clouds)
+  dayF: clamp[3.0*glit+0.4; 0.0; 1.0]
+  sh:   0.32+0.85*max[0.0; lit]                    / day-side shading (ambient+diffuse)
   / ocean sun-glint from the specular mask (bright over water)
-  spc: pow[max[0.0; dot[N;H]]; 60.0]*(0.04+0.8*specM[0])*max[0.0;lit]
-  / shaded day map over night city lights, plus the sun glint
+  spc: pow[max[0.0; dot[N;H]]; 50.0]*(0.04+0.7*specM[0])*max[0.0;glit]
   r0: spc+mix[night[0]; day[0]*sh; dayF]
   g0: spc+mix[night[1]; day[1]*sh; dayF]
   b0: spc+mix[night[2]; day[2]*sh; dayF]
   / clouds (grayscale in red): white, lit by the sun, gated by the toggle
-  cl: cloud[0]*flag*(0.12+0.88*max[0.0;dot[N0;L]])
-  (mix[r0;1.0;cl]; mix[g0;1.0;cl]; mix[b0;1.0;cl]; 1.0)
+  cl: cloud[0]*flag*(0.12+0.88*max[0.0;glit])
+  (clamp[mix[r0;1.0;cl];0.;1.]; clamp[mix[g0;1.0;cl];0.;1.]; clamp[mix[b0;1.0;cl];0.;1.]; 1.0)
 }]
 
-/ ── Window loop ──────────────────────────────────────────────────────────────
-/ Start tilted a little so the globe reads as 3-D from the first frame.  The mesh
-/ and the three textures are uploaded ONCE to persistent GPU buffers (earthGeom /
-/ earthTex); each frame ships only the 12-float uniform (camera + cloud toggle),
-/ never the vertex or texture data — see lib/gpu.k UploadMesh + DrawGeomT.
-/
-/ Press 1 to toggle the cloud layer.
-cam::         CamAt[0.92; 0.39; 0.97; 0.24]
+/ ── Controls + window loop ────────────────────────────────────────────────────
+/ All state is local (no camera module):
+/   Left-drag   spin the globe WITH the cursor — rotation speed = screen-pixels /
+/               (window · zoom), so a point tracks the mouse at any zoom
+/   Scroll      zoom (0.55 .. 30, orthographic → never clips)
+/   ← →         rotate the sun (move the day / terminator; independent of the view)
+/   1           toggle clouds
+/ Pitch is clamped to ±80° so the globe can't flip.
+PLIM:   1.40                                     / pitch clamp (~80°)
+ZMIN:   0.55; ZMAX: 30.0
+SUNSPD: 0.02                                     / sun radians per held frame
+SUNEL:  0.40                                     / sun elevation above the view horizon
+
+yaw::    0.6
+pitch::  0.35
+zoom::   0.9
+sunAz::  0.6                                      / sun azimuth (arrow keys)
+lastMx:: 0.; lastMy:: 0.
+held:: 0; hL:: 0; hR:: 0                          / held: left-mouse, ←, →
+cloudsOn:: 1.
+
 earthHandle:: 0
 earthGeom::   0
-earthTex::    0                                  / int vector of (day;night;clouds) handles
-cloudsOn::    1.
+earthTex::    0
 
 window.run[{[props]
   $[earthHandle=0; earthHandle:: CompileMesh[earthVtx; earthFrag];  0]
   $[earthGeom=0;   earthGeom::   UploadMesh[earthMesh; earthHandle]; 0]
   $[0~earthTex;    earthTex::    {Texture x}'(imgDay;imgNight;imgClouds;imgSpec;imgNorm); 0]
-  cam:: CamUpdate[cam; props]
-  / Toggle clouds on the '1' key (GLFW keycode 49) press.
+
   E: props`events
+  w: props`width; h: props`height
+  mx: props`mx; my: props`my
+  / held keys/buttons across frames (last matching down-event wins, else keep)
+  mb:  (E`down)@&(`mouse=E`kind)&(0=E`code);   held:: $[#mb;  *|mb;  held]
+  lk:  (E`down)@&(`key=E`kind)&(263=E`code);   hL::   $[#lk;  *|lk;  hL]
+  rk:  (E`down)@&(`key=E`kind)&(262=E`code);   hR::   $[#rk;  *|rk;  hR]
+  / drag → spin with the cursor (angle/pixel = ndc/pixel ÷ zoom); clamp pitch
+  dx: $[held; mx-lastMx; 0.]; dy: $[held; my-lastMy; 0.]
+  yaw::   yaw + (2.0*dx)%(w*zoom)
+  pitch:: (0.0-PLIM)|PLIM&(pitch + (2.0*dy)%(h*zoom))
+  lastMx:: mx; lastMy:: my
+  / sun azimuth: arrows move the day (→ ahead, ← back)
+  sunAz:: sunAz + SUNSPD*(hR-hL)
+  / scroll zoom (clamped)
+  sc: (E`amt)@&`scroll=E`kind
+  zoom:: ZMIN|ZMAX&(zoom*(1.+0.1*$[#sc;+/sc;0.]))
+  / '1' toggles clouds
   dn: (E`code)@&(`key=E`kind)&(1=E`down)
   $[#dn; $[|/49=dn; cloudsOn:: 1.-cloudsOn; 0]; 0]
-  ca: cam`rotCa; sa: cam`rotSa; xca: cam`xCa; xsa: cam`xSa
-  zoom: cam`zoom; camX: cam`camX; camZ: cam`camZ
-  asp: (props`height)%props`width
-  uni: (ca;sa;xca;xsa; zoom;camX;camZ;asp; cloudsOn;0.;0.;0.)
+
+  / view-space sun direction from azimuth + fixed elevation
+  ce: cos SUNEL
+  Lx: (sin sunAz)*ce; Ly: sin SUNEL; Lz: (cos sunAz)*ce
+  asp: h%w
+  uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;0.;0.;asp; cloudsOn;0.;0.;0.; Lx;Ly;Lz;0.)
   DrawGeomT[earthGeom; uni; earthTex]
 }; 0]
