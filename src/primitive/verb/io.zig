@@ -134,11 +134,49 @@ pub const WriteLines = struct {
 };
 
 // ---------------------------------------------------------------------------
+// Raw stdio for byte-stream protocols (LSP/Jupyter frames over stdin/stdout).
+//   1: `stdin        → up to 64 KiB of available bytes (blocks for ≥1), "" at EOF
+//   `stdout 1: data  → write raw bytes, no trailing newline, flush
+//   `stderr 1: data  → same, to stderr (safe for logging beside a stdout protocol)
+// The caller frames/buffers in k; reads are partial-by-design.
+// ---------------------------------------------------------------------------
+
+fn readStdinBytes(vm: *VM) V {
+  const io = std.Io.Threaded.global_single_threaded.io();
+  var buf: [65536]u8 = undefined;
+  const n = std.Io.File.stdin().readStreaming(io, &.{buf[0..]}) catch |err| {
+    if (err == error.EndOfStream) return V.Chars(vm.alloc, "") catch V{ .err = .memory };
+    return V{ .err = .io };
+  };
+  // n == 0 also signals EOF; hand k an empty char vector so its loop can stop.
+  return V.Chars(vm.alloc, buf[0..n]) catch V{ .err = .memory };
+}
+
+fn writeStdRaw(vm: *VM, comptime is_stdout: bool, data: []const u8) V {
+  // stdout shares the VM's output writer so it interleaves correctly with any
+  // ordinary `` `0 0:… `` prints; stderr uses its own fd.
+  if (is_stdout) if (vm.out) |out| {
+    out.writeAll(data) catch return V{ .err = .io };
+    out.flush() catch return V{ .err = .io };
+    return .blank;
+  };
+  const io = std.Io.Threaded.global_single_threaded.io();
+  var wbuf: [4096]u8 = undefined;
+  const file = if (is_stdout) std.Io.File.stdout() else std.Io.File.stderr();
+  var w = file.writer(io, &wbuf);
+  w.interface.writeAll(data) catch return V{ .err = .io };
+  w.interface.flush() catch return V{ .err = .io };
+  return .blank;
+}
+
+// ---------------------------------------------------------------------------
 // ReadBytes  1: (monad)
 // ---------------------------------------------------------------------------
 
 fn readBytesBySymbol(vm: *VM, x: V) V {
-  const id = vm.mapFile(vm.getSymbol(x.s)) catch return V{ .err = .io };
+  const name = vm.getSymbol(x.s);
+  if (std.mem.eql(u8, name, "stdin")) return readStdinBytes(vm);
+  const id = vm.mapFile(name) catch return V{ .err = .io };
   return readBytesById(vm, V{ .i = @intCast(id) });
 }
 fn readBytesByChars(vm: *VM, x: V) V {
@@ -163,7 +201,10 @@ pub const ReadBytes = struct {
 // ---------------------------------------------------------------------------
 
 fn writeBytesBySymbol(vm: *VM, x: V, y: V) V {
-  const id = vm.mapFile(vm.getSymbol(x.s)) catch return V{ .err = .io };
+  const name = vm.getSymbol(x.s);
+  if (std.mem.eql(u8, name, "stdout")) return writeStdRaw(vm, true, y.C.slice());
+  if (std.mem.eql(u8, name, "stderr")) return writeStdRaw(vm, false, y.C.slice());
+  const id = vm.mapFile(name) catch return V{ .err = .io };
   return writeBytesByHandle(vm, V{ .i = @intCast(id) }, y);
 }
 fn writeBytesByChars(vm: *VM, x: V, y: V) V {
