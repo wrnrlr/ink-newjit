@@ -603,6 +603,39 @@ compScatterAdd: {[i; env]
   (old; `i32)
 }
 
+/ set[buf; idx; val] — plain (non-atomic) store buf[idx]:=val into an f32 buffer.
+/ Lets a kernel write several buffers as side effects (GpKernel has no auto-output).
+compSet: {[i; env]
+  args: kF[i;`arg]                              / (bufName; idxExpr; valExpr)
+  bid: (env kVal args[0])0
+  ip: compNode[args[1]; env; `f32]; si:newId[]; emitBuf opF2s[Ti32; si; ip[0]]
+  vp: compNode[args[2]; env; `f32]
+  p:  newId[]; emitBuf opAccChain[CPf32; p; bid; CKz; si]
+  emitBuf opStore[p; vp[0]]
+  vp
+}
+/ iget[acc; idx] — load i32 acc[idx] and convert to f32 (read a fixed-point accumulator).
+compIget: {[i; env]
+  args: kF[i;`arg]
+  aid: (env kVal args[0])0
+  ip: compNode[args[1]; env; `f32]; si:newId[]; emitBuf opF2s[Ti32; si; ip[0]]
+  p:  newId[]; emitBuf opAccChain[CPi32; p; aid; CKz; si]
+  iv: newId[]; emitBuf opLoad[Ti32; iv; p]
+  fv: newId[]; emitBuf opI2f[Tf32; fv; iv]      / SToF
+  (fv; `f32)
+}
+/ iset[acc; idx; val] — store val (truncated to i32) into an i32 accumulator. Used to
+/ clear the fixed-point accumulator (iset[acc;i;0.]) between constraint passes.
+compIset: {[i; env]
+  args: kF[i;`arg]
+  aid: (env kVal args[0])0
+  ip: compNode[args[1]; env; `f32]; si:newId[]; emitBuf opF2s[Ti32; si; ip[0]]
+  vp: compNode[args[2]; env; `f32]; vi:newId[]; emitBuf opF2s[Ti32; vi; vp[0]]
+  p:  newId[]; emitBuf opAccChain[CPi32; p; aid; CKz; si]
+  emitBuf opStore[p; vi]
+  (vi; `i32)
+}
+
 / sample[uv] (texture 0) or sample[k; uv] (texture k, k a literal) → texture
 / lookup: OpSampledImage(image_k, shared sampler) then OpImageSampleImplicitLod at
 / the interpolated uv. Only valid inside a FragmentShaderTexN. Returns v4.
@@ -625,6 +658,9 @@ compApply: {[i; env; oty]
   fnName: kVal fr
   $[fnName~`sample;      compSample[i; env]
     fnName~`scatterAdd;  compScatterAdd[i; env]
+    fnName~`set;         compSet[i; env]
+    fnName~`iget;        compIget[i; env]
+    fnName~`iset;        compIset[i; env]
     fnName in mathFns;   compFnCall[fnName; i; env; oty]
     isBuf[fnName; env];  compBufIdx[(env fnName)0; i; env]
     compApplyIdx[fr; i; env; oty]]
@@ -680,11 +716,14 @@ compNode: {[i; env; oty]
 
 / ── Layer 3: sequential body with local bindings ──────────────────────────
 / stmts: list of statement nodes (seq/div markers already stripped)
-/ For bind nodes (y: expr), compile rhs and extend env with name→result.
+/ For bind nodes (y: expr), compile rhs and extend env with name→result. A bare
+/ (non-bind) non-final statement is compiled for its SIDE EFFECTS (set/scatterAdd/
+/ iset stores) — `sfx` forces that; without it such statements were silently dropped.
 / Returns (id; ty_sym) of the last expression.
 compSeqTail: {[stmts; env; oty]
   s:   stmts 0
   isb: ((kKind s)~`bind) & (0<#kF[s;`a])
+  sfx: $[isb; 0; compNode[s;env;oty]]
   e2:  $[isb; ((!env),kVal kF1[s;`v])!(env[!env],(,compNode[kF1[s;`a];env;oty])); env]
   compSeq[1_stmts;e2;oty]}
 
@@ -1145,6 +1184,72 @@ compScatter: {[fn]
   vars:varGid,varAcc,varA,varB,varG
   ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
 StencilScatter: compScatter
+
+/ ── compGpN: general compute kernel — nAcc i32 accumulators + nBuf f32 buffers ────
+/ Kernel {[acc0..accM; buf0..bufN; i]}: bindings 0..nAcc-1 are i32 atomic
+/ accumulators (scatterAdd/iget/iset), nAcc..nAcc+nBuf-1 are f32 buffers (read with
+/ b[j], written with set[b;j;v]); i is the thread index. There is NO automatic output
+/ store — every write is an explicit set/scatterAdd/iset, so one kernel can update
+/ several buffers (e.g. XPBD integrate writes p, v AND prev). This is the general
+/ lowering the fixed StencilShader* emitters specialise; it drives test/clothgpu.k.
+/ nbind = nAcc+nBuf; Dispatch order is (accumulators…; buffers…).
+GAcc::   ()   / accumulator var ids (globals so the per-binding each-helpers see them)
+GBuf::   ()   / f32 buffer var ids
+GNAcc::  0    / accumulator count (f32 buffers start at binding GNAcc)
+GPbufs:: 0    / StorageBuffer→f32-struct pointer type
+GPbufsI::0    / StorageBuffer→i32-struct pointer type
+gpAccDec: {[k] (0x00040047;GAcc[k];34;0),(0x00040047;GAcc[k];33;k)}
+gpBufDec: {[k] (0x00040047;GBuf[k];34;0),(0x00040047;GBuf[k];33;GNAcc+k)}
+gpAccVar: {[k] (0x0004003B;GPbufsI;GAcc[k];12)}
+gpBufVar: {[k] (0x0004003B;GPbufs;GBuf[k];12)}
+compGpN: {[fn; nAcc; nBuf]
+  Nid::Nfixed; Buf::(); Con::()
+  Tu32:newId[]; Tv3u32:newId[]
+  Trta:newId[]; Tbuf:newId[]; Pbufs:newId[]; Pf32s:newId[]
+  TrtaI:newId[]; TbufI:newId[]; PbufsI:newId[]; Pi32s:newId[]
+  Pv3u32i:newId[]
+  gidVar:newId[]
+  ka:!nAcc; kb:!nBuf
+  accIds:{[k]newId[]}'ka
+  bufIds:{[k]newId[]}'kb
+  Ku32z:newId[]; emitCon (0x0004002B;Tu32;Ku32z;0)
+  KDev:newId[];  emitCon (0x0004002B;Tu32;KDev;1)
+  CKz::Ku32z; CPf32::Pf32s; CPi32::Pi32s; CScope::KDev
+  GAcc::accIds; GBuf::bufIds; GNAcc::nAcc; GPbufs::Pbufs; GPbufsI::PbufsI
+  lam:lamOf fn; argNames:lamArgs lam
+  gidId:newId[]; emitBuf opLoad[Tv3u32;gidId;gidVar]
+  gidXId:newId[]; emitBuf opXtract[Tu32;gidXId;gidId;0]
+  gidF:newId[]; emitBuf opU2f[Tf32;gidF;gidXId]
+  accPairs:{[id](id;`scat)}'accIds
+  bufPairs:{[id](id;`buf)}'bufIds
+  env: argNames!(accPairs,bufPairs,(,(gidF;`f32)))
+  stmts:lamBody lam
+  rp:compSeq[stmts;env;`f32]
+  bnd:Nid+1; iface:(,gidVar)
+  hdr:(0x07230203;0x00010300;0;bnd;0)
+  cap:(0x00020011;1)
+  ext:(0x0006000B;Glsl;0x4C534C47;0x6474732E;0x3035342E;0)
+  mem:(0x0003000E;0;1)
+  ep:(0x000F+(0x10000*(5+#iface));5;Fmain;0x6E69616D;0),iface
+  exm:(0x00060010;Fmain;17;64;1;1)
+  decGid:(0x00040047;gidVar;11;28)
+  decStr:(0x00040047;Trta;6;4);   decMem:(0x00050048;Tbuf;0;35;0);  decBlk:(0x00030047;Tbuf;2)
+  decStrI:(0x00040047;TrtaI;6;4); decMemI:(0x00050048;TbufI;0;35;0);decBlkI:(0x00030047;TbufI;2)
+  accDecs:$[nAcc; ,/gpAccDec'ka; !0]
+  bufDecs:$[nBuf; ,/gpBufDec'kb; !0]
+  sTypes:(0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid)
+  cTypes:(0x00040015;Tu32;32;0;0x00040017;Tv3u32;Tu32;3;0x0003001D;Trta;Tf32;0x0003001E;Tbuf;Trta;0x00040020;Pbufs;12;Tbuf;0x00040020;Pf32s;12;Tf32;0x0003001D;TrtaI;Ti32;0x0003001E;TbufI;TrtaI;0x00040020;PbufsI;12;TbufI;0x00040020;Pi32s;12;Ti32;0x00040020;Pv3u32i;1;Tv3u32)
+  accVars:$[nAcc; ,/gpAccVar'ka; !0]
+  bufVars:$[nBuf; ,/gpBufVar'kb; !0]
+  varGid:(0x0004003B;Pv3u32i;gidVar;1)
+  label:newId[]
+  fnh:(0x00050036;Tvoid;Fmain;0;Tfunc;0x000200F8;label)
+  ret:(0x000100FD;0x00010038)
+  conWds:$[#Con;,/Con;!0]; bodWds:$[#Buf;,/Buf;!0]
+  decs:decGid,decStr,decMem,decBlk,decStrI,decMemI,decBlkI,accDecs,bufDecs
+  vars:varGid,accVars,bufVars
+  ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
+GpKernel: compGpN
 
 / ── Vertex shader stencils ────────────────────────────────────────────────────
 opAccChain1: {[t;r;base;i] (0x00050041;t;r;base;i)}  / OpAccessChain single index

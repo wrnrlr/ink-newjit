@@ -90,11 +90,11 @@ fn writeLinesConsole(vm: *VM, _: V, y: V) V {
 fn writeLinesBySymbol(vm: *VM, x: V, y: V) V {
   const path = vm.getSymbol(x.s);
   if (path.len == 0 or std.mem.eql(u8, path, "0")) return writeLinesConsole(vm, x, y);
-  const id = vm.mapFile(path) catch return V{ .err = .io };
+  const id = vm.mapFileW(path) catch return V{ .err = .io };
   return writeLinesById(vm, V{ .i = @intCast(id) }, y);
 }
 fn writeLinesByChars(vm: *VM, x: V, y: V) V {
-  const id = vm.mapFile(x.C.slice()) catch return V{ .err = .io };
+  const id = vm.mapFileW(x.C.slice()) catch return V{ .err = .io };
   return writeLinesById(vm, V{ .i = @intCast(id) }, y);
 }
 fn writeLinesById_L(vm: *VM, x: V, y: V) V { return writeLinesById(vm, x, y); }
@@ -203,11 +203,11 @@ fn writeBytesBySymbol(vm: *VM, x: V, y: V) V {
   const name = vm.getSymbol(x.s);
   if (std.mem.eql(u8, name, "stdout")) return writeStdRaw(vm, true, y.C.slice());
   if (std.mem.eql(u8, name, "stderr")) return writeStdRaw(vm, false, y.C.slice());
-  const id = vm.mapFile(name) catch return V{ .err = .io };
+  const id = vm.mapFileW(name) catch return V{ .err = .io };
   return writeBytesByHandle(vm, V{ .i = @intCast(id) }, y);
 }
 fn writeBytesByChars(vm: *VM, x: V, y: V) V {
-  const id = vm.mapFile(x.C.slice()) catch return V{ .err = .io };
+  const id = vm.mapFileW(x.C.slice()) catch return V{ .err = .io };
   return writeBytesByHandle(vm, V{ .i = @intCast(id) }, y);
 }
 fn writeBytesByHandle(vm: *VM, x: V, y: V) V {

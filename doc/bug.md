@@ -130,3 +130,65 @@ at indices `I`). Present in both the scalar and SIMD builds, so unrelated to the
 SIMD kernels. Sections 1 (random walk) and 3 (D4-symmetric iteration) run fine.
 Not yet triaged — likely the `@[x;idxvec;:;computed-vec]` amend path or the
 `x@W`/`+/:` gather over a matrix of indices.
+
+---
+
+## 8. `` `~ `` (and other op-glyph symbols) glue to a following backtick — Match needs spaces
+
+```k-repl
+ `~`          / → `~`   (the SYMBOL "~", then a null symbol — NOT a match)
+ ` ~ `        / → 1b    (Match of two null symbols, as intended)
+```
+
+The lexer greedily consumes op-chars into a backtick symbol (`` `<= `` is the
+symbol `<=`, by design), so `` `~` `` reads as `` `~ `` (symbol "~") followed by
+`` ` `` (null symbol), i.e. a juxtaposition/index — never the dyadic Match verb
+`~` between two `` ` `` operands. To use a verb glyph as a verb next to a symbol
+literal, surround it with spaces: `` ` ~ ` ``, `` ` = ` ``, etc. Surprising for
+the common `x~y` idiom when `x`/`y` are backtick symbols; the greedy-symbol rule
+is otherwise intentional (see AGENT.md "Multi-char operator symbols"). Cost real
+time while writing `lib`/`tools/lsp.k` (a `` `~w `` blank-check silently misread).
+
+---
+
+## 9. Special-symbol builtins apply by juxtaposition / brackets, not `@`
+
+```k-repl
+ `dir "lib"     / → recursive file list (works)
+ `dir["lib"]    / → same (works)
+ `dir@"lib"     / → !  (does NOT route to the builtin)
+ `argv@0        / → (blank)  — same problem
+ `asin@0.5      / → 0.523…   — but THIS one works via @
+```
+
+A bare `` `sym `` (e.g. `` `argv ``, `` `env ``, `` `dir ``, `` `x ``) is a
+special-form builtin (`src/runtime/syms.zig`). Applying it with juxtaposition
+(`` `dir p ``) or brackets (`` `dir[p] ``) routes to `syms.apply`; applying it
+with `@` does **not** for these (even though `Apply`'s `_s_*` cases point at
+`applySymFn`). Only the inverse-trig helpers (`` `asin@x ``, `` `atan2@(y;x) ``)
+work through `@`, which is inconsistent with how they're documented. Either `@`
+should route all symbol-applies, or the trig docs should show juxtaposition.
+
+---
+
+## 10. Namespace member forward-reference resolves to blank under script eval
+
+Inside a `\d ns` block, a member that references another member defined *later*
+in the same file compiles to a blank when the file is evaluated statement-by-
+statement (`ink file.k`, evalStream) — the call silently no-ops (no reply / wrong
+value). The same file loaded via the autoloader (`vm.load`, whole-file compile)
+resolves the forward ref fine. Order definitions so every member precedes its
+first use, or the compiler should defer global-name resolution to call time.
+(Hit in `tools/lsp.k`: `onDef` → `defBuiltin` defined later → definition-on-
+operator returned nothing until reordered.)
+
+---
+
+## 11. `parse` of many files leaks IR-lowering scratch (Debug allocator)
+
+Running the k language server (`tools/lsp.k`), which `parse`s every workspace
+`.k` file to build a cross-file index, ends with a DebugAllocator leak report at
+`src/compiler/compiler.zig:1025` (`lower`, the `offsets = alloc.alloc(usize, …)`
+scratch). A single `parse` does not leak; it accumulates over many parses. Debug-
+only (release uses `c_allocator`), so no functional impact, but the lowering
+scratch for `parse`'d chunks isn't freed. Low priority.

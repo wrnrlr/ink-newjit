@@ -29,7 +29,7 @@ gen: {[x] t:@x;
    / enlist that case so keys and values stay length-aligned for the Zip.
    ;t=`m; $[0=#x;"{}";"{",(","/((!x){[ky;vl](jstr(1_$ky)),":",gen vl}'($[1=#!x;,(. x);. x]))),"}"]
    ;t=`C; jstr x
-   ;t=`c; jstr ,x
+   ;t=`c; jstr(,x)
    ;t=`s; jstr(1_$x)
    ;t=`b; $[x;"true";"false"]
    ;t=`i; $x

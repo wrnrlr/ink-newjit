@@ -41,6 +41,7 @@ pub fn apply(vm: *VM, sym_idx: u32, args: []const V) !V {
     return items[@as(usize, @intCast(idx))].ref();
   }
   if (eql(u8, name, "env")) return getEnv(vm);
+  if (eql(u8, name, "dir")) return listDir(vm, args);
   if (eql(u8, name, "prng")) {
     const has_arg = args.len == 1 and args[0] != .blank;
     if (!has_arg) return getPrngState(vm);
@@ -168,6 +169,50 @@ fn setPrngState(vm: *VM, v: V) V {
     vm.prng.s[i] = @as(u64, @as(u32, @bitCast(src[i*2]))) | (@as(u64, @as(u32, @bitCast(src[i*2+1]))) << 32);
   }
   return .blank;
+}
+
+// `dir@"path" — recursively list file paths under "path" (relative to CWD),
+// returning a list of char-vector paths. Hidden entries (dot-prefixed) and the
+// usual build/VCS dirs are skipped; depth is capped. Used by the k language
+// server to discover workspace .k files.  Errors return an empty list rather
+// than `!io so a missing workspace root is harmless.
+fn skipWalkDir(nm: []const u8) bool {
+  if (nm.len > 0 and nm[0] == '.') return true;
+  const skip = [_][]const u8{ "zig-cache", "zig-out", "node_modules", "target" };
+  for (skip) |s| if (eql(u8, nm, s)) return true;
+  return false;
+}
+
+fn walkInto(vm: *VM, dir_path: []const u8, out: *std.ArrayList(V), depth: u8) void {
+  if (depth > 8) return;
+  const io = std.Io.Threaded.global_single_threaded.io();
+  var dir = std.Io.Dir.openDir(std.Io.Dir.cwd(), io, dir_path, .{ .iterate = true }) catch return;
+  defer dir.close(io);
+  var it = dir.iterate();
+  while (it.next(io) catch null) |entry| {
+    const child = std.fmt.allocPrint(vm.alloc, "{s}/{s}", .{ dir_path, entry.name }) catch continue;
+    defer vm.alloc.free(child);
+    if (entry.kind == .directory) {
+      if (skipWalkDir(entry.name)) continue;
+      walkInto(vm, child, out, depth + 1);
+    } else if (entry.kind == .file) {
+      const v = V.Chars(vm.alloc, child) catch continue;
+      out.append(vm.alloc, v) catch v.deinit(vm.alloc);
+    }
+  }
+}
+
+fn listDir(vm: *VM, args: []const V) V {
+  if (args.len != 1 or args[0] == .blank) return V{ .err = .rank };
+  const path: []const u8 = switch (args[0]) {
+    .C => |c| c.slice(),
+    .s => |s| vm.getSymbol(s),
+    else => return V{ .err = .@"type" },
+  };
+  var out = std.ArrayList(V).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
+  defer out.deinit(vm.alloc);
+  walkInto(vm, path, &out, 0);
+  return V.Values(vm.alloc, out.items) catch V{ .err = .memory };
 }
 
 fn getEnv(vm: *VM) !V {

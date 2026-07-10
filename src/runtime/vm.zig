@@ -682,6 +682,15 @@ pub const VM = struct {
     return try vm.fs.addFile(path, text);
   }
 
+  // Map a path for WRITING: a missing file is fine (it will be created on the
+  // first write), so register it with empty content instead of erroring. This
+  // is what lets `"new.txt" 1: bytes` create a file that doesn't exist yet.
+  pub fn mapFileW(vm: *VM, path: []const u8) !u32 {
+    if (vm.fs.findFile(path)) |id| return id;
+    const text = vm.readFileText(path) catch try vm.alloc.dupe(u8, "");
+    return try vm.fs.addFile(path, text);
+  }
+
   pub inline fn pushFrame(vm: *VM, frame: Frame) void {
     vm.frames[vm.frames_len] = frame;
     vm.frames_len += 1;
