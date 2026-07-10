@@ -233,6 +233,18 @@ pub fn build(b: *std.Build) !void {
   const parquet_step = b.step("parquet", "Build the Parquet extension shared library");
   parquet_step.dependOn(&b.addInstallArtifact(parquet_lib, .{}).step);
 
+  // --- Safetensors extension shared library ---
+  const safetensors_ext_mod = b.createModule(.{
+    .root_source_file = b.path("lib/safetensors/src/main.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+  });
+  safetensors_ext_mod.addImport("kabi", kabi_mod);
+
+  const safetensors_lib = b.addLibrary(.{ .name = "safetensors", .root_module = safetensors_ext_mod, .linkage = .dynamic });
+  b.installArtifact(safetensors_lib);
+  const safetensors_step = b.step("safetensors", "Build the Safetensors extension shared library");
+  safetensors_step.dependOn(&b.addInstallArtifact(safetensors_lib, .{}).step);
+
   // --- Shapefile extension shared library ---
   const shp_ext_mod = b.createModule(.{
     .root_source_file = b.path("lib/shp/src/main.zig"),
@@ -317,6 +329,7 @@ pub fn build(b: *std.Build) !void {
   inline for (.{
     .{ "json", json_ext_mod },   .{ "csv", csv_ext_mod }, .{ "md5", md5_ext_mod },
     .{ "font", font_ext_mod }, .{ "parquet", parquet_ext_mod }, .{ "shp", shp_ext_mod },
+    .{ "safetensors", safetensors_ext_mod },
   }) |pair| {
     const slib = b.addLibrary(.{ .name = pair[0], .root_module = pair[1], .linkage = .static });
     static_step.dependOn(&b.addInstallArtifact(slib, .{}).step);

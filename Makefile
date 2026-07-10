@@ -93,17 +93,19 @@ static-all:
 #   bin/             one binary per distributed platform
 #   ink              symlink to the host binary
 #   lib/             k source library (*.k, *.kb)
+#   tools/           k tools run by `ink <tool>` (e.g. tools/lsp.k → `ink lsp`)
 #   share/<host>/     host-platform native extensions (.dylib/.so) for the REPL
 #   share/<platform>/ per-platform static libs (.a/.lib) for `ink bundle -t`
 # Shipping every platform's binary + static libs lets users `ink bundle [-t …]`
 # to produce self-contained native programs for any distributed platform.
 install: build all static-all
 	@echo "Installing ink $(VERSION) -> $(PREFIX)"
-	@mkdir -p $(PREFIX)/bin $(PREFIX)/lib $(PREFIX)/share/$(HOST)
+	@mkdir -p $(PREFIX)/bin $(PREFIX)/lib $(PREFIX)/tools $(PREFIX)/share/$(HOST)
 	@cp zig-out/bin/ink-* $(PREFIX)/bin/
 	@rm -f $(PREFIX)/bin/*.pdb
 	@ln -sf bin/ink-$(HOST) $(PREFIX)/ink
 	@(cd lib && find . \( -name '*.k' -o -name '*.kb' \) -print | tar -cf - -T -) | (cd $(PREFIX)/lib && tar -xf -)
+	@(cd tools && find . -name '*.k' -print | tar -cf - -T -) | (cd $(PREFIX)/tools && tar -xf -)
 	@cp zig-out/lib/*.dylib $(PREFIX)/share/$(HOST)/ 2>/dev/null || true
 	@cp zig-out/lib/*.so    $(PREFIX)/share/$(HOST)/ 2>/dev/null || true
 	@for p in $(PLATFORMS); do \

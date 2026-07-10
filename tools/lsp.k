@@ -350,5 +350,7 @@ run:{[dummy] {(@x)=`C}step/""}
 \d
 
 / This file IS the language-server executable: running it (`ink tools/lsp.k`, or
-/ `ink lsp` once rewired) starts the JSON-RPC read loop on stdin/stdout.
-lsp.run 0
+/ `ink lsp`) starts the JSON-RPC read loop on stdin/stdout. Bind the result to a
+/ name so the loop's terminal `eof/`exit value isn't printed onto the protocol
+/ stream (a bare expression statement's result is echoed by the evaluator).
+done: lsp.run 0
