@@ -19,9 +19,18 @@ vlen3:{sqrt[(sqr x)+(sqr y)+(sqr z)]}
 cross3:{((x@1 2 0)*y@2 0 1)-(x@2 0 1)*y@1 2 0}
 vnorm:{x%vlen3[x@0;x@1;x@2]|0.0001}
 
-W::10; H::10; nP::W*H; nDof::3*nP
+W::20; H::20; nP::W*H; nDof::3*nP        / 20x20 grid (matches test/cloth.k resolution)
 SDT::(1.%60.)%15.                        / substep dt (60fps, 15 substeps)
-SC::65536.                               / fixed-point scale
+/ Fixed-point scale for the scatter accumulator. This also sets the velocity jitter
+/ floor: the smallest position correction is 1/SC, so residual |v| ~ (1/SC)/SDT.
+/ 2^16 leaves ~0.013 m/s of permanent jitter (visible "buzzing"); 2^20 drops it ~16x.
+/ Baked as a literal in kCon/kApp (host globals aren't visible inside shaders) — keep
+/ those two literals in sync with this value.
+SC::1048576.                             / 2^20
+/ Velocity damping per substep (1 = none). XPBD's v=(x-prev)/dt conserves energy, so
+/ without this the cloth swings forever and the fixed-point noise keeps re-exciting it.
+/ Lower = settles faster / stiffer; 0.995 settles in ~3s, ~0.999 stays loose longer.
+DAMP::0.995
 
 / ── kernels ──────────────────────────────────────────────────────────────────
 / integrate: gravity on free particles (y axis), snapshot prev, advance p, floor.
@@ -37,7 +46,7 @@ kInt::GpKernel[{[p;v;prev;im;g;d]
 / constraint scatter: one thread per edge; XPBD correction scattered (± w0/w1) into
 / DP for both endpoints, all three axes. guard value 0 for over-dispatched threads.
 kCon::GpKernel[{[dp;p;e;g;ee]
-  sc:65536.
+  sc:1048576.
   ne:g[0]; sdt:g[1]; ok:$[ee<ne;1.;0.]
   base:7.*ee
   pi:e[base]; pj:e[base+1.]; l0:e[base+2.]; al:e[base+3.]; w0:e[base+4.]; w1:e[base+5.]; wt:e[base+6.]
@@ -52,12 +61,12 @@ kCon::GpKernel[{[dp;p;e;g;ee]
   b0:scatterAdd[dp;bj;(0.-cx)*w1]; b1:scatterAdd[dp;bj+1.;(0.-cy)*w1]; scatterAdd[dp;bj+2.;(0.-cz)*w1]}; 1; 3]
 
 / apply: fold the fixed-point accumulator into positions, then clear it.
-kApp::GpKernel[{[dp;p;g;d] set[p; d; (p[d])+(iget[dp;d])%65536.]; iset[dp;d;0.]}; 1; 2]
+kApp::GpKernel[{[dp;p;g;d] set[p; d; (p[d])+(iget[dp;d])%1048576.]; iset[dp;d;0.]}; 1; 2]
 
-/ velocity recovery: v = free*(p-prev)/dt.
+/ velocity recovery with damping: v = damp*free*(p-prev)/dt.  g[1] = damping factor.
 kVel::GpKernel[{[v;p;prev;im;g;d]
-  sdt:g[0]; part:floor[d%3.]; free:$[(im[part])>0.;1.;0.]
-  set[v; d; free*((p[d])-prev[d])%sdt]}; 0; 5]
+  sdt:g[0]; damp:g[1]; part:floor[d%3.]; free:$[(im[part])>0.;1.;0.]
+  set[v; d; damp*free*((p[d])-prev[d])%sdt]}; 0; 5]
 
 / ── grid + edges (host side) ─────────────────────────────────────────────────
 ii::!nP; col::ii mod W; row::ii div W
@@ -121,7 +130,7 @@ initGpu::{[]
   P::NewBuffer[,/+(px0;py0;pz0)]; V::NewBuffer[nDof#0.]; PREV::NewBuffer[nDof#0.]
   IM::NewBuffer[im0]; DP::NewBuffer[nDof#0.]
   bH:NewBuffer[EH]; bV:NewBuffer[EV]; bD:NewBuffer[ED]; bB:NewBuffer[EB]
-  G::NewBuffer[SDT,0.,0.,0.]
+  G::NewBuffer[SDT,DAMP,0.,0.]                            / g[0]=sdt, g[1]=damping
   GH:NewBuffer[(0.+(#hi)),SDT,0.,0.]; GV:NewBuffer[(0.+(#vi)),SDT,0.,0.]
   GD:NewBuffer[(0.+(#di)),SDT,0.,0.]; GB:NewBuffer[(0.+(#bi2)),SDT,0.,0.]
   cons::((bH;GH);(bV;GV);(bD;GD);(bB;GB))

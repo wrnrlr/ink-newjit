@@ -1601,6 +1601,25 @@ export fn gpuDrawInstanced(geom_k: ?K, count_k: ?K, data_k: ?K) callconv(.c) ?K 
   return ki(0);
 }
 
+// gpuDrawGeomResident[geom; packed] -> 0 : readback-free instanced draw. packed is
+// an int vector (count; bufHandle): draw `count` instances of retained geometry
+// `geom`, with per-instance data pulled straight from resident buffer `bufHandle`
+// (a vec4[] the GPU solver wrote) — no host upload/readback. The pipeline must be an
+// InstancedVertexShader that reads its instance slot(s) from @group(0) binding 0.
+export fn gpuDrawGeomResident(geom_k: ?K, packed_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const geom = ki_val(geom_k);
+  if (geom <= 0 or geom > r.geom_buffers.items.len) return ki(0);
+  const pp = kip(packed_k) orelse return ki(0);
+  if (kn(packed_k) < 2) return ki(0);
+  const count = pp[0];
+  const h = pp[1];
+  if (count <= 0 or h <= 0 or h > g_sbuf.items.len) return ki(0);
+  const sidx: usize = @intCast(h - 1);
+  r.queueResidentInstanced(@intCast(geom - 1), @intCast(count), g_sbuf.items[sidx], g_ssize.items[sidx]) catch {};
+  return ki(0);
+}
+
 // ── gpuDrawInstancedT ───────────────────────────────────────────────────────────
 //
 // Like gpuDrawInstanced, plus one shared texture (@group(1)) for every instance.
@@ -1843,6 +1862,7 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuMesh", @ptrCast(&gpuMesh), 2);
   r.k_register("gpuUploadMesh", @ptrCast(&gpuUploadMesh), 2);
   r.k_register("gpuDrawInstanced", @ptrCast(&gpuDrawInstanced), 3);
+  r.k_register("gpuDrawGeomResident", @ptrCast(&gpuDrawGeomResident), 2);
   r.k_register("gpuDrawInstancedT", @ptrCast(&gpuDrawInstancedT), 3);
   r.k_register("gpuDrawMesh", @ptrCast(&gpuDrawMesh), 2);
   r.k_register("gpuDrawMeshU", @ptrCast(&gpuDrawMeshU), 3);

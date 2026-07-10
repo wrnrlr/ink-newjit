@@ -41,6 +41,17 @@ pub const InstCall = struct {
   tex_n: u8 = 0,
 };
 
+// A retained, instanced draw whose per-instance data lives in a RESIDENT compute
+// buffer (from the resident-compute registry) instead of the per-frame inst_data.
+// This is the readback-free path: a GPU solver writes positions into a buffer and
+// the vertex shader pulls them straight out — no host round-trip.
+pub const ResidentCall = struct {
+  geom_idx: usize,
+  inst_count: u32,
+  buffer: wgpu.Buffer, // vec4[] storage buffer, one slot(s) per instance
+  byte_size: u64,
+};
+
 // A retained mesh drawn once with a per-draw uniform block (@group(0)) and
 // optional textures (@group(1)) — the non-instanced counterpart of InstCall.
 // Geometry lives in a persistent buffer (uploadGeom), so only the small uniform
@@ -147,6 +158,7 @@ pub const Renderer = struct {
   geom_pipeline: ArrayList(usize),      // pipeline index per geometry
   inst_data: ArrayList(f32),            // this frame's instance data (all instanced draws)
   inst_calls: ArrayList(InstCall),
+  resident_calls: ArrayList(ResidentCall), // this frame's readback-free instanced draws
   geom_calls: ArrayList(GeomCall),      // this frame's retained uniform+texture draws
 
   pub fn init(
@@ -210,6 +222,7 @@ pub const Renderer = struct {
       .geom_pipeline = try ArrayList(usize).initCapacity(allocator, 4),
       .inst_data = try ArrayList(f32).initCapacity(allocator, 4096),
       .inst_calls = try ArrayList(InstCall).initCapacity(allocator, 16),
+      .resident_calls = try ArrayList(ResidentCall).initCapacity(allocator, 4),
       .geom_calls = try ArrayList(GeomCall).initCapacity(allocator, 16),
       .mesh_vertex_buffer = device.createBuffer(.{
       .label = "mesh vertex buffer",
@@ -285,6 +298,7 @@ pub const Renderer = struct {
     self.geom_pipeline.deinit(self.allocator);
     self.inst_data.deinit(self.allocator);
     self.inst_calls.deinit(self.allocator);
+    self.resident_calls.deinit(self.allocator);
     self.geom_calls.deinit(self.allocator);
     self.mesh_vertex_buffer.release();
     self.mesh_calls.deinit(self.allocator);
@@ -487,6 +501,13 @@ pub const Renderer = struct {
   });
   }
 
+  // Readback-free instanced draw: bind an already-resident buffer as the per-instance
+  // storage source (no upload). `buffer` is a vec4[] holding inst_count slots.
+  pub fn queueResidentInstanced(self: *Renderer, geom_idx: usize, inst_count: u32, buffer: wgpu.Buffer, byte_size: u64) !void {
+    if (geom_idx >= self.geom_buffers.items.len) return;
+    try self.resident_calls.append(self.allocator, .{ .geom_idx = geom_idx, .inst_count = inst_count, .buffer = buffer, .byte_size = byte_size });
+  }
+
   // Queue a draw of a retained geometry with a per-draw uniform block and an
   // optional texture (tex_idx < 0 = none).  The vertex buffer is the persistent
   // one from uploadGeom — nothing but the uniform block is written per frame.
@@ -509,9 +530,10 @@ pub const Renderer = struct {
       self.mesh_verts.clearRetainingCapacity();
       self.inst_calls.clearRetainingCapacity();
       self.inst_data.clearRetainingCapacity();
+      self.resident_calls.clearRetainingCapacity();
       self.geom_calls.clearRetainingCapacity();
     }
-    if (self.mesh_verts.items.len == 0 and self.inst_calls.items.len == 0 and self.geom_calls.items.len == 0) return;
+    if (self.mesh_verts.items.len == 0 and self.inst_calls.items.len == 0 and self.resident_calls.items.len == 0 and self.geom_calls.items.len == 0) return;
   
     const verts = self.mesh_verts.items;
     const write_count = @min(verts.len, MESH_BUFFER_FLOATS);
@@ -612,6 +634,22 @@ pub const Renderer = struct {
       const tex_bg = self.bindTex(pass, pidx, &ic.tex);
       defer if (tex_bg) |b| b.release();
       pass.draw(gcount, ic.inst_count, 0, 0);
+    }
+
+    // Readback-free instanced draws: like the above, but the per-instance storage
+    // buffer is a resident compute buffer (the solver's output) — no host upload.
+    for (self.resident_calls.items) |rcall| {
+      if (rcall.geom_idx >= self.geom_buffers.items.len) continue;
+      const pidx = self.geom_pipeline.items[rcall.geom_idx];
+      if (pidx >= self.mesh_pipelines.items.len) continue;
+      pass.setPipeline(self.mesh_pipelines.items[pidx]);
+      const gcount = self.geom_counts.items[rcall.geom_idx];
+      pass.setVertexBuffer(0, self.geom_buffers.items[rcall.geom_idx], 0, @as(usize, gcount) * self.mesh_strides.items[pidx] * @sizeOf(f32));
+      const be = [_]wgpu.BindGroupEntry{.{ .binding = 0, .buffer = rcall.buffer, .offset = 0, .size = rcall.byte_size }};
+      const bg = self.device.createBindGroup(.{ .layout = self.mesh_inst_bgl, .entry_count = be.len, .entries = &be });
+      defer bg.release();
+      pass.setBindGroup(0, bg, null);
+      pass.draw(gcount, rcall.inst_count, 0, 0);
     }
   }
 
