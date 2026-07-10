@@ -12,6 +12,10 @@
 UploadMesh:    so 2: (`gpuUploadMesh;  2)   / (verts_F; handle) → geom : geometry → persistent vertex buffer
 DrawInstanced: so 2: (`gpuDrawInstanced;3)  / (geom; count; inst_F) → 0 : one draw of `count` instances
 gpuDrawInstancedT0: so 2: (`gpuDrawInstancedT;3)  / (geom; (count,texHandles)_I; inst_F) → 0
+gpuDrawGeomResident0: so 2: (`gpuDrawGeomResident;2)  / (geom; (count,bufHandle)_I) → 0
+/ Readback-free instanced draw: per-instance vec4[] data is pulled from a RESIDENT
+/ compute buffer (a solver's output) instead of a host upload — no round-trip.
+DrawResident: {[geom;cnt;buf] gpuDrawGeomResident0[geom; cnt,buf]}   / NB: not `count` (a keyword verb)
 / Instanced draw sampling shared textures at @group(1) (InstancedVertexShader +
 / FragmentShaderTexN). texs is an int vector of handles; all instances share them.
 DrawInstancedT: {[geom; num; texs; inst] gpuDrawInstancedT0[geom; num,texs; inst]}

@@ -192,3 +192,101 @@ Running the k language server (`tools/lsp.k`), which `parse`s every workspace
 scratch). A single `parse` does not leak; it accumulates over many parses. Debug-
 only (release uses `c_allocator`), so no functional impact, but the lowering
 scratch for `parse`'d chunks isn't freed. Low priority.
+
+---
+
+## 12. Raw byte write (`1:`) rejects a single-char atom
+
+```k-repl
+ `stdout 1: "ab"      / writes the 2 bytes
+ `stdout 1: "a"       / -> !type   ("a" is a char ATOM, not a `C` vector)
+ `stdout 1: ,"a"      / workaround: enlist to a 1-char `C` vector
+```
+
+The `1:` WriteBytes verb only dispatches on `C` (char vector) for the raw-write
+paths (`_s_C`/`_C_C`/`_i_C` in `src/primitive/verb/io.zig`), so writing a single
+character — which lexes as a char atom `c`, not `C` (single-char string is an
+atom) — is a `!type`. Applies to the stdio handles (`` `stdout ``/`` `stderr ``),
+files, and sockets. Harmless for the LSP (frames are multi-char) but surprising;
+the fix is to accept a `c` atom as a 1-byte write in the byte-IO dispatch.
+Workaround: enlist with `,`.
+
+---
+
+## 13. `2:"file"; expr` on one line panics (stack underflow)
+
+```k
+ 2:"lib/regex.k"; regex.test[regex.compile["x"];"x"]   / → panic: integer overflow in vm.pop
+ 2:"lib/regex.k"                                        / fine (alone)
+```
+```k
+ 2:"lib/regex.k"
+ regex.test[regex.compile["x"];"x"]                     / fine (newline-separated)
+```
+
+A `2:` load followed by `;` and another statement on the **same line** panics
+(`src/runtime/vm.zig:738` `pop`, `stack_len -= 1` underflow) — the load's result
+isn't balanced on the stack when the next statement is compiled in the same
+chunk. Newline-separating the statements, or loading alone, works. Pre-existing
+(reproduces reading from disk, unrelated to the embedded-module overlay);
+surfaced while testing embedded `2:"lib/x.k"` loads. Same family as the earlier
+nested-`2:` / `z:2:"f"` issues.
+
+---
+
+## 14. A keyword-verb param name is silently mishandled (dropped / mis-parsed)
+
+```k-repl
+ {[count;buf] count,buf}[100;3]      / → a DICT (`!), not `100 3`
+ {[in;x] in,x}[1;2]                  / `in` dropped: arg mapping shifts
+```
+
+A lambda parameter named the same as a keyword verb (`in count first last has
+mod div sqrt sqr exp log sin cos abs parse exec depth epoch …`) is not treated as
+a plain local: the reference lexes as the *verb*, so `count,buf` parses as the
+`count` verb applied (yielding a dict) rather than "join the two params", and
+`in` is dropped from the parameter list entirely (shifting every later param /
+the arg→slot mapping). No error — just wrong values. Cost real time twice: an
+`in`-named kernel param in `lib/spirv.k`'s GpKernel silently shifted its env, and
+a `count`-named param in `lib/instancing.k`'s `DrawResident` built a dict instead
+of the `(count,buf)` vector the FFI expected (→ a no-op draw / black screen). Fix:
+either reject keyword names for params at parse time, or bind params before verb
+lookup. Workaround: never name a param after a keyword verb (use `cnt`, `src`, …).
+
+---
+
+## 15. `f +x` (function juxtaposed with a monadic-verb-prefixed arg) parses `+` as dyadic
+
+```k-repl
+ tcol:+(nTris;3)#triIds; av:triArea tcol     / correct: av = per-triangle areas
+ av:triArea +(nTris;3)#triIds                / WRONG: parses as (triArea + reshape)
+```
+
+`triArea +x` is read as the dyadic add `triArea + x` (function plus matrix), not
+`triArea (+x)` (apply `triArea` to the transpose `+x`). The result silently
+collapses (adding a lambda to a matrix yields a 1-element/garbage value), so a
+downstream table/`#` looks fine structurally but has 1 row. Any `f <op>x` where
+`<op>` is meant monadically (`+`transpose, `-`negate, `|`…) next to an applied
+function hits this; parenthesise the operand (`f (+x)`) or bind it to a temp
+first. Cost time in `test/clothbench.k`'s CPU cloth setup (areas → inverse masses
+collapsed → empty constraint tables → the whole solver silently did nothing).
+
+---
+
+## 16. Indexed-amend `x[i]:v` inside a lambda breaks the global (needs `::` / `@[]`)
+
+```k-repl
+ gIm::(400)#1.
+ f:{[] gIm[0,19]:0.}   f[]   /  #gIm → 1  (gIm clobbered; single `:` makes a broken local)
+ f2:{[] gIm[0,19]::0.} f2[]  /  #gIm → 1  (the `x[i]::v` deep-assign also collapses on a multi-index)
+ f3:{[] gIm::@[gIm;0,19;:;0.]} f3[]  / correct: #gIm → 400, indices 0 & 19 zeroed
+```
+
+The `x[idx]:v` amend sugar amends the global correctly at top level, but inside a
+function the single-colon form creates a broken local (`#gIm`→1, subsequent reads
+error), and even the `::` deep-indexed-assign collapses when `idx` is a
+multi-element index list. The reliable form inside a function is the explicit
+amend `x::@[x;idx;:;v]`. Surfaced pinning corner masses (`gIm[0,nCols-1]:0.` /
+`im0[0,W-1]:0.`) in `test/clothbench.k`'s size-parameterised setup functions —
+the pins silently corrupted the mass array. Same family as the "`::` for globals
+in lambdas" note, but specific to the *indexed* amend with a list index.

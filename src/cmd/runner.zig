@@ -6,7 +6,6 @@ const serve = @import("../runtime/serve.zig");
 const ffi = @import("../ffi.zig");
 const home = @import("../home.zig");
 const modules = @import("modules.zig");
-const lsp = @import("lsp.zig");
 const jupyter = @import("jupyter.zig");
 const help = @import("help.zig");
 const disasm = @import("disasm.zig");
@@ -150,6 +149,20 @@ fn scanLibDirs(loader: *modules.ModuleLoader) void {
     const lib = std.fmt.bufPrint(&pbuf, "{s}/lib", .{hdir}) catch return;
     loader.scan(lib) catch {};
   }
+}
+
+// Resolve a tool name to its `tools/<name>.k` path: CWD `tools/` (dev tree) then
+// `$INK_HOME/tools/` (installed).  Returns an allocated path (caller frees) or null.
+fn resolveToolPath(allocator: std.mem.Allocator, name: []const u8) ?[]u8 {
+  const io = std.Io.Threaded.global_single_threaded.io();
+  const rel = std.fmt.allocPrint(allocator, "tools/{s}.k", .{name}) catch return null;
+  if (std.Io.Dir.cwd().access(io, rel, .{})) |_| return rel else |_| allocator.free(rel);
+  var hbuf: [512]u8 = undefined;
+  if (home.dir(&hbuf)) |hdir| {
+    const abs = std.fmt.allocPrint(allocator, "{s}/tools/{s}.k", .{ hdir, name }) catch return null;
+    if (std.Io.Dir.cwd().access(io, abs, .{})) |_| return abs else |_| allocator.free(abs);
+  }
+  return null;
 }
 
 // Populate vm.argv = [exe, script?, extra...] and the `x` global (= extra args).
@@ -318,9 +331,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
   // single self-contained executable.  No VM needed.
   if (script_path) |sp| if (std.mem.eql(u8, sp, "bundle")) return bundle.run(allocator, extra_args.items);
 
-  // `ink lsp` — run the language server over stdio (JSON-RPC).  No VM needed.
-  if (script_path) |sp| if (std.mem.eql(u8, sp, "lsp")) return lsp.run(allocator);
-
   // `ink jupyter -f <connection-file>` — run a Jupyter kernel over ZeroMQ.
   // `ink jupyter install` — write a kernelspec so editors can discover it.
   // The kernel uses posix poll(2)/sockets, unavailable in Windows' std, so the
@@ -348,6 +358,30 @@ pub fn main(init: std.process.Init.Minimal) !void {
   var loader = modules.ModuleLoader.init(allocator);
   defer loader.deinit();
   scanLibDirs(&loader);
+
+  // `ink <tool>` — run a k tool `tools/<tool>.k`, resolved from CWD `tools/` (dev)
+  // or `$INK_HOME/tools/` (installed) — the same way `\l` resolves libraries.
+  // `ink lsp` is one such tool; future tools are just new files under tools/.
+  // `vm.eval` (not `evalSource`) so a self-running tool's terminal value isn't
+  // echoed onto its stdout stream.
+  if (script_path) |sp| if (std.mem.indexOfScalar(u8, sp, '/') == null and
+      std.mem.indexOfScalar(u8, sp, '.') == null) {
+    if (resolveToolPath(allocator, sp)) |tool_path| {
+      defer allocator.free(tool_path);
+      if (std.Io.Dir.cwd().readFileAlloc(io, tool_path, allocator, std.Io.Limit.limited(10 * 1024 * 1024))) |tool_src| {
+        defer allocator.free(tool_src);
+        var stdout_buf: [4096]u8 = undefined;
+        var w = std.Io.File.stdout().writer(io, &stdout_buf);
+        vm.out = &w.interface;
+        loader.autoLoad(vm, tool_src) catch {};
+        _ = vm.eval(tool_src) catch |e| {
+          std.debug.print("ink {s}: {}\n", .{ sp, e });
+          std.process.exit(1);
+        };
+        return;
+      } else |_| {}
+    }
+  };
 
   // `ink disasm <script.k>` — compile without running, print bytecode, exit.
   if (script_path) |sp| if (std.mem.eql(u8, sp, "disasm")) {

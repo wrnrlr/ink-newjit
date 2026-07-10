@@ -33,7 +33,7 @@ kPack::GpKernel[{[out;src;g;i]
   tux:(src[3.*r])-src[3.*l]; tuy:(src[(3.*r)+1.])-src[(3.*l)+1.]; tuz:(src[(3.*r)+2.])-src[(3.*l)+2.]
   tvx:(src[3.*d])-src[3.*u]; tvy:(src[(3.*d)+1.])-src[(3.*u)+1.]; tvz:(src[(3.*d)+2.])-src[(3.*u)+2.]
   nx:(tuy*tvz)-(tuz*tvy); ny:(tuz*tvx)-(tux*tvz); nz:(tux*tvy)-(tuy*tvx)
-  nl:sqrt[(nx*nx)+(ny*ny)+(nz*nz)]|0.0001; o:8.*i
+  nl:max[sqrt[(nx*nx)+(ny*ny)+(nz*nz)];0.0001]; o:8.*i   / max, not | (| is logical-or in shaders)
   a0:set[out;o;px]; a1:set[out;o+1.;py]; a2:set[out;o+2.;pz]; a3:set[out;o+3.;1.]
   b0:set[out;o+4.;nx%nl]; b1:set[out;o+5.;ny%nl]; b2:set[out;o+6.;nz%nl]; set[out;o+7.;0.]};0;3]
 
@@ -60,7 +60,7 @@ hi::&col<W-1; vi::&row<H-1; di::&(col<W-1)&row<H-1
 
 gReady::0; gGeom::0
 initGpu::{[]
-  pInt::CompileCompute[kInt;5]; pCon::CompileCompute[kCon;4]; pApp::CompileCompute[kApp;3]; pVel::CompileCompute[kVel;5]; pPack::CompileCompute[kPack;2]
+  pInt::CompileCompute[kInt;5]; pCon::CompileCompute[kCon;4]; pApp::CompileCompute[kApp;3]; pVel::CompileCompute[kVel;5]; pPack::CompileCompute[kPack;3]
   P::NewBuffer[,/+(px0;py0;pz0)]; V::NewBuffer[nDof#0.]; PREV::NewBuffer[nDof#0.]; IM::NewBuffer[im0]; DP::NewBuffer[nDof#0.]
   PK::NewBuffer[(8*nP)#0.]                                / 2×vec4[] (position + normal) for the vertex pull
   GN::NewBuffer[(0.+W),(0.+H),0.,0.]                      / pack params: grid dims
@@ -76,7 +76,7 @@ substep::{[s] Dispatch[pInt;(P;V;PREV;IM;G);nDof]; onePass'cons; Dispatch[pVel;(
 loop::{[props]
   $[gReady=0; initGpu[]; 0]
   15 substep/0
-  Dispatch[pPack; (PK;P); nP]              / pack positions → vec4[]  (on GPU)
+  Dispatch[pPack; (PK;P;GN); nP]           / pack positions + normals → 2×vec4[]  (on GPU)
   DrawResident[gGeom; nP; PK]              / draw nP dots, pulled from PK — NO readback
 }
 window.run[loop; 0]

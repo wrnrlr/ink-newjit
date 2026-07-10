@@ -103,12 +103,16 @@
 / ── recording (poll audio.rec.read from your loop) ──────────────────────────
 / NB: these are a sibling of audio.ffi, so relative `ffi.` doesn't resolve here —
 / reach the bindings by their fully-qualified `audio.ffi.` names.
-\d audio.rec open start stop info read channels rate available
+\d audio.rec open start speech stop info read channels rate available
 
   / Start the mic at mono @ 48 kHz (the common case).
   start: {[] audio.ffi.recStart 1 48000}
-  / Start the mic with an explicit channel count and sample rate.
+  / Start the mic with an explicit channel count and sample rate.  miniaudio
+  / resamples from the device's native rate to whatever you ask for here, so a
+  / non-native rate (e.g. 16000) just works — no host-side resampler needed.
   open:  {[channels;rate] audio.ffi.recStart (channels; rate)}
+  / Mono @ 16 kHz — the rate ASR models (Whisper, Parakeet) expect.
+  speech: {[] audio.ffi.recStart 1 16000}
   stop:  {[] audio.ffi.recStop 0}
   / Labelled capture info: `channels`rate`available (available is in frames).
   info:  {[] `channels`rate`available ! audio.ffi.recInfo 0}

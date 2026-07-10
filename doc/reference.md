@@ -135,6 +135,7 @@ The IO system is organized around file descriptors (filename, port number, etc.)
   - `` 1: `stdin `` reads up to 64 KiB of available bytes from stdin (blocks for ≥1 byte); returns `""` at EOF. Partial by design — frame/buffer in k. For byte-stream protocols (LSP/Jupyter).
 - Write bytes `` x 1: y ``
   - `` `stdout 1: y `` / `` `stderr 1: y `` write raw bytes with **no** trailing newline and flush (unlike `` `0 0:y `` which appends `\n`).
+  - Writing to a path that doesn't exist **creates** the file (`` "new.txt" 1: bytes ``); the same holds for `` x 0: y ``. (Reads still require the file to exist.)
 - Load code `` 2: y `` used for importing other files
 
 ### Special Forms
@@ -189,6 +190,7 @@ Some adverbs are digrams, like While `f f/` and Stencil `i f'`, they have 2 left
 ## Special Symbols
 - Arguments `` `argv[] `` - list of cmd-line args (also in global `x`)
 - Environment variables `` `env[] `` - dict of env variables
+- Directory walk `` `dir p `` - recursively list file paths under directory `p` (a char vector), skipping hidden/build dirs; returns a list of path strings. Apply by **juxtaposition** (`` `dir p ``), not `@`.
 - Random number `` `prng[] ``
 - Inverse trig `` `asin@x ``, `` `acos@x ``, `` `atan@x `` (element-wise over F vectors), `` `atan2@(y;x) `` (broadcasts scalar⊕vector) — no verb glyph, added for equirectangular UV mapping (see `test/earth.k`)
 - Exit `` `exit@i ``
@@ -198,6 +200,9 @@ Ink supports writing native extensions based on a FFI.
 
 ## Commands
 A command always starts at the beginning of a line with `\`.
+- `\d name` - Declare namespace
+- `\l name` - Load `name` module from `$INK_HOME/lib/<name>.k`
+- `\l name.k` - Loads `name` module from `$PWD/<name>.k`
 
 ### Time Command `\t:n expr`
 Time elapsed in milliseconds after n runs (n is optional).
