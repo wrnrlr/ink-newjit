@@ -263,6 +263,9 @@ opFmod: {[t;r;a;b] (0x0005008D;t;r;a;b)}   / OpFMod  141 (GLSL mod: result sign 
 opSin:  {[t;r;a]   (0x0006000C;t;r;Glsl;13;a)}    / sin
 opCos:  {[t;r;a]   (0x0006000C;t;r;Glsl;14;a)}    / cos
 opSqrt: {[t;r;a]   (0x0006000C;t;r;Glsl;31;a)}    / sqrt
+opExp:  {[t;r;a]   (0x0006000C;t;r;Glsl;27;a)}    / exp  (e^x)
+opLog:  {[t;r;a]   (0x0006000C;t;r;Glsl;28;a)}    / log  (ln x)
+opTanh: {[t;r;a]   (0x0006000C;t;r;Glsl;21;a)}    / tanh (for GELU)
 opAbs:  {[t;r;a]   (0x0006000C;t;r;Glsl;4;a)}     / FAbs
 opFloor:{[t;r;a]   (0x0006000C;t;r;Glsl;8;a)}     / Floor
 opFract:{[t;r;a]   (0x0006000C;t;r;Glsl;10;a)}    / Fract
@@ -332,8 +335,8 @@ cmpOps: `<`>`=`~`&`|
 binRty: {[op;aty;bty;oty] $[op in cmpOps; `bool; op~`,; jnRty[aty;bty]; isVecTy[aty]; aty; isVecTy[bty]; bty; aty]}
 
 / ── Known 1-arg and multi-arg math function names ────────────────────────────
-mathFns1: `abs`floor`fract`sign`sqrt`sqr`sin`cos`asin`acos`atan`length`normalize
-mathFns:  `abs`floor`fract`sign`sqrt`sqr`sin`cos`asin`acos`atan`length`normalize`pow`min`max`atan2`dot`cross`step`mod`clamp`mix`smoothstep
+mathFns1: `abs`floor`fract`sign`sqrt`exp`log`tanh`sqr`sin`cos`asin`acos`atan`length`normalize
+mathFns:  `abs`floor`fract`sign`sqrt`exp`log`tanh`sqr`sin`cos`asin`acos`atan`length`normalize`pow`min`max`atan2`dot`cross`step`mod`clamp`mix`smoothstep
 
 / ── Verb dispatch ────────────────────────────────────────────────────────────
 dispBin: {[op;rty;r;aty;a;bty;b]
@@ -460,6 +463,9 @@ compFnCall: {[name; i; env; oty]
     name~`fract;      emitBuf opFract[at;r;a0[0]]
     name~`sign;       emitBuf opSign[at;r;a0[0]]
     name~`sqrt;       emitBuf opSqrt[at;r;a0[0]]
+    name~`exp;        emitBuf opExp[at;r;a0[0]]
+    name~`log;        emitBuf opLog[at;r;a0[0]]
+    name~`tanh;       emitBuf opTanh[at;r;a0[0]]
     name~`sqr;        emitBuf opFmul[at;r;a0[0];a0[0]]
     name~`sin;        emitBuf opSin[at;r;a0[0]]
     name~`cos;        emitBuf opCos[at;r;a0[0]]
@@ -663,9 +669,10 @@ compIset: {[i; env]
 / Constants RCi0/RCi1/RCf0 (i32 0, i32 1, f32 0.) are made once per compile in
 / compGpN, so these are valid inside a GpKernel only (the fixed stencil emitters
 / don't create them).
-RCi0:: 0   / i32 constant 0  (loop counter init)
-RCi1:: 0   / i32 constant 1  (loop counter step)
-RCf0:: 0   / f32 constant 0. (rsum accumulator init)
+RCi0:: 0    / i32 constant 0     (loop counter init)
+RCi1:: 0    / i32 constant 1     (loop counter step)
+RCf0:: 0    / f32 constant 0.    (rsum accumulator init)
+RCfNeg:: 0  / f32 constant -1e30 (rmax accumulator init)
 
 / Emit a counter-driven loop scaffold threading an i32 counter (0..Kmax-1) plus one
 / carried state of type `sty` (init `seedId`), and leave the BODY block open. The
@@ -713,6 +720,23 @@ compRsum: {[i; env]
   benv: ((!env),pn)!(env[!env],(,(kf;`f32)))
   bp:   compSeq[bst; benv; `f32]
   nv:   newId[]; emitBuf opFadd[Tf32; nv; accPhi; bp 0]   / acc' = acc + expr
+  loopClose[nv; `f32; accNext; iNext; iPhi; conL; hdrL; mrgL]
+  (accPhi; `f32)
+}
+
+/ rmax[K; {[k] expr}] — max reduction (stable-softmax numerator).  Same loop as rsum
+/ but seeded at -1e30 and combined with FMax.
+compRmax: {[i; env]
+  args: kF[i;`arg]; lamN: args 1
+  pn:   *(Cst`value)@kF[lamN;`param]; bst: kF[lamN;`stmt]
+  kp:   compNode[args 0; env; `f32]
+  Kmax: newId[]; emitBuf opF2s[Ti32; Kmax; kp 0]
+  h:    loopOpen[Kmax; RCfNeg; `f32]
+  iPhi:h 0; accPhi:h 1; iNext:h 2; accNext:h 3; conL:h 4; hdrL:h 5; mrgL:h 6
+  kf:   newId[]; emitBuf opI2f[Tf32; kf; iPhi]
+  benv: ((!env),pn)!(env[!env],(,(kf;`f32)))
+  bp:   compSeq[bst; benv; `f32]
+  nv:   newId[]; emitBuf opFmax[Tf32; nv; accPhi; bp 0]   / acc' = max(acc, expr)
   loopClose[nv; `f32; accNext; iNext; iPhi; conL; hdrL; mrgL]
   (accPhi; `f32)
 }
@@ -791,6 +815,7 @@ compApply: {[i; env; oty]
     fnName~`iget;        compIget[i; env]
     fnName~`iset;        compIset[i; env]
     fnName~`rsum;        compRsum[i; env]
+    fnName~`rmax;        compRmax[i; env]
     fnName in mathFns;   compFnCall[fnName; i; env; oty]
     isBuf[fnName; env];  compBufIdx[(env fnName)0; i; env]
     compApplyIdx[fr; i; env; oty]]
@@ -1346,9 +1371,10 @@ compGpN: {[fn; nAcc; nBuf]
   KDev:newId[];  emitCon (0x0004002B;Tu32;KDev;1)
   CKz::Ku32z; CPf32::Pf32s; CPi32::Pi32s; CScope::KDev
   / rsum loop constants (i32 0/1, f32 0.) — one set per compile, forward-refs by compRsum
-  RCi0::newId[]; emitCon opConst[Ti32;RCi0;0]
-  RCi1::newId[]; emitCon opConst[Ti32;RCi1;1]
-  RCf0::newId[]; emitCon opConst[Tf32;RCf0;0.]
+  RCi0::newId[];   emitCon opConst[Ti32;RCi0;0]
+  RCi1::newId[];   emitCon opConst[Ti32;RCi1;1]
+  RCf0::newId[];   emitCon opConst[Tf32;RCf0;0.]
+  RCfNeg::newId[]; emitCon opConst[Tf32;RCfNeg;-1e30]
   GAcc::accIds; GBuf::bufIds; GNAcc::nAcc; GPbufs::Pbufs; GPbufsI::PbufsI
   lam:lamOf fn; argNames:lamArgs lam
   gidId:newId[]; emitBuf opLoad[Tv3u32;gidId;gidVar]
