@@ -12,6 +12,7 @@
 /                      shared nodes via OpAtomicIAdd (the XPBD cloth pattern).
 
 2: "lib/spirv.k"
+2: "lib/dye.k"
 2: "lib/gpu.k"
 
 / walk.k energy solve; N from the params uniform g[0] (nothing baked).

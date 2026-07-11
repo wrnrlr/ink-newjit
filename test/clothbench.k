@@ -8,6 +8,7 @@
 / position readback). `t is a microsecond clock; ms/frame = elapsed / frames.
 
 2: "lib/spirv.k"
+2: "lib/dye.k"
 2: "lib/gpu.k"
 
 vlen3:{sqrt[(sqr x)+(sqr y)+(sqr z)]}

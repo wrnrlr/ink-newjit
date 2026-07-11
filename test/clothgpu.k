@@ -11,6 +11,7 @@
 / (3*nP). Each edge buffer packs 7 floats/edge: i j restlen alpha w0 w1 wt.
 
 2: "lib/spirv.k"
+2: "lib/dye.k"
 2: "lib/gpu.k"
 2: "lib/pbr.k"                            / PbrFragment (Cook-Torrance) renderer
 

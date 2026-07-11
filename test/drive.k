@@ -17,6 +17,7 @@
 / Run: zig build gpu && ink test/drive_home.k
 
 2: "lib/spirv.k"
+2: "lib/dye.k"
 2: "lib/gpu.k"
 
 dhWds: FragmentShader[`uv`out!`v2`v4; {[uv]

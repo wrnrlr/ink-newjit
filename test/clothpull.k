@@ -9,6 +9,7 @@
 / the per-frame readback + CPU mesh-build (test/clothgpu.k) disappears.
 
 2: "lib/spirv.k"
+2: "lib/dye.k"
 2: "lib/gpu.k"
 2: "lib/instancing.k"                    / UploadMesh, DrawResident, InstancedVertexShader
 2: "lib/pbr.k"                           / PbrFragment

@@ -2,7 +2,7 @@
 /
 / Build first:  zig build gpu
 / Load deps FIRST, then this (nested `2:` loads overflow), e.g.:
-/                 2: "lib/spirv.k"; 2: "lib/gpu.k"; 2: "lib/nn.k"
+/                 2: "lib/dye.k"; 2: "lib/gpu.k"; 2: "lib/nn.k"
 / Run:          inside a window.run loop (compute needs a live device — see test/nn.k)
 /
 / All matrices are ROW-MAJOR flat f32 vectors.  Each primitive comes in two forms:

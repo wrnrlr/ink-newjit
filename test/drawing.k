@@ -12,6 +12,7 @@
 / Run: zig build gpu && ink test/fill_demo.k
 
 2: "lib/spirv.k"
+2: "lib/dye.k"
 2: "lib/gpu.k"
 
 / ── SPIR-V rounded-rect SDF shader ──────────────────────────────────────────

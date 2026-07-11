@@ -10,6 +10,7 @@
 / Run:  zig build gpu && ink test/demo.k
 
 2: "lib/spirv.k"
+2: "lib/dye.k"
 2: "lib/gpu.k"
 
 / ── Compile SPIR-V shaders ──────────────────────────────────────────────────

@@ -6,6 +6,7 @@
 / over Dispatch swapping the in/out buffers — the pattern SOR / XPBD cloth want.
 
 2: "lib/spirv.k"
+2: "lib/dye.k"
 2: "lib/gpu.k"
 
 demo:{[]

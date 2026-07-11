@@ -7,6 +7,7 @@
 / Run: zig build gpu && ink test/sphere.k
 
 2: "lib/spirv.k"
+2: "lib/dye.k"
 2: "lib/gpu.k"
 2: "lib/pbr.k"   / shared PBR renderer: PbrFragment (Cook-Torrance)
 

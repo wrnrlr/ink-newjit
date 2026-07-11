@@ -1,3 +1,4 @@
 text:1:"./test/data/shakespear.txt"
 ` 0: text
-chars:{x@<x}
+chars:{x@<x}@!=text
+N:#chars

@@ -2,6 +2,7 @@
 / Runs without a GPU device (decode is host-side).   Run:  ink test/tdt.k
 
 2: "lib/spirv.k"
+2: "lib/dye.k"
 2: "lib/gpu.k"
 2: "lib/nn.k"
 

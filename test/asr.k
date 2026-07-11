@@ -13,6 +13,7 @@
 / below exist.
 
 2: "lib/spirv.k"
+2: "lib/dye.k"
 2: "lib/gpu.k"
 2: "lib/nn.k"
 2: "lib/font.k"

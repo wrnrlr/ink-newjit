@@ -5,7 +5,7 @@
 / instance.  Pairs with lib/gpu.k's UploadMesh (retained geometry → persistent
 / vertex buffer) and DrawInstanced (one draw, N instances).
 /
-/ Load:  2: "lib/spirv.k"  and  2: "lib/gpu.k"  then  2: "lib/instancing.k"
+/ Load:  2: "lib/dye.k"  and  2: "lib/gpu.k"  then  2: "lib/instancing.k"
 
 / FFI bindings for retained geometry + instancing (kept here, not in lib/gpu.k,
 / so non-instancing scenes stay under the 256-global ceiling). `so` is from gpu.k.

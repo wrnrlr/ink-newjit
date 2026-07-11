@@ -1186,3 +1186,25 @@ test "dyad dispatch structure" {
   }
   try testing.expectEqual(Op2.QUICK_COUNT * verbs.S1_STRIDE * verbs.S1_STRIDE, verbs.quick_table.len);
 }
+
+// ── Phase 0: the math-intrinsic registry stays faithful to the live enums.
+// Guards src/primitive/intrinsic.zig so Phase 1 can generate the lexer keyword
+// list / syms dispatch / fuse map from it without drift. See doc/design/dye.md.
+test "intrinsic registry parity with Op1/Op2" {
+  const intrinsic = @import("primitive/intrinsic.zig");
+  const Op1 = @import("noun/operator.zig").Op1;
+  const Op2 = @import("noun/operator.zig").Op2;
+  for (intrinsic.table) |it| {
+    // Any intrinsic that names a CPU opcode must match the real enum member.
+    if (it.op1) |o1| try testing.expectEqual(o1, Op1.fromString(it.name).?);
+    if (it.op2) |o2| try testing.expectEqual(o2, Op2.fromString(it.name).?);
+    // Every grammar keyword math verb is an Op1 today (Phase 1 removes the keyword,
+    // keeps the Op1).
+    if (it.keyword) try testing.expect(it.op1 != null);
+  }
+  // Spot-checks on the lookup + derived keyword list.
+  try testing.expectEqual(Op1.sin, intrinsic.find("sin").?.op1.?);
+  try testing.expect(intrinsic.find("atan2").?.arity == .two);
+  try testing.expect(intrinsic.find("nope") == null);
+  try testing.expectEqual(@as(usize, 7), intrinsic.keyword_names.len);
+}

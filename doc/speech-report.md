@@ -134,7 +134,13 @@ writes zeros for them and folds BatchNorm into an affine.)
 
 ## 4. Problems encountered
 
-### 4.1 The blocker — `safetensors.read` caps at ~1.5 GB
+### 4.1 The blocker — `safetensors.read` caps at ~1.5 GB — **FIXED**
+
+**Resolved (2026-07-11):** `ReadSafetensors` now `mmap`s the file instead of
+slurping it into one contiguous heap buffer, and surfaces the real error to
+stderr instead of `catch return null`. The 2.47 GB parakeet model loads (914
+tensors) and decodes correctly — verified end-to-end. See the mmap path in
+`lib/safetensors/src/main.zig`. The original diagnosis below is kept for context.
 
 Measured empirically: a 1.36 GB safetensors reads fine (108 tensors); a 1.93 GB
 one returns null. The 0.6B model is 2.4 GB, so **it cannot currently be loaded**.

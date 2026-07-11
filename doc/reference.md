@@ -63,7 +63,7 @@ Assignmet of globals and locals at the top level happens with the singe colon `:
 while assigment of globals in a lambda happen with a double colon `::`
 
 ### General Verbs `@#`
-- `@x` **Type** - Symbol for type of x. `` @(1;2.3;`c)  / `i`f`s ``
+- `@x` **Type** - Type of x. `` @(1;2.3;`c;"Hi")  / `i`f`s`C ``
 - `#x` **Tally** - Count number of elements in x. `` #(1 2;3 4)  / 2 ``
 
 ### Arithmetic Verbs `-+*%`
@@ -213,12 +213,52 @@ Some adverbs are digrams, like While `f f/` and Stencil `i f'`, they have 2 left
 - Inverse trig `` `asin@x ``, `` `acos@x ``, `` `atan@x `` (element-wise over F vectors), `` `atan2@(y;x) `` (broadcasts scalar⊕vector) — no verb glyph, added for equirectangular UV mapping (see `test/earth.k`)
 - Exit `` `exit@i ``
 
-## Native Extension
-Ink supports writing native extensions based on a FFI.
-
 ## Commands
 A command always starts at the beginning of a line with `\`.
 - `\d name` - Declare namespace
 - `\l name` - Load `name` module from `$INK_HOME/lib/<name>.k`
 - `\l name.k` - Loads `name` module from `$PWD/<name>.k`
 - `\t:n expr` - Time elapsed in milliseconds after n runs (n is optional).
+
+## Native Extension
+Ink supports writing native extensions based on a FFI.
+The names of exported symbols from a shared library should be prefixed by the name of the module.
+
+## Fuzed Operators
+- `+/` **Sum**
+- `*/` **Product**
+- `,/` **Raze**
+
+## Libraries
+
+### Audio Library
+- `audio.play "boop.wav"` - one-shot UI/SFX
+- `audio.load "gun.wav"`a controllable voice
+- `audio.start h`          (re)trigger it
+- `audio.music "song.mp3"` streamed, looping background music
+- `audio.pos[h; 3 0 -2]`   place it in 3D; move the listener
+- `audio.listener 0 0 0` - with audio.listener each frame
+- `audio.rec.start[]` - start the mic
+- `s: audio.rec.read[]` - drain samples (call in your loop)
+- `audio.save["take.wav"; audio.rec.channels[]; audio.rec.rate[]; s]`
+- `clip: audio.decode "take.wav"` - load a file to a PCM dict
+
+### Crypto Library TODO
+
+### Data Library
+- `csv.read`
+- `csv.write`
+- `json.read`
+- `json.write`
+- `parquet.read`
+- `parquet.write`
+
+### Image Library
+- `image.read[path]`
+- `image.write[path;img]`
+- `image.scale[img;w;h]`
+
+### Graphics Library
+- `window.run`
+
+### Network Library
