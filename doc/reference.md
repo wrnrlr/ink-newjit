@@ -141,7 +141,17 @@ while assigment of globals in a lambda happen with a double colon `::`
 - `=X` **Group** - for each distinct value, the indices where it occurs
 - `=i` **Unit** - identity matrix
 - `^x` **Null** - boolean mask of null/missing elements
-- `sqrt n`, `sqr n`, `log n`, `exp n`, `sin n`, `cos n`, `abs n`
+
+### Math Functions (prelude names, not grammar keywords)
+`sqrt sqr log exp sin cos abs` and the inverse trig `asin acos atan atan2` are **not**
+built-in verbs — they are ordinary names bound in `lib/prelude.k` (loaded into every VM
+at init) to callable symbols: `` sin:`sin@ `` etc. `` `sin@x `` routes through `syms.zig`
+to the same opcode kernel the old verb used, so `sin x` / `sqrt 4 9` behave as before and
+`sqr`/`abs` stay integer-closed on integers. Because they are names (nouns) rather than
+verbs, a bare `-` directly after one is **dyadic subtract**: write `abs[-4]` (or `abs(-4)`),
+not `abs -4`. See `src/primitive/intrinsic.zig` (the canonical registry) and
+`doc/design/dye.md`. GPU shaders (lib/dye.k) additionally support `pow min max dot cross
+step mod clamp mix smoothstep floor fract sign tanh length normalize`.
 
 ### Dyadic Operators
 - Right `x:y` - return right-hand side

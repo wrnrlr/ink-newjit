@@ -26,8 +26,13 @@ pub const Token = struct {
   pub fn len(t: Token) u32 { return t.end - t.start; }
 };
 
+// Grammar keyword verbs. The math functions (sqrt sqr exp log sin cos abs) were
+// REMOVED here in Phase 1 — they are no longer baked into the grammar. They now
+// live as callable symbols (`sin@x, routed through syms.zig to the identical Op1
+// kernel) and are bound to friendly names in lib/prelude.k (sin:`sin@ …), loaded
+// at VM init. The canonical list of math intrinsics is src/primitive/intrinsic.zig;
+// see doc/design/dye.md. Their Op1 enum members are kept (the kernels still exist).
 const KEYWORD_OPS = [_][]const u8{
-  "sqrt", "sqr", "exp", "log", "sin", "cos", "abs",
   "first", "last", "count", "in", "has", "mod", "div",
   "parse", "exec", "depth", "epoch",
 };

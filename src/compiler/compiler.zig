@@ -5,6 +5,7 @@ const opmod = @import("../noun/operator.zig");
 const Adverb = opmod.Adverb;
 const Op1 = opmod.Op1;
 const Op2 = opmod.Op2;
+const intrinsic = @import("../primitive/intrinsic.zig");
 const Op3 = opmod.Op3;
 const Op4 = opmod.Op4;
 const ir = @import("ir.zig");
@@ -322,6 +323,28 @@ pub const Compiler = struct {
   fn compileApply(self: *Compiler, ap: ast.Apply, is_tail: bool) anyerror!ir.ValueId {
     const seq = if (ap.a) |s| s else &[_]*ast.Node{};
     const n: u8 = @intCast(seq.len);
+
+    // Monomorphic intrinsic call site: a literal intrinsic SYMBOL applied directly
+    // (`` `sin x `` — which is exactly what the lib/prelude.k bodies `{`sin x}`
+    // compile to) lowers straight to the Op1/Op2 kernel. That is fusable by the
+    // optimizer, and it skips both the syms.apply string-match and the buggy
+    // `@`(symbol, int-scalar) dispatch (doc/bug.md). A literal symbol can't be
+    // shadowed, so this needs no scope analysis. See src/primitive/intrinsic.zig.
+    if (ap.f.* == .literal and ap.f.literal == .s) {
+      if (intrinsic.find(ap.f.literal.s)) |ic| {
+        if (n == 1) {
+          if (ic.op1) |o1| {
+            const a = try self.compileNode(seq[0], false);
+            return try self.emitOpWithArg(.Apply1, @intFromEnum(o1), &.{a});
+          }
+        } else if (n == 2) {
+          if (ic.op2) |o2| {
+            var in2 = [_]ir.ValueId{ try self.compileNode(seq[0], false), try self.compileNode(seq[1], false) };
+            return try self.emitOpWithArg(.Apply2, @intFromEnum(o2), &in2);
+          }
+        }
+      }
+    }
 
     // @[x;i;f] (3) / @[x;i;f;v] (4) → Apply3/Apply4 with Op3/Op4 byte (no function on stack).
     // Same for .[x;p;f] / .[x;p;f;v] → drill3 / drill4.
@@ -670,6 +693,17 @@ pub const Compiler = struct {
   }
 
   fn compileApposit(self: *Compiler, ap: ast.Apposit, is_tail: bool) anyerror!ir.ValueId {
+    // Monomorphic intrinsic call site: a literal intrinsic SYMBOL juxtaposed with an
+    // argument (`` `sin a ``) — the shape the lib/prelude.k bodies `{`sin x}` take —
+    // lowers straight to the Op1 kernel, so it fuses with adjacent elementwise ops
+    // and skips the syms.apply string-match. A literal symbol can't be shadowed.
+    // See src/primitive/intrinsic.zig / compileApply's twin peephole.
+    if (ap.f.* == .literal and ap.f.literal == .s) {
+      if (intrinsic.find(ap.f.literal.s)) |ic| if (ic.op1) |o1| {
+        const a = try self.compileNode(ap.a, false);
+        return try self.emitOpWithArg(.Apply1, @intFromEnum(o1), &.{a});
+      };
+    }
     // When both sides are single-char verb ops, build a train (composition) constant.
     var ops_buf: [7]u8 = undefined;
     var ops_len: usize = 0;

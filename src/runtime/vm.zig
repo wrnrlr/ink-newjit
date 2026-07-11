@@ -111,7 +111,17 @@ pub const VM = struct {
     @memset(&vm.globals, .blank);
     std.Io.Threaded.global_single_threaded.allocator = alloc;
     vm.pushFrame(.{ .base = 0, .result_slot = 0, .lambda_idx = NO_LAMBDA });
+    vm.loadPrelude();
     return vm;
+  }
+
+  // Load the CPU builtins (lib/prelude.k: the math names removed from the grammar
+  // in Phase 1, etc.) into every fresh VM. Best-effort — a missing prelude just
+  // leaves those names unbound. Runs at the top level (not a nested `2:`), so it's
+  // safe; globals persist in vm.globals. See doc/design/dye.md.
+  fn loadPrelude(vm: *VM) void {
+    const r = vm.load("prelude") catch return;
+    r.deinit(vm.alloc);
   }
 
   pub fn deinit(vm: *VM) void {

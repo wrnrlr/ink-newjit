@@ -198,7 +198,19 @@ test "arithmetic" {
   try t.check("`asin@(0.0 1.0)", "0.0 1.5707964");
   try t.check("`atan2@(1.0;1.0)", "0.7853982");
   try t.check("`atan2@(0.0 1.0; 1.0 0.0)", "0.0 1.5707964");
-  try t.check("abs -4.0", "4.0"); // TODO abs 0N crashes
+  // Phase 1: math fns are prelude NAMES (nouns), not verbs, so `abs -4.0` now
+  // parses as `abs - 4.0` (dyadic subtract). Apply a negative literal via brackets.
+  // The juxtaposition prelude (`` `abs x ``) keeps abs integer-closed on ints.
+  try t.check("abs[-4.0]", "4.0"); // TODO abs 0N crashes
+  try t.check("abs[-4]", "4");
+  try t.check("sqr 3", "9");
+  try t.check("sin 0", "0.0");
+  // Phase 3: a literal intrinsic symbol applied lowers to the Op1 kernel at compile
+  // time (compileApposit/compileApply peephole) — fusable, integer-closed, correct.
+  try t.check("`sqr 2 3", "4 9");
+  try t.check("`sqrt 4", "2.0");
+  try t.check("`abs 3", "3");
+  try t.check("`sqrt 1.0+1.0 2.0 3.0", "1.4142135 1.7320508 2.0"); // fused add+sqrt
   // try t.check("min 5 3 4 8 2", "2");
   // try t.check("min 5", "!class");
   // try t.check("min `a`b!1 2", "!rank"); 
@@ -1198,13 +1210,18 @@ test "intrinsic registry parity with Op1/Op2" {
     // Any intrinsic that names a CPU opcode must match the real enum member.
     if (it.op1) |o1| try testing.expectEqual(o1, Op1.fromString(it.name).?);
     if (it.op2) |o2| try testing.expectEqual(o2, Op2.fromString(it.name).?);
-    // Every grammar keyword math verb is an Op1 today (Phase 1 removes the keyword,
-    // keeps the Op1).
-    if (it.keyword) try testing.expect(it.op1 != null);
+    // Prelude names must have a working CPU form: either a monadic Op1 kernel
+    // (sqrt sqr exp log sin cos abs), or one of the syms.zig std.math helpers
+    // (asin acos atan atan2). None should be GPU-only.
+    if (it.prelude) {
+      const stdmath = std.mem.eql(u8, it.name, "asin") or std.mem.eql(u8, it.name, "acos") or
+        std.mem.eql(u8, it.name, "atan") or std.mem.eql(u8, it.name, "atan2");
+      try testing.expect(it.op1 != null or stdmath);
+    }
   }
-  // Spot-checks on the lookup + derived keyword list.
+  // Spot-checks on the lookup + derived prelude list.
   try testing.expectEqual(Op1.sin, intrinsic.find("sin").?.op1.?);
   try testing.expect(intrinsic.find("atan2").?.arity == .two);
   try testing.expect(intrinsic.find("nope") == null);
-  try testing.expectEqual(@as(usize, 7), intrinsic.keyword_names.len);
+  try testing.expectEqual(@as(usize, 11), intrinsic.prelude_names.len);
 }

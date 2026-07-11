@@ -86,7 +86,7 @@ doc/               # spec.md, triage.md, changelog.md, future.md
 - `,/()` returns a unit, not an empty list — use `$[#x;,/x;!0]` when folding possibly-empty lists.
 - Lambdas do **not** close over parent scope. Use `/:` patterns instead of nested closures.
 - Namespaces: `\d ns` opens namespace `ns` (all members public); `\d ns a b` makes only `a`,`b` public (rest private, reachable only within `ns`); bare `\d` resets to global. Resolution is compile-time — names mangle to `ns.member` global keys (zero runtime cost). A bare name inside `ns` resolves to `ns.name` if that member exists, else the global.
-- A **member name colliding with a keyword verb** (`parse exec count first last in has mod div sqrt sqr exp log sin cos abs depth epoch`) must be defined via its explicit qualified LHS (`json.parse: …`, not `parse: …`) — a bare `parse:` lexes as the verb.
+- A **member name colliding with a keyword verb** (`parse exec count first last in has mod div depth epoch`) must be defined via its explicit qualified LHS (`json.parse: …`, not `parse: …`) — a bare `parse:` lexes as the verb. (The math functions `sqrt sqr exp log sin cos abs` were removed from the grammar in Phase 1 — they're now names bound in `lib/prelude.k`, so they no longer lex as verbs; a bare `-` after one is dyadic subtract, so use `abs[-4]` not `abs -4`. See `doc/design/dye.md`.)
 - Module loading: `2:"lib/foo.k"` loads by path; `2:"foo"` / `\l foo` (extension-less) resolve to `lib/foo.k`. A public `ns.member` / dotted name auto-loads its file on first reference. Only namespaced/dotted public names are indexed for autoload — bare global names are file-private.
 
 ## Native Extensions (FFI)

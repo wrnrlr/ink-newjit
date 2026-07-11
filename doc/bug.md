@@ -290,3 +290,29 @@ amend `x::@[x;idx;:;v]`. Surfaced pinning corner masses (`gIm[0,nCols-1]:0.` /
 `im0[0,W-1]:0.`) in `test/clothbench.k`'s size-parameterised setup functions —
 the pins silently corrupted the mass array. Same family as the "`::` for globals
 in lambdas" note, but specific to the *indexed* amend with a list index.
+
+---
+
+## `@`(symbol, int-scalar) mis-dispatches to the `2:` loader
+
+Applying a symbol to an **integer scalar** via `@` panics instead of running the
+symbol function:
+
+```
+`abs@4     / panic: index out of bounds: index 4, len 2  (→ unmarshal_s_i / 2: load)
+`foo@3     / same panic — NOT math-specific; any symbol@int-scalar
+`sin@2     / panic
+`sin@2.0   / 0.9092974   (float arg is fine)
+`sin@(2 3) / works        (vector arg is fine)
+```
+
+Root cause: `dispatch2(.@, s, i)` lands on the `2:` (Marshal) handler
+`unmarshal_s_i` (marshal.zig:72), which does `getFileText(@intCast(y.i))` — using
+the integer *value* as a file id. Only the `(symbol, int-scalar)` type pair is
+affected; `(symbol, float)` and `(symbol, vector)` route correctly to `applySymFn`.
+
+Impact: none on current code (nothing wrote `` `sym@int ``). Surfaced while wiring
+lib/prelude.k (Phase 1); worked around there by applying math symbols via
+JUXTAPOSITION (`` `sin x ``, which routes Call.apply → syms.apply, bypassing the
+`@`-dyad table) instead of the `` `sin@ `` projection. Fixing the dispatch table
+would let the projection form work too.
