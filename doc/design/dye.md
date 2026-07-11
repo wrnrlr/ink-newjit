@@ -191,12 +191,44 @@ tree, so the map is per-unit (cleared each top-level `compile()`); cross-unit
 propagation (a lib constant into another file) is not done. Verified via the
 existing global/list-assign tests plus new folding tests.
 
+**Neutral IR seam — the Tiramisu layer (DONE for the fragment-expression path).**
+Instead of `compNode` welding CST→SPIR-V, `dye.k` now grows a target-neutral, typed
+SSA IR and a two-stage pipeline. IR node = an index into parallel lists
+`xOp / xTy / xArg / xVal` (op sym, result type, operand node indices, literal/glyph):
+
+```
+{[uv] (uv[0]; uv[1]; 0.5; 1.0)}  →
+  0: param   :v2  ()          22       (the loaded input id)
+  1: extract :f32 (0)         0
+  2: extract :f32 (0)         1
+  3: const   :f32 ()          0.5
+  4: const   :f32 ()          1.0
+  5: cons    :v4  (1,2,3,4)
+```
+
+- **Builder** `xNode` (mirrors `compNode`) walks the CST into IR, returning
+  `(nodeIdx; ty)` instead of emitting.
+- **Optimizations** run once on the neutral IR: `xFold` (const-folds f32 scalar
+  arith + a few unary math, executed on the host since dye is the CPU compiler),
+  `xReach` (DCE — a guarded reachability fold).
+- **Two back-ends over the same IR**: `xLowerSpirv` (assigns ids, replays the `op*`
+  stencils — copy-and-patch's stencil library) and `xDump` (textual). A third
+  (ink-VM bytecode / copy-and-patch CPU) is now just another lowering.
+- `FragmentShaderIr` drives a fragment lambda through build→fold→DCE→lower.
+
+Verified (`test/ir.k`): **byte-identical** to the direct `FragmentShader` when
+nothing folds (record-then-replay: ids are assigned in lowering order = IR order),
+`x+1.0+2.0` folds `1.0+2.0→3.0` (shorter module), and a real circle SDF compiled
+*through the IR* renders on the GPU. Golden + unit tests + direct demos unchanged.
+
+Scope: the fragment-expression subset (arith, math, vector cons/extract, select,
+comparisons, broadcast, local binds). The compute/vertex entry points still use the
+direct `compNode` — their in-kernel loop phis, atomics, and scatter don't fit a pure
+value-SSA IR; migrating the default path onto the seam is the follow-up.
+
 **Remaining Phase 3 (larger, deferred):**
-- *Neutral IR seam (the Tiramisu layer).* `compNode` emits a typed IR list
-  `{op; ty; args}` that a per-target pass lowers to SPIR-V words (and later ink
-  bytecode / a copy-and-patch CPU path). Adds global const/var tracking; the seam
-  for a shared `assembleCompute` (the ~7 compute entry points duplicate ~40 lines
-  of module-assembly boilerplate).
+- Migrate the default `FragmentShader`/vertex/compute onto the IR (needs IR ops for
+  stores/loads/atomics/loop-CFG), plus CSE and a shared `assembleCompute`.
 - *Two VM bugs* (see `doc/bug.md`): the nested-`2:` load underflow (fixing it lets
   `dye.k` self-load `spirv.k`) and the `@`(symbol, int-scalar) mis-dispatch.
 

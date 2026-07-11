@@ -1325,3 +1325,181 @@ compSeqEnvTail: {[stmts; env]
 
 compSeqEnv: {[stmts; env]
   $[0=#stmts; env; compSeqEnvTail[stmts; env]]}
+
+/ ════════════════════════════════════════════════════════════════════════════
+/ Neutral IR seam (the Tiramisu "Layer 1/2"). Instead of emitting SPIR-V inline,
+/ the walker below builds a target-neutral, typed SSA op list; a lowering pass then
+/ turns it into a target — SPIR-V words (xLowerSpirv, reusing the op* stencils) or a
+/ textual dump (xDump). Optimizations (xFold, xReach/DCE) run once on the neutral IR
+/ and help every target. FragmentShaderIr drives the fragment-expression subset
+/ through it; the compute/loop machinery stays on the direct compNode path for now.
+/ See doc/design/dye.md.  IR node = an index into these parallel lists:
+xOp::  ()   / op sym:  param const cons extract select arith math neg lnot
+xTy::  ()   / result type sym
+xArg:: ()   / operand node indices (a list) per node
+xVal:: ()   / const value / extract index / verb glyph / math name
+xId::  ()   / SPIR-V id per node, filled by lowering
+xRe::  ()   / reachability mask (DCE)
+xReset: {[] xOp::(); xTy::(); xArg::(); xVal::(); xId::(); xRe::()}
+xEmit: {[op;ty;args;val] xOp,:: ,op; xTy,:: ,ty; xArg,:: ,args; xVal,:: ,val; -1+#xOp}
+xSplat: {[vty;snode] xEmit[`cons; vty; (ncVec[vty])#snode; 0n]}
+
+/ ── IR builder: mirrors compNode, but returns (nodeIdx; ty) and records IR ──
+xLit: {[i;oty] $[(kKind i) in `floats`ints; xVecLit[i]; xScalarLit[i;oty]]}
+xVecLit: {[i] vals:0.+kVal i; n:#vals; cs:{[v] xEmit[`const;`f32;();v]}'vals; rty:$[n=2;`v2;n=3;`v3;`v4]; (xEmit[`cons;rty;cs;0n]; rty)}
+xScalarLit: {[i;oty] litTy:kKind i; useTy:$[(litTy~`int)&(oty~`f32);`float;litTy]; v:$[(litTy~`int)&(useTy~`float);0.+kVal i;kVal i]; (xEmit[`const;LitSym[useTy];();v]; LitSym[useTy])}
+
+xTransNorm: {[i;env;oty]
+  op: kVal kF1[i;`v]
+  opTy: $[op in `<`>`=`~; `f32; op in (`&;`|); `bool; oty]
+  ap: xNode[kF1[i;`a];env;opTy]; bp: xNode[kF1[i;`b];env;opTy]
+  aty: ap 1; bty: bp 1
+  rty: binRty[op;aty;bty;oty]
+  bcast: (op in `+`-`%) & isVecTy[rty] & ~(isVecTy[aty] & isVecTy[bty])
+  aN: $[bcast & ~isVecTy[aty]; xSplat[rty; ap 0]; ap 0]
+  bN: $[bcast & ~isVecTy[bty]; xSplat[rty; bp 0]; bp 0]
+  (xEmit[`arith; rty; (aN;bN); op]; rty)}
+xLeGe: {[i;env;flip]
+  ap: xNode[kF1[i;`a];env;`f32]; bp: xNode[kF1[kF1[i;`b];`a];env;`f32]
+  rc: xEmit[`arith;`bool;(ap 0;bp 0);flip]
+  (xEmit[`lnot;`bool;,rc;`]; `bool)}
+xTransOp: {[i;env;oty]
+  op: kVal kF1[i;`v]; b: kF1[i;`b]
+  isEq: ((kKind b)~`apposit) & ((kVal kF1[b;`f])~`=)
+  $[(op~`<)&isEq; xLeGe[i;env;`>]
+    (op~`>)&isEq; xLeGe[i;env;`<]
+    xTransNorm[i;env;oty]]}
+xTrans: {[i;env;oty] $[(kKind kF1[i;`v])~`term; (0;oty); xTransOp[i;env;oty]]}
+xAppos: {[i;env;oty]
+  op: kVal kF1[i;`f]; ap: xNode[kF1[i;`a];env;oty]; aty: ap 1
+  $[op in mathFns; (xEmit[`math; $[op~`length;`f32;aty]; ,ap 0; op]; $[op~`length;`f32;aty])
+    op~`~; (xEmit[`lnot;`bool;,ap 0;`]; `bool)
+    (xEmit[`neg;aty;,ap 0;`]; aty)]}
+xFnCall: {[name;i;env;oty]
+  args: kF[i;`arg]; n:#args
+  a0: xNode[args 0;env;`f32]
+  a1: $[n>1; xNode[args 1;env;`f32]; (0;`f32)]
+  a2: $[n>2; xNode[args 2;env;`f32]; (0;`f32)]
+  rty: $[(name~`length)|(name~`dot);`f32; name~`cross;`v3; a0 1]
+  ids: $[n=1;,a0 0; n=2;(a0 0;a1 0); (a0 0;a1 0;a2 0)]
+  (xEmit[`math;rty;ids;name]; rty)}
+xApplyIdx: {[fr;i;env;oty] ap:xNode[fr;env;oty]; (xEmit[`extract;`f32;,ap 0; kVal kF1[i;`arg]]; `f32)}
+xApply: {[i;env;oty] fr:kF1[i;`f]; nm:kVal fr; $[nm in mathFns; xFnCall[nm;i;env;oty]; xApplyIdx[fr;i;env;oty]]}
+/ Unrolled (an inner `{[e] xNode[e;env;…]}` each can't see env — lambdas don't
+/ close over parent scope), like the direct compList.
+xList: {[i;env;oty]
+  elems:kF[i;`elem]; n:#elems
+  p0:xNode[elems 0;env;`f32]; p1:xNode[elems 1;env;`f32]
+  p2:$[n>2; xNode[elems 2;env;`f32]; (0;`f32)]
+  p3:$[n>3; xNode[elems 3;env;`f32]; (0;`f32)]
+  ids:$[n=2;(p0 0;p1 0); n=3;(p0 0;p1 0;p2 0); (p0 0;p1 0;p2 0;p3 0)]
+  rty:$[n=2;`v2;n=3;`v3;`v4]
+  (xEmit[`cons;rty;ids;0n]; rty)}
+xCond: {[i;env;oty] xCondS[kF[i;`stmt];env;oty]}
+xCondS: {[ss;env;oty]
+  n:#ss; cp:xNode[ss 0;env;`bool]; tp:xNode[ss 1;env;oty]
+  ep: $[n=3; xNode[ss 2;env;oty]; xCondS[2_ss;env;oty]]
+  (xEmit[`select; tp 1; (cp 0;tp 0;ep 0); 0n]; tp 1)}
+xNode: {[i;env;oty]
+  tag: kKind i
+  $[tag~`var;     env[kVal i]
+    tag in `int`float`ints`floats`bool`string`symbol; xLit[i;oty]
+    tag~`transit;  xTrans[i;env;oty]
+    tag~`apposit;  xAppos[i;env;oty]
+    tag~`apply;    xApply[i;env;oty]
+    tag~`list;     xList[i;env;oty]
+    tag~`cond;     xCond[i;env;oty]
+    tag~`right;    xNode[kF1[i;`clause];env;oty]
+    tag~`group;    xNode[kF1[i;`stmt];env;oty]
+    (0;oty)]}
+xSeqTail: {[stmts;env;oty]
+  s: stmts 0
+  isb: ((kKind s)~`bind) & (0<#kF[s;`a])
+  sfx: $[isb; 0; xNode[s;env;oty]]
+  e2: $[isb; ((!env),kVal kF1[s;`v])!(env[!env],(,xNode[kF1[s;`a];env;oty])); env]
+  xSeq[1_stmts;e2;oty]}
+xSeq: {[stmts;env;oty] n:#stmts; $[n=0;(0;oty); n=1;xNode[stmts 0;env;oty]; xSeqTail[stmts;env;oty]]}
+
+/ ── IR optimizations ─────────────────────────────────────────────────────────
+/ Const-fold f32 scalar arith / a few unary math whose operands are all const.
+xSetConst: {[k;v] xOp[k]::`const; xVal[k]::v; xArg[k]::()}
+/ Each $[] branch must be ONE expression, so the multi-statement arith/math folds
+/ live in helpers. `sqrt@a etc. run on the host (dye is the CPU compiler).
+xFoldArith: {[k] args:xArg k; g:xVal k; a:xVal args 0; b:xVal args 1; v:$[g~`+;a+b;g~`-;a-b;g~`*;a*b;g~`%;a%b;0n]; $[^v;0;xSetConst[k;v]]}
+xFoldMath:  {[k] args:xArg k; nm:xVal k; a:xVal args 0; v:$[nm~`sqrt;`sqrt@a;nm~`sqr;a*a;nm~`abs;`abs@a;nm~`sin;`sin@a;nm~`cos;`cos@a;nm~`floor;`floor@a;0n]; $[^v;0;xSetConst[k;v]]}
+xFoldOne: {[k]
+  op:xOp k; args:xArg k
+  $[0=#args; 0
+    ~&/{[j](xOp j)~`const}'args; 0
+    op~`neg; xSetConst[k; -xVal args 0]
+    ~(xTy k)~`f32; 0
+    op~`arith; xFoldArith[k]
+    op~`math;  xFoldMath[k]
+    0]}
+xFold: {[] {[k] xFoldOne k}' !#xOp; 0}
+/ DCE: mark nodes reachable from root; lowering skips the rest (one high→low pass,
+/ since every operand has a lower index than its user).
+/ Pure guarded fold (an empty-index amend `m[()]:1b` would corrupt the mask, so
+/ skip leaf nodes). Args have lower indices than users, so one high→low pass suffices.
+xReach: {[root] {[m;k] $[(m k) & 0<#xArg k; @[m; xArg k; :; 1b]; m]}/[@[(#xOp)#0b; root; :; 1b]; |!#xOp]}
+
+/ ── Back-end 1: lower IR → SPIR-V words (reuse the op* stencils) ──────────────
+xConsW: {[ty;r;ids] n:#ids; $[n=2;opCons2[Tid[ty];r;ids 0;ids 1]; n=3;opCons3[Tid[ty];r;ids 0;ids 1;ids 2]; opCons4[Tid[ty];r;ids 0;ids 1;ids 2;ids 3]]}
+xMathW: {[name;ty;r;ids;at]
+  $[name~`abs;opAbs[at;r;ids 0]; name~`floor;opFloor[at;r;ids 0]; name~`fract;opFract[at;r;ids 0]
+    name~`sign;opSign[at;r;ids 0]; name~`sqrt;opSqrt[at;r;ids 0]; name~`exp;opExp[at;r;ids 0]
+    name~`log;opLog[at;r;ids 0]; name~`tanh;opTanh[at;r;ids 0]; name~`sqr;opFmul[at;r;ids 0;ids 0]
+    name~`sin;opSin[at;r;ids 0]; name~`cos;opCos[at;r;ids 0]; name~`asin;opAsin[at;r;ids 0]
+    name~`acos;opAcos[at;r;ids 0]; name~`atan;opAtan[at;r;ids 0]; name~`atan2;opAtan2[at;r;ids 0;ids 1]
+    name~`length;opLen[Tf32;r;ids 0]; name~`normalize;opNrm[at;r;ids 0]; name~`pow;opPow[at;r;ids 0;ids 1]
+    name~`min;opFmin[at;r;ids 0;ids 1]; name~`max;opFmax[at;r;ids 0;ids 1]; name~`dot;opDot[Tf32;r;ids 0;ids 1]
+    name~`cross;opCrs[Tv3;r;ids 0;ids 1]; name~`step;opStep[at;r;ids 0;ids 1]; name~`mod;opFmod[at;r;ids 0;ids 1]
+    name~`clamp;opClamp[at;r;ids 0;ids 1;ids 2]; name~`mix;opMix[at;r;ids 0;ids 1;ids 2]
+    name~`smoothstep;opSS[at;r;ids 0;ids 1;ids 2]; opFneg[at;r;ids 0]]}
+/ One helper per op (each $[] branch must be a single expression). Each allocates
+/ an id, emits its op* words (into Con for constants, else Buf), and records xId[k].
+xLoConst:   {[k] r:newId[]; emitCon opConst[Tid[xTy k];r;xVal k]; xId[k]::r}
+xLoCons:    {[k] r:newId[]; emitBuf xConsW[xTy k;r;xId@xArg k]; xId[k]::r}
+xLoExtract: {[k] r:newId[]; emitBuf opXtract[Tf32;r;(xId@xArg k)0;xVal k]; xId[k]::r}
+xLoSelect:  {[k] r:newId[]; ids:xId@xArg k; emitBuf opSel[Tid[xTy k];r;ids 0;ids 1;ids 2]; xId[k]::r}
+xLoNeg:     {[k] r:newId[]; emitBuf opFneg[Tid[xTy k];r;(xId@xArg k)0]; xId[k]::r}
+xLoLnot:    {[k] r:newId[]; emitBuf opLNot[Tbool;r;(xId@xArg k)0]; xId[k]::r}
+xLoArith:   {[k] a:xArg k; ids:xId@a; r:newId[]; emitBuf dispBin[xVal k; xTy k; r; xTy a 0; ids 0; xTy a 1; ids 1]; xId[k]::r}
+xLoMath:    {[k] a:xArg k; ids:xId@a; r:newId[]; emitBuf xMathW[xVal k; xTy k; r; ids; Tid[xTy a 0]]; xId[k]::r}
+xLowerOne: {[k]
+  op:xOp k
+  $[op~`param;   xId[k]:: xVal k
+    op~`const;   xLoConst[k]
+    op~`cons;    xLoCons[k]
+    op~`extract; xLoExtract[k]
+    op~`select;  xLoSelect[k]
+    op~`neg;     xLoNeg[k]
+    op~`lnot;    xLoLnot[k]
+    op~`arith;   xLoArith[k]
+    op~`math;    xLoMath[k]
+    0]}
+/ xRe is a GLOBAL so the each's lambda can read it (no closure over the local mask).
+xLowerSpirv: {[root] xId::(#xOp)#-1; xRe:: xReach[root]; {[k] $[xRe k; xLowerOne k; 0]}' !#xOp; 0}
+
+/ ── Back-end 2: textual IR dump (proves the same IR retargets) ────────────────
+xArgStr: {[k] a:xArg k; $[0=#a;"[]"; ","/$'a]}
+xDump: {[] {[k] `0 0: ($k),": ",($xOp k)," :",($xTy k)," (",xArgStr[k],") ",$xVal k}' !#xOp; 0}
+
+/ ── Entry point: fragment shader compiled through the neutral IR ──────────────
+FragmentShaderIr: {[ioTypes; fn]
+  Nid::Nfixed; Buf::(); Con::()
+  TexVars:: ()
+  xReset[]
+  lam: lamOf fn; argNames: lamArgs lam
+  outTySym: ioTypes[`out]; outPtr: PtrOut[outTySym]
+  inTySyms: ioTypes' argNames; inTys: Tid' inTySyms; inPtrs: PtrIn' inTySyms
+  inVarIds: {[x] newId[]}' argNames
+  outId: newId[]
+  loadedPairs: inVarIds loadOnePair' inTySyms
+  penv: argNames!{[p] (xEmit[`param; p 1; (); p 0]; p 1)}' loadedPairs
+  rp: xSeq[lamBody lam; penv; outTySym]
+  root: rp 0
+  xFold[]
+  xLowerSpirv[root]
+  emitBuf opStore[outId; xId root]
+  buildMod[outId; inVarIds; inTys; inPtrs; outPtr; !#argNames]}
