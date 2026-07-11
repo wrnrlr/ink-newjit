@@ -167,9 +167,29 @@ of the name clears the alias, and a local/param of the same name (`{[sin] …}`,
 (`{[sin] sin 5}[{x*10}]` → 50; `sin: {x+100}` → user def wins). This is the
 monomorphic call-site optimization the whole reorg was aiming at.
 
-*Deferred: full constant propagation.* The alias is a targeted case of a general
-`:`-constant-folding pass (fold any constant global, inline trivial lambdas); that
-generalization is future work.
+**General `:`-constant propagation (DONE).** The alias generalises: a global bound at
+global scope with a single colon (`:` = constant) to a **pure literal** (scalar /
+vector / string / symbol) is recorded `name → rhs` in `Compiler.const_globals`; a
+reference then re-emits the literal inline (`compileVar`), so the `Global` load is
+elided and downstream arithmetic constant-folds and const scalars bake into fused
+kernels:
+
+```
+n: 100;  2*n          → Const 200
+dt: 0.5; {x+dt}[10]   → dt inlined; 10.5
+pi: 3.14159; {pi*x*x} → λ body: Const 3.14159 + FusedMap [Col0 Col1 Col2 Mul0 Mul0]
+```
+
+Soundness does **not** assume the contract is followed: real code writes
+`a:1; {a::2}[]; a` (mutating a `:`-global via `::` inside a lambda). A per-unit
+prescan (`collectMutated`) walks the whole tree — into lambda bodies and every
+node that can hold a bind — and records every name assigned by `::`, a compound op
+(`+:`), an indexed lvalue (`d[i]:…`), or a destructure-compound (`(a;b)*:…`). Any
+such name is excluded from `const_globals`/`intrinsic_alias`, so a mutated name is
+never folded. `const_globals` values are ast nodes owned by the current unit's
+tree, so the map is per-unit (cleared each top-level `compile()`); cross-unit
+propagation (a lib constant into another file) is not done. Verified via the
+existing global/list-assign tests plus new folding tests.
 
 **Remaining Phase 3 (larger, deferred):**
 - *Neutral IR seam (the Tiramisu layer).* `compNode` emits a typed IR list

@@ -215,6 +215,11 @@ test "arithmetic" {
   // opcode at the call site (fuses add+sqrt), and shadowing is respected.
   try t.check("sqrt 1.0+1.0 2.0 3.0", "1.4142135 1.7320508 2.0");
   try t.check("{[sin] sin 5}[{x*10}]", "50"); // a param named sin shadows the alias
+  // Phase 3: general `:`-constant propagation. A `:`-bound literal global folds into
+  // downstream expressions (here `2*n` -> 200) and inlines inside lambdas; a `::`
+  // variable or a name the unit mutates is never folded (see "global/list assign").
+  try t.check("n:100; 2*n", "200");
+  try t.check("dt:0.5; {x+dt}[10.0]", "10.5");
   // try t.check("min 5 3 4 8 2", "2");
   // try t.check("min 5", "!class");
   // try t.check("min `a`b!1 2", "!rank"); 

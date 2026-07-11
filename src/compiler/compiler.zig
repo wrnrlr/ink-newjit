@@ -87,6 +87,22 @@ pub const Compiler = struct {
   // local/param of the same name is skipped — so user shadowing is respected. This
   // is the payoff of the strict single/double-bind = constant/variable rule.
   intrinsic_alias: std.StringHashMap(Op1),
+  // General `:`-constant propagation. A GLOBAL-scope SINGLE-bind (`:` = constant) to
+  // a pure LITERAL (scalar / vector / string / symbol — not a var or expression) is
+  // recorded name→its RHS ast node. A reference to that name then re-emits the literal
+  // inline instead of a Global load, so downstream arithmetic constant-folds and const
+  // scalars bake into fused kernels. A `::` (variable), a compound/indexed rebind, or a
+  // non-literal rhs clears the entry; a local/param of the same name is skipped. Keys
+  // are interned (stable); VALUES are ast nodes owned by the CURRENT unit's tree, so
+  // the map is cleared at the start of every top-level compile (see compile()).
+  // Relies on the single/double-bind contract: a `:`-global is never reassigned.
+  const_globals: std.StringHashMap(*ast.Node),
+  // Names mutated somewhere in the current unit — assigned with `::` (variable) or via
+  // an indexed lvalue (`d[i]:…`), possibly INSIDE a lambda. Such a name is never a true
+  // constant even if some top-level `:` binds it (real code writes `a:1; {a::2}[]; a`),
+  // so it is excluded from const_globals / intrinsic_alias. Recomputed per unit by
+  // collectMutated at the start of compile().
+  mutated: std.StringHashMap(void),
 
   pub fn init(alloc: Alloc, chunk: *Chunk, globals: *std.StringHashMap(u16), symbols: *Pool, registry: *Fs, fn_tables: *fntable.FnTables) !Compiler {
     const scope = try alloc.create(Scope);
@@ -102,10 +118,14 @@ pub const Compiler = struct {
       .namespaces = std.StringHashMap(NsPolicy).init(alloc),
       .private_members = std.StringHashMap(void).init(alloc),
       .intrinsic_alias = std.StringHashMap(Op1).init(alloc),
+      .const_globals = std.StringHashMap(*ast.Node).init(alloc),
+      .mutated = std.StringHashMap(void).init(alloc),
     };
   }
 
   pub fn deinit(self: *Compiler) void {
+    self.mutated.deinit();
+    self.const_globals.deinit();
     self.intrinsic_alias.deinit();
     var curr: ?*Scope = self.scope;
     while (curr) |s| {
@@ -121,6 +141,13 @@ pub const Compiler = struct {
   }
 
   pub fn compile(self: *Compiler, node: *ast.Node, is_tail: bool) anyerror!void {
+    // const_globals values are ast nodes owned by THIS unit's tree (freed after);
+    // drop last unit's entries so a later reference can't read a stale node. Then
+    // find every name mutated in this unit (`::` / indexed, even inside a lambda) so
+    // constant propagation excludes them.
+    self.const_globals.clearRetainingCapacity();
+    self.mutated.clearRetainingCapacity();
+    try self.collectMutated(node);
     // Pre-register the namespace members assigned in this compilation unit so
     // forward/self/mutual references (recursion inside `\d ns`) resolve to the
     // member rather than falling back to a blank global. See prescanMembers.
@@ -129,6 +156,58 @@ pub const Compiler = struct {
     if (self.scope.parent == null) {
       try self.runOptimizer(&self.scope.ir, root_id);
       try self.lower();
+    }
+  }
+
+  // Mark the base variable(s) of a target expression as mutated: a plain var, the
+  // base of an `.apply` index chain, or every element of a `(a;b;…)` destructure.
+  fn markTargetVars(self: *Compiler, v: *ast.Node) anyerror!void {
+    switch (v.*) {
+      .literal => if (v.literal == .@"var") try self.mutated.put(try self.interned(v.literal.@"var"), {}),
+      .apply => { var n = v; while (n.* == .apply) n = n.apply.f; try self.markTargetVars(n); },
+      .list => if (v.list.seq) |seq| for (seq) |it| try self.markTargetVars(it),
+      else => {},
+    }
+  }
+
+  // A bind mutates its target (so the target is not a foldable constant) when it is a
+  // `::` double-bind (variable; rhs wrapped in `.right`), an indexed lvalue (`d[i]:…`,
+  // target is an `.apply` chain), or a COMPOUND assign (`op:` reads then writes). A
+  // plain `:` scalar/destructure rebind is handled in-order at its site instead.
+  fn markMutation(self: *Compiler, v: *ast.Node, f: ?ast.Op, a: ?*ast.Node) !void {
+    const is_double = a != null and a.?.* == .right;
+    const is_indexed = v.* == .apply;
+    const is_compound = f != null and !std.mem.eql(u8, f.?, ":");
+    if (!is_double and !is_indexed and !is_compound) return;
+    try self.markTargetVars(v);
+  }
+
+  // Walk the whole unit collecting names mutated via `::` / indexed assignment,
+  // descending into lambda bodies and every other node that can hold a bind, so a
+  // later constant-propagation of a name the program actually mutates is impossible.
+  fn collectMutated(self: *Compiler, node: *ast.Node) anyerror!void {
+    switch (node.*) {
+      .terse => |t| for (t.stmts) |s| try self.collectMutated(s.node),
+      .verb, .stmt_clause, .stmt_adjunct, .phrase, .noun, .phrase_verb => |c| try self.collectMutated(c),
+      .right => |r| try self.collectMutated(r.clause),
+      .@"defer" => |d| try self.collectMutated(d.adjunct),
+      .group => |g| try self.collectMutated(g.stmt),
+      .term => |tm| try self.collectMutated(tm.f),
+      .transit => |tr| { try self.collectMutated(tr.a); try self.collectMutated(tr.v); try self.collectMutated(tr.b); },
+      .affix => |af| { try self.collectMutated(af.a); try self.collectMutated(af.b); },
+      .apposit => |ap| { try self.collectMutated(ap.f); try self.collectMutated(ap.a); },
+      .intrans => |i| { try self.collectMutated(i.a); try self.collectMutated(i.v); if (i.z) |z| try self.collectMutated(z); },
+      .prefix => |p| { try self.collectMutated(p.a); if (p.z) |z| try self.collectMutated(z); },
+      .compose => |c| switch (c) { .v => |v| try self.collectMutated(v), .fz => |fz| { try self.collectMutated(fz.f); try self.collectMutated(fz.z); } },
+      .apply => |ap| { try self.collectMutated(ap.f); if (ap.a) |seq| for (seq) |x| try self.collectMutated(x); },
+      .list => |l| if (l.seq) |seq| for (seq) |x| try self.collectMutated(x),
+      .lambda => |lm| if (lm.b) |seq| for (seq) |x| try self.collectMutated(x),
+      .cond => |cd| for (cd.stmts) |x| try self.collectMutated(x),
+      .dict, .table => |d| if (d.items) |items| for (items) |it| try self.collectMutated(it.v),
+      .utable => |u| { if (u.keys) |k| for (k) |it| try self.collectMutated(it.v); if (u.items) |i| for (i) |it| try self.collectMutated(it.v); },
+      .bind => |b| { try self.markMutation(b.v, b.f, b.a); if (b.a) |a| try self.collectMutated(a); try self.collectMutated(b.v); },
+      .pending => |p| { try self.markMutation(p.v, p.f, p.a); try self.collectMutated(p.a); try self.collectMutated(p.v); },
+      else => {}, // literal, op, io, blank, monad, adverb_val, command — no child binds
     }
   }
 
@@ -446,6 +525,14 @@ pub const Compiler = struct {
       if (std.mem.eql(u8, name, "z")) return if (args.len > 2) args[2] else try self.emitOp(.Gap, &.{});
     }
 
+    // Constant propagation: a `:`-bound global constant (literal) inlines its value
+    // here — re-emitting the literal — so downstream arithmetic folds and the Global
+    // load is elided. Skipped when a local/param of the same name shadows it. The rhs
+    // is always a non-var literal, so this recurses at most once into compileLiteral.
+    if (!self.isLocalName(name)) if (self.const_globals.get(name)) |rhs| {
+      return try self.compileNode(rhs, false);
+    };
+
     const scope = self.scope;
     if (scope.is_lambda) {
       if (std.mem.eql(u8, name, "x")) { scope.uses_x = true; }
@@ -547,18 +634,26 @@ pub const Compiler = struct {
         try self.addPatch(name);
         return id;
       } else {
-        // Level-B: only a GLOBAL-scope SINGLE-bind (`:` = constant) to a monadic
-        // intrinsic wrapper aliases the name to the opcode. A `::` (double-bind =
-        // variable, arrives as a `.right` rhs), a compound op (`+:`), or any other
-        // rhs clears the alias — a variable can't be constant-folded.
+        // A GLOBAL-scope SINGLE-bind (`:` = constant) records the name for constant
+        // folding: a pure literal rhs → const_globals (propagate the value), a monadic
+        // intrinsic wrapper `{`sin x}` → intrinsic_alias (lower calls to the opcode).
+        // A `::` (double-bind = variable, arrives as a `.right` rhs), a compound op
+        // (`+:`), an indexed rebind, or any other rhs clears both — a variable can't
+        // be folded. Relies on the single/double-bind contract (a `:`-global is const).
         if (!scope.is_lambda) {
+          _ = self.const_globals.remove(name);
+          _ = self.intrinsic_alias.remove(name);
           const is_double = b.a != null and b.a.?.* == .right;
           const compound = b.f != null and !std.mem.eql(u8, b.f.?, ":");
-          if (!is_double and !compound and b.a != null and monoIntrinsicWrapper(b.a.?) != null) {
-            try self.intrinsic_alias.put(try self.interned(name), monoIntrinsicWrapper(b.a.?).?);
-          } else {
-            _ = self.intrinsic_alias.remove(name);
-          }
+          // A name the unit mutates anywhere (`::` / indexed, even inside a lambda)
+          // is not a constant, so never record it.
+          if (!is_double and !compound and !self.mutated.contains(name)) if (b.a) |rhs| {
+            if (rhs.* == .literal and rhs.literal != .@"var") {
+              try self.const_globals.put(try self.interned(name), rhs);
+            } else if (monoIntrinsicWrapper(rhs)) |op1| {
+              try self.intrinsic_alias.put(try self.interned(name), op1);
+            }
+          };
         }
         return try self.emitOpWithArg(.AssignGlobal, try self.resolveGlobalAssign(name), &.{rhs_id});
       }
