@@ -2,7 +2,6 @@
 / Each conv kernel is checked individually, then the full ConvSubsample pipeline.
 / Run headless:  INK_SNAP=0 ink test/subsample.k
 
-2: "lib/spirv.k"
 2: "lib/dye.k"
 2: "lib/gpu.k"
 2: "lib/nn.k"

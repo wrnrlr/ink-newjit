@@ -242,7 +242,9 @@ fn readDataById(vm: *VM, x: V) V {
   // A loaded module's `\d` namespace must not leak into the caller's scope.
   const saved_ns = vm.compiler.namespace;
   defer vm.compiler.namespace = saved_ns;
-  return vm.eval(vm.fs.getFileText(id)) catch return V{ .err = .io };
+  // evalNested (not eval) so a `2:` running INSIDE another file doesn't reset the
+  // caller's stack — lets a loaded module load another (dye.k → spirv.k).
+  return vm.evalNested(vm.fs.getFileText(id)) catch return V{ .err = .io };
 }
 
 pub const ReadData = struct {

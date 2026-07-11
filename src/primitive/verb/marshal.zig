@@ -6,6 +6,16 @@ const N = @import("../../noun/array.zig").N;
 const Dict = @import("../../noun/dict.zig").Dict;
 const VM = @import("../../runtime/vm.zig").VM;
 const binary = @import("../../encoding/binary.zig");
+const syms = @import("../../runtime/syms.zig");
+
+// `@` with a symbol left operand is polysemic: `` `bin@bytes `` deserializes, but
+// every other symbol means "apply the symbol as a function" (`` `sin@x ``). The
+// Unmarshal handlers below register into `@`'s dispatch row for the byte-ish operand
+// types (C/B/s/i) and so must hand non-`bin` symbols back to the symbol-apply path —
+// otherwise they shadow it (and `_s_i` even panics on getFileText before checking).
+fn applyOrElse(vm: *VM, x: V, y: V) V {
+  return syms.apply(vm, x.s, &.{y}) catch V{ .err = .memory };
+}
 
 /// Marshal/Serialize: value -> bytes
 pub const Marshal = struct {
@@ -56,20 +66,26 @@ fn loadFile(alloc: Alloc, path: []const u8) ![]u8 {
 }
 
 fn unmarshal_s_C(vm: *VM, x: V, y: V) V {
+  if (!std.mem.eql(u8, vm.getSymbol(x.s), "bin")) return applyOrElse(vm, x, y);
   return unmarshalDispatch(vm, vm.getSymbol(x.s), y.C.slice());
 }
 
 fn unmarshal_s_B(vm: *VM, x: V, y: V) V {
+  if (!std.mem.eql(u8, vm.getSymbol(x.s), "bin")) return applyOrElse(vm, x, y);
   return unmarshalDispatch(vm, vm.getSymbol(x.s), std.mem.sliceAsBytes(y.B.slice()));
 }
 
 fn unmarshal_s_s(vm: *VM, x: V, y: V) V {
+  if (!std.mem.eql(u8, vm.getSymbol(x.s), "bin")) return applyOrElse(vm, x, y);
   const data = loadFile(vm.alloc, vm.getSymbol(y.s)) catch return .{ .err = .io };
   defer vm.alloc.free(data);
   return unmarshalDispatch(vm, vm.getSymbol(x.s), data);
 }
 
 fn unmarshal_s_i(vm: *VM, x: V, y: V) V {
+  // Check the symbol BEFORE getFileText — a non-`bin` symbol is a function apply,
+  // and getFileText(y.i) would panic on an out-of-range id (the filed bug).
+  if (!std.mem.eql(u8, vm.getSymbol(x.s), "bin")) return applyOrElse(vm, x, y);
   return unmarshalDispatch(vm, vm.getSymbol(x.s), vm.fs.getFileText(@intCast(y.i)));
 }
 

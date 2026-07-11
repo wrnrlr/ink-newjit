@@ -14,7 +14,6 @@
 /
 / Run: zig build gpu && ink test/sword.k
 
-2: "lib/spirv.k"
 2: "lib/dye.k"
 2: "lib/gpu.k"
 2: "lib/fbx.k"

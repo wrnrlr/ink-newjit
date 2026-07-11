@@ -11,7 +11,6 @@
 / Run:  ink test/ir.k              (opens a window)
 /       INK_SNAP=1 ink test/ir.k -snap 1   (headless snapshot)
 
-2: "lib/spirv.k"
 2: "lib/dye.k"
 2: "lib/gpu.k"
 

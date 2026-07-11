@@ -213,7 +213,12 @@ Workaround: enlist with `,`.
 
 ---
 
-## 13. `2:"file"; expr` on one line panics (stack underflow)
+## 13. `2:"file"; expr` on one line panics (stack underflow) — FIXED
+
+**FIXED** (with the nested-`2:` bug): a `2:` executed while another file/statement is
+running now evals on its own re-entrant frame (`VM.evalNested`) instead of `interpret`
+resetting the caller's stack. `2:"f"; expr`, `r:2:"f"`, and dye.k self-loading spirv.k
+all work now. Original report below.
 
 ```k
  2:"lib/regex.k"; regex.test[regex.compile["x"];"x"]   / → panic: integer overflow in vm.pop
@@ -293,7 +298,13 @@ in lambdas" note, but specific to the *indexed* amend with a list index.
 
 ---
 
-## `@`(symbol, int-scalar) mis-dispatches to the `2:` loader
+## `@`(symbol, int-scalar) mis-dispatches to the `2:` loader — FIXED
+
+**FIXED**: `marshal.zig`'s Unmarshal handlers (which register into `@`'s row for
+C/B/s/i operands to support `` `bin@bytes ``) now delegate non-`bin` symbols back to
+`syms.apply` (symbol-application), and `unmarshal_s_i` checks the symbol before
+`getFileText`. So `` `abs@4 ``→4, `` `sin@0 ``→0.0, `` `foo@4 ``→!type (no panic).
+Original report below.
 
 Applying a symbol to an **integer scalar** via `@` panics instead of running the
 symbol function:

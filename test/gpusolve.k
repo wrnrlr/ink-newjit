@@ -11,7 +11,6 @@
 /   4. atomic scatter — StencilScatter + scatterAdd: edge-parallel scatter-add onto
 /                      shared nodes via OpAtomicIAdd (the XPBD cloth pattern).
 
-2: "lib/spirv.k"
 2: "lib/dye.k"
 2: "lib/gpu.k"
 

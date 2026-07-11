@@ -8,7 +8,6 @@
 /   echo | timeout 6s ./zig-out/bin/ink test/compute.k
 
 2: "lib/gpu.k"
-2: "lib/spirv.k"
 2: "lib/dye.k"
 
 / A couple of element-wise kernels (the shared shader expr-compiler handles

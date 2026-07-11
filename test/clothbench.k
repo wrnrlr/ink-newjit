@@ -7,7 +7,6 @@
 / substeps, one final sync) and the realistic render-loop cost (+ a per-frame
 / position readback). `t is a microsecond clock; ms/frame = elapsed / frames.
 
-2: "lib/spirv.k"
 2: "lib/dye.k"
 2: "lib/gpu.k"
 

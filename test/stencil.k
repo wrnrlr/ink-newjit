@@ -7,7 +7,6 @@
 / gather (a stencil), so Jacobi/SOR/PDE relaxations run on the resident-buffer
 / path from test/relax.k. Grid size + boundaries are baked into the kernel.
 
-2: "lib/spirv.k"
 2: "lib/dye.k"
 2: "lib/gpu.k"
 

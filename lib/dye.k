@@ -12,9 +12,8 @@
 /   Layer 3 (Data Mgmt)           : assign SPIR-V IDs, emit typed sections
 /   Layer 4 (Communication Mgmt)  : assemble SPIR-V binary in spec order
 /
-/ Load the encoder FIRST, then this (a `2:` load inside a `2:`-loaded file
-/ underflows the VM stack — the "nested 2:" bug; see doc/design/dye.md):
-/     2: "lib/spirv.k"; 2: "lib/dye.k"
+/ Load with:  2: "lib/dye.k"   (pulls in the encoder itself).
+2: "lib/spirv.k"
 
 / ── Layer 1+2: public shader compiler ───────────────────────────────────────
 / FragmentShader[ioTypes; fn] → SPIR-V word list (int list)

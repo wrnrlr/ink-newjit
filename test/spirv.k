@@ -8,7 +8,6 @@
 / Run: ink test/spirv.k
 /      zig build && ink test/spirv.k   (to rebuild after cast.zig change)
 
-2: "lib/spirv.k"
 2: "lib/dye.k"
 
 chk: {[e;a;n] (("FAIL";"ok  ") e~a)," ",n}

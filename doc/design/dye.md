@@ -57,12 +57,13 @@ lib/prelude.k  (Phase 1) CPU builtins: bind ink names to intrinsic symbols
 first, then the compiler, at their own top level:
 
 ```
-2: "lib/spirv.k"; 2: "lib/dye.k"; 2: "lib/gpu.k"
+2: "lib/dye.k"; 2: "lib/gpu.k"       # dye.k self-loads spirv.k
 ```
 
-All ~27 GPU demos and `test/spirv.k` were repointed accordingly. Fixing the
-nested-`2:` VM bug (Phase 3+) would let `dye.k` pull in its own dependency and
-collapse this back to a single load line.
+**Update (Phase 3):** the nested-`2:` VM bug is now fixed (`VM.evalNested`, below),
+so `dye.k` self-loads `spirv.k` and the demos collapse to a single `2:"lib/dye.k"`.
+Historically (Phase 1–2) the two-load convention `2:"lib/spirv.k"; 2:"lib/dye.k"`
+was required because a `2:` inside a `2:`-loaded file underflowed the stack.
 
 **Verification.** The split is behavior-preserving: `test/spirv.k` (the whitebox
 golden) produces byte-identical output before and after, and the compute /
@@ -229,8 +230,19 @@ value-SSA IR; migrating the default path onto the seam is the follow-up.
 **Remaining Phase 3 (larger, deferred):**
 - Migrate the default `FragmentShader`/vertex/compute onto the IR (needs IR ops for
   stores/loads/atomics/loop-CFG), plus CSE and a shared `assembleCompute`.
-- *Two VM bugs* (see `doc/bug.md`): the nested-`2:` load underflow (fixing it lets
-  `dye.k` self-load `spirv.k`) and the `@`(symbol, int-scalar) mis-dispatch.
+**Two VM bugs — FIXED (Phase 3).**
+- *Nested `2:` load underflow.* A `2:` run while another file/statement is executing
+  used to `interpret` (which `resetStack`s), corrupting the caller. Now it evals on
+  its own re-entrant top-level frame (`VM.evalNested`): compile the module, run it
+  above the caller's stack (`runUntil` the caller's frame level), truncate the
+  module's appended code back off the shared chunk (so the caller's `code.len` — and
+  its code-end detection — is restored), then pop the result and restore stack/frame/
+  chunk. This also fixed `2:"f"; expr` on one line, `r:2:"f"`, and lets `dye.k`
+  self-load `spirv.k`.
+- *`@`(symbol, int-scalar) mis-dispatch.* `marshal.zig`'s Unmarshal handlers shadowed
+  symbol-application in `@`'s dispatch row for C/B/s/i operands; they now delegate any
+  non-`bin` symbol back to `syms.apply` (and check the symbol before `getFileText`, so
+  no panic). `` `abs@4 ``→4, `` `foo@4 ``→!type.
 
 ### Phase 4 — namespace the GPU library
 Rename the capital-letter globals into namespaces (blast radius: 3 defining libs,

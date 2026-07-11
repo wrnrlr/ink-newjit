@@ -240,6 +240,42 @@ pub const VM = struct {
     return vm.pop();
   }
 
+  // Re-entrant module eval for a NESTED `2:` load (a `2:` executed while another
+  // file is running). Unlike interpret(), it does NOT resetStack/reset the caller's
+  // frame — it compiles the module, runs it on its OWN top-level frame above the
+  // caller's stack (runUntil the caller's frame level), then restores the caller's
+  // stack/frame/chunk and returns the module's result. This is what lets a
+  // `2:`-loaded file itself `2:`-load another (e.g. dye.k → spirv.k).
+  pub fn evalNested(vm: *VM, txt: []const u8) anyerror!V {
+    const prev_frames = vm.frames_len;
+    const res_slot = vm.stack_len;
+    const saved_chunk = vm.current_chunk;
+    const start_ip = try vm.compileOnce(txt);   // appends to vm.chunk, returns its start ip
+    vm.current_chunk = vm.chunk;
+    vm.pushFrame(.{ .ip = start_ip, .base = res_slot, .result_slot = res_slot, .lambda_idx = NO_LAMBDA });
+    vm.runUntil(prev_frames) catch |e| {
+      vm.frames_len = prev_frames;
+      vm.current_chunk = saved_chunk;
+      vm.chunk.code.shrinkRetainingCapacity(start_ip);
+      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
+      vm.stack_len = res_slot;
+      return e;
+    };
+    // The module's top-level code has no Return, so it ran to code end and broke out
+    // of runUntil with its frame still on. Take its last value, then restore. Truncate
+    // the module's appended top-level code off the shared chunk so the caller's
+    // code.len (and its own code-end detection) is restored — else the caller runs
+    // past its end into the appended module code. (Lambda chunks the module created
+    // are separate and survive; the globals it defined persist.)
+    const result = if (vm.stack_len > res_slot) vm.pop() else V.blank;
+    for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
+    vm.stack_len = res_slot;
+    vm.frames_len = prev_frames;
+    vm.current_chunk = saved_chunk;
+    vm.chunk.code.shrinkRetainingCapacity(start_ip);
+    return result;
+  }
+
   fn executeCall(vm: *VM, func: V, incoming: []const V, mode: call.CallMode) !void {
     var fc = call.Call{ .vm = vm };
     try vm.push(fc.apply(func, incoming, mode == .bracket));

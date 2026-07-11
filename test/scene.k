@@ -15,7 +15,6 @@
 / Controls: WASD pan · scroll zoom · right-drag orbit/tilt (lib/camera.k)
 / Run: zig build gpu && ink test/scene.k
 
-2: "lib/spirv.k"
 2: "lib/dye.k"
 2: "lib/gpu.k"
 2: "lib/pbr.k"        / PbrFragment (Cook-Torrance)
