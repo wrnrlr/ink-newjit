@@ -211,6 +211,10 @@ test "arithmetic" {
   try t.check("`sqrt 4", "2.0");
   try t.check("`abs 3", "3");
   try t.check("`sqrt 1.0+1.0 2.0 3.0", "1.4142135 1.7320508 2.0"); // fused add+sqrt
+  // Phase 3 Level B: a prelude NAME (`:`-bound intrinsic wrapper) lowers to the
+  // opcode at the call site (fuses add+sqrt), and shadowing is respected.
+  try t.check("sqrt 1.0+1.0 2.0 3.0", "1.4142135 1.7320508 2.0");
+  try t.check("{[sin] sin 5}[{x*10}]", "50"); // a param named sin shadows the alias
   // try t.check("min 5 3 4 8 2", "2");
   // try t.check("min 5", "!class");
   // try t.check("min `a`b!1 2", "!rank"); 

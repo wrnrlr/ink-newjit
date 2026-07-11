@@ -147,13 +147,31 @@ every lib/prelude.k body (`{`sin x}`) compile to the fast opcode instead of a
 ops, and sidesteps the `@`(sym,int-scalar) dispatch bug (the intrinsic never
 reaches `dispatch2`). Verified via `ink disasm`; full suite + golden + demos green.
 
+**Name-level fusion — Level B (DONE), built on single/double-bind.** The strict rule
+"`:` at global scope = **constant**, `::` = **variable**" is what makes constant
+name-resolution sound, so we lean on it: a name bound at global scope with a SINGLE
+colon to a monadic intrinsic wrapper (`` sin: {`sin x} ``, exactly the prelude form)
+is recorded in the compiler as an **alias** `name → Op1` (`Compiler.intrinsic_alias`).
+A reference `sin y` / `sin[y]` then lowers straight to `Apply1(Op1.sin)` at the call
+site — no lambda frame — so it fuses with adjacent elementwise ops:
+
+```
+sin a            → Apply1 sin
+sqrt 1.0+a       → FusedMap [Col0 Col1 Add0 Sqrt0]     (at the call site, and inside
+                                                        user lambdas: {sqrt 1.0+x})
+```
+
+Shadowing is fully respected: a `::` double-bind (variable) or any non-wrapper rebind
+of the name clears the alias, and a local/param of the same name (`{[sin] …}`,
+`{sin: …}`) is skipped (`isLocalName`). Verified via `ink disasm` + unit tests
+(`{[sin] sin 5}[{x*10}]` → 50; `sin: {x+100}` → user def wins). This is the
+monomorphic call-site optimization the whole reorg was aiming at.
+
+*Deferred: full constant propagation.* The alias is a targeted case of a general
+`:`-constant-folding pass (fold any constant global, inline trivial lambdas); that
+generalization is future work.
+
 **Remaining Phase 3 (larger, deferred):**
-- *Name-level fusion (Level B).* The common `sin x` (a prelude **name**) still calls
-  the wrapper lambda — its body is now a fast `Apply1`, but the caller's `a+b` and
-  the `sin` don't fuse across the lambda boundary. Full call-site fusion needs
-  either a **soft-builtin** resolution (an unshadowed intrinsic name → the opcode
-  directly, so `sin (a+b)` fuses) or inlining the trivial prelude lambdas. Both
-  require care around lambda-local name resolution and user shadowing.
 - *Neutral IR seam (the Tiramisu layer).* `compNode` emits a typed IR list
   `{op; ty; args}` that a per-target pass lowers to SPIR-V words (and later ink
   bytecode / a copy-and-patch CPU path). Adds global const/var tracking; the seam

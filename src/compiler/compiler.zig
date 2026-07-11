@@ -79,6 +79,14 @@ pub const Compiler = struct {
   // Fully-qualified names (`ns.member`, interned) declared private by their
   // namespace's policy. Referenced from outside their namespace → compile error.
   private_members: std.StringHashMap(void),
+  // Level-B monomorphic call-site opt. A name bound at GLOBAL scope with a SINGLE
+  // colon (`:` = constant) to a trivial monadic intrinsic wrapper `{`sin x}` is an
+  // alias for that opcode; recorded here name→Op1. A reference `sin y` then lowers
+  // straight to Apply1(Op1.sin) (fusable) instead of a lambda call. A `::`
+  // (double-bind = variable) or any non-matching rebind clears the entry, and a
+  // local/param of the same name is skipped — so user shadowing is respected. This
+  // is the payoff of the strict single/double-bind = constant/variable rule.
+  intrinsic_alias: std.StringHashMap(Op1),
 
   pub fn init(alloc: Alloc, chunk: *Chunk, globals: *std.StringHashMap(u16), symbols: *Pool, registry: *Fs, fn_tables: *fntable.FnTables) !Compiler {
     const scope = try alloc.create(Scope);
@@ -93,10 +101,12 @@ pub const Compiler = struct {
       .scope = scope,
       .namespaces = std.StringHashMap(NsPolicy).init(alloc),
       .private_members = std.StringHashMap(void).init(alloc),
+      .intrinsic_alias = std.StringHashMap(Op1).init(alloc),
     };
   }
 
   pub fn deinit(self: *Compiler) void {
+    self.intrinsic_alias.deinit();
     var curr: ?*Scope = self.scope;
     while (curr) |s| {
       const parent = s.parent;
@@ -330,6 +340,13 @@ pub const Compiler = struct {
     // optimizer, and it skips both the syms.apply string-match and the buggy
     // `@`(symbol, int-scalar) dispatch (doc/bug.md). A literal symbol can't be
     // shadowed, so this needs no scope analysis. See src/primitive/intrinsic.zig.
+    if (n == 1 and ap.f.* == .literal and ap.f.literal == .@"var") {
+      const nm = ap.f.literal.@"var";
+      if (!self.isLocalName(nm)) if (self.intrinsic_alias.get(nm)) |o1| {
+        const a = try self.compileNode(seq[0], false);
+        return try self.emitOpWithArg(.Apply1, @intFromEnum(o1), &.{a});
+      };
+    }
     if (ap.f.* == .literal and ap.f.literal == .s) {
       if (intrinsic.find(ap.f.literal.s)) |ic| {
         if (n == 1) {
@@ -530,6 +547,19 @@ pub const Compiler = struct {
         try self.addPatch(name);
         return id;
       } else {
+        // Level-B: only a GLOBAL-scope SINGLE-bind (`:` = constant) to a monadic
+        // intrinsic wrapper aliases the name to the opcode. A `::` (double-bind =
+        // variable, arrives as a `.right` rhs), a compound op (`+:`), or any other
+        // rhs clears the alias — a variable can't be constant-folded.
+        if (!scope.is_lambda) {
+          const is_double = b.a != null and b.a.?.* == .right;
+          const compound = b.f != null and !std.mem.eql(u8, b.f.?, ":");
+          if (!is_double and !compound and b.a != null and monoIntrinsicWrapper(b.a.?) != null) {
+            try self.intrinsic_alias.put(try self.interned(name), monoIntrinsicWrapper(b.a.?).?);
+          } else {
+            _ = self.intrinsic_alias.remove(name);
+          }
+        }
         return try self.emitOpWithArg(.AssignGlobal, try self.resolveGlobalAssign(name), &.{rhs_id});
       }
     } else if (b.v.* == .literal and b.v.literal != .@"var") {
@@ -692,7 +722,56 @@ pub const Compiler = struct {
     };
   }
 
+  // If `node` is the canonical prelude wrapper `{`sin x}` — a lambda whose sole
+  // statement applies a literal intrinsic symbol (with an Op1) to the lambda's
+  // sole parameter — return that Op1. Used to alias a `:`-bound global to the
+  // opcode. The arg must BE the parameter, so `{`sin y}` (y free) is not matched.
+  fn monoIntrinsicWrapper(node: *ast.Node) ?Op1 {
+    if (node.* != .lambda) return null;
+    const lam = node.lambda;
+    const body = lam.b orelse return null;
+    var n = body.len;
+    while (n > 0 and body[n - 1].* == .blank) n -= 1;
+    if (n != 1) return null;
+    const s = body[0];
+    if (s.* != .apposit) return null;
+    const f = s.apposit.f;
+    const a = s.apposit.a;
+    if (f.* != .literal or f.literal != .s) return null;
+    if (a.* != .literal or a.literal != .@"var") return null;
+    const argname = a.literal.@"var";
+    if (lam.a) |args| {
+      if (args.len != 1 or !std.mem.eql(u8, args[0].value, argname)) return null;
+    } else if (!std.mem.eql(u8, argname, "x")) return null; // implicit args: only x
+    const ic = intrinsic.find(f.literal.s) orelse return null;
+    return ic.op1;
+  }
+
+  // True if `name` resolves to a local (a param or a lambda-local) in the current
+  // scope — in which case an intrinsic alias of the same name must NOT fire.
+  // Lambdas don't close over parent scope, so only the immediate scope matters.
+  fn isLocalName(self: *Compiler, name: []const u8) bool {
+    const s = self.scope;
+    if (!s.is_lambda) return false;
+    if (s.locals.contains(name)) return true;
+    if (s.named_args) |args| for (args) |arg| {
+      if (std.mem.eql(u8, arg.value, name)) return true;
+    };
+    return false;
+  }
+
   fn compileApposit(self: *Compiler, ap: ast.Apposit, is_tail: bool) anyerror!ir.ValueId {
+    // Level-B: a constant (`:`) global aliased to an intrinsic wrapper, applied by
+    // juxtaposition (`sin y`), lowers to the Op1 kernel — fusable at the call site,
+    // no lambda frame. Cleared on `::`/rebind; skipped for a local/param of the
+    // same name. See intrinsic_alias.
+    if (ap.f.* == .literal and ap.f.literal == .@"var") {
+      const nm = ap.f.literal.@"var";
+      if (!self.isLocalName(nm)) if (self.intrinsic_alias.get(nm)) |o1| {
+        const a = try self.compileNode(ap.a, false);
+        return try self.emitOpWithArg(.Apply1, @intFromEnum(o1), &.{a});
+      };
+    }
     // Monomorphic intrinsic call site: a literal intrinsic SYMBOL juxtaposed with an
     // argument (`` `sin a ``) — the shape the lib/prelude.k bodies `{`sin x}` take —
     // lowers straight to the Op1 kernel, so it fuses with adjacent elementwise ops
