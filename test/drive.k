@@ -1,7 +1,7 @@
 / test/drive_home.k — "Drive Home" atmosphere via SPIR-V copy-and-patch
 /
 / Inspired by BigWings / Martijn Steinrucken. Translates the core visual
-/ elements into ink, compiled with FragmentShader (no loops, no helper fns):
+/ elements into ink, compiled with shader.fragment (no loops, no helper fns):
 /   - Night sky gradient with star-field noise
 /   - Wet road with specular reflection stripe
 /   - 2 analytic bokeh headlights (on-coming)
@@ -19,7 +19,7 @@
 2: "lib/dye.k"
 2: "lib/gpu.k"
 
-dhWds: FragmentShader[`uv`out!`v2`v4; {[uv]
+dhWds: shader.fragment[`uv`out!`v2`v4; {[uv]
   / Screen coords, y up, aspect corrected (assume 4:3)
   sx: (uv[0]-0.5)*2.0*(4.0%3.0)
   sy: (0.5-uv[1])*2.0
@@ -102,7 +102,7 @@ verts: 0. 0. 0. 0. 800. 0. 1. 0. 800. 600. 1. 1. 0. 0. 0. 0. 800. 600. 1. 1. 0. 
 
 handle:: 0
 loop: {[props]
-  $[handle=0; handle:: CompileSpirV[dhWds; 0]; 0]
-  DrawShader[verts; handle]}
+  $[handle=0; handle:: gpu.compileSpirv[dhWds; 0]; 0]
+  gpu.drawShader[verts; handle]}
 
 window.run[loop; 0]

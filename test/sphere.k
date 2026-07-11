@@ -61,7 +61,7 @@ icoMesh: ,/ sphVert' icoTris
 / Vertex shader: 45° Y + isometric X tilt; rotates the normal by the same matrix
 / in-shader (no CPU normal pass), then emits the standard wNor;wMat;wLit varyings
 / so lib/pbr.k's PbrFragment shades it.
-sphereVtx: VertexShader[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
+sphereVtx: shader.vertex[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.8
   py0: (c45*pos[0])+(s45*pos[2])
   py2: (c45*pos[2])-(s45*pos[0])
@@ -76,7 +76,7 @@ sphereVtx: VertexShader[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;w
 
 meshHandle:: 0
 loop: {[props]
-  $[meshHandle=0; meshHandle:: CompileMesh[sphereVtx; PbrFragment]; 0]
-  DrawMesh[icoMesh; meshHandle]}
+  $[meshHandle=0; meshHandle:: mesh.compile[sphereVtx; PbrFragment]; 0]
+  mesh.draw[icoMesh; meshHandle]}
 
 window.run[loop; 0]

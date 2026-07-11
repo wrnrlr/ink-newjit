@@ -10,11 +10,11 @@
 /   mat(4)   material = rgb + roughness
 /   lit(1)   sun factor 0..1  (1 = full sun, 0 = shadowed: ambient + sky-fill only)
 /
-/ Depends on lib/spirv.k (FragmentShader/VertexShader) and lib/gpu.k (CompileMesh).
+/ Depends on lib/spirv.k (shader.fragment/shader.vertex) and lib/gpu.k (mesh.compile).
 / Load them first, then:  2: "lib/pbr.k"
 /
 / Compile once:  h: PbrPipeline[]        / → mesh pipeline handle
-/ Draw a frame:  DrawMesh[verts; h]      / verts = flat stride-11 float vector
+/ Draw a frame:  mesh.draw[verts; h]      / verts = flat stride-11 float vector
 /
 / A material+lit tail is five floats (rgb rough lit); build one with PbrMat:
 /   grass: PbrMat[0.13; 0.42; 0.07; 0.90; 1.]   / lit grass
@@ -24,7 +24,7 @@
 / Material arrives per-vertex as wMat = (r; g; b; roughness) and wLit = sun
 / factor.  Key light L1 is the sun; L2 is a soft sky fill; ambient is a simple
 / sky/ground hemisphere term so shadowed faces still read.
-PbrFragment: FragmentShader[[wNor:`v3; wMat:`v4; wLit:`f32; out:`v4]; {[wNor;wMat;wLit]
+PbrFragment: shader.fragment[[wNor:`v3; wMat:`v4; wLit:`f32; out:`v4]; {[wNor;wMat;wLit]
   ar: wMat[0]; ag: wMat[1]; ab: wMat[2]; rough: wMat[3]
   V: normalize 0.5774 0.5774 0.5774
   L1: normalize 0.5 1.5 0.3; H1: normalize V+L1
@@ -60,7 +60,7 @@ PbrFragment: FragmentShader[[wNor:`v3; wMat:`v4; wLit:`f32; out:`v4]; {[wNor;wMa
 / Projects pos to clip space and passes normal + material + sun through. The
 / near-flat depth term relies on painter-order draws / mostly-convex meshes;
 / self-occluding geometry (e.g. cloth) should use its own stronger depth term.
-pbrVtx: VertexShader[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
+pbrVtx: shader.vertex[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.3
   py0:(c45*pos[0])+(s45*pos[2])
   py2:(c45*pos[2])-(s45*pos[0])
@@ -69,6 +69,6 @@ pbrVtx: VertexShader[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit
   ((sc*py0; sc*px1; 0.5-px2*0.001; 1.0); nor; mat; lit)
 }]
 
-/ Compile the standard pipeline with  CompileMesh[pbrVtx; PbrFragment]  and build a
+/ Compile the standard pipeline with  mesh.compile[pbrVtx; PbrFragment]  and build a
 / material+lit vertex tail with  r,g,b,rough,lit  (kept inline, not as helpers, to
 / spend fewer of the VM's 256 global slots — see doc/bug.md).

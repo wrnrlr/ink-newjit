@@ -1,12 +1,12 @@
 / test/fill_demo.k — Immediate mode UI demo using the fill shader
 /
-/ Demonstrates FillFrame + gpuSolid + tessellate for 2D UI rendering.
+/ Demonstrates gpu.fill + gpu.solid + gpu.tessellate for 2D UI rendering.
 / Also shows a k-compiled SPIR-V "fill" variant: a rounded-rect SDF shader
 / that produces soft, anti-aliased filled rectangles without tesselation.
 /
 / Layout:
-/   - Animated solid-colored rectangles (FillFrame + gpuSolid)
-/   - tessellated polygon (star shape via tessellate)
+/   - Animated solid-colored rectangles (gpu.fill + gpu.solid)
+/   - tessellated polygon (star shape via gpu.tessellate)
 /   - SPIR-V rounded-rect SDF overlay
 /
 / Run: zig build gpu && ink test/fill_demo.k
@@ -16,8 +16,8 @@
 
 / ── SPIR-V rounded-rect SDF shader ──────────────────────────────────────────
 / uv in [0,1]x[0,1], draws a soft white rounded rectangle in the centre.
-/ Useful as a primitive for custom UI elements drawn via DrawShader.
-rrSdf: FragmentShader[`uv`out!`v2`v4; {[uv]
+/ Useful as a primitive for custom UI elements drawn via gpu.drawShader.
+rrSdf: shader.fragment[`uv`out!`v2`v4; {[uv]
   px: (uv[0]*2.0)-1.0
   py: (uv[1]*2.0)-1.0
   / Rounded rect SDF: box half-size 0.6x0.7, radius 0.15
@@ -53,11 +53,11 @@ loop: {[props]
   t: props[`time]
 
   / Background — deep blue
-  FillFrame[fullQuad[w;h]; gpuSolid[0.04;0.06;0.14;1.]]
+  gpu.fill[fullQuad[w;h]; gpu.solid[0.04;0.06;0.14;1.]]
 
   / Animated horizontal bar
   by: h*0.1 + (h*0.05)*sin t
-  FillFrame[rect[0.;by;w;h*0.15]; gpuSolid[0.15;0.25;0.55;0.6]]
+  gpu.fill[rect[0.;by;w;h*0.15]; gpu.solid[0.15;0.25;0.55;0.6]]
 
   / Three animated color boxes
   bw: 120.
@@ -65,9 +65,9 @@ loop: {[props]
   bx0: w*0.1 + 30.*sin t
   bx1: w*0.4 + 20.*sin[t*1.3+1.]
   bx2: w*0.7 + 25.*sin[t*0.7+2.]
-  FillFrame[rect[bx0; h*0.35; bw; bh]; gpuSolid[0.9; 0.3; 0.2; 1.]]
-  FillFrame[rect[bx1; h*0.35; bw; bh]; gpuSolid[0.2; 0.8; 0.3; 1.]]
-  FillFrame[rect[bx2; h*0.35; bw; bh]; gpuSolid[0.25; 0.45; 1.0; 1.]]
+  gpu.fill[rect[bx0; h*0.35; bw; bh]; gpu.solid[0.9; 0.3; 0.2; 1.]]
+  gpu.fill[rect[bx1; h*0.35; bw; bh]; gpu.solid[0.2; 0.8; 0.3; 1.]]
+  gpu.fill[rect[bx2; h*0.35; bw; bh]; gpu.solid[0.25; 0.45; 1.0; 1.]]
 
   / Spinning star — tessellated polygon
   cx: w*0.5; cy: h*0.72
@@ -79,12 +79,12 @@ loop: {[props]
   ro: 90.; ri: 38.
   rs: ,/((ri,ro)' !n*2)
   pts: ,/((cx+rs*cos angs),' (cy+rs*sin angs))
-  starVerts: tessellate[pts]
-  FillFrame[starVerts; gpuSolid[1.0;0.85;0.1;1.]]
+  starVerts: gpu.tessellate[pts]
+  gpu.fill[starVerts; gpu.solid[1.0;0.85;0.1;1.]]
 
   / SPIR-V rounded-rect in lower-right corner
-  $[rrHandle=0; rrHandle:: CompileSpirV[rrSdf; 0]; 0]
-  DrawShader[rect[w-200.;h-160.;180.;140.]; rrHandle]
+  $[rrHandle=0; rrHandle:: gpu.compileSpirv[rrSdf; 0]; 0]
+  gpu.drawShader[rect[w-200.;h-160.;180.;140.]; rrHandle]
 
   0}
 

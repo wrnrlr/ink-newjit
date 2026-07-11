@@ -1,8 +1,8 @@
 / compute.k — element-wise GPU compute via SPIR-V lowering.
 /
 / Demonstrates the data-parallel ECS lowering path: a per-element column map
-/ {[x] ...} is compiled to a SPIR-V compute shader (ComputeShader) once, then
-/ dispatched on a float column each frame with RunShader. Reads binding 0,
+/ {[x] ...} is compiled to a SPIR-V compute shader (shader.compute) once, then
+/ dispatched on a float column each frame with gpu.runShader. Reads binding 0,
 / writes binding 1, workgroup size 64.
 /
 /   echo | timeout 6s ./zig-out/bin/ink test/compute.k
@@ -21,15 +21,15 @@ gDbl:: 0; gPoly:: 0; gWave:: 0          / cached compiled shaders
 
 demo: {[]
   / compile once (cache the SPIR-V binaries)
-  gDbl::  ComputeShader[doubleIt]
-  gPoly:: ComputeShader[poly]
-  gWave:: ComputeShader[wave]
+  gDbl::  shader.compute[doubleIt]
+  gPoly:: shader.compute[poly]
+  gWave:: shader.compute[wave]
   `0 0: "double 1..5 -> "
-  `0 0: $RunShader[gDbl;  1. 2. 3. 4. 5.]
+  `0 0: $gpu.runShader[gDbl;  1. 2. 3. 4. 5.]
   `0 0: "poly   0..4 -> "
-  `0 0: $RunShader[gPoly; 0. 1. 2. 3. 4.]
+  `0 0: $gpu.runShader[gPoly; 0. 1. 2. 3. 4.]
   `0 0: "wave   ->       "
-  `0 0: $RunShader[gWave; 0. 1.5708 3.14159 4.71239]
+  `0 0: $gpu.runShader[gWave; 0. 1.5708 3.14159 4.71239]
   gReady:: 1
   0
 }

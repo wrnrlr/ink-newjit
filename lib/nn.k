@@ -12,9 +12,9 @@
 /                              (the form the encoder/decoder chain wants — data stays
 /                              on the GPU between layers).
 / Pipelines are compiled ONCE and cached in globals; a 4-float scratch params buffer
-/ is reused via WriteBuffer so a call allocates no per-invocation param buffer.
+/ is reused via gpu.write so a call allocates no per-invocation param buffer.
 /
-/ Dispatch rounds the grid up to a multiple of 64, and Metal CLAMPS an out-of-bounds
+/ gpu.dispatch rounds the grid up to a multiple of 64, and Metal CLAMPS an out-of-bounds
 / store to the last valid index — so every OUTPUT buffer is padded to the launched
 / thread count (`nnPad`) so stray writes land in padding, never clobbering a live
 / element.  OOB input reads clamp harmlessly (their outputs are discarded).
@@ -25,7 +25,7 @@ nnPad: {[n] 64 * 1 | `i$ (n+63) div 64}
 / ── GEMM  C[M,N] = A[M,K] · B[K,N] ───────────────────────────────────────────
 / One pipeline serves every shape: dims travel in the params buffer g=(M;N;K).
 / thread d → C[d]; i=d/N, j=d%N; C[d] = Σ_k A[i*K+k]·B[k*N+j].
-gemmK: GpKernel[{[c;a;b;g;d]
+gemmK: gpu.kernel[{[c;a;b;g;d]
   n:g[1]; kk:g[2]
   i:floor[d%n]; j:mod[d;n]
   set[c; d; rsum[kk; {[k] (a[(i*kk)+k]) * b[(k*n)+j]}]]}; 0; 4]
@@ -35,55 +35,55 @@ gParam:: 0    / cached 4-float params scratch buffer
 
 / Resident GEMM: bc must already be a buffer of length ≥ nnPad[M*N]; ba/bb hold A/B.
 GemmR: {[bc;ba;bb;M;K;N]
-  $[gPipe=0;  gPipe::  CompileCompute[gemmK;4]; 0]
-  $[gParam=0; gParam:: NewBuffer[4#0.]; 0]
-  WriteBuffer[gParam; (0.+M),(0.+N),(0.+K),0.]
-  Dispatch[gPipe; (bc;ba;bb;gParam); M*N]
+  $[gPipe=0;  gPipe::  gpu.compileCompute[gemmK;4]; 0]
+  $[gParam=0; gParam:: gpu.buffer[4#0.]; 0]
+  gpu.write[gParam; (0.+M),(0.+N),(0.+K),0.]
+  gpu.dispatch[gPipe; (bc;ba;bb;gParam); M*N]
   bc}
 
 / Host convenience: A,B host arrays → C host array (M*N).
 Gemm: {[A;B;M;K;N]
-  ba:NewBuffer[A]; bb:NewBuffer[B]; bc:NewBuffer[(nnPad[M*N])#0.]
+  ba:gpu.buffer[A]; bb:gpu.buffer[B]; bc:gpu.buffer[(nnPad[M*N])#0.]
   GemmR[bc;ba;bb;M;K;N]
-  (M*N) # ReadBuffer[bc]}
+  (M*N) # gpu.read[bc]}
 
 / ── Row softmax  (numerically stable: subtract the row max) ───────────────────
 / Two passes: (1) per row i → m[i]=max, s[i]=Σexp(x-m);  (2) per element → exp/s.
-smStatK: GpKernel[{[mb;sb;x;g;i]
+smStatK: gpu.kernel[{[mb;sb;x;g;i]
   n:g[0]
   m: rmax[n; {[k] x[(i*n)+k]}]
   s: rsum[n; {[k] exp[(x[(i*n)+k]) - m]}]
   set[mb; i; m]; set[sb; i; s]}; 0; 4]
-smApplyK: GpKernel[{[o;x;mb;sb;g;d]
+smApplyK: gpu.kernel[{[o;x;mb;sb;g;d]
   n:g[0]; i:floor[d%n]
   set[o; d; (exp[(x[d]) - mb[i]]) % sb[i]]}; 0; 5]
 
 smSP::0; smAP::0; smParam::0
 / Resident softmax: bo (≥nnPad[M*N]) = row-softmax of bx; bmax/bsum per-row scratch.
 SoftmaxR: {[bo;bx;bmax;bsum;M;N]
-  $[smSP=0;    smSP::    CompileCompute[smStatK;4];  0]
-  $[smAP=0;    smAP::    CompileCompute[smApplyK;5]; 0]
-  $[smParam=0; smParam:: NewBuffer[4#0.]; 0]
-  WriteBuffer[smParam; (0.+N),(0.+M),0.,0.]
-  Dispatch[smSP; (bmax;bsum;bx;smParam); M]
-  Dispatch[smAP; (bo;bx;bmax;bsum;smParam); M*N]
+  $[smSP=0;    smSP::    gpu.compileCompute[smStatK;4];  0]
+  $[smAP=0;    smAP::    gpu.compileCompute[smApplyK;5]; 0]
+  $[smParam=0; smParam:: gpu.buffer[4#0.]; 0]
+  gpu.write[smParam; (0.+N),(0.+M),0.,0.]
+  gpu.dispatch[smSP; (bmax;bsum;bx;smParam); M]
+  gpu.dispatch[smAP; (bo;bx;bmax;bsum;smParam); M*N]
   bo}
 / Softmax of X (M rows × N cols) over each row → host array (M*N).
 Softmax: {[X;M;N]
-  bx:NewBuffer[X]
-  bm:NewBuffer[(nnPad M)#0.]; bs:NewBuffer[(nnPad M)#0.]; bo:NewBuffer[(nnPad[M*N])#0.]
+  bx:gpu.buffer[X]
+  bm:gpu.buffer[(nnPad M)#0.]; bs:gpu.buffer[(nnPad M)#0.]; bo:gpu.buffer[(nnPad[M*N])#0.]
   SoftmaxR[bo;bx;bm;bs;M;N]
-  (M*N) # ReadBuffer[bo]}
+  (M*N) # gpu.read[bo]}
 
 / ── LayerNorm over the last dim  (mean/var per row, affine γ/β per feature) ───
 / Two passes: (1) per row i → mean[i], rstd[i]=1/√(var+eps);  (2) per element →
 / ((x-mean)*rstd)*γ[j] + β[j].
-lnStatK: GpKernel[{[mb;rb;x;g;i]
+lnStatK: gpu.kernel[{[mb;rb;x;g;i]
   n:g[0]; eps:g[1]
   mean: (rsum[n; {[k] x[(i*n)+k]}]) % n
   var:  (rsum[n; {[k] sqr[(x[(i*n)+k]) - mean]}]) % n
   set[mb; i; mean]; set[rb; i; 1. % sqrt[var + eps]]}; 0; 4]
-lnApplyK: GpKernel[{[o;x;mb;rb;gm;bt;g;d]
+lnApplyK: gpu.kernel[{[o;x;mb;rb;gm;bt;g;d]
   n:g[0]; i:floor[d%n]; j:mod[d;n]
   nrm: ((x[d]) - mb[i]) * rb[i]
   set[o; d; (nrm * gm[j]) + bt[j]]}; 0; 7]
@@ -93,60 +93,60 @@ lnSP::0; lnAP::0; lnParam::0
 / cfg=(M;N;eps) — dims are packed because ink lambdas cap at 8 params.
 LayerNormR: {[bo;bx;bg;bb;bm;br;cfg]
   M:cfg 0; N:cfg 1; eps:cfg 2
-  $[lnSP=0;    lnSP::    CompileCompute[lnStatK;4];  0]
-  $[lnAP=0;    lnAP::    CompileCompute[lnApplyK;7]; 0]
-  $[lnParam=0; lnParam:: NewBuffer[4#0.]; 0]
-  WriteBuffer[lnParam; (0.+N),eps,0.,0.]
-  Dispatch[lnSP; (bm;br;bx;lnParam); M]
-  Dispatch[lnAP; (bo;bx;bm;br;bg;bb;lnParam); M*N]
+  $[lnSP=0;    lnSP::    gpu.compileCompute[lnStatK;4];  0]
+  $[lnAP=0;    lnAP::    gpu.compileCompute[lnApplyK;7]; 0]
+  $[lnParam=0; lnParam:: gpu.buffer[4#0.]; 0]
+  gpu.write[lnParam; (0.+N),eps,0.,0.]
+  gpu.dispatch[lnSP; (bm;br;bx;lnParam); M]
+  gpu.dispatch[lnAP; (bo;bx;bm;br;bg;bb;lnParam); M*N]
   bo}
 / LayerNorm of X (M×N) with per-feature gamma G (N) and beta B (N) → host (M*N).
 LayerNorm: {[X;G;B;M;N;eps]
-  bx:NewBuffer[X]; bg:NewBuffer[G]; bb:NewBuffer[B]
-  bm:NewBuffer[(nnPad M)#0.]; br:NewBuffer[(nnPad M)#0.]
-  bo:NewBuffer[(nnPad[M*N])#0.]
+  bx:gpu.buffer[X]; bg:gpu.buffer[G]; bb:gpu.buffer[B]
+  bm:gpu.buffer[(nnPad M)#0.]; br:gpu.buffer[(nnPad M)#0.]
+  bo:gpu.buffer[(nnPad[M*N])#0.]
   LayerNormR[bo;bx;bg;bb;bm;br;(M;N;eps)]
-  (M*N) # ReadBuffer[bo]}
+  (M*N) # gpu.read[bo]}
 
 / ── Linear  Y[M,N] = X[M,K] · Wᵀ + b   (W is [N,K] = PyTorch [out,in]) ─────────
 / Fuses GEMM-with-transposed-B and bias: no host weight transpose, and reading
 / row j of W (w[j*K+k]) is the j-th output's weights.
-linK: GpKernel[{[o;x;w;b;g;d]
+linK: gpu.kernel[{[o;x;w;b;g;d]
   nn:g[1]; kk:g[2]
   i:floor[d%nn]; j:mod[d;nn]
   set[o; d; (rsum[kk; {[k] (x[(i*kk)+k]) * w[(j*kk)+k]}]) + b[j]]}; 0; 5]
 linPipe::0; linParam::0
 / Resident: bo (≥nnPad[M*N]) = bx[M,K] · bw[N,K]ᵀ + bb[N].
 LinearR: {[bo;bx;bw;bb;M;K;N]
-  $[linPipe=0;  linPipe::  CompileCompute[linK;5]; 0]
-  $[linParam=0; linParam:: NewBuffer[4#0.]; 0]
-  WriteBuffer[linParam; (0.+M),(0.+N),(0.+K),0.]
-  Dispatch[linPipe; (bo;bx;bw;bb;linParam); M*N]
+  $[linPipe=0;  linPipe::  gpu.compileCompute[linK;5]; 0]
+  $[linParam=0; linParam:: gpu.buffer[4#0.]; 0]
+  gpu.write[linParam; (0.+M),(0.+N),(0.+K),0.]
+  gpu.dispatch[linPipe; (bo;bx;bw;bb;linParam); M*N]
   bo}
 Linear: {[X;W;B;M;K;N]
-  bx:NewBuffer[X]; bw:NewBuffer[W]; bb:NewBuffer[B]; bo:NewBuffer[(nnPad[M*N])#0.]
+  bx:gpu.buffer[X]; bw:gpu.buffer[W]; bb:gpu.buffer[B]; bo:gpu.buffer[(nnPad[M*N])#0.]
   LinearR[bo;bx;bw;bb;M;K;N]
-  (M*N) # ReadBuffer[bo]}
+  (M*N) # gpu.read[bo]}
 
 / ── Elementwise activations + residual (one thread per element) ───────────────
 / SiLU / Swish:  x·σ(x) = x / (1 + e^-x)
-siluK: GpKernel[{[o;x;d] t:x[d]; set[o; d; t % (1. + exp[0. - t])]}; 0; 2]
+siluK: gpu.kernel[{[o;x;d] t:x[d]; set[o; d; t % (1. + exp[0. - t])]}; 0; 2]
 / GELU (tanh approximation):  0.5x(1 + tanh(√(2/π)(x + 0.044715x³)))
-geluK: GpKernel[{[o;x;d] t:x[d]; c:0.7978845608 * (t + 0.044715*t*t*t); set[o; d; (0.5*t)*(1. + tanh[c])]}; 0; 2]
+geluK: gpu.kernel[{[o;x;d] t:x[d]; c:0.7978845608 * (t + 0.044715*t*t*t); set[o; d; (0.5*t)*(1. + tanh[c])]}; 0; 2]
 / scaled residual:  o = a + s·b   (s in params g[0])
-addsK: GpKernel[{[o;a;b;g;d] set[o; d; (a[d]) + (g[0])*b[d]]}; 0; 4]
+addsK: gpu.kernel[{[o;a;b;g;d] set[o; d; (a[d]) + (g[0])*b[d]]}; 0; 4]
 
 siluPipe::0; geluPipe::0; addsPipe::0; addsParam::0
-SiluR: {[bo;bx;n] $[siluPipe=0; siluPipe:: CompileCompute[siluK;2]; 0]; Dispatch[siluPipe;(bo;bx);n]; bo}
-GeluR: {[bo;bx;n] $[geluPipe=0; geluPipe:: CompileCompute[geluK;2]; 0]; Dispatch[geluPipe;(bo;bx);n]; bo}
+SiluR: {[bo;bx;n] $[siluPipe=0; siluPipe:: gpu.compileCompute[siluK;2]; 0]; gpu.dispatch[siluPipe;(bo;bx);n]; bo}
+GeluR: {[bo;bx;n] $[geluPipe=0; geluPipe:: gpu.compileCompute[geluK;2]; 0]; gpu.dispatch[geluPipe;(bo;bx);n]; bo}
 AddScaledR: {[bo;ba;bb;s;n]
-  $[addsPipe=0;  addsPipe::  CompileCompute[addsK;4]; 0]
-  $[addsParam=0; addsParam:: NewBuffer[4#0.]; 0]
-  WriteBuffer[addsParam; (0.+s),0.,0.,0.]
-  Dispatch[addsPipe; (bo;ba;bb;addsParam); n]
+  $[addsPipe=0;  addsPipe::  gpu.compileCompute[addsK;4]; 0]
+  $[addsParam=0; addsParam:: gpu.buffer[4#0.]; 0]
+  gpu.write[addsParam; (0.+s),0.,0.,0.]
+  gpu.dispatch[addsPipe; (bo;ba;bb;addsParam); n]
   bo}
-Silu: {[X;n] bx:NewBuffer[X]; bo:NewBuffer[(nnPad n)#0.]; SiluR[bo;bx;n]; n # ReadBuffer[bo]}
-Gelu: {[X;n] bx:NewBuffer[X]; bo:NewBuffer[(nnPad n)#0.]; GeluR[bo;bx;n]; n # ReadBuffer[bo]}
+Silu: {[X;n] bx:gpu.buffer[X]; bo:gpu.buffer[(nnPad n)#0.]; SiluR[bo;bx;n]; n # gpu.read[bo]}
+Gelu: {[X;n] bx:gpu.buffer[X]; bo:gpu.buffer[(nnPad n)#0.]; GeluR[bo;bx;n]; n # gpu.read[bo]}
 
 / ── Conformer feed-forward sub-block (macaron half-step) ──────────────────────
 /   out = x + 0.5 · Linear2( SiLU( Linear1( LayerNorm(x) ) ) )
@@ -154,21 +154,21 @@ Gelu: {[X;n] bx:NewBuffer[X]; bo:NewBuffer[(nnPad n)#0.]; GeluR[bo;bx;n]; n # Re
 / cfg=(M;D;Dff;eps) — packed (ink lambdas cap at 8 params).
 FfnBlock: {[X;W1;B1;W2;B2;GAM;BET;cfg]
   M:cfg 0; D:cfg 1; Dff:cfg 2; eps:cfg 3
-  bx:NewBuffer[X]
-  bw1:NewBuffer[W1]; bb1:NewBuffer[B1]; bw2:NewBuffer[W2]; bb2:NewBuffer[B2]
-  bgm:NewBuffer[GAM]; bbt:NewBuffer[BET]
-  h0:NewBuffer[(nnPad[M*D])#0.]                 / LayerNorm(x)   [M,D]
-  bm:NewBuffer[(nnPad M)#0.]; br:NewBuffer[(nnPad M)#0.]
-  h1:NewBuffer[(nnPad[M*Dff])#0.]               / Linear1        [M,Dff]
-  h2:NewBuffer[(nnPad[M*Dff])#0.]               / SiLU(h1)       [M,Dff]
-  h3:NewBuffer[(nnPad[M*D])#0.]                 / Linear2        [M,D]
-  bo:NewBuffer[(nnPad[M*D])#0.]
+  bx:gpu.buffer[X]
+  bw1:gpu.buffer[W1]; bb1:gpu.buffer[B1]; bw2:gpu.buffer[W2]; bb2:gpu.buffer[B2]
+  bgm:gpu.buffer[GAM]; bbt:gpu.buffer[BET]
+  h0:gpu.buffer[(nnPad[M*D])#0.]                 / LayerNorm(x)   [M,D]
+  bm:gpu.buffer[(nnPad M)#0.]; br:gpu.buffer[(nnPad M)#0.]
+  h1:gpu.buffer[(nnPad[M*Dff])#0.]               / Linear1        [M,Dff]
+  h2:gpu.buffer[(nnPad[M*Dff])#0.]               / SiLU(h1)       [M,Dff]
+  h3:gpu.buffer[(nnPad[M*D])#0.]                 / Linear2        [M,D]
+  bo:gpu.buffer[(nnPad[M*D])#0.]
   LayerNormR[h0; bx; bgm; bbt; bm; br; (M;D;eps)]
   LinearR[h1; h0; bw1; bb1; M; D; Dff]
   SiluR[h2; h1; M*Dff]
   LinearR[h3; h2; bw2; bb2; M; Dff; D]
   AddScaledR[bo; bx; h3; 0.5; M*D]
-  (M*D) # ReadBuffer[bo]}
+  (M*D) # gpu.read[bo]}
 
 / ── Multi-head self-attention ────────────────────────────────────────────────
 / Two head-structured batched-matmul kernels (Q/K/V projections and the output
@@ -177,7 +177,7 @@ FfnBlock: {[X;W1;B1;W2;B2;GAM;BET;cfg]
 / large-T model needs i32 indices / tiling here (H*T*T can exceed 16M).
 /
 / scores S[h,i,j] = scale · Σ_k Q[i,h·dh+k]·K[j,h·dh+k]   (one thread per H*T*T elem)
-attnScoresK: GpKernel[{[s;q;kb;g;e]
+attnScoresK: gpu.kernel[{[s;q;kb;g;e]
   T:g[0]; D:g[1]; dh:g[2]; sc:g[3]
   tt: T*T
   h: floor[e%tt]; rem: mod[e;tt]
@@ -186,7 +186,7 @@ attnScoresK: GpKernel[{[s;q;kb;g;e]
   set[s; e; sc * rsum[dh; {[k] (q[(i*D)+base+k]) * kb[(j*D)+base+k]}]]}; 0; 4]
 / context C[i,c] = Σ_j A[h,i,j]·V[j,c]  where h = c÷dh   (one thread per T*D elem)
 / writes straight into the concatenated [T,D] layout — no per-head regather.
-attnCtxK: GpKernel[{[o;a;v;g;e]
+attnCtxK: gpu.kernel[{[o;a;v;g;e]
   T:g[0]; D:g[1]; dh:g[2]
   i: floor[e%D]; c: mod[e;D]
   h: floor[c%dh]
@@ -196,17 +196,17 @@ attnCtxK: GpKernel[{[o;a;v;g;e]
 asPipe::0; asParam::0; acPipe::0; acParam::0
 / Resident attention scores: bs[H*T*T] = scaled QKᵀ per head.  H = D÷dh.
 AttnScoresR: {[bs;bq;bk;T;D;dh;scale]
-  $[asPipe=0;  asPipe::  CompileCompute[attnScoresK;4]; 0]
-  $[asParam=0; asParam:: NewBuffer[4#0.]; 0]
-  WriteBuffer[asParam; (0.+T),(0.+D),(0.+dh),scale]
-  Dispatch[asPipe; (bs;bq;bk;asParam); (D div dh)*T*T]
+  $[asPipe=0;  asPipe::  gpu.compileCompute[attnScoresK;4]; 0]
+  $[asParam=0; asParam:: gpu.buffer[4#0.]; 0]
+  gpu.write[asParam; (0.+T),(0.+D),(0.+dh),scale]
+  gpu.dispatch[asPipe; (bs;bq;bk;asParam); (D div dh)*T*T]
   bs}
 / Resident attention context: bc[T,D] = A·V, gathered into concatenated-head layout.
 AttnCtxR: {[bc;ba;bv;T;D;dh]
-  $[acPipe=0;  acPipe::  CompileCompute[attnCtxK;4]; 0]
-  $[acParam=0; acParam:: NewBuffer[4#0.]; 0]
-  WriteBuffer[acParam; (0.+T),(0.+D),(0.+dh),0.]
-  Dispatch[acPipe; (bc;ba;bv;acParam); T*D]
+  $[acPipe=0;  acPipe::  gpu.compileCompute[attnCtxK;4]; 0]
+  $[acParam=0; acParam:: gpu.buffer[4#0.]; 0]
+  gpu.write[acParam; (0.+T),(0.+D),(0.+dh),0.]
+  gpu.dispatch[acPipe; (bc;ba;bv;acParam); T*D]
   bc}
 
 / Mhsa[X; W; cfg] — standard scaled-dot-product self-attention (no rel-pos yet).
@@ -217,19 +217,19 @@ Mhsa: {[X;W;cfg]
   T:cfg 0; D:cfg 1; H:cfg 2
   dh: D div H
   scale: 1. % sqrt 0.+dh
-  bx:NewBuffer[X]
-  bwq:NewBuffer[W 0]; bbq:NewBuffer[W 1]; bwk:NewBuffer[W 2]; bbk:NewBuffer[W 3]
-  bwv:NewBuffer[W 4]; bbv:NewBuffer[W 5]; bwo:NewBuffer[W 6]; bbo:NewBuffer[W 7]
-  bq:NewBuffer[(nnPad[T*D])#0.]; LinearR[bq;bx;bwq;bbq;T;D;D]
-  bk:NewBuffer[(nnPad[T*D])#0.]; LinearR[bk;bx;bwk;bbk;T;D;D]
-  bv:NewBuffer[(nnPad[T*D])#0.]; LinearR[bv;bx;bwv;bbv;T;D;D]
-  bs:NewBuffer[(nnPad[H*T*T])#0.]; AttnScoresR[bs;bq;bk;T;D;dh;scale]
-  bsm:NewBuffer[(nnPad[H*T*T])#0.]
-  bmx:NewBuffer[(nnPad[H*T])#0.]; bsu:NewBuffer[(nnPad[H*T])#0.]
+  bx:gpu.buffer[X]
+  bwq:gpu.buffer[W 0]; bbq:gpu.buffer[W 1]; bwk:gpu.buffer[W 2]; bbk:gpu.buffer[W 3]
+  bwv:gpu.buffer[W 4]; bbv:gpu.buffer[W 5]; bwo:gpu.buffer[W 6]; bbo:gpu.buffer[W 7]
+  bq:gpu.buffer[(nnPad[T*D])#0.]; LinearR[bq;bx;bwq;bbq;T;D;D]
+  bk:gpu.buffer[(nnPad[T*D])#0.]; LinearR[bk;bx;bwk;bbk;T;D;D]
+  bv:gpu.buffer[(nnPad[T*D])#0.]; LinearR[bv;bx;bwv;bbv;T;D;D]
+  bs:gpu.buffer[(nnPad[H*T*T])#0.]; AttnScoresR[bs;bq;bk;T;D;dh;scale]
+  bsm:gpu.buffer[(nnPad[H*T*T])#0.]
+  bmx:gpu.buffer[(nnPad[H*T])#0.]; bsu:gpu.buffer[(nnPad[H*T])#0.]
   SoftmaxR[bsm;bs;bmx;bsu;H*T;T]
-  bc:NewBuffer[(nnPad[T*D])#0.]; AttnCtxR[bc;bsm;bv;T;D;dh]
-  bo:NewBuffer[(nnPad[T*D])#0.]; LinearR[bo;bc;bwo;bbo;T;D;D]
-  (T*D) # ReadBuffer[bo]}
+  bc:gpu.buffer[(nnPad[T*D])#0.]; AttnCtxR[bc;bsm;bv;T;D;dh]
+  bo:gpu.buffer[(nnPad[T*D])#0.]; LinearR[bo;bc;bwo;bbo;T;D;D]
+  (T*D) # gpu.read[bo]}
 
 / ── Relative-position attention (Transformer-XL / Conformer) ─────────────────
 / score[h,i,j] = scale·Σ_k (q[i,c]+u[c])·k[j,c] + (q[i,c]+v[c])·P[i−j, c]   (c=h·dh+k)
@@ -247,7 +247,7 @@ nnPosRow: {[idx]
 nnPosEmb: {[T;D] nnPosT::T; nnPosD::D; ,/ nnPosRow' !(2*T)-1}
 
 / rel-pos scores: buffers s,q,k,u,v,P + params (T;D;dh;scale).  One thread per H·T·T.
-attnScoresRelK: GpKernel[{[s;q;kb;u;v;pe;g;e]
+attnScoresRelK: gpu.kernel[{[s;q;kb;u;v;pe;g;e]
   T:g[0]; D:g[1]; dh:g[2]; sc:g[3]
   tt: T*T
   h: floor[e%tt]; rem: mod[e;tt]
@@ -259,10 +259,10 @@ attnScoresRelK: GpKernel[{[s;q;kb;u;v;pe;g;e]
     ((qc + u[c]) * kb[(j*D)+c]) + (qc + v[c]) * pe[prow+c]}]]}; 0; 7]
 asrPipe::0; asrParam::0
 AttnScoresRelR: {[bs;bq;bk;bu;bv;bpe;cfg]
-  $[asrPipe=0;  asrPipe::  CompileCompute[attnScoresRelK;7]; 0]
-  $[asrParam=0; asrParam:: NewBuffer[4#0.]; 0]
-  WriteBuffer[asrParam; (0.+cfg 0),(0.+cfg 1),(0.+cfg 2),cfg 3]
-  Dispatch[asrPipe; (bs;bq;bk;bu;bv;bpe;asrParam); ((cfg 1) div (cfg 2))*(cfg 0)*(cfg 0)]
+  $[asrPipe=0;  asrPipe::  gpu.compileCompute[attnScoresRelK;7]; 0]
+  $[asrParam=0; asrParam:: gpu.buffer[4#0.]; 0]
+  gpu.write[asrParam; (0.+cfg 0),(0.+cfg 1),(0.+cfg 2),cfg 3]
+  gpu.dispatch[asrPipe; (bs;bq;bk;bu;bv;bpe;asrParam); ((cfg 1) div (cfg 2))*(cfg 0)*(cfg 0)]
   bs}
 
 / MhsaRel[X; W; cfg] — rel-pos self-attention.  W = (Wq;Bq;Wk;Bk;Wv;Bv;Wo;Bo; Wpos;
@@ -270,33 +270,33 @@ AttnScoresRelR: {[bs;bq;bk;bu;bv;bpe;cfg]
 MhsaRel: {[X;W;cfg]
   T:cfg 0; D:cfg 1; H:cfg 2
   dh: D div H; scale: 1. % sqrt 0.+dh
-  bx:NewBuffer[X]
-  bwq:NewBuffer[W 0]; bbq:NewBuffer[W 1]; bwk:NewBuffer[W 2]; bbk:NewBuffer[W 3]
-  bwv:NewBuffer[W 4]; bbv:NewBuffer[W 5]; bwo:NewBuffer[W 6]; bbo:NewBuffer[W 7]
-  bwp:NewBuffer[W 8]; bu:NewBuffer[W 9]; bv:NewBuffer[W 10]
-  bq:NewBuffer[(nnPad[T*D])#0.];  LinearR[bq;bx;bwq;bbq;T;D;D]
-  bk:NewBuffer[(nnPad[T*D])#0.];  LinearR[bk;bx;bwk;bbk;T;D;D]
-  bvv:NewBuffer[(nnPad[T*D])#0.]; LinearR[bvv;bx;bwv;bbv;T;D;D]
+  bx:gpu.buffer[X]
+  bwq:gpu.buffer[W 0]; bbq:gpu.buffer[W 1]; bwk:gpu.buffer[W 2]; bbk:gpu.buffer[W 3]
+  bwv:gpu.buffer[W 4]; bbv:gpu.buffer[W 5]; bwo:gpu.buffer[W 6]; bbo:gpu.buffer[W 7]
+  bwp:gpu.buffer[W 8]; bu:gpu.buffer[W 9]; bv:gpu.buffer[W 10]
+  bq:gpu.buffer[(nnPad[T*D])#0.];  LinearR[bq;bx;bwq;bbq;T;D;D]
+  bk:gpu.buffer[(nnPad[T*D])#0.];  LinearR[bk;bx;bwk;bbk;T;D;D]
+  bvv:gpu.buffer[(nnPad[T*D])#0.]; LinearR[bvv;bx;bwv;bbv;T;D;D]
   np: (2*T)-1
-  bz:NewBuffer[D#0.]
-  bpe0:NewBuffer[nnPosEmb[T;D]]
-  bpe:NewBuffer[(nnPad[np*D])#0.]; LinearR[bpe;bpe0;bwp;bz;np;D;D]     / P = posEmb·Wposᵀ
-  bs:NewBuffer[(nnPad[H*T*T])#0.]; AttnScoresRelR[bs;bq;bk;bu;bv;bpe;(T;D;dh;scale)]
-  bsm:NewBuffer[(nnPad[H*T*T])#0.]; bmx:NewBuffer[(nnPad[H*T])#0.]; bsu:NewBuffer[(nnPad[H*T])#0.]
+  bz:gpu.buffer[D#0.]
+  bpe0:gpu.buffer[nnPosEmb[T;D]]
+  bpe:gpu.buffer[(nnPad[np*D])#0.]; LinearR[bpe;bpe0;bwp;bz;np;D;D]     / P = posEmb·Wposᵀ
+  bs:gpu.buffer[(nnPad[H*T*T])#0.]; AttnScoresRelR[bs;bq;bk;bu;bv;bpe;(T;D;dh;scale)]
+  bsm:gpu.buffer[(nnPad[H*T*T])#0.]; bmx:gpu.buffer[(nnPad[H*T])#0.]; bsu:gpu.buffer[(nnPad[H*T])#0.]
   SoftmaxR[bsm;bs;bmx;bsu;H*T;T]
-  bc:NewBuffer[(nnPad[T*D])#0.]; AttnCtxR[bc;bsm;bvv;T;D;dh]
-  bo:NewBuffer[(nnPad[T*D])#0.]; LinearR[bo;bc;bwo;bbo;T;D;D]
-  (T*D) # ReadBuffer[bo]}
+  bc:gpu.buffer[(nnPad[T*D])#0.]; AttnCtxR[bc;bsm;bvv;T;D;dh]
+  bo:gpu.buffer[(nnPad[T*D])#0.]; LinearR[bo;bc;bwo;bbo;T;D;D]
+  (T*D) # gpu.read[bo]}
 
 / ── Conformer convolution module ─────────────────────────────────────────────
 / GLU gate: X is [T,2D]; out[t,c] = X[t,c]·σ(X[t,D+c])  (split channels a|b → a·σ(b))
-gluK: GpKernel[{[o;x;g;e]
+gluK: gpu.kernel[{[o;x;g;e]
   D:g[0]; w2:2.*D
   i:floor[e%D]; c:mod[e;D]
   a: x[(i*w2)+c]; b: x[(i*w2)+D+c]
   set[o; e; a * 1. % 1. + exp[0. - b]]}; 0; 3]
 / Depthwise 1-D conv (per-channel, zero-padded): out[t,c]=Σ_k x[t+k-pad,c]·W[c,k]+B[c]
-dwK: GpKernel[{[o;x;w;b;g;e]
+dwK: gpu.kernel[{[o;x;w;b;g;e]
   T:g[0]; D:g[1]; ks:g[2]; pad:g[3]
   i:floor[e%D]; c:mod[e;D]
   acc: rsum[ks; {[k]
@@ -305,31 +305,31 @@ dwK: GpKernel[{[o;x;w;b;g;e]
     ($[ok; x[(tp*D)+c]; 0.]) * w[(c*ks)+k]}]
   set[o; e; acc + b[c]]}; 0; 5]
 / Per-channel affine (BatchNorm inference folded to scale/shift): out[t,c]=x·A[c]+B[c]
-caK: GpKernel[{[o;x;a;b;g;e]
+caK: gpu.kernel[{[o;x;a;b;g;e]
   D:g[0]; c:mod[e;D]
   set[o; e; (x[e]*a[c]) + b[c]]}; 0; 5]
 
 gluPipe::0; gluParam::0; dwPipe::0; dwParam::0; caPipe::0; caParam::0
 / GLU:  bx[T,2D] → bo[T,D].
 GluR: {[bo;bx;T;D]
-  $[gluPipe=0;  gluPipe::  CompileCompute[gluK;3]; 0]
-  $[gluParam=0; gluParam:: NewBuffer[4#0.]; 0]
-  WriteBuffer[gluParam; (0.+D),0.,0.,0.]
-  Dispatch[gluPipe; (bo;bx;gluParam); T*D]
+  $[gluPipe=0;  gluPipe::  gpu.compileCompute[gluK;3]; 0]
+  $[gluParam=0; gluParam:: gpu.buffer[4#0.]; 0]
+  gpu.write[gluParam; (0.+D),0.,0.,0.]
+  gpu.dispatch[gluPipe; (bo;bx;gluParam); T*D]
   bo}
 / Depthwise conv:  bx[T,D], bw[D,ks], bb[D] → bo[T,D].  pad = (ks-1)÷2 for "same".
 DwConvR: {[bo;bx;bw;bb;T;D;ks;pad]
-  $[dwPipe=0;  dwPipe::  CompileCompute[dwK;5]; 0]
-  $[dwParam=0; dwParam:: NewBuffer[4#0.]; 0]
-  WriteBuffer[dwParam; (0.+T),(0.+D),(0.+ks),(0.+pad)]
-  Dispatch[dwPipe; (bo;bx;bw;bb;dwParam); T*D]
+  $[dwPipe=0;  dwPipe::  gpu.compileCompute[dwK;5]; 0]
+  $[dwParam=0; dwParam:: gpu.buffer[4#0.]; 0]
+  gpu.write[dwParam; (0.+T),(0.+D),(0.+ks),(0.+pad)]
+  gpu.dispatch[dwPipe; (bo;bx;bw;bb;dwParam); T*D]
   bo}
 / Channel affine:  bo[T,D] = bx·A[c] + B[c].
 ChanAffineR: {[bo;bx;ba;bb;T;D]
-  $[caPipe=0;  caPipe::  CompileCompute[caK;5]; 0]
-  $[caParam=0; caParam:: NewBuffer[4#0.]; 0]
-  WriteBuffer[caParam; (0.+D),0.,0.,0.]
-  Dispatch[caPipe; (bo;bx;ba;bb;caParam); T*D]
+  $[caPipe=0;  caPipe::  gpu.compileCompute[caK;5]; 0]
+  $[caParam=0; caParam:: gpu.buffer[4#0.]; 0]
+  gpu.write[caParam; (0.+D),0.,0.,0.]
+  gpu.dispatch[caPipe; (bo;bx;ba;bb;caParam); T*D]
   bo}
 
 / ConvModule[X; W; cfg] — conformer conv module (residual included).
@@ -340,17 +340,17 @@ ChanAffineR: {[bo;bx;ba;bb;T;D]
 ConvModule: {[X;W;cfg]
   T:cfg 0; D:cfg 1; ks:cfg 2; eps:cfg 3
   pad: (ks-1) div 2
-  bx:NewBuffer[X]
-  blnG:NewBuffer[W 0]; blnB:NewBuffer[W 1]
-  bwp1:NewBuffer[W 2]; bbp1:NewBuffer[W 3]
-  bwdw:NewBuffer[W 4]; bbdw:NewBuffer[W 5]
-  bcaA:NewBuffer[W 6]; bcaB:NewBuffer[W 7]
-  bwp2:NewBuffer[W 8]; bbp2:NewBuffer[W 9]
-  h0:NewBuffer[(nnPad[T*D])#0.]; bm:NewBuffer[(nnPad T)#0.]; br:NewBuffer[(nnPad T)#0.]
-  h1:NewBuffer[(nnPad[T*2*D])#0.]
-  h2:NewBuffer[(nnPad[T*D])#0.]; h3:NewBuffer[(nnPad[T*D])#0.]
-  h4:NewBuffer[(nnPad[T*D])#0.]; h5:NewBuffer[(nnPad[T*D])#0.]; h6:NewBuffer[(nnPad[T*D])#0.]
-  bo:NewBuffer[(nnPad[T*D])#0.]
+  bx:gpu.buffer[X]
+  blnG:gpu.buffer[W 0]; blnB:gpu.buffer[W 1]
+  bwp1:gpu.buffer[W 2]; bbp1:gpu.buffer[W 3]
+  bwdw:gpu.buffer[W 4]; bbdw:gpu.buffer[W 5]
+  bcaA:gpu.buffer[W 6]; bcaB:gpu.buffer[W 7]
+  bwp2:gpu.buffer[W 8]; bbp2:gpu.buffer[W 9]
+  h0:gpu.buffer[(nnPad[T*D])#0.]; bm:gpu.buffer[(nnPad T)#0.]; br:gpu.buffer[(nnPad T)#0.]
+  h1:gpu.buffer[(nnPad[T*2*D])#0.]
+  h2:gpu.buffer[(nnPad[T*D])#0.]; h3:gpu.buffer[(nnPad[T*D])#0.]
+  h4:gpu.buffer[(nnPad[T*D])#0.]; h5:gpu.buffer[(nnPad[T*D])#0.]; h6:gpu.buffer[(nnPad[T*D])#0.]
+  bo:gpu.buffer[(nnPad[T*D])#0.]
   LayerNormR[h0; bx; blnG; blnB; bm; br; (T;D;eps)]
   LinearR[h1; h0; bwp1; bbp1; T; D; 2*D]
   GluR[h2; h1; T; D]
@@ -359,7 +359,7 @@ ConvModule: {[X;W;cfg]
   SiluR[h5; h4; T*D]
   LinearR[h6; h5; bwp2; bbp2; T; D; D]
   AddScaledR[bo; bx; h6; 1.; T*D]
-  (T*D) # ReadBuffer[bo]}
+  (T*D) # gpu.read[bo]}
 
 / ── Full conformer block + encoder stack ─────────────────────────────────────
 / block(x) = ½FFN → (x + MHSA(LayerNorm x)) → ConvModule → ½FFN → LayerNorm
@@ -424,7 +424,7 @@ nnMelFb: {[sr; nfft; nmels; fmin; fmax]
   ,/ nnMelRow' !nmels}
 
 / STFT power: pw[f,k] = re²+im², re=Σ_t sig[f·hop+t]·Cr[k,t]  (one thread per frame×freq)
-stftPowerK: GpKernel[{[pw;sig;cr;ci;g;e]
+stftPowerK: gpu.kernel[{[pw;sig;cr;ci;g;e]
   hop:g[0]; win:g[1]; nf:g[2]
   f:floor[e%nf]; k:mod[e;nf]
   base: f*hop; kb: k*win
@@ -432,35 +432,35 @@ stftPowerK: GpKernel[{[pw;sig;cr;ci;g;e]
   im: rsum[win; {[t] (sig[base+t]) * ci[kb+t]}]
   set[pw; e; (re*re) + im*im]}; 0; 5]
 / log with a floor:  o = log(x + eps)
-logK: GpKernel[{[o;x;g;e] set[o; e; log[(x[e]) + g[0]]]}; 0; 3]
+logK: gpu.kernel[{[o;x;g;e] set[o; e; log[(x[e]) + g[0]]]}; 0; 3]
 
 spPipe::0; spParam::0; logPipe::0; logParam::0
 StftPowerR: {[bpw;bsig;bcr;bci;hop;win;nf;nfr]
-  $[spPipe=0;  spPipe::  CompileCompute[stftPowerK;5]; 0]
-  $[spParam=0; spParam:: NewBuffer[4#0.]; 0]
-  WriteBuffer[spParam; (0.+hop),(0.+win),(0.+nf),0.]
-  Dispatch[spPipe; (bpw;bsig;bcr;bci;spParam); nfr*nf]
+  $[spPipe=0;  spPipe::  gpu.compileCompute[stftPowerK;5]; 0]
+  $[spParam=0; spParam:: gpu.buffer[4#0.]; 0]
+  gpu.write[spParam; (0.+hop),(0.+win),(0.+nf),0.]
+  gpu.dispatch[spPipe; (bpw;bsig;bcr;bci;spParam); nfr*nf]
   bpw}
 LogEpsR: {[bo;bx;eps;n]
-  $[logPipe=0;  logPipe::  CompileCompute[logK;3]; 0]
-  $[logParam=0; logParam:: NewBuffer[4#0.]; 0]
-  WriteBuffer[logParam; (0.+eps),0.,0.,0.]
-  Dispatch[logPipe; (bo;bx;logParam); n]
+  $[logPipe=0;  logPipe::  gpu.compileCompute[logK;3]; 0]
+  $[logParam=0; logParam:: gpu.buffer[4#0.]; 0]
+  gpu.write[logParam; (0.+eps),0.,0.,0.]
+  gpu.dispatch[logPipe; (bo;bx;logParam); n]
   bo}
 
 / LogMel[sig; Cr; Ci; MelFb; cfg] cfg=(hop;win;nfreq;nmels;nframes;eps) → [nframes*nmels].
 / Chain: STFT power → mel projection (Linear, zero bias) → log(·+eps).
 LogMel: {[sig; Cr; Ci; MelFb; cfg]
   hop:cfg 0; win:cfg 1; nf:cfg 2; nm:cfg 3; nfr:cfg 4; eps:cfg 5
-  bsig:NewBuffer[sig]; bcr:NewBuffer[Cr]; bci:NewBuffer[Ci]; bmf:NewBuffer[MelFb]
-  bz:NewBuffer[nm#0.]
-  bpw:NewBuffer[(nnPad[nfr*nf])#0.]
+  bsig:gpu.buffer[sig]; bcr:gpu.buffer[Cr]; bci:gpu.buffer[Ci]; bmf:gpu.buffer[MelFb]
+  bz:gpu.buffer[nm#0.]
+  bpw:gpu.buffer[(nnPad[nfr*nf])#0.]
   StftPowerR[bpw;bsig;bcr;bci;hop;win;nf;nfr]
-  bmel:NewBuffer[(nnPad[nfr*nm])#0.]
+  bmel:gpu.buffer[(nnPad[nfr*nm])#0.]
   LinearR[bmel;bpw;bmf;bz;nfr;nf;nm]
-  bout:NewBuffer[(nnPad[nfr*nm])#0.]
+  bout:gpu.buffer[(nnPad[nfr*nm])#0.]
   LogEpsR[bout;bmel;eps;nfr*nm]
-  (nfr*nm) # ReadBuffer[bout]}
+  (nfr*nm) # gpu.read[bout]}
 
 / ── Conv subsampling  (mel spectrogram → 8×-downsampled encoder input) ───────
 / 2-D conv, kernel 3, stride 2, pad 1.  Layout [C,T,F] channel-major flat.
@@ -468,7 +468,7 @@ LogMel: {[sig; Cr; Ci; MelFb; cfg]
 nnSub2: {[n] 1 + (n-1) div 2}
 
 / regular conv2d 1→C:  out[oc,t',f'] = b[oc] + Σ_{kt,kf} in[2t'+kt−1, 2f'+kf−1]·W[oc,kt,kf]
-conv2dK: GpKernel[{[o;x;w;b;g;e]
+conv2dK: gpu.kernel[{[o;x;w;b;g;e]
   C:g[0]; Tout:g[1]; Fout:g[2]; Tin:g[3]; Fin:g[4]
   tf: Tout*Fout
   oc: floor[e%tf]; rem: mod[e;tf]
@@ -479,7 +479,7 @@ conv2dK: GpKernel[{[o;x;w;b;g;e]
     ok: (~(ti<0.)) & (ti<Tin) & (~(fi<0.)) & (fi<Fin)
     ($[ok; x[(ti*Fin)+fi]; 0.]) * w[(oc*9.)+kk]}]]}; 0; 5]
 / depthwise conv2d C→C (per channel):  reads input channel c only.
-dwConv2dK: GpKernel[{[o;x;w;b;g;e]
+dwConv2dK: gpu.kernel[{[o;x;w;b;g;e]
   C:g[0]; Tout:g[1]; Fout:g[2]; Tin:g[3]; Fin:g[4]
   tf: Tout*Fout
   c: floor[e%tf]; rem: mod[e;tf]
@@ -491,15 +491,15 @@ dwConv2dK: GpKernel[{[o;x;w;b;g;e]
     ok: (~(ti<0.)) & (ti<Tin) & (~(fi<0.)) & (fi<Fin)
     ($[ok; x[cin+(ti*Fin)+fi]; 0.]) * w[(c*9.)+kk]}]]}; 0; 5]
 / pointwise conv2d C→C (1×1) = per-position channel linear.
-pwConv2dK: GpKernel[{[o;x;w;b;g;e]
+pwConv2dK: gpu.kernel[{[o;x;w;b;g;e]
   C:g[0]; T:g[1]; F:g[2]
   tf: T*F
   oc: floor[e%tf]; pos: mod[e;tf]
   set[o; e; (b[oc]) + rsum[C; {[ic] (x[(ic*tf)+pos]) * w[(oc*C)+ic]}]]}; 0; 5]
 / ReLU  (shader `|` is logical-or, not max — use the max builtin)
-reluK: GpKernel[{[o;x;e] set[o; e; max[0.; x[e]]]}; 0; 2]
+reluK: gpu.kernel[{[o;x;e] set[o; e; max[0.; x[e]]]}; 0; 2]
 / flatten [C,Tp,Fp] → [Tp, C·Fp]  (out[t',c·Fp+f'] = in[c,t',f'])
-flattenK: GpKernel[{[o;x;g;e]
+flattenK: gpu.kernel[{[o;x;g;e]
   C:g[0]; Tp:g[1]; Fp:g[2]
   cf: C*Fp
   tpp: floor[e%cf]; rem: mod[e;cf]
@@ -509,29 +509,29 @@ flattenK: GpKernel[{[o;x;g;e]
 c2Pipe::0; c2Param::0; dw2Pipe::0; dw2Param::0; pw2Pipe::0; pw2Param::0
 reluPipe::0; flPipe::0; flParam::0
 Conv2dR: {[bo;bin;bw;bb;cfg]
-  $[c2Pipe=0;  c2Pipe::  CompileCompute[conv2dK;5]; 0]
-  $[c2Param=0; c2Param:: NewBuffer[8#0.]; 0]
-  WriteBuffer[c2Param; (0.+cfg 0),(0.+cfg 1),(0.+cfg 2),(0.+cfg 3),(0.+cfg 4),0.,0.,0.]
-  Dispatch[c2Pipe; (bo;bin;bw;bb;c2Param); (cfg 0)*(cfg 1)*(cfg 2)]
+  $[c2Pipe=0;  c2Pipe::  gpu.compileCompute[conv2dK;5]; 0]
+  $[c2Param=0; c2Param:: gpu.buffer[8#0.]; 0]
+  gpu.write[c2Param; (0.+cfg 0),(0.+cfg 1),(0.+cfg 2),(0.+cfg 3),(0.+cfg 4),0.,0.,0.]
+  gpu.dispatch[c2Pipe; (bo;bin;bw;bb;c2Param); (cfg 0)*(cfg 1)*(cfg 2)]
   bo}
 DwConv2dR: {[bo;bin;bw;bb;cfg]
-  $[dw2Pipe=0;  dw2Pipe::  CompileCompute[dwConv2dK;5]; 0]
-  $[dw2Param=0; dw2Param:: NewBuffer[8#0.]; 0]
-  WriteBuffer[dw2Param; (0.+cfg 0),(0.+cfg 1),(0.+cfg 2),(0.+cfg 3),(0.+cfg 4),0.,0.,0.]
-  Dispatch[dw2Pipe; (bo;bin;bw;bb;dw2Param); (cfg 0)*(cfg 1)*(cfg 2)]
+  $[dw2Pipe=0;  dw2Pipe::  gpu.compileCompute[dwConv2dK;5]; 0]
+  $[dw2Param=0; dw2Param:: gpu.buffer[8#0.]; 0]
+  gpu.write[dw2Param; (0.+cfg 0),(0.+cfg 1),(0.+cfg 2),(0.+cfg 3),(0.+cfg 4),0.,0.,0.]
+  gpu.dispatch[dw2Pipe; (bo;bin;bw;bb;dw2Param); (cfg 0)*(cfg 1)*(cfg 2)]
   bo}
 PwConv2dR: {[bo;bin;bw;bb;C;T;F]
-  $[pw2Pipe=0;  pw2Pipe::  CompileCompute[pwConv2dK;5]; 0]
-  $[pw2Param=0; pw2Param:: NewBuffer[4#0.]; 0]
-  WriteBuffer[pw2Param; (0.+C),(0.+T),(0.+F),0.]
-  Dispatch[pw2Pipe; (bo;bin;bw;bb;pw2Param); C*T*F]
+  $[pw2Pipe=0;  pw2Pipe::  gpu.compileCompute[pwConv2dK;5]; 0]
+  $[pw2Param=0; pw2Param:: gpu.buffer[4#0.]; 0]
+  gpu.write[pw2Param; (0.+C),(0.+T),(0.+F),0.]
+  gpu.dispatch[pw2Pipe; (bo;bin;bw;bb;pw2Param); C*T*F]
   bo}
-ReluR: {[bo;bx;n] $[reluPipe=0; reluPipe:: CompileCompute[reluK;2]; 0]; Dispatch[reluPipe;(bo;bx);n]; bo}
+ReluR: {[bo;bx;n] $[reluPipe=0; reluPipe:: gpu.compileCompute[reluK;2]; 0]; gpu.dispatch[reluPipe;(bo;bx);n]; bo}
 FlattenR: {[bo;bin;C;Tp;Fp]
-  $[flPipe=0;  flPipe::  CompileCompute[flattenK;3]; 0]
-  $[flParam=0; flParam:: NewBuffer[4#0.]; 0]
-  WriteBuffer[flParam; (0.+C),(0.+Tp),(0.+Fp),0.]
-  Dispatch[flPipe; (bo;bin;flParam); Tp*C*Fp]
+  $[flPipe=0;  flPipe::  gpu.compileCompute[flattenK;3]; 0]
+  $[flParam=0; flParam:: gpu.buffer[4#0.]; 0]
+  gpu.write[flParam; (0.+C),(0.+Tp),(0.+Fp),0.]
+  gpu.dispatch[flPipe; (bo;bin;flParam); Tp*C*Fp]
   bo}
 
 / ConvSubsample[MEL; W; cfg] — dw_striding 8× subsampling → [T/8, D].
@@ -541,23 +541,23 @@ FlattenR: {[bo;bin;C;Tp;Fp]
 ConvSubsample: {[MEL;W;cfg]
   Ti:cfg 0; Fi:cfg 1; C:cfg 2; D:cfg 3
   T1:nnSub2 Ti; F1:nnSub2 Fi; T2:nnSub2 T1; F2:nnSub2 F1; T3:nnSub2 T2; F3:nnSub2 F2
-  bmel:NewBuffer[MEL]
-  bw0:NewBuffer[W 0]; bb0:NewBuffer[W 1]
-  bwd1:NewBuffer[W 2]; bbd1:NewBuffer[W 3]; bwp1:NewBuffer[W 4]; bbp1:NewBuffer[W 5]
-  bwd2:NewBuffer[W 6]; bbd2:NewBuffer[W 7]; bwp2:NewBuffer[W 8]; bbp2:NewBuffer[W 9]
-  bwpr:NewBuffer[W 10]; bbpr:NewBuffer[W 11]
-  h1:NewBuffer[(nnPad[C*T1*F1])#0.]; Conv2dR[h1;bmel;bw0;bb0;(C;T1;F1;Ti;Fi)]
-  r1:NewBuffer[(nnPad[C*T1*F1])#0.]; ReluR[r1;h1;C*T1*F1]
-  h2:NewBuffer[(nnPad[C*T2*F2])#0.]; DwConv2dR[h2;r1;bwd1;bbd1;(C;T2;F2;T1;F1)]
-  p2:NewBuffer[(nnPad[C*T2*F2])#0.]; PwConv2dR[p2;h2;bwp1;bbp1;C;T2;F2]
-  r2:NewBuffer[(nnPad[C*T2*F2])#0.]; ReluR[r2;p2;C*T2*F2]
-  h3:NewBuffer[(nnPad[C*T3*F3])#0.]; DwConv2dR[h3;r2;bwd2;bbd2;(C;T3;F3;T2;F2)]
-  p3:NewBuffer[(nnPad[C*T3*F3])#0.]; PwConv2dR[p3;h3;bwp2;bbp2;C;T3;F3]
-  r3:NewBuffer[(nnPad[C*T3*F3])#0.]; ReluR[r3;p3;C*T3*F3]
+  bmel:gpu.buffer[MEL]
+  bw0:gpu.buffer[W 0]; bb0:gpu.buffer[W 1]
+  bwd1:gpu.buffer[W 2]; bbd1:gpu.buffer[W 3]; bwp1:gpu.buffer[W 4]; bbp1:gpu.buffer[W 5]
+  bwd2:gpu.buffer[W 6]; bbd2:gpu.buffer[W 7]; bwp2:gpu.buffer[W 8]; bbp2:gpu.buffer[W 9]
+  bwpr:gpu.buffer[W 10]; bbpr:gpu.buffer[W 11]
+  h1:gpu.buffer[(nnPad[C*T1*F1])#0.]; Conv2dR[h1;bmel;bw0;bb0;(C;T1;F1;Ti;Fi)]
+  r1:gpu.buffer[(nnPad[C*T1*F1])#0.]; ReluR[r1;h1;C*T1*F1]
+  h2:gpu.buffer[(nnPad[C*T2*F2])#0.]; DwConv2dR[h2;r1;bwd1;bbd1;(C;T2;F2;T1;F1)]
+  p2:gpu.buffer[(nnPad[C*T2*F2])#0.]; PwConv2dR[p2;h2;bwp1;bbp1;C;T2;F2]
+  r2:gpu.buffer[(nnPad[C*T2*F2])#0.]; ReluR[r2;p2;C*T2*F2]
+  h3:gpu.buffer[(nnPad[C*T3*F3])#0.]; DwConv2dR[h3;r2;bwd2;bbd2;(C;T3;F3;T2;F2)]
+  p3:gpu.buffer[(nnPad[C*T3*F3])#0.]; PwConv2dR[p3;h3;bwp2;bbp2;C;T3;F3]
+  r3:gpu.buffer[(nnPad[C*T3*F3])#0.]; ReluR[r3;p3;C*T3*F3]
   Kf: C*F3
-  hf:NewBuffer[(nnPad[T3*Kf])#0.]; FlattenR[hf;r3;C;T3;F3]
-  bo:NewBuffer[(nnPad[T3*D])#0.]; LinearR[bo;hf;bwpr;bbpr;T3;Kf;D]
-  (T3*D) # ReadBuffer[bo]}
+  hf:gpu.buffer[(nnPad[T3*Kf])#0.]; FlattenR[hf;r3;C;T3;F3]
+  bo:gpu.buffer[(nnPad[T3*D])#0.]; LinearR[bo;hf;bwpr;bbpr;T3;Kf;D]
+  (T3*D) # gpu.read[bo]}
 
 / ── TDT decoder (host greedy loop) ──────────────────────────────────────────
 / The transducer decode is SEQUENTIAL with tiny per-step work + data-dependent

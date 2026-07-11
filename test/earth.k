@@ -7,8 +7,8 @@
 / (longitude = `atan2@(z;x), latitude = `asin@y) and the fragment shader samples
 / the maps per pixel, so continents stay sharp however coarse the mesh is.
 /
-/ Uses the SPIR-V texture path: gpuTexture uploads each image (lib/gpu.k Texture),
-/ FragmentShaderTexN samples them with sample[k;uv] (lib/spirv.k), DrawGeomT binds
+/ Uses the SPIR-V texture path: gpuTexture uploads each image (lib/gpu.k texture.upload),
+/ shader.fragmentTexN samples them with sample[k;uv] (lib/spirv.k), mesh.drawGeomT binds
 / them at @group(1).  The mesh + textures upload ONCE; each frame ships only a
 / 12-float uniform (orientation + zoom + cloud toggle).
 /
@@ -28,7 +28,7 @@
 
 PI: 3.14159265
 
-/ Texture resolution: "2k" (fast start) or "8k" (sharp when zoomed in, heavier).
+/ texture.upload resolution: "2k" (fast start) or "8k" (sharp when zoomed in, heavier).
 TEXRES: "2k"
 
 / ── Icosphere geometry (see test/sphere.k) ───────────────────────────────────
@@ -96,7 +96,7 @@ earthMesh: ,/ +(X;Y;Z;X;Y;Z;us;v)
 / get the same rotation for a consistent lighting/bump frame.  The sun rides
 / through unrotated (it lives in view space, set by the arrow keys → arrows move
 / the day, camera moves the view).  Varyings: wNor, wTan, wUvF=(u;v;cloudsOn), wSun.
-earthVtx: VertexShaderU[[pos:`v3;nor:`v3;uv:`v2]; [wNor:`v3;wTan:`v3;wUvF:`v3;wSun:`v3]; `uRot`uView`uFlag`uSun; {[pos;nor;uv]
+earthVtx: shader.vertexU[[pos:`v3;nor:`v3;uv:`v2]; [wNor:`v3;wTan:`v3;wUvF:`v3;wSun:`v3]; `uRot`uView`uFlag`uSun; {[pos;nor;uv]
   yc:uRot[0]; ys:uRot[1]; pc:uRot[2]; ps:uRot[3]
   zoom:uView[0]; asp:uView[3]
   / rotate position: yaw about Y, then pitch about X
@@ -123,7 +123,7 @@ earthVtx: VertexShaderU[[pos:`v3;nor:`v3;uv:`v2]; [wNor:`v3;wTan:`v3;wUvF:`v3;wS
 / night city lights); the specular mask gates an ocean sun-glint; clouds (white)
 / overlay both, lit by the sun and toggled by wUvF.z.  Output is clamped so the
 / glint/lights can't blow out to a white seam.
-earthFrag: FragmentShaderTexN[[wNor:`v3; wTan:`v3; wUvF:`v3; wSun:`v3; out:`v4]; 5; {[wNor;wTan;wUvF;wSun]
+earthFrag: shader.fragmentTexN[[wNor:`v3; wTan:`v3; wUvF:`v3; wSun:`v3; out:`v4]; 5; {[wNor;wTan;wUvF;wSun]
   uv:    (wUvF[0]; wUvF[1])
   flag:  wUvF[2]
   day:   sample[0; uv]
@@ -162,13 +162,13 @@ earthFrag: FragmentShaderTexN[[wNor:`v3; wTan:`v3; wUvF:`v3; wSun:`v3; out:`v4];
 starQuad: -1. -1.  1. -1.  1. 1.  -1. -1.  1. 1.  -1. 1.
 STARFOV:  0.85                                   / how much sky fills the view
 
-starVtx: VertexShaderU[[pos:`v2]; [wRay:`v2;wRot:`v4]; `uRot`uView; {[pos]
+starVtx: shader.vertexU[[pos:`v2]; [wRay:`v2;wRot:`v4]; `uRot`uView; {[pos]
   cy:uRot[0]; sy:uRot[1]; cp:uRot[2]; sp:uRot[3]
   asp:uView[0]; fov:uView[1]
   ((pos[0]; pos[1]; 0.9999; 1.0); (pos[0]*fov%asp; pos[1]*fov); (cy;sy;cp;sp))
 }]
 
-starFrag: FragmentShaderTexN[[wRay:`v2; wRot:`v4; out:`v4]; 1; {[wRay;wRot]
+starFrag: shader.fragmentTexN[[wRay:`v2; wRot:`v4; out:`v4]; 1; {[wRay;wRot]
   cy:wRot[0]; sy:wRot[1]; cp:wRot[2]; sp:wRot[3]
   dx:wRay[0]; dy:wRay[1]; dz:0.0-1.0
   / rotate the view ray by yaw-about-Y then pitch-about-X (same as the globe)
@@ -212,12 +212,12 @@ starGeom::    0
 starTex::     0
 
 window.run[{[props]
-  $[earthHandle=0; earthHandle:: CompileMesh[earthVtx; earthFrag];  0]
-  $[earthGeom=0;   earthGeom::   UploadMesh[earthMesh; earthHandle]; 0]
-  $[0~earthTex;    earthTex::    {Texture x}'(imgDay;imgNight;imgClouds;imgSpec;imgNorm); 0]
-  $[starHandle=0;  starHandle::  CompileMesh[starVtx; starFrag];     0]
-  $[starGeom=0;    starGeom::    UploadMesh[starQuad; starHandle];   0]
-  $[0~starTex;     starTex::     ,Texture[imgStars];                 0]
+  $[earthHandle=0; earthHandle:: mesh.compile[earthVtx; earthFrag];  0]
+  $[earthGeom=0;   earthGeom::   mesh.upload[earthMesh; earthHandle]; 0]
+  $[0~earthTex;    earthTex::    {texture.upload x}'(imgDay;imgNight;imgClouds;imgSpec;imgNorm); 0]
+  $[starHandle=0;  starHandle::  mesh.compile[starVtx; starFrag];     0]
+  $[starGeom=0;    starGeom::    mesh.upload[starQuad; starHandle];   0]
+  $[0~starTex;     starTex::     ,texture.upload[imgStars];                 0]
 
   E: props`events
   w: props`width; h: props`height
@@ -246,7 +246,7 @@ window.run[{[props]
   asp: h%w
   / stars first (behind), then the earth depth-tests in front
   starUni: (cos yaw; sin yaw; cos pitch; sin pitch; asp;STARFOV;0.;0.)
-  DrawGeomT[starGeom; starUni; starTex]
+  mesh.drawGeomT[starGeom; starUni; starTex]
   uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;0.;0.;asp; cloudsOn;0.;0.;0.; Lx;Ly;Lz;0.)
-  DrawGeomT[earthGeom; uni; earthTex]
+  mesh.drawGeomT[earthGeom; uni; earthTex]
 }; 0]

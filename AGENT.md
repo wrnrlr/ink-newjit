@@ -142,8 +142,14 @@ Available auto-loaded libraries:
 - `lib/csv.k` — `csv.read`
 - `lib/parquet.k` — `ReadParquet`
 - `lib/safetensors.k` — `safetensors.read`
-- `lib/gpu.k` — `RunWindow`, `FillFrame`, `Tessellate`, `CompileSpirV`, `DrawShader`, `RunShader`, `CompileWgsl`, `CompileMesh`, `DrawMesh`
-- `lib/spirv.k` — `FragmentShader`, `VertexShader`
+- `lib/gpu.k` — namespaced GPU API (Phase 4): `window.run`; `gpu.fill`, `gpu.tessellate`,
+  `gpu.compileSpirv`, `gpu.drawShader`, `gpu.runShader`, `gpu.buffer`, `gpu.read`,
+  `gpu.write`, `gpu.dispatch`, `gpu.compileCompute`, `gpu.solid`, `gpu.kernel`;
+  `mesh.compile`, `mesh.draw`/`drawU`/`drawT`, `mesh.upload`, `mesh.drawInstanced`;
+  `texture.upload`
+- `lib/dye.k` — shader compiler (loads `lib/spirv.k` encoder): `shader.fragment`/`Tex`/
+  `TexN`, `shader.vertex`/`vertexU`, `shader.compute`/`compute2`, `shader.stencil`/`U`/`IP`,
+  `shader.scatter`, `shader.fragmentIr` (neutral-IR path). See `doc/design/dye.md`.
 - `lib/font.k` — font functions
 - `lib/json.k` — JSON functions
 - `lib/audio.k` — audio (native miniaudio ext, `zig build audio`). Playback is fire-and-forget on miniaudio's own thread; recording is polled. `audio.play`/`load`/`stream`/`music`, `start`/`stop`/`volume`/`pitch`/`loop`/`seek`, 3D `pos`/`vel`/`dir`/`spatial`/`range`/`listener`, `decode`/`save`; `audio.rec.start`/`read`/`stop` (drain the mic ring buffer from your loop).

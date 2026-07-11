@@ -14,7 +14,7 @@ ellipsePts: {[cx;cy;rx;ry;n]
 
 / Fill a solid-color ellipse
 fillEllipse: {[cx;cy;rx;ry;r;g;b]
-  FillFrame[tessellate ellipsePts[cx;cy;rx;ry;64]; gpuSolid[r;g;b;1.]]}
+  gpu.fill[gpu.tessellate ellipsePts[cx;cy;rx;ry;64]; gpu.solid[r;g;b;1.]]}
 
 drawEye: {[ex;ey;er;mx;my]
   br: er * 0.35

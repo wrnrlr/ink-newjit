@@ -13,7 +13,7 @@
 2: "lib/gpu.k"
 
 / ── Compile SPIR-V shaders ──────────────────────────────────────────────────
-spirvWds:   FragmentShader[[uv:`v2; out:`v4]; {[uv] (uv[0]; uv[1]; 0.5; 1.0)}]
+spirvWds:   shader.fragment[[uv:`v2; out:`v4]; {[uv] (uv[0]; uv[1]; 0.5; 1.0)}]
 computeWds: compCompute[{[x] x*2}]
 
 / ── Full-screen quad vertices: [x, y, u, v] for 800x600 window ──────────────
@@ -23,10 +23,10 @@ verts: 0. 0. 0. 0. 800. 0. 1. 0. 800. 600. 1. 1. 0. 0. 0. 0. 800. 600. 1. 1. 0. 
 handle::        0
 computeResult:: ()
 loop: {[props]
-  $[handle=0; handle:: CompileSpirV[spirvWds; 0]; 0]
+  $[handle=0; handle:: gpu.compileSpirv[spirvWds; 0]; 0]
   $[0=#computeResult
-    computeResult:: RunShader[computeWds; 1. 2. 3. 4. 5. 6. 7. 8.]
+    computeResult:: gpu.runShader[computeWds; 1. 2. 3. 4. 5. 6. 7. 8.]
     0]
-  DrawShader[verts; handle]}
+  gpu.drawShader[verts; handle]}
 
 window.run[loop; 0]

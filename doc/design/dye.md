@@ -263,3 +263,64 @@ Open naming calls: `gpu.*` vs `mesh.*` for the immediate-mode trio
 (`FillFrame`/`DrawShader`/`tessellate`); `shader.kernel` vs `gpu.kernel` for
 `GpKernel`; keep `gpu.runShader` (not `gpu.run`, which clashes with `window.run`).
 Migrate with one commit of thin aliases, update consumers, then drop the aliases.
+
+---
+
+## Later architecture work (design notes)
+
+These are the larger items deliberately deferred. They are *not* loose ends — each
+is a project. Captured here so the next session starts from a design, not a blank.
+
+### A. Migrate the default compiler onto the IR seam
+Today only `FragmentShaderIr` uses the neutral IR; `FragmentShader`/vertex/compute
+still emit SPIR-V directly through `compNode`. Finishing the seam means every entry
+point builds IR then lowers. The blocker is that the IR is a **pure value-SSA** and
+the compute dialect isn't:
+
+- **Effects.** `set`/`iset`/`scatterAdd`/the output store are side effects with no
+  SSA value. The IR needs explicit effect ops (`store ptr val`, `atomicAdd acc i v`)
+  that lower in program order and are never DCE'd. A node carries an `effect` flag;
+  `xReach` keeps all effect nodes (roots), not just the return value.
+- **Loads / access chains.** `u[i]` (buffer gather), texture `sample`, uniform member
+  loads → `load`/`accessChain`/`sample` IR ops carrying the binding/pointer-type.
+- **Control flow (the hard part).** `rsum`/`rmax`/N-do/While compile to a structured
+  loop with a header block, an `OpPhi` carrying the counter + state across the back
+  edge, `OpLoopMerge`, and forward-referenced ids. A value-SSA list can't express
+  this directly. Options: (1) a small **region/block IR** (nodes grouped into basic
+  blocks with explicit phi nodes and branch targets), lowered by a CFG walk; or
+  (2) keep loops as *opaque macro nodes* (`loop{init;cond;body;merge}` holding
+  sub-IR) that the SPIR-V lowering expands with the existing `loopOpen`/`loopClose`
+  scaffold. (2) is far less work and enough to migrate compute; (1) is the "real"
+  answer if a second back-end (bytecode) ever needs the loops too.
+- **Module assembly.** The ~7 compute entry points duplicate ~40 lines of
+  hdr/cap/ext/types/vars/fn boilerplate that differs only in binding declarations.
+  Once bodies go through IR, extract `spirv.assembleCompute[decs; vars; bodyWords]`.
+
+Suggested order: effects + loads first (unlocks stencil/scatter), then the opaque-
+loop-node approach for compute, then delete the direct `compNode` once every entry
+point is on the IR. Keep the record-then-replay invariant (byte-identical when no
+optimization fires) as the regression oracle at each step.
+
+### B. IR optimizations beyond fold+DCE
+- **CSE.** Dedup nodes with identical `(op, ty, args, val)` — but the k gotchas bite:
+  an inner `{[j] … enclosing …}` can't see locals, so build the signature→canonical
+  map with a fold threading state, then remap `xArg` through the canonical table and
+  let DCE drop the duplicates. Biggest win on the vector-literal + repeated-subexpr
+  shaders (SDFs recompute `uv-0.5` a lot).
+- **Algebraic peepholes** (`x*1`, `x+0`, `x*2 → x+x`), and **constant vector folding**
+  (currently only f32 scalars fold).
+
+### C. `bits` — dye → ink-VM bytecode back-end
+The whole point of the neutral IR: a second lowering `bits.compile[ir]` that emits
+ink `Chunk` bytecode instead of SPIR-V words, so the same shader-style pipeline can
+JIT k for the CPU (copy-and-patch, `doc/papers/copy-and-patch.md`). Needs the IR to
+cover control flow (item A) and a k→`OpCode` mapping (mostly the inverse of the
+existing `compiler.zig` Op1/Op2 tables). This is what makes "ink : dye :: k : q"
+literal — dye becomes a real compiler front-end targeting both GPU and CPU.
+
+### D. General constant propagation → full partial evaluation
+`const_globals` folds literal `:`-globals within a unit. The generalization: a proper
+compile-time value lattice (const / range / unknown), cross-unit constant tables
+(needs V-ownership across interprets, or serialising consts into the module index),
+and inlining trivial `:`-bound lambdas — turning the single/double-bind contract into
+a real partial-evaluation pass that feeds monomorphic call-site specialization.

@@ -15,7 +15,7 @@
 /     helper decodes UTF-8 source literals for the seed text.
 /  3. Speed. Each glyph is tessellated ONCE (cached by glyph id); a frame only
 /     re-lays the document when an event arrived, and idle frames redraw a cached
-/     vertex buffer. As in typeset.k every draw is an explicit FillFrame and every
+/     vertex buffer. As in typeset.k every draw is an explicit gpu.fill and every
 /     $[...] stays on one line.
 
 2: "lib/font.k"
@@ -43,9 +43,9 @@ KMOUSE: `mouse
 KSCROLL: `scroll
 
 / ── Colours ──────────────────────────────────────────────────────────────────
-BG:    gpuSolid[0.12; 0.12; 0.15; 1.]   / dark background
-PEN:   gpuSolid[0.90; 0.90; 0.84; 1.]   / glyph ink
-CARET: gpuSolid[0.40; 0.75; 0.95; 1.]   / cursor bar
+BG:    gpu.solid[0.12; 0.12; 0.15; 1.]   / dark background
+PEN:   gpu.solid[0.90; 0.90; 0.84; 1.]   / glyph ink
+CARET: gpu.solid[0.40; 0.75; 0.95; 1.]   / cursor bar
 
 / ── UTF-8 → codepoints (for the seed text; typed text is already codepoints) ──
 contByte: {[out;need;acc;c] a: (acc*64)+c-128; $[need=1; (out,a; 0; 0); (out; need-1; a)]}
@@ -60,21 +60,21 @@ CR: 0                              / caret row
 CC: 0                              / caret column
 
 / ── Geometry (verbatim from typeset.k) ───────────────────────────────────────
-quad:  {[x;y;w;h] tessellate (x,y, (x+w),y, (x+w),(y+h), x,(y+h))}
+quad:  {[x;y;w;h] gpu.tessellate (x,y, (x+w),y, (x+w),(y+h), x,(y+h))}
 shift: {[t;ox;oy] t + ((#t) # ox,oy,0.,0.)}
 
 / ── Glyph cache ──────────────────────────────────────────────────────────────
 / Tessellating a glyph (Bézier flatten + triangulate) is the expensive step, so
 / do it once per glyph id and keep the local-space vertices. A cache miss appends
 / to the parallel CKEYS/CVALS globals (found via `?`); hits just reuse. Contours
-/ are packed with NaN pairs so tessellate resolves counters (holes in a,e,o,…).
+/ are packed with NaN pairs so gpu.tessellate resolves counters (holes in a,e,o,…).
 CKEYS: !0                          / cached glyph ids (I)
 CVALS: ()                          / their local vertex buffers (L)
 / 0.+ copies the tessellation out of the extension's C-allocated buffer into VM
 / memory, so caching it in a global is freed with the matching allocator at exit.
 cacheGlyph: {[gid]
   cs:font.outline[FONT;gid;SZ];
-  v:$[0=#cs;0#0.;0.+tessellate(,/{x,0n,0n}'cs)];
+  v:$[0=#cs;0#0.;0.+gpu.tessellate(,/{x,0n,0n}'cs)];
   CKEYS,::gid;CVALS,::,v;
   v}
 glyphLocal: {[gid] i: CKEYS?gid; $[i<#CKEYS; CVALS i; cacheGlyph gid]}
@@ -147,8 +147,8 @@ run: {[props]
   n: handle props
   $[n>0; GLYPHS:: textVerts[]; 0]     / re-lay the document only on a change
   w: props`width; h: props`height
-  FillFrame[quad[0.;0.;w;h]; BG]      / background
-  FillFrame[caretVerts[];    CARET]   / caret (drawn under the glyphs)
-  FillFrame[GLYPHS;          PEN]}    / all glyphs in one cached draw
+  gpu.fill[quad[0.;0.;w;h]; BG]      / background
+  gpu.fill[caretVerts[];    CARET]   / caret (drawn under the glyphs)
+  gpu.fill[GLYPHS;          PEN]}    / all glyphs in one cached draw
 
 window.run[run; WINW,WINH]

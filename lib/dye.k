@@ -3,7 +3,7 @@
 / dye is to ink what q is to k: a language layer that compiles ink lambdas to GPU
 / shaders. It owns the CST walk (via `parse`), the shader type system, the module
 / state (id counter + word buffers), module assembly, and the public entry points
-/ (FragmentShader / VertexShader / ComputeShader / StencilShader / GpKernel / …).
+/ (shader.fragment / shader.vertex / shader.compute / shader.stencil / gpu.kernel / …).
 / It emits SPIR-V words through the pure instruction stencils in lib/spirv.k.
 /
 / Tiramisu 4-layer model (doc/papers/baghdadi_2019_tiramisu.md):
@@ -16,14 +16,14 @@
 2: "lib/spirv.k"
 
 / ── Layer 1+2: public shader compiler ───────────────────────────────────────
-/ FragmentShader[ioTypes; fn] → SPIR-V word list (int list)
+/ shader.fragment[ioTypes; fn] → SPIR-V word list (int list)
 / ioTypes: dict of arg_name→type_sym, plus `out for the output type
 /          type symbols: `f32 `v4 `v2 `v3 `i32 `bool
 / fn:      ink lambda whose args become shader inputs, return value → output
 / Lambdas can have local bindings: {[uv] d: sqrt[...]; (d;d;d;1.0)}
-FragmentShader: {[ioTypes; fn]
+shader.fragment: {[ioTypes; fn]
   Nid::Nfixed; Buf::(); Con::()
-  TexVars:: ()                      / no texture section (see FragmentShaderTexN)
+  TexVars:: ()                      / no texture section (see shader.fragmentTexN)
 
   lam: lamOf fn
   argNames: lamArgs lam
@@ -52,13 +52,13 @@ FragmentShader: {[ioTypes; fn]
   buildMod[outId; inVarIds; inTys; inPtrs; outPtr; locs]
 }
 
-/ ── FragmentShaderTexN[ioTypes; nTex; fn] → SPIR-V word list ────────────────
-/ Like FragmentShader, plus nTex sampled 2-D textures at @group(1): image k is at
+/ ── shader.fragmentTexN[ioTypes; nTex; fn] → SPIR-V word list ────────────────
+/ Like shader.fragment, plus nTex sampled 2-D textures at @group(1): image k is at
 / binding k, and one shared sampler at binding nTex.  The body samples texture k
 / with  sample[k; uv]  → v4 (sample[uv] is texture 0).  See compSample.  The host
-/ wires the textures with gpuTexture + DrawMeshT/DrawGeomT/DrawInstancedT, passing
+/ wires the textures with gpuTexture + mesh.drawT/mesh.drawGeomT/mesh.drawInstancedT, passing
 / a list of texture handles.  Interpolate the UV(s) as v2 vertex varyings.
-FragmentShaderTexN: {[ioTypes; nTex; fn]
+shader.fragmentTexN: {[ioTypes; nTex; fn]
   Nid::Nfixed; Buf::(); Con::()
 
   lam: lamOf fn
@@ -96,25 +96,25 @@ FragmentShaderTexN: {[ioTypes; nTex; fn]
 }
 
 / Single-texture convenience: sample[uv] samples the one texture.
-FragmentShaderTex: {[ioTypes; fn] FragmentShaderTexN[ioTypes; 1; fn]}
+shader.fragmentTex: {[ioTypes; fn] shader.fragmentTexN[ioTypes; 1; fn]}
 
-/ ── VertexShader[inTypes; varyTypes; fn] → SPIR-V word list ─────────────────
+/ ── shader.vertex[inTypes; varyTypes; fn] → SPIR-V word list ─────────────────
 / inTypes:   dict argName→typeSym  (vertex attribute inputs, e.g. `pos`nor!`v3`v3)
 / varyTypes: dict name→typeSym     (interpolated varyings; use ()!() for none)
 / fn:        lambda returning (glPos_v4; vary0; ...) or just glPos_v4 if no varyings
 /
 / gl_Position is always the first return element; emitted via the gl_PerVertex
 / Block struct (required by Vulkan/SPIR-V spec).  Varyings get Location 0,1,...
-/ and must match the FragmentShader's input Location assignments.
-VertexShader: {[inTypes; varyTypes; fn] VertexShaderU[inTypes; varyTypes; (); fn]}
+/ and must match the shader.fragment's input Location assignments.
+shader.vertex: {[inTypes; varyTypes; fn] shader.vertexU[inTypes; varyTypes; (); fn]}
 
-/ ── VertexShaderU[inTypes; varyTypes; uniNames; fn] ─────────────────────────
-/ Like VertexShader, plus a uniform block at @group(0) @binding(0).  uniNames is
+/ ── shader.vertexU[inTypes; varyTypes; uniNames; fn] ─────────────────────────
+/ Like shader.vertex, plus a uniform block at @group(0) @binding(0).  uniNames is
 / a list of symbols, one per vec4 uniform slot; each becomes a v4 value in the
 / shader body (index components with name[i]).  The host fills the slots per draw
-/ via DrawMeshU (slot k = uniform floats 4k..4k+3).  uniNames:() ⇒ no block, and
-/ the emitted module is byte-identical to the old VertexShader.
-VertexShaderU: {[inTypes; varyTypes; uniNames; fn]
+/ via mesh.drawU (slot k = uniform floats 4k..4k+3).  uniNames:() ⇒ no block, and
+/ the emitted module is byte-identical to the old shader.vertex.
+shader.vertexU: {[inTypes; varyTypes; uniNames; fn]
   Nid::Nfixed; Buf::(); Con::()
 
   lam:      lamOf fn
@@ -281,14 +281,14 @@ Nid:: Nfixed
 Con:: ()
 Buf:: ()
 
-/ VertexShaderU uniform-block scratch: the current block's struct type id, the
+/ shader.vertexU uniform-block scratch: the current block's struct type id, the
 / Uniform→vec4 pointer type id, and the block variable id.  Set per shader and
 / read by the top-level each-helpers below (ink lambdas can't see enclosing locals).
 UTuni:: 0
 UPv4::  0
 UVar::  0
 
-/ FragmentShaderTexN texture scratch: SPIR-V ids for the shared image / sampler
+/ shader.fragmentTexN texture scratch: SPIR-V ids for the shared image / sampler
 / types, their UniformConstant pointer types, one variable per image, and the one
 / shared sampler variable.  #TexVars>0 signals buildMod to emit the texture
 / section; set per shader, read by compSample (ink lambdas can't see enclosing
@@ -527,7 +527,7 @@ compScatterAdd: {[i; env]
 }
 
 / set[buf; idx; val] — plain (non-atomic) store buf[idx]:=val into an f32 buffer.
-/ Lets a kernel write several buffers as side effects (GpKernel has no auto-output).
+/ Lets a kernel write several buffers as side effects (gpu.kernel has no auto-output).
 compSet: {[i; env]
   args: kF[i;`arg]                              / (bufName; idxExpr; valExpr)
   bid: (env kVal args[0])0
@@ -570,7 +570,7 @@ compIset: {[i; env]
 / param bound to the carried state (and, for rsum, `k` bound to the loop counter as
 / f32); enclosing locals stay visible because we compile in the current env.
 / Constants RCi0/RCi1/RCf0 (i32 0, i32 1, f32 0.) are made once per compile in
-/ compGpN, so these are valid inside a GpKernel only (the fixed stencil emitters
+/ compGpN, so these are valid inside a gpu.kernel only (the fixed stencil emitters
 / don't create them).
 RCi0:: 0    / i32 constant 0     (loop counter init)
 RCi1:: 0    / i32 constant 1     (loop counter step)
@@ -694,7 +694,7 @@ compAdverb: {[i; vN; env; oty]
 
 / sample[uv] (texture 0) or sample[k; uv] (texture k, k a literal) → texture
 / lookup: OpSampledImage(image_k, shared sampler) then OpImageSampleImplicitLod at
-/ the interpolated uv. Only valid inside a FragmentShaderTexN. Returns v4.
+/ the interpolated uv. Only valid inside a shader.fragmentTexN. Returns v4.
 compSample: {[i; env]
   args: kF[i;`arg]
   two:  1<#args
@@ -725,7 +725,7 @@ compApply: {[i; env; oty]
 }
 
 / Tuple → vec2/vec3/vec4 via OpCompositeConstruct
-/ Dispatch on element count.
+/ gpu.dispatch on element count.
 compList: {[i; env; oty]
   elems: kF[i;`elem]
   n:  #elems
@@ -821,7 +821,7 @@ buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
   varIn:  ,/ inPtrs varInOne' inVarIds
   varOut: (0x0004003B; outPtr; outId; 3)
 
-  / FragmentShaderTex texture section (emitted only when TexVar was allocated):
+  / shader.fragmentTex texture section (emitted only when TexVar was allocated):
   / DescriptorSet/Binding decorations, image/sampler/sampled-image types + their
   / UniformConstant pointers, and the two global variables.  All one line each —
   / newlines inside (...) inject null words.
@@ -913,16 +913,16 @@ compCompute: {[fn]
 
   ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
 
-/ Public name, consistent with FragmentShader / VertexShader. Compiles an
+/ Public name, consistent with shader.fragment / shader.vertex. Compiles an
 / element-wise f32 kernel {[x] ...} to a SPIR-V compute shader (workgroup 64,
-/ reads binding 0, writes binding 1). Run it with RunShader[ComputeShader[fn]; inF].
+/ reads binding 0, writes binding 1). Run it with gpu.runShader[shader.compute[fn]; inF].
 / This is the lowering target for data-parallel ECS systems (a per-entity column
-/ map): compile once, then RunShader the column each frame inside a gpuRun frame.
-ComputeShader: compCompute
+/ map): compile once, then gpu.runShader the column each frame inside a gpuRun frame.
+shader.compute: compCompute
 
 / ── compCompute2: two-input element-wise compute shader ──────────────────────────
 / Kernel {[x;y] ...} reads input1 at binding 0 and input2 at binding 2, writes the
-/ result to output at binding 1. Run with RunShader2[ComputeShader2[fn]; in1; in2].
+/ result to output at binding 1. Run with gpu.runShader2[shader.compute2[fn]; in1; in2].
 / Enables real systems that combine two columns, e.g. {[px;vx] px+vx*dt}.
 compCompute2: {[fn]
   Nid::Nfixed; Buf::(); Con::()
@@ -1000,17 +1000,17 @@ compCompute2: {[fn]
 
   ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
 
-ComputeShader2: compCompute2
+shader.compute2: compCompute2
 
 / ── compStencil: gather-capable compute shader (the buffer-index intrinsic) ──────
 / Kernel {[u; i] expr}: `u` is the input storage buffer (binding 0), indexable at
 / ANY computed offset — u[i], u[i-1], u[i+W] — and `i` is this thread's flat index
 / (gl_GlobalInvocationID.x) as an f32. The result is stored to output[i] (binding 1).
-/ This is the element-wise ComputeShader generalised from a map to a gather: the
+/ This is the element-wise shader.compute generalised from a map to a gather: the
 / single hard-wired input[gid] load becomes u[<expr>], so stencils (Jacobi/SOR/
 / image filters) compile. Grid dims / boundaries are baked as literals in the kernel
 / (it's compiled per problem); conditionals ($[…]) and floor/mod handle edges.
-/ Run on the resident path: p:CompileCompute[StencilShader[fn]; 2]; then Dispatch.
+/ Run on the resident path: p:gpu.compileCompute[shader.stencil[fn]; 2]; then gpu.dispatch.
 compStencil: {[fn]
   Nid::Nfixed; Buf::(); Con::()
 
@@ -1080,13 +1080,13 @@ compStencil: {[fn]
 
   ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
 
-StencilShader: compStencil
+shader.stencil: compStencil
 
 / ── compStencilU: stencil + a params buffer (uniforms as an indexable buffer) ────
 / Kernel {[u; g; i]}: `u`=input (binding 0), `g`=params (binding 2, indexable
 / g[0],g[1],…), `i`=thread index; result → output (binding 1). Lets ONE compiled
 / pipeline serve any grid: pass N/ω/… in the params buffer instead of baking them.
-/ nbind=3; Dispatch order is (in; out; params). g is just another storage buffer,
+/ nbind=3; gpu.dispatch order is (in; out; params). g is just another storage buffer,
 / so the buffer-index intrinsic reads it for free.
 compStencilU: {[fn]
   Nid::Nfixed; Buf::(); Con::()
@@ -1131,7 +1131,7 @@ compStencilU: {[fn]
   decs:decGid,decStride,decMem,decBlk,decInDs,decInBnd,decOutDs,decOutBnd,decIn2Ds,decIn2Bnd
   vars:varGid,varIn,varOut,varIn2
   ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
-StencilShaderU: compStencilU
+shader.stencilU: compStencilU
 
 / ── compStencilIP: in-place stencil (single state buffer) + params ──────────────
 / Kernel {[u; g; i]}: `u`=state (binding 0, read AND written in place), `g`=params
@@ -1139,7 +1139,7 @@ StencilShaderU: compStencilU
 / what red-black Gauss-Seidel/SOR needs: reds read blacks and write reds in place,
 / so the just-updated reds are visible to the black pass. Non-updated cells must
 / store their own value (u[i]); the resulting same-value read/write "race" is
-/ benign on real hardware (and Dawn doesn't flag it). nbind=2; Dispatch (state;params).
+/ benign on real hardware (and Dawn doesn't flag it). nbind=2; gpu.dispatch (state;params).
 compStencilIP: {[fn]
   Nid::Nfixed; Buf::(); Con::()
   Tu32:newId[]; Tv3u32:newId[]; Trta:newId[]; Tbuf:newId[]
@@ -1181,7 +1181,7 @@ compStencilIP: {[fn]
   decs:decGid,decStride,decMem,decBlk,decInDs,decInBnd,decParDs,decParBnd
   vars:varGid,varIn,varPar
   ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
-StencilShaderIP: compStencilIP
+shader.stencilIP: compStencilIP
 
 / ── compScatter: edge-parallel atomic scatter (the cloth/graph intrinsic) ────────
 / Kernel {[acc; a; b; g; i]}: one thread per EDGE (i = edge index). `a`,`b` are f32
@@ -1193,7 +1193,7 @@ StencilShaderIP: compStencilIP
 / particles (cloth.k's amend-with-+), on the GPU. IMPORTANT: dispatch rounds up to
 / a multiple of 64, so guard the scatter VALUE to 0 for out-of-range threads
 / ($[i<g[0];val;0.]) — atomic-add of 0 is a harmless no-op (OpSelect can't guard
-/ the side effect itself). Read back with ReadBufferI. nbind=4; Dispatch (acc;a;b;g).
+/ the side effect itself). Read back with gpu.readI. nbind=4; gpu.dispatch (acc;a;b;g).
 compScatter: {[fn]
   Nid::Nfixed; Buf::(); Con::()
   Tu32:newId[]; Tv3u32:newId[]
@@ -1239,7 +1239,7 @@ compScatter: {[fn]
   decs:decGid,decStr,decMem,decBlk,decStrI,decMemI,decBlkI,decAccDs,decAccBnd,decADs,decABnd,decBDs,decBBnd,decGDs,decGBnd
   vars:varGid,varAcc,varA,varB,varG
   ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
-StencilScatter: compScatter
+shader.scatter: compScatter
 
 / ── compGpN: general compute kernel — nAcc i32 accumulators + nBuf f32 buffers ────
 / Kernel {[acc0..accM; buf0..bufN; i]}: bindings 0..nAcc-1 are i32 atomic
@@ -1247,8 +1247,8 @@ StencilScatter: compScatter
 / b[j], written with set[b;j;v]); i is the thread index. There is NO automatic output
 / store — every write is an explicit set/scatterAdd/iset, so one kernel can update
 / several buffers (e.g. XPBD integrate writes p, v AND prev). This is the general
-/ lowering the fixed StencilShader* emitters specialise; it drives test/clothgpu.k.
-/ nbind = nAcc+nBuf; Dispatch order is (accumulators…; buffers…).
+/ lowering the fixed shader.stencil* emitters specialise; it drives test/clothgpu.k.
+/ nbind = nAcc+nBuf; gpu.dispatch order is (accumulators…; buffers…).
 GAcc::   ()   / accumulator var ids (globals so the per-binding each-helpers see them)
 GBuf::   ()   / f32 buffer var ids
 GNAcc::  0    / accumulator count (f32 buffers start at binding GNAcc)
@@ -1310,7 +1310,7 @@ compGpN: {[fn; nAcc; nBuf]
   decs:decGid,decStr,decMem,decBlk,decStrI,decMemI,decBlkI,accDecs,bufDecs
   vars:varGid,accVars,bufVars
   ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
-GpKernel: compGpN
+gpu.kernel: compGpN
 
 varOutOne:   {[ptr;vid]    (0x0004003B;ptr;vid;3)}    / OpVariable Output storage class
 
@@ -1330,7 +1330,7 @@ compSeqEnv: {[stmts; env]
 / the walker below builds a target-neutral, typed SSA op list; a lowering pass then
 / turns it into a target — SPIR-V words (xLowerSpirv, reusing the op* stencils) or a
 / textual dump (xDump). Optimizations (xFold, xReach/DCE) run once on the neutral IR
-/ and help every target. FragmentShaderIr drives the fragment-expression subset
+/ and help every target. shader.fragmentIr drives the fragment-expression subset
 / through it; the compute/loop machinery stays on the direct compNode path for now.
 / See doc/design/dye.md.  IR node = an index into these parallel lists:
 xOp::  ()   / op sym:  param const cons extract select arith math neg lnot
@@ -1485,7 +1485,7 @@ xArgStr: {[k] a:xArg k; $[0=#a;"[]"; ","/$'a]}
 xDump: {[] {[k] `0 0: ($k),": ",($xOp k)," :",($xTy k)," (",xArgStr[k],") ",$xVal k}' !#xOp; 0}
 
 / ── Entry point: fragment shader compiled through the neutral IR ──────────────
-FragmentShaderIr: {[ioTypes; fn]
+shader.fragmentIr: {[ioTypes; fn]
   Nid::Nfixed; Buf::(); Con::()
   TexVars:: ()
   xReset[]

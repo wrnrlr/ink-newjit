@@ -9,8 +9,8 @@
 /
 / One sphere mesh is compiled once and SHARED by every entity; each entity's own
 / transform (orbit, bob, scale, spin) and material ride in the per-draw uniform
-/ block (lib/spirv.k VertexShaderU + lib/gpu.k DrawMeshU), so the render "system"
-/ is just: read columns → pack uniforms (vectorised) → one DrawMeshU per row.
+/ block (lib/spirv.k shader.vertexU + lib/gpu.k mesh.drawU), so the render "system"
+/ is just: read columns → pack uniforms (vectorised) → one mesh.drawU per row.
 /
 / Controls: WASD pan · scroll zoom · right-drag orbit/tilt (lib/camera.k)
 / Run: zig build gpu && ink test/scene.k
@@ -19,7 +19,7 @@
 2: "lib/gpu.k"
 2: "lib/pbr.k"        / PbrFragment (Cook-Torrance)
 2: "lib/camera.k"    / orbit camera
-2: "lib/instancing.k" / InstancedVertexShader + UploadMesh + DrawInstanced
+2: "lib/instancing.k" / shader.instancedVertex + mesh.upload + mesh.drawInstanced
 
 PI:: 3.14159265
 DT:: 1.%60.
@@ -44,7 +44,7 @@ icoMesh:: ,/ sphVert' icoTris2          / flat stride-6 (pos , nor=pos)
 / uCam=(ca;sa;xca;xsa) uPan=(zoom;camX;camZ;_) uMat=(r;g;b;rough).
 / Position gets model spin+scale+translate, then camera rotate/tilt/zoom/pan; the
 / normal gets model spin + camera rotate/tilt only (uniform scale leaves it intact).
-sceneVtx: InstancedVertexShader[[pos:`v3;nor:`v3]; [wNor:`v3;wMat:`v4;wLit:`f32]; `uModel`uPos`uCam`uPan`uMat; {[pos;nor]
+sceneVtx: shader.instancedVertex[[pos:`v3;nor:`v3]; [wNor:`v3;wMat:`v4;wLit:`f32]; `uModel`uPos`uCam`uPan`uMat; {[pos;nor]
   myc:uModel[0]; mys:uModel[1]; scl:uModel[2]; lit:uModel[3]
   ex:uPos[0]; ey:uPos[1]; ez:uPos[2]
   ca:uCam[0]; sa:uCam[1]; xca:uCam[2]; xsa:uCam[3]
@@ -79,7 +79,7 @@ bobSys:  {[x] th:x`theta; ph:x`phase; x:@[x;`py;:;0.6*sin((2.*th)+ph)]; x:@[x;`s
 / ── Render system: read columns → pack the n×20 instance matrix → ONE draw ─────
 / Each row is one instance's 5 vec4 slots (uModel uPos uCam uPan uMat); camera
 / columns are shared (n copies).  The whole table is drawn with a single instanced
-/ draw call (DrawInstanced) over the retained geometry — N entities, 1 draw.
+/ draw call (mesh.drawInstanced) over the retained geometry — N entities, 1 draw.
 renderSys: {[e]
   ca:cam`rotCa; sa:cam`rotSa; xca:cam`xCa; xsa:cam`xSa
   zoom:cam`zoom; cx:cam`camX; cz:cam`camZ
@@ -92,7 +92,7 @@ renderSys: {[e]
   c4:n#,(zoom,cx,cz,0.)                           / uPan   (shared)
   c5:+(cr; cg; cb; ro)                            / uMat
   unis:c1,'c2,'c3,'c4,'c5                          / n×20
-  DrawInstanced[sceneGeom; n; ,/unis]             / one draw, n instances
+  mesh.drawInstanced[sceneGeom; n; ,/unis]             / one draw, n instances
   e}
 
 / ── Window loop ───────────────────────────────────────────────────────────────
@@ -101,8 +101,8 @@ sceneHandle:: 0                                   / mesh pipeline (compiled once
 sceneGeom:: 0                                     / retained geometry handle (uploaded once)
 
 window.run[{[props]
-  $[sceneHandle=0; sceneHandle:: CompileMesh[sceneVtx; PbrFragment]; 0]
-  $[sceneGeom=0;   sceneGeom:: UploadMesh[icoMesh; sceneHandle]; 0]   / upload sphere once
+  $[sceneHandle=0; sceneHandle:: mesh.compile[sceneVtx; PbrFragment]; 0]
+  $[sceneGeom=0;   sceneGeom:: mesh.upload[icoMesh; sceneHandle]; 0]   / upload sphere once
   cam:: CamUpdate[cam; props]
   ent:: ent{y x}/(moveSys;bobSys)                / tick the simulation systems
   renderSys ent                                  / one instanced draw of the whole table

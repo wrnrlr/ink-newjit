@@ -2,7 +2,7 @@
 / as test/clothgpu.k, but rendered WITHOUT reading positions back to the host. A
 / small compute pass packs the solver's positions into a vec4[] resident buffer, and
 / an instanced vertex shader pulls each particle straight out of that buffer via
-/ gl_InstanceIndex (DrawResident) — one quad per particle, no host round-trip at all.
+/ gl_InstanceIndex (mesh.drawResident) — one quad per particle, no host round-trip at all.
 / Run:  ink test/clothpull.k
 /
 / This is the pattern for large cloths: physics + render stay fully GPU-resident, so
@@ -10,22 +10,22 @@
 
 2: "lib/dye.k"
 2: "lib/gpu.k"
-2: "lib/instancing.k"                    / UploadMesh, DrawResident, InstancedVertexShader
+2: "lib/instancing.k"                    / mesh.upload, mesh.drawResident, shader.instancedVertex
 2: "lib/pbr.k"                           / PbrFragment
 
 W::30; H::30; nP::W*H; nDof::3*nP
 SDT::(1.%60.)%15.
 
 / ── solver kernels (identical to test/clothgpu.k) ─────────────────────────────
-kInt::GpKernel[{[p;v;prev;im;g;d] sdt:g[0];ax:mod[d;3.];part:floor[d%3.];isY:$[ax=1.;1.;0.];free:$[(im[part])>0.;1.;0.];nv:(v[d])+isY*free*(-9.81*sdt);set[v;d;nv];set[prev;d;p[d]];np:(p[d])+sdt*nv;set[p;d;$[ax=1.;$[np<(-2.);-2.;np];np]]};0;5]
-kCon::GpKernel[{[dp;p;e;g;ee] sc:1048576.;ne:g[0];sdt:g[1];ok:$[ee<ne;1.;0.];base:7.*ee;pi:e[base];pj:e[base+1.];l0:e[base+2.];al:e[base+3.];w0:e[base+4.];w1:e[base+5.];wt:e[base+6.];bi:3.*pi;bj:3.*pj;dx:(p[bj])-p[bi];dy:(p[bj+1.])-p[bi+1.];dz:(p[bj+2.])-p[bi+2.];ds:sqrt[(dx*dx)+(dy*dy)+dz*dz];safe:$[ds>0.0001;1.;0.];dsc:$[ds>0.0001;ds;0.0001];cc:ds-l0;lam:0.5*((cc*safe)%(wt+al%(sdt*sdt)));cx:ok*sc*(dx%dsc)*lam;cy:ok*sc*(dy%dsc)*lam;cz:ok*sc*(dz%dsc)*lam;a0:scatterAdd[dp;bi;cx*w0];a1:scatterAdd[dp;bi+1.;cy*w0];a2:scatterAdd[dp;bi+2.;cz*w0];b0:scatterAdd[dp;bj;(0.-cx)*w1];b1:scatterAdd[dp;bj+1.;(0.-cy)*w1];scatterAdd[dp;bj+2.;(0.-cz)*w1]};1;3]
-kApp::GpKernel[{[dp;p;g;d] set[p;d;(p[d])+(iget[dp;d])%1048576.];iset[dp;d;0.]};1;2]
-kVel::GpKernel[{[v;p;prev;im;g;d] sdt:g[0];damp:g[1];part:floor[d%3.];free:$[(im[part])>0.;1.;0.];set[v;d;damp*free*((p[d])-prev[d])%sdt]};0;5]
+kInt::gpu.kernel[{[p;v;prev;im;g;d] sdt:g[0];ax:mod[d;3.];part:floor[d%3.];isY:$[ax=1.;1.;0.];free:$[(im[part])>0.;1.;0.];nv:(v[d])+isY*free*(-9.81*sdt);set[v;d;nv];set[prev;d;p[d]];np:(p[d])+sdt*nv;set[p;d;$[ax=1.;$[np<(-2.);-2.;np];np]]};0;5]
+kCon::gpu.kernel[{[dp;p;e;g;ee] sc:1048576.;ne:g[0];sdt:g[1];ok:$[ee<ne;1.;0.];base:7.*ee;pi:e[base];pj:e[base+1.];l0:e[base+2.];al:e[base+3.];w0:e[base+4.];w1:e[base+5.];wt:e[base+6.];bi:3.*pi;bj:3.*pj;dx:(p[bj])-p[bi];dy:(p[bj+1.])-p[bi+1.];dz:(p[bj+2.])-p[bi+2.];ds:sqrt[(dx*dx)+(dy*dy)+dz*dz];safe:$[ds>0.0001;1.;0.];dsc:$[ds>0.0001;ds;0.0001];cc:ds-l0;lam:0.5*((cc*safe)%(wt+al%(sdt*sdt)));cx:ok*sc*(dx%dsc)*lam;cy:ok*sc*(dy%dsc)*lam;cz:ok*sc*(dz%dsc)*lam;a0:scatterAdd[dp;bi;cx*w0];a1:scatterAdd[dp;bi+1.;cy*w0];a2:scatterAdd[dp;bi+2.;cz*w0];b0:scatterAdd[dp;bj;(0.-cx)*w1];b1:scatterAdd[dp;bj+1.;(0.-cy)*w1];scatterAdd[dp;bj+2.;(0.-cz)*w1]};1;3]
+kApp::gpu.kernel[{[dp;p;g;d] set[p;d;(p[d])+(iget[dp;d])%1048576.];iset[dp;d;0.]};1;2]
+kVel::gpu.kernel[{[v;p;prev;im;g;d] sdt:g[0];damp:g[1];part:floor[d%3.];free:$[(im[part])>0.;1.;0.];set[v;d;damp*free*((p[d])-prev[d])%sdt]};0;5]
 / pack: for each particle write TWO vec4 slots — position (slot 0) and a smooth
 / surface normal (slot 1) computed from its grid neighbours (cross of the row/col
 / tangents). g[0]=W g[1]=H. gid = particle index. The normal is what makes the
 / pulled point cloud read as a shaded surface instead of a flat fill.
-kPack::GpKernel[{[out;src;g;i]
+kPack::gpu.kernel[{[out;src;g;i]
   w:g[0]; hh:g[1]; col:mod[i;w]; rw:floor[i%w]
   l:$[col<0.5;i;i-1.]; r:$[col>w-1.5;i;i+1.]
   u:$[rw<0.5;i;i-w]; d:$[rw>hh-1.5;i;i+w]
@@ -40,7 +40,7 @@ kPack::GpKernel[{[out;src;g;i]
 / ── render: instanced vertex shader pulls the particle position from @group(0) ─
 / Each instance = one particle; uPos is its vec4 (from the resident PK buffer). The
 / quad's per-vertex `pos` is a screen-space corner offset (a little square dot).
-ptVtx:: InstancedVertexShader[[pos:`v3]; [wNor:`v3;wMat:`v4;wLit:`f32]; `uPos`uNor; {[pos]
+ptVtx:: shader.instancedVertex[[pos:`v3]; [wNor:`v3;wMat:`v4;wLit:`f32]; `uPos`uNor; {[pos]
   X:uPos[0]; Y:uPos[1]; Z:uPos[2]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.6
   py0:(c45*X)+(s45*Z); py2:(c45*Z)-(s45*X)
@@ -60,23 +60,23 @@ hi::&col<W-1; vi::&row<H-1; di::&(col<W-1)&row<H-1
 
 gReady::0; gGeom::0
 initGpu::{[]
-  pInt::CompileCompute[kInt;5]; pCon::CompileCompute[kCon;4]; pApp::CompileCompute[kApp;3]; pVel::CompileCompute[kVel;5]; pPack::CompileCompute[kPack;3]
-  P::NewBuffer[,/+(px0;py0;pz0)]; V::NewBuffer[nDof#0.]; PREV::NewBuffer[nDof#0.]; IM::NewBuffer[im0]; DP::NewBuffer[nDof#0.]
-  PK::NewBuffer[(8*nP)#0.]                                / 2×vec4[] (position + normal) for the vertex pull
-  GN::NewBuffer[(0.+W),(0.+H),0.,0.]                      / pack params: grid dims
-  bH::NewBuffer[mkE[hi;hi+1;(#hi)#0.]]; bV::NewBuffer[mkE[vi;vi+W;(#vi)#0.]]; bD::NewBuffer[mkE[di;di+W+1;(#di)#0.]]; bB::NewBuffer[mkE[di+1;di+W;(#di)#1.]]
-  G::NewBuffer[SDT,0.995,0.,0.]; GH::NewBuffer[(0.+(#hi)),SDT,0.,0.]; GV::NewBuffer[(0.+(#vi)),SDT,0.,0.]; GD::NewBuffer[(0.+(#di)),SDT,0.,0.]; GB::NewBuffer[(0.+(#di)),SDT,0.,0.]
+  pInt::gpu.compileCompute[kInt;5]; pCon::gpu.compileCompute[kCon;4]; pApp::gpu.compileCompute[kApp;3]; pVel::gpu.compileCompute[kVel;5]; pPack::gpu.compileCompute[kPack;3]
+  P::gpu.buffer[,/+(px0;py0;pz0)]; V::gpu.buffer[nDof#0.]; PREV::gpu.buffer[nDof#0.]; IM::gpu.buffer[im0]; DP::gpu.buffer[nDof#0.]
+  PK::gpu.buffer[(8*nP)#0.]                                / 2×vec4[] (position + normal) for the vertex pull
+  GN::gpu.buffer[(0.+W),(0.+H),0.,0.]                      / pack params: grid dims
+  bH::gpu.buffer[mkE[hi;hi+1;(#hi)#0.]]; bV::gpu.buffer[mkE[vi;vi+W;(#vi)#0.]]; bD::gpu.buffer[mkE[di;di+W+1;(#di)#0.]]; bB::gpu.buffer[mkE[di+1;di+W;(#di)#1.]]
+  G::gpu.buffer[SDT,0.995,0.,0.]; GH::gpu.buffer[(0.+(#hi)),SDT,0.,0.]; GV::gpu.buffer[(0.+(#vi)),SDT,0.,0.]; GD::gpu.buffer[(0.+(#di)),SDT,0.,0.]; GB::gpu.buffer[(0.+(#di)),SDT,0.,0.]
   cons::((bH;GH);(bV;GV);(bD;GD);(bB;GB))
-  gGeom::UploadMesh[quad; CompileMesh[ptVtx; PbrFragment]]  / upload the dot quad once
+  gGeom::mesh.upload[quad; mesh.compile[ptVtx; PbrFragment]]  / upload the dot quad once
   gReady::1}
 
-onePass::{[cg] Dispatch[pCon;(DP;P;cg 0;cg 1);nP]; Dispatch[pApp;(DP;P;G);nDof]}
-substep::{[s] Dispatch[pInt;(P;V;PREV;IM;G);nDof]; onePass'cons; Dispatch[pVel;(V;P;PREV;IM;G);nDof]; s+1}
+onePass::{[cg] gpu.dispatch[pCon;(DP;P;cg 0;cg 1);nP]; gpu.dispatch[pApp;(DP;P;G);nDof]}
+substep::{[s] gpu.dispatch[pInt;(P;V;PREV;IM;G);nDof]; onePass'cons; gpu.dispatch[pVel;(V;P;PREV;IM;G);nDof]; s+1}
 
 loop::{[props]
   $[gReady=0; initGpu[]; 0]
   15 substep/0
-  Dispatch[pPack; (PK;P;GN); nP]           / pack positions + normals → 2×vec4[]  (on GPU)
-  DrawResident[gGeom; nP; PK]              / draw nP dots, pulled from PK — NO readback
+  gpu.dispatch[pPack; (PK;P;GN); nP]           / pack positions + normals → 2×vec4[]  (on GPU)
+  mesh.drawResident[gGeom; nP; PK]              / draw nP dots, pulled from PK — NO readback
 }
 window.run[loop; 0]

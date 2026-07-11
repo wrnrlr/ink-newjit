@@ -54,7 +54,7 @@ swStatic:: ,/swBase,'swNor,'swMrep
 / Camera pose arrives as uniforms: uCam = (ca;sa;xca;xsa), uPan = (zoom;cx;cz;_).
 / The position gets zoom+pan; the normal gets the same rotation only (lit in the
 / rotated camera space, matching lib/pbr.k's fixed light directions).
-swVtx: VertexShaderU[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; `uCam`uPan; {[pos;nor;mat;lit]
+swVtx: shader.vertexU[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; `uCam`uPan; {[pos;nor;mat;lit]
   ca:uCam[0]; sa:uCam[1]; xca:uCam[2]; xsa:uCam[3]
   zoom:uPan[0]; cx:uPan[1]; cz:uPan[2]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.3
@@ -74,7 +74,7 @@ swHandle:: 0
 
 / ── Window loop ───────────────────────────────────────────────────────────────
 window.run[{[props]
-  $[swHandle=0; swHandle:: CompileMesh[swVtx; PbrFragment]; 0]
+  $[swHandle=0; swHandle:: mesh.compile[swVtx; PbrFragment]; 0]
 
   / Fold one frame of input into the orbit camera, then pack its pose as uniforms
   cam:: CamUpdate[cam; props]
@@ -83,5 +83,5 @@ window.run[{[props]
   uni: ca,sa,xca,xsa,zoom,cx,cz,0.
 
   / Static mesh uploads once; the GPU rotates it via the uniform camera pose
-  DrawMeshU[swStatic; swHandle; uni]
+  mesh.drawU[swStatic; swHandle; uni]
 }; 0]

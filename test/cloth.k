@@ -130,7 +130,7 @@ buildClothMesh:{[]
 / Cloth keeps its own projection (bigger scale, y-recentre, and a real depth term
 / so the draped sheet self-occludes correctly), but emits the standard
 / wNor;wMat;wLit varyings so lib/pbr.k's PbrFragment can shade it.
-clothVtx: VertexShader[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
+clothVtx: shader.vertex[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.6
   py0:(c45*pos[0])+(s45*pos[2])
   py2:(c45*pos[2])-(s45*pos[0])
@@ -144,9 +144,9 @@ clothVtx: VertexShader[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wL
 gHandle:: 0
 
 loop: {[props]
-  $[gHandle=0; gHandle::CompileMesh[clothVtx;PbrFragment]; 0]
+  $[gHandle=0; gHandle::mesh.compile[clothVtx;PbrFragment]; 0]
   clothFrame[]
-  DrawMesh[buildClothMesh[]; gHandle]
+  mesh.draw[buildClothMesh[]; gHandle]
 }
 
 window.run[loop; 0]

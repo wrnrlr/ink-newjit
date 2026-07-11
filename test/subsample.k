@@ -54,14 +54,14 @@ cpuSubsample:{[M;W;cfg]
   cpuLin[hf; W 10; W 11; t3; c*f3; d]}
 
 / ── GPU wrappers for the individual convs ───────────────────────────────────
-gConv2d:  {[IN;Wm;Bs;cfg] n:(cfg 0)*(cfg 1)*(cfg 2); bo:NewBuffer[(nnPad n)#0.]
-  Conv2dR[bo; NewBuffer[IN]; NewBuffer[Wm]; NewBuffer[Bs]; cfg]; n#ReadBuffer[bo]}
-gDwConv2d:{[IN;Wm;Bs;cfg] n:(cfg 0)*(cfg 1)*(cfg 2); bo:NewBuffer[(nnPad n)#0.]
-  DwConv2dR[bo; NewBuffer[IN]; NewBuffer[Wm]; NewBuffer[Bs]; cfg]; n#ReadBuffer[bo]}
-gPwConv2d:{[IN;Wm;Bs;c;t;f] n:c*t*f; bo:NewBuffer[(nnPad n)#0.]
-  PwConv2dR[bo; NewBuffer[IN]; NewBuffer[Wm]; NewBuffer[Bs]; c; t; f]; n#ReadBuffer[bo]}
-gFlatten: {[IN;c;tp;fp] n:tp*c*fp; bo:NewBuffer[(nnPad n)#0.]
-  FlattenR[bo; NewBuffer[IN]; c; tp; fp]; n#ReadBuffer[bo]}
+gConv2d:  {[IN;Wm;Bs;cfg] n:(cfg 0)*(cfg 1)*(cfg 2); bo:gpu.buffer[(nnPad n)#0.]
+  Conv2dR[bo; gpu.buffer[IN]; gpu.buffer[Wm]; gpu.buffer[Bs]; cfg]; n#gpu.read[bo]}
+gDwConv2d:{[IN;Wm;Bs;cfg] n:(cfg 0)*(cfg 1)*(cfg 2); bo:gpu.buffer[(nnPad n)#0.]
+  DwConv2dR[bo; gpu.buffer[IN]; gpu.buffer[Wm]; gpu.buffer[Bs]; cfg]; n#gpu.read[bo]}
+gPwConv2d:{[IN;Wm;Bs;c;t;f] n:c*t*f; bo:gpu.buffer[(nnPad n)#0.]
+  PwConv2dR[bo; gpu.buffer[IN]; gpu.buffer[Wm]; gpu.buffer[Bs]; c; t; f]; n#gpu.read[bo]}
+gFlatten: {[IN;c;tp;fp] n:tp*c*fp; bo:gpu.buffer[(nnPad n)#0.]
+  FlattenR[bo; gpu.buffer[IN]; c; tp; fp]; n#gpu.read[bo]}
 
 / full subsample weight list (12 arrays)
 WSUB: ( rv[C*9;1];  rv[C;2]

@@ -1,5 +1,5 @@
 / test/clothgpu.k — XPBD cloth entirely on the GPU, built on the compute stack:
-/ GpKernel (general n-buffer kernel), set/iget/iset (buffer stores) and scatterAdd
+/ gpu.kernel (general n-buffer kernel), set/iget/iset (buffer stores) and scatterAdd
 / (atomic scatter). Positions/velocities live in resident buffers across the whole
 / sim; constraint corrections scatter-add (fixed point) into an i32 accumulator.
 / Each frame the solver advances 15 substeps on the GPU; positions are read back to
@@ -34,7 +34,7 @@ DAMP::0.995
 
 / ── kernels ──────────────────────────────────────────────────────────────────
 / integrate: gravity on free particles (y axis), snapshot prev, advance p, floor.
-kInt::GpKernel[{[p;v;prev;im;g;d]
+kInt::gpu.kernel[{[p;v;prev;im;g;d]
   sdt:g[0]; ax:mod[d;3.]; part:floor[d%3.]
   isY:$[ax=1.;1.;0.]; free:$[(im[part])>0.;1.;0.]
   nv:(v[d])+isY*free*(-9.81*sdt)
@@ -45,7 +45,7 @@ kInt::GpKernel[{[p;v;prev;im;g;d]
 
 / constraint scatter: one thread per edge; XPBD correction scattered (± w0/w1) into
 / DP for both endpoints, all three axes. guard value 0 for over-dispatched threads.
-kCon::GpKernel[{[dp;p;e;g;ee]
+kCon::gpu.kernel[{[dp;p;e;g;ee]
   sc:1048576.
   ne:g[0]; sdt:g[1]; ok:$[ee<ne;1.;0.]
   base:7.*ee
@@ -61,10 +61,10 @@ kCon::GpKernel[{[dp;p;e;g;ee]
   b0:scatterAdd[dp;bj;(0.-cx)*w1]; b1:scatterAdd[dp;bj+1.;(0.-cy)*w1]; scatterAdd[dp;bj+2.;(0.-cz)*w1]}; 1; 3]
 
 / apply: fold the fixed-point accumulator into positions, then clear it.
-kApp::GpKernel[{[dp;p;g;d] set[p; d; (p[d])+(iget[dp;d])%1048576.]; iset[dp;d;0.]}; 1; 2]
+kApp::gpu.kernel[{[dp;p;g;d] set[p; d; (p[d])+(iget[dp;d])%1048576.]; iset[dp;d;0.]}; 1; 2]
 
 / velocity recovery with damping: v = damp*free*(p-prev)/dt.  g[1] = damping factor.
-kVel::GpKernel[{[v;p;prev;im;g;d]
+kVel::gpu.kernel[{[v;p;prev;im;g;d]
   sdt:g[0]; damp:g[1]; part:floor[d%3.]; free:$[(im[part])>0.;1.;0.]
   set[v; d; damp*free*((p[d])-prev[d])%sdt]}; 0; 5]
 
@@ -99,7 +99,7 @@ nTris::2*(H-1)*(W-1)
 tris::(nTris;3)#triIds
 
 / Cloth's own projection (matches test/cloth.k) → standard PBR varyings.
-clothVtx:: VertexShader[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
+clothVtx:: shader.vertex[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.6
   py0:(c45*pos[0])+(s45*pos[2])
   py2:(c45*pos[2])-(s45*pos[0])
@@ -125,35 +125,35 @@ P::0; V::0; PREV::0; IM::0; DP::0; G::0
 cons::(); onePass::0; substep::0
 
 initGpu::{[]
-  pInt::CompileCompute[kInt;5]; pCon::CompileCompute[kCon;4]
-  pApp::CompileCompute[kApp;3]; pVel::CompileCompute[kVel;5]
-  P::NewBuffer[,/+(px0;py0;pz0)]; V::NewBuffer[nDof#0.]; PREV::NewBuffer[nDof#0.]
-  IM::NewBuffer[im0]; DP::NewBuffer[nDof#0.]
-  bH:NewBuffer[EH]; bV:NewBuffer[EV]; bD:NewBuffer[ED]; bB:NewBuffer[EB]
-  G::NewBuffer[SDT,DAMP,0.,0.]                            / g[0]=sdt, g[1]=damping
-  GH:NewBuffer[(0.+(#hi)),SDT,0.,0.]; GV:NewBuffer[(0.+(#vi)),SDT,0.,0.]
-  GD:NewBuffer[(0.+(#di)),SDT,0.,0.]; GB:NewBuffer[(0.+(#bi2)),SDT,0.,0.]
+  pInt::gpu.compileCompute[kInt;5]; pCon::gpu.compileCompute[kCon;4]
+  pApp::gpu.compileCompute[kApp;3]; pVel::gpu.compileCompute[kVel;5]
+  P::gpu.buffer[,/+(px0;py0;pz0)]; V::gpu.buffer[nDof#0.]; PREV::gpu.buffer[nDof#0.]
+  IM::gpu.buffer[im0]; DP::gpu.buffer[nDof#0.]
+  bH:gpu.buffer[EH]; bV:gpu.buffer[EV]; bD:gpu.buffer[ED]; bB:gpu.buffer[EB]
+  G::gpu.buffer[SDT,DAMP,0.,0.]                            / g[0]=sdt, g[1]=damping
+  GH:gpu.buffer[(0.+(#hi)),SDT,0.,0.]; GV:gpu.buffer[(0.+(#vi)),SDT,0.,0.]
+  GD:gpu.buffer[(0.+(#di)),SDT,0.,0.]; GB:gpu.buffer[(0.+(#bi2)),SDT,0.,0.]
   cons::((bH;GH);(bV;GV);(bD;GD);(bB;GB))
   gReady::1}
 
 / one constraint type: scatter corrections into DP, then fold DP into positions.
-onePass::{[cg] Dispatch[pCon; (DP;P;cg 0;cg 1); nP]; Dispatch[pApp; (DP;P;G); nDof]}
+onePass::{[cg] gpu.dispatch[pCon; (DP;P;cg 0;cg 1); nP]; gpu.dispatch[pApp; (DP;P;G); nDof]}
 substep::{[s]
-  Dispatch[pInt; (P;V;PREV;IM;G); nDof]
+  gpu.dispatch[pInt; (P;V;PREV;IM;G); nDof]
   onePass'cons
-  Dispatch[pVel; (V;P;PREV;IM;G); nDof]
+  gpu.dispatch[pVel; (V;P;PREV;IM;G); nDof]
   s+1}
 
 loop::{[props]
   $[gReady=0; initGpu[]; 0]
-  $[gMesh=0; gMesh::CompileMesh[clothVtx; PbrFragment]; 0]
+  $[gMesh=0; gMesh::mesh.compile[clothVtx; PbrFragment]; 0]
   15 substep/0                          / 15 substeps this frame
-  DrawMesh[buildMesh[ReadBuffer[P]]; gMesh]}
+  mesh.draw[buildMesh[gpu.read[P]]; gMesh]}
 window.run[loop; 0]
 
 /
 Headless invariant check (no window) — run with INK_SNAP=0:
   initGpu[]; (15*40) substep/0
-  R:ReadBuffer[P]; yv:R@1+3*ii
+  R:gpu.read[P]; yv:R@1+3*ii
   minY:&/yv                              / drape height (pinned corners stay at 1)
 \

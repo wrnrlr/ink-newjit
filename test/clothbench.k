@@ -38,10 +38,10 @@ cpuSetup:{[side]
   hCons::buildCons hR; vCons::buildCons vR; dCons::buildCons dR; bCons::buildCons bR; 0}
 
 / ── GPU solver (clothgpu.k kernels — compiled once, size lives in the buffers) ─
-kInt::GpKernel[{[p;v;prev;im;g;d] sdt:g[0];ax:mod[d;3.];part:floor[d%3.];isY:$[ax=1.;1.;0.];free:$[(im[part])>0.;1.;0.];nv:(v[d])+isY*free*(-9.81*sdt);set[v;d;nv];set[prev;d;p[d]];np:(p[d])+sdt*nv;set[p;d;$[ax=1.;$[np<(-2.);-2.;np];np]]};0;5]
-kCon::GpKernel[{[dp;p;e;g;ee] sc:1048576.;ne:g[0];sdt:g[1];ok:$[ee<ne;1.;0.];base:7.*ee;pi:e[base];pj:e[base+1.];l0:e[base+2.];al:e[base+3.];w0:e[base+4.];w1:e[base+5.];wt:e[base+6.];bi:3.*pi;bj:3.*pj;dx:(p[bj])-p[bi];dy:(p[bj+1.])-p[bi+1.];dz:(p[bj+2.])-p[bi+2.];ds:sqrt[(dx*dx)+(dy*dy)+dz*dz];safe:$[ds>0.0001;1.;0.];dsc:$[ds>0.0001;ds;0.0001];cc:ds-l0;lam:0.5*((cc*safe)%(wt+al%(sdt*sdt)));cx:ok*sc*(dx%dsc)*lam;cy:ok*sc*(dy%dsc)*lam;cz:ok*sc*(dz%dsc)*lam;a0:scatterAdd[dp;bi;cx*w0];a1:scatterAdd[dp;bi+1.;cy*w0];a2:scatterAdd[dp;bi+2.;cz*w0];b0:scatterAdd[dp;bj;(0.-cx)*w1];b1:scatterAdd[dp;bj+1.;(0.-cy)*w1];scatterAdd[dp;bj+2.;(0.-cz)*w1]};1;3]
-kApp::GpKernel[{[dp;p;g;d] set[p;d;(p[d])+(iget[dp;d])%1048576.];iset[dp;d;0.]};1;2]
-kVel::GpKernel[{[v;p;prev;im;g;d] sdt:g[0];damp:g[1];part:floor[d%3.];free:$[(im[part])>0.;1.;0.];set[v;d;damp*free*((p[d])-prev[d])%sdt]};0;5]
+kInt::gpu.kernel[{[p;v;prev;im;g;d] sdt:g[0];ax:mod[d;3.];part:floor[d%3.];isY:$[ax=1.;1.;0.];free:$[(im[part])>0.;1.;0.];nv:(v[d])+isY*free*(-9.81*sdt);set[v;d;nv];set[prev;d;p[d]];np:(p[d])+sdt*nv;set[p;d;$[ax=1.;$[np<(-2.);-2.;np];np]]};0;5]
+kCon::gpu.kernel[{[dp;p;e;g;ee] sc:1048576.;ne:g[0];sdt:g[1];ok:$[ee<ne;1.;0.];base:7.*ee;pi:e[base];pj:e[base+1.];l0:e[base+2.];al:e[base+3.];w0:e[base+4.];w1:e[base+5.];wt:e[base+6.];bi:3.*pi;bj:3.*pj;dx:(p[bj])-p[bi];dy:(p[bj+1.])-p[bi+1.];dz:(p[bj+2.])-p[bi+2.];ds:sqrt[(dx*dx)+(dy*dy)+dz*dz];safe:$[ds>0.0001;1.;0.];dsc:$[ds>0.0001;ds;0.0001];cc:ds-l0;lam:0.5*((cc*safe)%(wt+al%(sdt*sdt)));cx:ok*sc*(dx%dsc)*lam;cy:ok*sc*(dy%dsc)*lam;cz:ok*sc*(dz%dsc)*lam;a0:scatterAdd[dp;bi;cx*w0];a1:scatterAdd[dp;bi+1.;cy*w0];a2:scatterAdd[dp;bi+2.;cz*w0];b0:scatterAdd[dp;bj;(0.-cx)*w1];b1:scatterAdd[dp;bj+1.;(0.-cy)*w1];scatterAdd[dp;bj+2.;(0.-cz)*w1]};1;3]
+kApp::gpu.kernel[{[dp;p;g;d] set[p;d;(p[d])+(iget[dp;d])%1048576.];iset[dp;d;0.]};1;2]
+kVel::gpu.kernel[{[v;p;prev;im;g;d] sdt:g[0];damp:g[1];part:floor[d%3.];free:$[(im[part])>0.;1.;0.];set[v;d;damp*free*((p[d])-prev[d])%sdt]};0;5]
 distp::{[a;b] sqrt[+/(a-b)*a-b]}
 gpuSetup:{[side]
   W::side; H::side; nP::W*H; nDof::3*nP
@@ -50,21 +50,21 @@ gpuSetup:{[side]
   im0::nP#1.; im0::@[im0;0,W-1;:;0.]; posf::{[k] (px0@k;py0@k;pz0@k)}   / pin corners (@-amend, not x[i]:v — breaks in a fn)
   hi::&col<W-1; vi::&row<H-1; di::&(col<W-1)&row<H-1
   mkE::{[is;js;al] l0:{[a;b]distp[posf a;posf b]}'[is;js]; ,/+((0.+is);(0.+js);l0;al;im0@is;im0@js;(im0@is)+im0@js)}
-  P::NewBuffer[,/+(px0;py0;pz0)]; V::NewBuffer[nDof#0.]; PREV::NewBuffer[nDof#0.]; IM::NewBuffer[im0]; DP::NewBuffer[nDof#0.]
-  bH::NewBuffer[mkE[hi;hi+1;(#hi)#0.]]; bV::NewBuffer[mkE[vi;vi+W;(#vi)#0.]]; bD::NewBuffer[mkE[di;di+W+1;(#di)#0.]]; bB::NewBuffer[mkE[di+1;di+W;(#di)#1.]]
-  G::NewBuffer[SDT,0.995,0.,0.]; GH::NewBuffer[(0.+(#hi)),SDT,0.,0.]; GV::NewBuffer[(0.+(#vi)),SDT,0.,0.]; GD::NewBuffer[(0.+(#di)),SDT,0.,0.]; GB::NewBuffer[(0.+(#di)),SDT,0.,0.]
+  P::gpu.buffer[,/+(px0;py0;pz0)]; V::gpu.buffer[nDof#0.]; PREV::gpu.buffer[nDof#0.]; IM::gpu.buffer[im0]; DP::gpu.buffer[nDof#0.]
+  bH::gpu.buffer[mkE[hi;hi+1;(#hi)#0.]]; bV::gpu.buffer[mkE[vi;vi+W;(#vi)#0.]]; bD::gpu.buffer[mkE[di;di+W+1;(#di)#0.]]; bB::gpu.buffer[mkE[di+1;di+W;(#di)#1.]]
+  G::gpu.buffer[SDT,0.995,0.,0.]; GH::gpu.buffer[(0.+(#hi)),SDT,0.,0.]; GV::gpu.buffer[(0.+(#vi)),SDT,0.,0.]; GD::gpu.buffer[(0.+(#di)),SDT,0.,0.]; GB::gpu.buffer[(0.+(#di)),SDT,0.,0.]
   cons::((bH;GH);(bV;GV);(bD;GD);(bB;GB)); 0}
-pInt::CompileCompute[kInt;5]; pCon::CompileCompute[kCon;4]; pApp::CompileCompute[kApp;3]; pVel::CompileCompute[kVel;5]
-onePass::{[cg] Dispatch[pCon;(DP;P;cg 0;cg 1);nP]; Dispatch[pApp;(DP;P;G);nDof]}
-gsub::{[s] Dispatch[pInt;(P;V;PREV;IM;G);nDof]; onePass'cons; Dispatch[pVel;(V;P;PREV;IM;G);nDof]; s+1}
+pInt::gpu.compileCompute[kInt;5]; pCon::gpu.compileCompute[kCon;4]; pApp::gpu.compileCompute[kApp;3]; pVel::gpu.compileCompute[kVel;5]
+onePass::{[cg] gpu.dispatch[pCon;(DP;P;cg 0;cg 1);nP]; gpu.dispatch[pApp;(DP;P;G);nDof]}
+gsub::{[s] gpu.dispatch[pInt;(P;V;PREV;IM;G);nDof]; onePass'cons; gpu.dispatch[pVel;(V;P;PREV;IM;G);nDof]; s+1}
 
 msPer::{[a;b;fr] ((0.+b-a)%1000.)%fr}      / µs delta → ms/frame
 bench:{[side]
   cpuSetup side; clothFrame[]              / warm
   a::`t@[]; FR {[x] clothFrame[]; x}/0; b::`t@[]
-  gpuSetup side; 15 gsub/0; z::ReadBuffer[P]
-  c::`t@[]; (FR*15) gsub/0; z::ReadBuffer[P]; d::`t@[]          / GPU compute (one sync)
-  e::`t@[]; FR {[x] 15 gsub/0; ReadBuffer[P]; x+1}/0; f::`t@[]  / GPU + per-frame readback
+  gpuSetup side; 15 gsub/0; z::gpu.read[P]
+  c::`t@[]; (FR*15) gsub/0; z::gpu.read[P]; d::`t@[]          / GPU compute (one sync)
+  e::`t@[]; FR {[x] 15 gsub/0; gpu.read[P]; x+1}/0; f::`t@[]  / GPU + per-frame readback
   `0 0:$side;`0 0:"x";`0 0:$side;`0 0:"  n=";`0 0:$nP
   `0 0:"  cpu=";`0 0:$msPer[a;b;FR];`0 0:"  gpu=";`0 0:$msPer[c;d;FR];`0 0:"  gpu+rb=";`0 0:$msPer[e;f;FR];`0 0:" ms/frame\n"; 0}
 

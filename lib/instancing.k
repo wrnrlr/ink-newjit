@@ -2,23 +2,23 @@
 /
 / Kept OUT of lib/spirv.k so non-instanced scenes don't pay its globals against
 / the VM's 256-global ceiling (see doc/bug.md): load this only when you actually
-/ instance.  Pairs with lib/gpu.k's UploadMesh (retained geometry → persistent
-/ vertex buffer) and DrawInstanced (one draw, N instances).
+/ instance.  Pairs with lib/gpu.k's mesh.upload (retained geometry → persistent
+/ vertex buffer) and mesh.drawInstanced (one draw, N instances).
 /
 / Load:  2: "lib/dye.k"  and  2: "lib/gpu.k"  then  2: "lib/instancing.k"
 
 / FFI bindings for retained geometry + instancing (kept here, not in lib/gpu.k,
 / so non-instancing scenes stay under the 256-global ceiling). `so` is from gpu.k.
-UploadMesh:    so 2: (`gpuUploadMesh;  2)   / (verts_F; handle) → geom : geometry → persistent vertex buffer
-DrawInstanced: so 2: (`gpuDrawInstanced;3)  / (geom; count; inst_F) → 0 : one draw of `count` instances
+mesh.upload:    so 2: (`gpuUploadMesh;  2)   / (verts_F; handle) → geom : geometry → persistent vertex buffer
+mesh.drawInstanced: so 2: (`gpuDrawInstanced;3)  / (geom; count; inst_F) → 0 : one draw of `count` instances
 gpuDrawInstancedT0: so 2: (`gpuDrawInstancedT;3)  / (geom; (count,texHandles)_I; inst_F) → 0
 gpuDrawGeomResident0: so 2: (`gpuDrawGeomResident;2)  / (geom; (count,bufHandle)_I) → 0
 / Readback-free instanced draw: per-instance vec4[] data is pulled from a RESIDENT
 / compute buffer (a solver's output) instead of a host upload — no round-trip.
-DrawResident: {[geom;cnt;buf] gpuDrawGeomResident0[geom; cnt,buf]}   / NB: not `count` (a keyword verb)
-/ Instanced draw sampling shared textures at @group(1) (InstancedVertexShader +
-/ FragmentShaderTexN). texs is an int vector of handles; all instances share them.
-DrawInstancedT: {[geom; num; texs; inst] gpuDrawInstancedT0[geom; num,texs; inst]}
+mesh.drawResident: {[geom;cnt;buf] gpuDrawGeomResident0[geom; cnt,buf]}   / NB: not `count` (a keyword verb)
+/ Instanced draw sampling shared textures at @group(1) (shader.instancedVertex +
+/ shader.fragmentTexN). texs is an int vector of handles; all instances share them.
+mesh.drawInstancedT: {[geom; num; texs; inst] gpuDrawInstancedT0[geom; num,texs; inst]}
 
 / Per-shader scratch (set per compile, read by the top-level loadInstMember —
 / ink lambdas can't see enclosing locals): storage struct member-0 const id,
@@ -32,15 +32,15 @@ IInstBase:: 0
 / element index) + OpLoad.  base already = gl_InstanceIndex*K, so slot j is +j.
 loadInstMember: {[j] jc:newId[]; emitCon opConst[Ti32;jc;j]; ix:newId[]; emitBuf opIadd[Ti32;ix;IInstBase;jc]; p:newId[]; emitBuf opAccChain[IPssboV4;p;ISsbo;IKzero;ix]; v:newId[]; emitBuf opLoad[Tv4;v;p]; (v;`v4)}
 
-/ ── InstancedVertexShader[inTypes; varyTypes; instNames; fn] ────────────────
-/ Like VertexShader, but every draw is INSTANCED: per-instance data lives in a
+/ ── shader.instancedVertex[inTypes; varyTypes; instNames; fn] ────────────────
+/ Like shader.vertex, but every draw is INSTANCED: per-instance data lives in a
 / read-only storage buffer at @set0/@binding0 (a flat `vec4 data[]`), and the
 / shader reads instance i's slot j as data[i*K + j] via gl_InstanceIndex (K =
 / #instNames).  Each instName becomes a v4 in the body.  The host uploads the
-/ geometry ONCE (UploadMesh) and issues ONE draw of instanceCount=N (DrawInstanced),
+/ geometry ONCE (mesh.upload) and issues ONE draw of instanceCount=N (mesh.drawInstanced),
 / so an N-row table collapses to a single draw call.  Camera/material that are
 / "shared" are simply duplicated into every instance's slots by the caller.
-InstancedVertexShader: {[inTypes; varyTypes; instNames; fn]
+shader.instancedVertex: {[inTypes; varyTypes; instNames; fn]
   Nid::Nfixed; Buf::(); Con::()
 
   lam:      lamOf fn

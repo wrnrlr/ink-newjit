@@ -40,9 +40,9 @@ ICR: 30.
 
 / ── colours ──────────────────────────────────────────────────────────────────
 BGV:      0.10 0.11 0.14                 / background (also used to punch the ring)
-BG:       gpuSolid[0.10; 0.11; 0.14; 1.]
-WAVEG:    gpuSolid[0.25; 0.68; 0.85; 1.]
-PHG:      gpuSolid[0.98; 0.82; 0.30; 1.]
+BG:       gpu.solid[0.10; 0.11; 0.14; 1.]
+WAVEG:    gpu.solid[0.25; 0.68; 0.85; 1.]
+PHG:      gpu.solid[0.98; 0.82; 0.30; 1.]
 IDLEC:    0.72 0.72 0.80
 RECC:     0.92 0.22 0.22
 PLAYC:    0.34 0.80 0.46
@@ -61,14 +61,14 @@ WVH:   0.
 LEVEL: 0.             / smoothed level-meter value
 PATH:  "/tmp/ink-replay.wav"
 
-/ ── shape helpers (flat vertex buffers → one FillFrame each) ─────────────────
+/ ── shape helpers (flat vertex buffers → one gpu.fill each) ─────────────────
 ellipsePts: {[cx;cy;rx;ry;n]
   t: (2.*pi%(n+0.))*!n
   pts: @[(2*n)#0.; 2*!n; :; cx + rx * cos t]
   @[pts; 1+2*!n; :; cy + ry * sin t]}
-fillEllipse: {[cx;cy;rx;ry;c] FillFrame[tessellate ellipsePts[cx;cy;rx;ry;48]; gpuSolid[c 0; c 1; c 2; 1.]]}
-quad:     {[x;y;w;h] tessellate (x,y, (x+w),y, (x+w),(y+h), x,(y+h))}
-fillRect: {[x;y;w;h;c] FillFrame[quad[x;y;w;h]; gpuSolid[c 0; c 1; c 2; 1.]]}
+fillEllipse: {[cx;cy;rx;ry;c] gpu.fill[gpu.tessellate ellipsePts[cx;cy;rx;ry;48]; gpu.solid[c 0; c 1; c 2; 1.]]}
+quad:     {[x;y;w;h] gpu.tessellate (x,y, (x+w),y, (x+w),(y+h), x,(y+h))}
+fillRect: {[x;y;w;h;c] gpu.fill[quad[x;y;w;h]; gpu.solid[c 0; c 1; c 2; 1.]]}
 
 / ── status icon ──────────────────────────────────────────────────────────────
 ring: {[cx;cy;rad;c]
@@ -176,9 +176,9 @@ run: {[props]
   w: props`width
   h: props`height
   $[needWave[w;h]; rebuildWave[w;h]; 0]
-  FillFrame[quad[0.;0.;w;h]; BG]                  / background
-  $[0<#WAVE; FillFrame[WAVE; WAVEG]; 0]           / waveform (single cached draw)
-  $[0<#BUF; FillFrame[playheadV[w;h]; PHG]; 0]    / playhead
+  gpu.fill[quad[0.;0.;w;h]; BG]                  / background
+  $[0<#WAVE; gpu.fill[WAVE; WAVEG]; 0]           / waveform (single cached draw)
+  $[0<#BUF; gpu.fill[playheadV[w;h]; PHG]; 0]    / playhead
   drawIcon[]
   drawMeter[]}
 

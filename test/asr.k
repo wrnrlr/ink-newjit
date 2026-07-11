@@ -81,10 +81,10 @@ pi:3.14159265359
 WINW:900.; WINH:560.; MARGIN:22.
 ICX:52.; ICY:44.; ICR:22.
 BGV:0.10 0.11 0.14
-BG:      gpuSolid[0.10;0.11;0.14;1.]
-WAVEG:   gpuSolid[0.25;0.68;0.85;1.]
+BG:      gpu.solid[0.10;0.11;0.14;1.]
+WAVEG:   gpu.solid[0.25;0.68;0.85;1.]
 IDLEC:0.72 0.72 0.80; RECC:0.92 0.22 0.22; PLAYC:0.34 0.80 0.46
-PEN:     gpuSolid[0.90;0.90;0.84;1.]
+PEN:     gpu.solid[0.90;0.90;0.84;1.]
 
 / ── state ────────────────────────────────────────────────────────────────────
 ST:`idle; BUF:0#0.; PH:-1; LEVEL:0.
@@ -93,9 +93,9 @@ PATH:"/tmp/ink-asr.wav"
 
 / ── shapes ───────────────────────────────────────────────────────────────────
 ellipsePts:{[cx;cy;rx;ry;n] t:(2.*pi%(n+0.))*!n; pts:@[(2*n)#0.;2*!n;:;cx+rx*cos t]; @[pts;1+2*!n;:;cy+ry*sin t]}
-fillEllipse:{[cx;cy;rx;ry;c] FillFrame[tessellate ellipsePts[cx;cy;rx;ry;40]; gpuSolid[c 0;c 1;c 2;1.]]}
-quad:{[x;y;w;h] tessellate (x,y,(x+w),y,(x+w),(y+h),x,(y+h))}
-fillRect:{[x;y;w;h;c] FillFrame[quad[x;y;w;h]; gpuSolid[c 0;c 1;c 2;1.]]}
+fillEllipse:{[cx;cy;rx;ry;c] gpu.fill[gpu.tessellate ellipsePts[cx;cy;rx;ry;40]; gpu.solid[c 0;c 1;c 2;1.]]}
+quad:{[x;y;w;h] gpu.tessellate (x,y,(x+w),y,(x+w),(y+h),x,(y+h))}
+fillRect:{[x;y;w;h;c] gpu.fill[quad[x;y;w;h]; gpu.solid[c 0;c 1;c 2;1.]]}
 ring:{[cx;cy;rad;c] fillEllipse[cx;cy;rad;rad;c]; fillEllipse[cx;cy;rad-4.;rad-4.;BGV]}
 drawIcon:{[] $[ST=`idle; ring[ICX;ICY;ICR;IDLEC]; ST=`rec; fillEllipse[ICX;ICY;ICR;ICR;RECC]; fillEllipse[ICX;ICY;ICR;ICR;PLAYC]]}
 
@@ -121,7 +121,7 @@ u8step:{[st;c] out:st 0; need:st 1; acc:st 2; $[need>0; contByte[out;need;acc;c]
 u8:{[s] (u8step/[(!0;0;0);`i$s]) 0}
 shift:{[t;ox;oy] t + ((#t)#ox,oy,0.,0.)}
 CKEYS:!0; CVALS:()
-cacheGlyph:{[gid] cs:font.outline[FONT;gid;SZ]; v:$[0=#cs;0#0.;0.+tessellate(,/{x,0n,0n}'cs)]; CKEYS,::gid; CVALS,::,v; v}
+cacheGlyph:{[gid] cs:font.outline[FONT;gid;SZ]; v:$[0=#cs;0#0.;0.+gpu.tessellate(,/{x,0n,0n}'cs)]; CKEYS,::gid; CVALS,::,v; v}
 glyphLocal:{[gid] i:CKEYS?gid; $[i<#CKEYS; CVALS i; cacheGlyph gid]}
 RowGids:!0; RowBase:0.
 glyphAt:{[i] shift[glyphLocal RowGids i; TX0+ADV*i; RowBase]}
@@ -164,8 +164,8 @@ run:{[props]
   w:props`width; h:props`height
   $[needWave[w;h]; rebuildWave[w;h]; 0]
   $[0=#GLYPHS; relayText[]; 0]                        / lay out the initial help/prompt text
-  FillFrame[quad[0.;0.;w;h]; BG]
-  $[0<#WAVE; FillFrame[WAVE; WAVEG]; 0]
+  gpu.fill[quad[0.;0.;w;h]; BG]
+  $[0<#WAVE; gpu.fill[WAVE; WAVEG]; 0]
   drawIcon[]
-  FillFrame[GLYPHS; PEN]}
+  gpu.fill[GLYPHS; PEN]}
 window.run[run; WINW,WINH]

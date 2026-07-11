@@ -21,7 +21,7 @@
 2: "lib/camera.k"  / orbit camera (WASD pan, scroll zoom, right-drag rotate)
 
 / ── Sky shader ───────────────────────────────────────────────────────────────
-skyWds: FragmentShader[[uv:`v2; out:`v4]; {[uv]
+skyWds: shader.fragment[[uv:`v2; out:`v4]; {[uv]
   t: uv[1]
   sr: mix[0.22; 0.88; t]; sg: mix[0.45; 0.68; t]; sb: mix[0.92; 0.35; t]
   px: uv[0]*10.0; py: uv[1]*5.0
@@ -75,8 +75,8 @@ pbrHandle:: 0; skyHandle:: 0
 
 / ── Window loop ───────────────────────────────────────────────────────────────
 window.run[{[props]
-  $[pbrHandle=0; pbrHandle:: CompileMesh[pbrVtx; PbrFragment]; 0]
-  $[skyHandle=0; skyHandle:: CompileSpirV[skyWds; 0];      0]
+  $[pbrHandle=0; pbrHandle:: mesh.compile[pbrVtx; PbrFragment]; 0]
+  $[skyHandle=0; skyHandle:: gpu.compileSpirv[skyWds; 0];      0]
 
   / Fold one frame of input into the orbit camera, then read its pose
   cam:: CamUpdate[cam; props]
@@ -118,8 +118,8 @@ window.run[{[props]
   / Draw: sky → ground → shadow (on ground, blocked by box) → box
   w: props`width; h: props`height
   skyV: 0.,0.,0.,0., w,0.,1.,0., w,h,1.,1., 0.,0.,0.,0., w,h,1.,1., 0.,h,0.,1.
-  DrawShader[skyV; skyHandle]
-  DrawMesh[tvg; pbrHandle]
-  DrawMesh[tvs; pbrHandle]
-  DrawMesh[tvb; pbrHandle]
+  gpu.drawShader[skyV; skyHandle]
+  mesh.draw[tvg; pbrHandle]
+  mesh.draw[tvs; pbrHandle]
+  mesh.draw[tvb; pbrHandle]
 }; 0]

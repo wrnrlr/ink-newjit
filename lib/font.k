@@ -21,7 +21,7 @@
   / #cps for an absent codepoint, indexing the appended .notdef gid 0.
   shape:{[f;s]c:f`cmap;((c`gid),0) @ (c`cp)?`i$s}
   / outline  f gid sz  → L of flat F contours (pixel-space, y-flipped). Feed each
-  / to tessellate. outlines does the whole gid vector at once.
+  / to gpu.tessellate. outlines does the whole gid vector at once.
   outline:{[f;gid;sz]$[`CFF in !f;cff2.outline;glyf.outline][f;scale[f;sz];gid]}
   outlines:{[f;sz;gids] $[`CFF in !f;cff2.outline;glyf.outline][f;scale[f;sz]]'gids}
 / ── font.glyf — TrueType quadratic (glyf) outline flattening ────────────────
