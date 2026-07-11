@@ -308,6 +308,15 @@ opLOr:  {[t;r;a;b] (0x000500A6;Tbool;r;a;b)}  / OpLogicalOr 166
 opLNot: {[t;r;a]   (0x000400A8;Tbool;r;a)}    / OpLogicalNot 168
 / Ternary select: cond ? a : b (condition must be bool, a/b same type as result)
 opSel:  {[t;r;c;a;b] (0x000600A9;t;r;c;a;b)}  / OpSelect 169
+/ Integer compare (loop condition) → bool
+opSLT:  {[t;r;a;b] (0x000500B1;t;r;a;b)}      / OpSLessThan 177
+/ Structured control flow (in-kernel bounded loops — see compRsum)
+opLabel:  {[r]        (0x000200F8;r)}                  / OpLabel 248
+opBranch: {[t]        (0x000200F9;t)}                  / OpBranch 249
+opBrCond: {[c;t;f]    (0x000400FA;c;t;f)}              / OpBranchConditional 250
+opLoopMrg:{[m;c]      (0x000400F6;m;c;0)}              / OpLoopMerge 246 (LoopControl None)
+opPhi2:   {[t;r;a;la;b;lb] (0x000700F5;t;r;a;la;b;lb)} / OpPhi 245 (two (value;parent) pairs)
+opCopy:   {[t;r;a]    (0x00040053;t;r;a)}             / OpCopyObject 83 (bind a computed value to a pre-allocated id)
 
 / ── Type helpers ─────────────────────────────────────────────────────────────
 LitSym: [float:`f32; int:`i32; bool:`bool]
@@ -541,6 +550,11 @@ compTransNorm: {[i; env; oty]
 / Detect that shape and emit the De Morgan equivalent so shaders can write
 / `a<=b` / `a>=b` directly instead of `~(a>b)` / `~(a<b)`.
 compTrans: {[i; env; oty]
+  vN: kF1[i;`v]
+  $[(kKind vN)~`term; compAdverb[i; vN; env; oty]   / adverbed verb: `i f/ x`, `f g/ x`
+    compTransOp[i; env; oty]]
+}
+compTransOp: {[i; env; oty]
   op: kVal kF1[i;`v]; b: kF1[i;`b]
   isEq: ((kKind b)~`apposit) & ((kVal kF1[b;`f])~`=)
   $[(op~`<) & isEq; compLeGe[i; env; `>]
@@ -636,6 +650,121 @@ compIset: {[i; env]
   (vi; `i32)
 }
 
+/ ── In-kernel bounded loops (control flow for the compute dialect) ───────────
+/ The dialect grows ONE loop CFG idiom, shared by three surfaces:
+/   rsum[K; {[k] e}]  — fused index map-reduce (Σ e over k=0..K-1). k has no single
+/                       adverb for this (`+/e'!K` needs a materialised range, which
+/                       a per-thread kernel can't build) so it stays a primitive.
+/   i f/ x  (N-do)    — apply verb `f` to state `x`, `i` times.   ← real k adverb
+/   f g/ x  (While)   — apply body `g` to state `x` while cond `f x` holds. ← adverb
+/ The verb/cond `{[s] …}` is NOT a runtime closure — its body is INLINED with the
+/ param bound to the carried state (and, for rsum, `k` bound to the loop counter as
+/ f32); enclosing locals stay visible because we compile in the current env.
+/ Constants RCi0/RCi1/RCf0 (i32 0, i32 1, f32 0.) are made once per compile in
+/ compGpN, so these are valid inside a GpKernel only (the fixed stencil emitters
+/ don't create them).
+RCi0:: 0   / i32 constant 0  (loop counter init)
+RCi1:: 0   / i32 constant 1  (loop counter step)
+RCf0:: 0   / f32 constant 0. (rsum accumulator init)
+
+/ Emit a counter-driven loop scaffold threading an i32 counter (0..Kmax-1) plus one
+/ carried state of type `sty` (init `seedId`), and leave the BODY block open. The
+/ caller then computes the next state from the returned counter/state phis and calls
+/ loopClose with it. Phis forward-reference the counter/state back-edge ids (SPIR-V
+/ permits forward <id> refs), so every id is allocated before emission.
+/ Returns (counterPhi; statePhi; counterNext; stateNext; contLbl; hdrLbl; mrgLbl).
+loopOpen: {[Kmax; seedId; sty]
+  preL:newId[]; hdrL:newId[]; bodL:newId[]; conL:newId[]; mrgL:newId[]
+  iPhi:newId[]; sPhi:newId[]; iNext:newId[]; sNext:newId[]; cond:newId[]
+  emitBuf opBranch[preL]                      / entry → preheader (gives the phi a known pred)
+  emitBuf opLabel[preL]
+  emitBuf opBranch[hdrL]
+  emitBuf opLabel[hdrL]
+  emitBuf opPhi2[Ti32;      iPhi; RCi0;   preL; iNext; conL]
+  emitBuf opPhi2[Tid[sty];  sPhi; seedId; preL; sNext; conL]
+  emitBuf opSLT[Tbool; cond; iPhi; Kmax]
+  emitBuf opLoopMrg[mrgL; conL]
+  emitBuf opBrCond[cond; bodL; mrgL]
+  emitBuf opLabel[bodL]                        / BODY block open; caller fills it
+  (iPhi; sPhi; iNext; sNext; conL; hdrL; mrgL)
+}
+/ Close a loopOpen: bind the computed next state, step the counter, loop back, land
+/ on the merge block. `statePhi` (returned by loopOpen) then holds the final value.
+loopClose: {[nv; sty; sNext; iNext; iPhi; conL; hdrL; mrgL]
+  emitBuf opCopy[Tid[sty]; sNext; nv]          / stateNext := nv (phi back-edge value)
+  emitBuf opBranch[conL]
+  emitBuf opLabel[conL]
+  emitBuf opIadd[Ti32; iNext; iPhi; RCi1]      / counter += 1
+  emitBuf opBranch[hdrL]
+  emitBuf opLabel[mrgL]
+}
+
+/ rsum[K; {[k] expr}] — reduction. State = the f32 accumulator; counter = the index.
+compRsum: {[i; env]
+  args: kF[i;`arg]                             / (Kexpr ; lambdaNode)
+  lamN: args 1
+  pn:   *(Cst`value)@kF[lamN;`param]            / loop-index name
+  bst:  kF[lamN;`stmt]                          / lambda body rows
+  kp:   compNode[args 0; env; `f32]
+  Kmax: newId[]; emitBuf opF2s[Ti32; Kmax; kp 0]
+  h:    loopOpen[Kmax; RCf0; `f32]              / seed acc = 0.
+  iPhi:h 0; accPhi:h 1; iNext:h 2; accNext:h 3; conL:h 4; hdrL:h 5; mrgL:h 6
+  kf:   newId[]; emitBuf opI2f[Tf32; kf; iPhi]  / expose counter to the body as f32 k
+  benv: ((!env),pn)!(env[!env],(,(kf;`f32)))
+  bp:   compSeq[bst; benv; `f32]
+  nv:   newId[]; emitBuf opFadd[Tf32; nv; accPhi; bp 0]   / acc' = acc + expr
+  loopClose[nv; `f32; accNext; iNext; iPhi; conL; hdrL; mrgL]
+  (accPhi; `f32)
+}
+
+/ N-do:  i f/ x  — verb `f` (=`vN`, a 1-param lambda) applied to state x, i times.
+/ The counter drives trip count only; the verb sees the state, not the counter
+/ (pure k n-do). State type follows the seed (f32 / vec2 / …).
+compNdo: {[aN; vN; bN; env; oty]
+  cp:   compNode[aN; env; `f32]
+  Kmax: newId[]; emitBuf opF2s[Ti32; Kmax; cp 0]
+  sp:   compNode[bN; env; oty]; sty: sp 1
+  h:    loopOpen[Kmax; sp 0; sty]
+  sPhi:h 1; iNext:h 2; sNext:h 3; conL:h 4; hdrL:h 5; mrgL:h 6; iPhi:h 0
+  vpn:  *(Cst`value)@kF[vN;`param]
+  venv: ((!env),vpn)!(env[!env],(,(sPhi;sty)))
+  bp:   compSeq[kF[vN;`stmt]; venv; sty]         / state' = f(state)
+  loopClose[bp 0; sty; sNext; iNext; iPhi; conL; hdrL; mrgL]
+  (sPhi; sty)
+}
+
+/ While:  f g/ x  — body `g` (=`vN`) applied to state x while cond `f` (=`cN`, a
+/ 1-param lambda returning bool) holds. No counter: cond is re-tested in the header.
+compWhile: {[cN; vN; bN; env; oty]
+  sp:   compNode[bN; env; oty]; sty: sp 1
+  preL:newId[]; hdrL:newId[]; bodL:newId[]; conL:newId[]; mrgL:newId[]
+  sPhi:newId[]; sNext:newId[]
+  emitBuf opBranch[preL]; emitBuf opLabel[preL]; emitBuf opBranch[hdrL]; emitBuf opLabel[hdrL]
+  emitBuf opPhi2[Tid[sty]; sPhi; sp 0; preL; sNext; conL]
+  cpn:  *(Cst`value)@kF[cN;`param]               / cond in the header, after the phi
+  cenv: ((!env),cpn)!(env[!env],(,(sPhi;sty)))
+  cc:   compSeq[kF[cN;`stmt]; cenv; `bool]
+  emitBuf opLoopMrg[mrgL; conL]; emitBuf opBrCond[cc 0; bodL; mrgL]; emitBuf opLabel[bodL]
+  vpn:  *(Cst`value)@kF[vN;`param]
+  venv: ((!env),vpn)!(env[!env],(,(sPhi;sty)))
+  bp:   compSeq[kF[vN;`stmt]; venv; sty]          / state' = g(state)
+  emitBuf opCopy[Tid[sty]; sNext; bp 0]
+  emitBuf opBranch[conL]; emitBuf opLabel[conL]; emitBuf opBranch[hdrL]; emitBuf opLabel[mrgL]
+  (sPhi; sty)
+}
+
+/ Adverbed-verb transit: `x adverb-verb y`. The operator node is a `term` whose
+/ value is the adverb glyph and whose `f` child is the verb. `/` splits N-do vs
+/ While by the left arg's kind (a lambda ⇒ While cond; else ⇒ N-do count).
+compAdverb: {[i; vN; env; oty]
+  glyph: kVal vN
+  verb:  kF1[vN;`f]
+  aN:    kF1[i;`a]; bN: kF1[i;`b]
+  $[glyph~`/; $[(kKind aN)~`lambda; compWhile[aN; verb; bN; env; oty]
+                compNdo[aN; verb; bN; env; oty]]
+    (0; oty)]                                     / other adverbs: not in kernels yet
+}
+
 / sample[uv] (texture 0) or sample[k; uv] (texture k, k a literal) → texture
 / lookup: OpSampledImage(image_k, shared sampler) then OpImageSampleImplicitLod at
 / the interpolated uv. Only valid inside a FragmentShaderTexN. Returns v4.
@@ -661,6 +790,7 @@ compApply: {[i; env; oty]
     fnName~`set;         compSet[i; env]
     fnName~`iget;        compIget[i; env]
     fnName~`iset;        compIset[i; env]
+    fnName~`rsum;        compRsum[i; env]
     fnName in mathFns;   compFnCall[fnName; i; env; oty]
     isBuf[fnName; env];  compBufIdx[(env fnName)0; i; env]
     compApplyIdx[fr; i; env; oty]]
@@ -1215,6 +1345,10 @@ compGpN: {[fn; nAcc; nBuf]
   Ku32z:newId[]; emitCon (0x0004002B;Tu32;Ku32z;0)
   KDev:newId[];  emitCon (0x0004002B;Tu32;KDev;1)
   CKz::Ku32z; CPf32::Pf32s; CPi32::Pi32s; CScope::KDev
+  / rsum loop constants (i32 0/1, f32 0.) — one set per compile, forward-refs by compRsum
+  RCi0::newId[]; emitCon opConst[Ti32;RCi0;0]
+  RCi1::newId[]; emitCon opConst[Ti32;RCi1;1]
+  RCf0::newId[]; emitCon opConst[Tf32;RCf0;0.]
   GAcc::accIds; GBuf::bufIds; GNAcc::nAcc; GPbufs::Pbufs; GPbufsI::PbufsI
   lam:lamOf fn; argNames:lamArgs lam
   gidId:newId[]; emitBuf opLoad[Tv3u32;gidId;gidVar]

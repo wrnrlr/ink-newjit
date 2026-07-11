@@ -127,6 +127,7 @@ This directory contains the ink executable for all platforms, shared libraries a
 - Walk example: `./zig-out/bin/ink test/walk.k`
 - Eyes example: `./zig-out/bin/ink test/eyes.k`
 - Artifact sizes: `du -h zig-out/*/*`
+- Download Huggingface Model `` hf download nvidia/parakeet-tdt-0.6b-v2 --local-dir ./data/parakeet-tdt-0.6b-v2 ``
 
 ## Ink Library
 

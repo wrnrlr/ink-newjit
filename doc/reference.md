@@ -4,13 +4,18 @@
 
 ### Lexical Grammar
 
+
 ### Syntactical Grammar
 Nouns can be combined into expressions using verbs and adverbs.
 Expressions are evaluated right-to-left. There are no special precedence rules for operators.
 
+- `n:e` **Single Binding** - When in global scope set a global constant and when in local scope set a local variable
+- `n::e` **Double Binding** - When in global scope set a global variable and when in local scope set a global variable;
+
 ## Datetypes
 
 ### Scalar types
+- **Boolean** - boolean number `0b 1b`, null `0b`, type `` `b ``
 - **Natural numbers** (no syntax support yet)
 - **Integer** - numbers like `-2 0 1`, null `0N`, infinities `-0W 0W`, type `` `i ``, 32bit signed int.
 - **Float** - floating point numbers `0.1 2. -3.`, null `0n`, infinities `0w -0w`, type `` `f ``, 32bit float
@@ -18,6 +23,7 @@ Expressions are evaluated right-to-left. There are no special precedence rules f
 - **Char** - a single character, eg `"H"`, null `" "`, type `` `c ``, u8 char
 
 ### Vector types
+- **Boolean** - boolean number `0b 1b`, null `0b`, type `` `b ``
 - **Integers** - array of integers, null `` &0 ``, type `` `I ``
 - **Floats** - array of floats, null `` 0#0.0 ``, type `` `F ``
 - **Symbols** - array of symbols, empty value `` 0#` ``, type `` `S ``
@@ -27,7 +33,8 @@ Expressions are evaluated right-to-left. There are no special precedence rules f
   - backed by an array of u8.
 
 ### Other types
-- **List** - heterogeneous list; empty list is `` ,() ``, type symbol `` `L ``.
+- **Error**
+- **List** - heterogeneous list; empty list is `` () ``, type symbol `` `L ``.
 - **Dict**
   - The syntax `` [a:1; b:2; c: 3] `` is equivalent to `` `a`b`c!1 2 3 ``
   - Empty dict `` [] ``
@@ -35,13 +42,12 @@ Expressions are evaluated right-to-left. There are no special precedence rules f
 - **Table**
   - The syntax `` [[]a:1 2; b:3 4] `` is equivalent to `` `a`b`c!1 2 3 ``
   - Type symbol `` `M ``.
+
+### Callable types
 - **Lambda** - a user-defined function, eg `{ a+b*c }`, type `` `o ``
 - **Partial** - partialy applied operator/lambda, type `` `p ``
+- **Composition** - A composition is a sequence of variadics applied in succession, type `` `q ``
 
-### Composition/Train `` `q ``
-A composition is a sequence of variadics applied in succession.
-
-### Error `` `! ``
 ### Blank `` ` ``
 Blanks are used for empty assignment and defining partials.
 
@@ -56,125 +62,137 @@ and a variable declared inside a lambda is a local variable.
 Assignmet of globals and locals at the top level happens with the singe colon `:`,
 while assigment of globals in a lambda happen with a double colon `::`
 
-### Arithmetic Verbs `-+*% mod div`
-- `-x` **Negate** - numeric negation
-- `x+y` **Add** - sum of x and y
-- `x-y` **Sub** - difference between x from y
-- `x*y` **Mul** - product of x and y
-- `x%y` **Div** - divFloor for integers, float division for floats
-- `x mod y` **Modulo** - remainder of x÷y (integer)
-- `x div y` **Integer division** - floor(x÷y)
+### General Verbs `@#`
+- `@x` **Type** - Symbol for type of x. `` @(1;2.3;`c)  / `i`f`s ``
+- `#x` **Tally** - Count number of elements in x. `` #(1 2;3 4)  / 2 ``
 
-### Logic Verbs `~=|&`
-- `~x` **Not** - logical negation
+### Arithmetic Verbs `-+*%`
+- `-x` **Minus** - Negative x. `` -(1;2.3)  / (-1;-2.3) ``
+- `x+y` **Add** - Sum of x and y
+- `x-y` **Sub** - Difference between x and y
+- `x*y` **Mul** - Product of x and y
+- `x%y` **Div** - Return x divided by y. `` (2%3;4.%2.)  / 0.6666667 2.0 ``
+
+### Logical Verbs `~=|&`
+- `~x` **Not** - boolean negation `` ~0110b  / 1001b ``
+- `x~y` **Match** - identity check (same type and value)
 - `x=y` **Equal** - elementwise equality
 - `x|y` **Max/Or** - maximum value of x or y
 - `x&y` **Min/And** - minimum value of x and y
 
-### Monadic Operators `:+-*!#@&|<>=?,^~$.`
-- `:x` **Identity** - return right-hand side
-- `+x` **Flip** - transpose. `` +(1 2 3;4 5 6) `` → `` (1 4;2 5;3 6) ``
-- `+d` **Pivot** - table to dict-of-lists and vice versa. `` +[[]n:`b`c;i:2 3] `` → `` [n:`b`c;i:2 3] ``
-- `*x` **First** - first item
-- `!i` **Iota** - integers 0..i-1
-- `!I` **Odometer** - Cartesian product indices for an integer list
-- `#x` **Tally** - number of elements
-- `@x` **Type** - type symbol (e.g. `` `i ``, `` `F ``)
-- `&I` **Where** - convert counts to repeated indices
-- `|x` **Reverse** - elements in reverse order
+### Grading Verbs `<>`
 - `<X` **Ascend** - indices that sort X ascending
 - `>X` **Descend** - indices that sort X descending
-- `=X` **Group** - for each distinct value, the indices where it occurs
-- `=i` **Unit** - identity matrix
+
+### Index Verbs `div mod`
+- `x mod y` **Modulo** - remainder of x÷y (integer)
+- `x div y` **Integer division** - floor(x÷y)
+- `!i` **Iota** - integers 0..i-1
+- `!I` **Odometer** - Cartesian product indices for an integer list
+
+### Random Verb `?`
 - `?X` **Distinct** - distinct elements in order
 - `?i` **Uniform** - i random floats in [0,1)
-- `,x` **Enlist** - wrap x in a list
-- `^x` **Null** - boolean mask of null/missing elements
+- `i?x` **Roll/Deal** - i random selections from x
+
+### String Verbs `$`
 - `$x` **String** - string representation
-- **Value/Get** `.x` - extract dictionary values; retrieve global by symbol name
+- `i$C` **Pad** - pad string to length |i|
+
+### Array Verbs `*`
+- `*x` **First** - first item
+
+### List Verbs `,`
+- `,x` **Enlist** - wrap x in a list
+- `x,y` **Join** - join atoms/lists; merge dictionaries (right-side wins)
+
+### Mappping Verbs `+!#_`
+- `+d` **Pivot** - table to dict-of-lists and vice versa. `` +[[]n:`b`c;i:2 3] `` → `` [n:`b`c;i:2 3] ``
+- `.d` **Value** - extract dictionary values
+- `x!y` **Key** - dictionary creation
+- `X#d` **TakeKeys** - filter dictionary d to keys X
+- `X_d` **DropKeys** - remove keys X from dictionary d
+
+### Structural Verbs `+#`
+- `+x` **Flip** - transpose. `` +(1 2 3;4 5 6) `` → `` (1 4;2 5;3 6) ``
+- `I#y` **Reshape** - reshape y to shape I, a `0N` means shape whats fits
+
+### Erasure Verbs
+- `i_Y` **Drop** - drop i items from start (positive) or end (negative)
+- `I_Y` **Cut** - slice Y at indices I
+- `f_Y` **WeedOut** - remove elements where boolean mask f is 1
+- `X_i` **Delete** - remove element at index i from list X
+
+### Other Verbs
+- `.s` **GetSymbol** - retrieve global by symbol name
+- `s$y` **Cast** - cast y to type s. `` `I$"-12" `` → `-12`; `` `F$"-12.3" `` → `-12.3`
+
+### Bulk Verbs `` @[] .[] ?[] ``
+- `@[x;y;f]` **Amend3** - `` @["ABC";1;_:] `` → `"AbC"`
+- `@[x;y;F;z]` **Amend4** - `` @["abc";1;:;"x"] `` → `"axc"`
+- `.[x;y;f]` **Drill3** - `` .[("AB";"CD");1 0;_:] `` → `("AB";"cD")`
+- `.[x;y;F;z]` **Drill4** - `` .[("ab";"cd");1 0;:;"x"] `` → `("ab";"xd")`
+- `?[C;I;C]` **Splice** - `` ?["abcd";1 3;"xyz"] -> "axyzd" `` TODO: does this work for non-char arrays as well
+
+### Monadic Operators `:+-*!#@&|<>=?,^~$.`
+- `:x` **Identity** - return right-hand side
+- `&I` **Where** - convert counts to repeated indices
+- `|x` **Reverse** - elements in reverse order
+- `=X` **Group** - for each distinct value, the indices where it occurs
+- `=i` **Unit** - identity matrix
+- `^x` **Null** - boolean mask of null/missing elements
 - `sqrt n`, `sqr n`, `log n`, `exp n`, `sin n`, `cos n`, `abs n`
 
 ### Dyadic Operators
 - Right `x:y` - return right-hand side
-- Add `x+y`
-- Sub `x-y`
-- Mul `x*y`
-- Div `x%y` - divFloor for integers, float division for floats
-- Modulo `x mod y` - remainder of x÷y (integer)
-- Integer division `x div y` - floor(x÷y)
-- Key `x!y` - dictionary creation
-- Equal `x=y` - elementwise equality
-- Match `x~y` - identity check (same type and value)
-- Drop `i_Y` - drop i items from start (positive) or end (negative)
-- Drop keys `X_d` - remove keys X from dictionary d
-- Cut `I_Y` - slice Y at indices I
-- WeedOut `f_Y` - remove elements where boolean mask f is 1
-- Delete `X_i` - remove element at index i from list X
-- Join `x,y` - join atoms/lists; merge dictionaries (right-side wins)
-- Take `x#y` - resize/cycle y to length |x|
-- TakeKeys `X#d` - filter dictionary d to keys X
-- Reshape `I#y` - reshape y to shape I
-  - A `0N` value 
-- Fill `x^y` - replace nulls in y with x
-- Without `X^y` - remove occurrences of X from y
-- Pad `i$C` - pad string to length |i|
-- Cast `s$y` - cast y to type s. `` `I$"-12" `` → `-12`; `` `F$"-12.3" `` → `-12.3`
-- Find `x?y` - first index of y in x (`#x` / length if not found, for index-with-fallback)
-- Roll/Deal `i?x` - i random selections from x
-- `x@y` (At/Apply) - index into x at y; apply function x to y
-- `x.y` (Dot/ApplyN) - deep indexing or multi-argument application
+- `x#y` **Take** - resize/cycle y to length |x|
+- `x^y` **Fill** - replace nulls in y with x
+- `X^y` **Without** - remove occurrences of X from y
+- `x?y` **Find** - first index of y in x (`#x` / length if not found, for index-with-fallback)
+- `x@y` **Apply** - index into x at y; apply function x to y
+- `x.y` **ApplyN** - deep indexing or multi-argument application
 
 ### IO Verbs
 The IO system is organized around file descriptors (filename, port number, etc.).
-- Open File `` <"file.txt" `` or `` <"/path/to/file.txt" ``
-- Open Connection `` <":port" `` or `` <"host:port" ``
-- Close handle `` >s ``
-- Read line `` 0: x `` - read lines from stdin
-- Write line `` x 0: y `` - write text. `` `0 0:"Hi" ``
-- Read bytes `` 1: x ``
-  - `` 1: `stdin `` reads up to 64 KiB of available bytes from stdin (blocks for ≥1 byte); returns `""` at EOF. Partial by design — frame/buffer in k. For byte-stream protocols (LSP/Jupyter).
-- Write bytes `` x 1: y ``
-  - `` `stdout 1: y `` / `` `stderr 1: y `` write raw bytes with **no** trailing newline and flush (unlike `` `0 0:y `` which appends `\n`).
-  - Writing to a path that doesn't exist **creates** the file (`` "new.txt" 1: bytes ``); the same holds for `` x 0: y ``. (Reads still require the file to exist.)
-- Load code `` 2: y `` used for importing other files
+- `` <c `` **OpenFile** - return file handle for file (relative or absolute path)
+- `` <s `` **OpenSocket** - return file handle for connection to `"host:port"` or `":port"`
+- `` >n `` **CloseHandle**
+- `` 0:x `` **ReadLine** - read lines from stdin
+- `` x 0:y `` **Write line** - write text. `` `0 0:"Hi" ``
+- `` 1:x `` **ReadBytes** 
+- `` 1:`stdin `` reads up to 64 KiB of available bytes from stdin (blocks for ≥1 byte); returns `""` at EOF. Partial by design — frame/buffer in k. For byte-stream protocols (LSP/Jupyter).
+- `` x 1: y `` **Write bytes**
+- `` `stdout 1: y `` / `` `stderr 1: y `` write raw bytes with **no** trailing newline and flush (unlike `` `0 0:y `` which appends `\n`).
+- Writing to a path that doesn't exist **creates** the file (`` "new.txt" 1: bytes ``); the same holds for `` x 0: y ``. (Reads still require the file to exist.)
+- `` 2: y `` **LoadCode** - used for importing other files
 
-### Special Forms
-- `` @[x;y;f] `` **Amend3** - `` @["ABC";1;_:] `` → `"AbC"`
-- `` @[x;y;F;z] `` **Amend4** - `` @["abc";1;:;"x"] `` → `"axc"`
-- `` .[x;y;f] `` **Drill3** - `` .[("AB";"CD");1 0;_:] `` → `("AB";"cD")`
-- `` .[x;y;F;z] `` **Drill4** - `` .[("ab";"cd");1 0;:;"x"] `` → `("ab";"xd")`
-- `` ?[C;I;C] `` **Splice** - `` ?["abcd";1 3;"xyz"] -> "axyzd" ``
-
-## Adverbs
+## Adverbs `` ' / \ ': /: \: ``
 An adverb is one of the glyphs: `` ' / \ ': /: \: `` when it is used as a modifier 
 of how the verb on the right-hand side is applied to the verb on the left hand argument.
 The verb can be a operator, partial or lambda.
-- Each `f'` - apply f to each item. `` #'("abc";3 4 5 6) `` → `3 4`
-- Zip `x F'` - elementwise dyad. `` 2 3#'"ab" `` → `("aa";"bbb")`
-- Fold `F/` - left fold. `+/1 2 3` → `6`
-- Scan `F\` - running fold. `+\1 2 3` → `1 3 6`
-- Seeded fold `x F/` - fold with seed. `10+/1 2 3` → `16`
-- Seeded scan `x F\` - running fold with seed. `10+\1 2 3` → `11 13 16`
-- N-do `i f/` - apply f i times. `` 5(2*)/1 `` → `32`
-- N-dos `i f\` - all intermediate results. `` 5(2*)\1 `` → `1 2 4 8 16 32`
-- While `f f/` - apply until condition fails. `(1<){:[2!x;1+3*x;-2!x]}/3` → `1`
-- Whiles `f f\` - all states while condition holds
-- Converge `f/` - iterate until stable. `` {1+1.0%x}/1 `` → `1.618...`
-- Converges `f\` - successive results until convergence
-- Join `C/` - join list with separator. `"ra"/("ab";"cadab";"")` → `"abracadabra"`
-- Split `C\` - split by separator. `"ra"\"abracadabra"` → `("ab";"cadab";"")`
-- Decode `I/` - mixed-base to number. `24 60 60/1 2 3` → `3723`
-- Encode `I\` - number to mixed-base. `24 60 60\3723` → `1 2 3`
-- Window `i'` - sliding windows. `3':"abcdef"` → `("abc";"bcd";"cde";"def")`
-- Stencil `i f'` - apply f to each window. `` 3{x,"."}'"abcde" ``
-- Eachprior `F':` - apply F between each item and its predecessor. `-':12 13 11 17 14` → `12 1 -2 6 -3`
-- Eachprior seeded `x F':` - like eachprior with seed. `10-':12 13 11 17 14` → `2 1 -2 6 -3`
-- Eachright `x F/:` - fixed right arg to each left item. `1 2*/:3 4` → `(3 6;4 8)`
-- Eachleft `x F\:` - fixed left arg to each right item. `1 2*\:3 4` → `(3 4;6 8)`
-
-Adverbs are polysemic and have a different behaviour based on operand types.
-Monadic and dyadic verbs influence how a adverb is interpreted.
-For example the `\` can be either a fold with a dyadic verb `F` or a converge with a monadic verb `f`.
+- `f'` **Each** - apply f to each item. `` #'("abc";3 4 5 6) `` → `3 4`
+- `x F'` **Zip** - elementwise dyad. `` 2 3#'"ab" `` → `("aa";"bbb")`
+- `F/` **Fold** - left fold. `+/1 2 3` → `6`
+- `F\` **Scan** - running fold. `+\1 2 3` → `1 3 6`
+- `x F/` **Seeded Fold** - fold with seed. `10+/1 2 3` → `16`
+- `x F\` **Seeded Scan** - running fold with seed. `10+\1 2 3` → `11 13 16`
+- `i f/` **N-do** - apply f i times. `` 5(2*)/1 `` → `32`
+- `i f\` **N-dos** - all intermediate results. `` 5(2*)\1 `` → `1 2 4 8 16 32`
+- `f f/` **While** - apply until condition fails. `(1<){:[2!x;1+3*x;-2!x]}/3` → `1`
+- `f f\` **Whiles** - all states while condition holds
+- `f/` **Converge** - iterate until stable. `` {1+1.0%x}/1 `` → `1.618...`
+- `f\` **Converges** - successive results until convergence
+- `C/` **Join** - join list with separator. `"ra"/("ab";"cadab";"")` → `"abracadabra"`
+- `C\` **Split** - split by separator. `"ra"\"abracadabra"` → `("ab";"cadab";"")`
+- `I/` **Decode** - mixed-base to number. `24 60 60/1 2 3` → `3723`
+- `I\` **Encode** - number to mixed-base. `24 60 60\3723` → `1 2 3`
+- `i'` **Window** - sliding windows. `3':"abcdef"` → `("abc";"bcd";"cde";"def")`
+- `i f'` **Stencil** - apply f to each window. `` 3{x,"."}'"abcde" ``
+- `F':` **Eachprior** - apply F between each item and its predecessor. `-':12 13 11 17 14` → `12 1 -2 6 -3`
+- `x F':` **Seeded Eachprior** - like eachprior with seed. `10-':12 13 11 17 14` → `2 1 -2 6 -3`
+- `x F/:` **Eachright** - fixed right arg to each left item. `1 2*/:3 4` → `(3 6;4 8)`
+- `x F\:` **Eachleft** - fixed left arg to each right item. `1 2*\:3 4` → `(3 4;6 8)`
+Adverbs are polysemic, there behaviour depends on the unique combination of the operator glyph, type of the operands and the arity (monadic/dyadic) of the operator verb. For example the `\` can be either a Fold with a dyadic verb `F` or a Converge with a monadic verb `f`.
 - `'`: Each, Zip
 - `/`: Fold, Decode, Join, N-do, While, Converge
 - `\`: Scan, Encode, Split, N-dos, Whiles, Converges
@@ -203,6 +221,4 @@ A command always starts at the beginning of a line with `\`.
 - `\d name` - Declare namespace
 - `\l name` - Load `name` module from `$INK_HOME/lib/<name>.k`
 - `\l name.k` - Loads `name` module from `$PWD/<name>.k`
-
-### Time Command `\t:n expr`
-Time elapsed in milliseconds after n runs (n is optional).
+- `\t:n expr` - Time elapsed in milliseconds after n runs (n is optional).
