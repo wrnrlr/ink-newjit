@@ -71,7 +71,7 @@ while assigment of globals in a lambda happen with a double colon `::`
 - `x+y` **Add** - Sum of x and y
 - `x-y` **Sub** - Difference between x and y
 - `x*y` **Mul** - Product of x and y
-- `x%y` **Div** - Return x divided by y. `` (2%3;4.%2.)  / 0.6666667 2.0 ``
+- `x%y` **Div** - Return x divided by y. `` (2%3;4.%2.)  / 0.6666667 2.0 ``  
 
 ### Logical Verbs `~=|&`
 - `~x` **Not** - boolean negation `` ~0110b  / 1001b ``

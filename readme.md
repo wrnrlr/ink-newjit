@@ -21,7 +21,7 @@ Functional programming with APL2
 - [ngn/k jit](https://codeberg.org/fiuzeri/k/src/commit/bac6dc52fa7ed56a4ab329b5cbb7fdafe0115814/b.c)
 - [Variadic functions in Q](https://bodonferenc.github.io/2026/05/13/Variadic-Functions.html)
 - [SIMD: making every cycle count](https://lv1.sh/blog/simd-making-every-cycle-count/)
-
+- [Leveraging APL and SPIR-V languages to write network functions to be deployed on Vulkan compatible GPUs](https://juuso.dev/papers/msc-thesis-lorraine/msc-thesis-lorraine.html)
 ```
  M:2 2#!4
  g:(::; |:; +:; |+:; +|:; +|+:; |+|:; +|+|:)
