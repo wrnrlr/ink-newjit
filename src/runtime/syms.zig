@@ -6,7 +6,7 @@ const N = @import("../noun/array.zig").N;
 const Dict = @import("../noun/dict.zig").Dict;
 const VM = @import("vm.zig").VM;
 const exec_mod = @import("../primitive/verb/exec.zig");
-const intrinsic = @import("../primitive/intrinsic.zig");
+const Op1 = @import("../noun/operator.zig").Op1;
 const dispatch1 = @import("../primitive/dispatch.zig").dispatch1;
 
 // Microsecond clock.  std.time has no timestamp fns and posix clock_gettime
@@ -54,14 +54,14 @@ pub fn apply(vm: *VM, sym_idx: u32, args: []const V) !V {
     if (args.len == 2 and args[0] != .blank) return forkExec(vm, args[0], args[1]);
     return V{ .err = .rank };
   }
-  // Math intrinsics with a CPU opcode kernel (sqrt sqr exp log sin cos abs) route
-  // to the SAME monadic kernel the (now-removed) keyword verb used, so types match
-  // exactly — e.g. `sqr on ints stays int, unlike the f32-widening mapUnary below.
-  // Reached via the lib/prelude.k projections (sin:`sin@ …) and explicit `sqrt@x.
-  // See src/primitive/intrinsic.zig. args are borrowed (as in call.zig applyCallable's
+  // Any monadic primitive is callable as a symbol: `` `sin x ``, `` `first x ``,
+  // `` `parse x `` route to the SAME Op1 kernel the (now-removed) keyword verb used
+  // (type-preserving — `` `sqr `` on ints stays int, unlike the f32-widening mapUnary
+  // below). This is what lets the lib/prelude.k projections (`` sin:{`sin x} ``,
+  // `` first:{`first x} ``, …) work. args are borrowed (as in call.zig applyCallable's
   // dispatch1 sites), so pass through without ref.
   if (args.len == 1 and args[0] != .blank) {
-    if (intrinsic.find(name)) |ic| if (ic.op1) |op1| return dispatch1(vm, op1, args[0]);
+    if (Op1.fromString(name)) |op1| return dispatch1(vm, op1, args[0]);
   }
   // Inverse-trig helpers exposed as `sym@x rather than as new verb glyphs.
   // Monadic ones map element-wise over scalars, F/I/B vectors and general lists;

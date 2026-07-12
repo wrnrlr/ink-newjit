@@ -346,7 +346,7 @@ kKids: {[i] &i=Cst`parent}                   / all child rows of i
 kF:    {[i;f] c:kKids i; c@&f=(Cst`field)c}  / child rows of i with field f
 kF1:   {[i;f] *kF[i;f]}                       / first such child (a row index)
 / Parse a lambda value and return (lambda row; arg-name symbols; body stmt rows).
-lamOf:   {[fn] Cst:: parse $fn; *|kF[0;`stmt]}   / last stmt of root terse = lambda
+lamOf:   {[fn] Cst:: parse[$fn]; *|kF[0;`stmt]}   / last stmt of root terse = lambda (parse is a prelude name now → bracket-apply, not `parse $fn`)
 lamArgs: {[lam] (Cst`value)@kF[lam;`param]}
 lamBody: {[lam] kF[lam;`stmt]}
 
