@@ -107,8 +107,8 @@ The parser, compiler, and runtime are all written in Zig 0.16.
 - Raze - flatten list `` ,/(1 0 0; 0 1 0) `` -> `1 0 0 0 1 0`.
 - No `<=`/`>=` operators `x <= y` parses as `x < (= y)`, use `~(x > y)` and `~(x < y)`.
 - Reshape array into 2 columns and infer size of rows `0N 2#x`
-- Connect to server `` h: > "127.0.0.1:5001" ``
-- Write text to stdout `` `0 0: "hello" ``
+- Connect to server `` h:<"127.0.0.1:5001" ``
+- Write text to stdout `` `0:"hello" ``
 
 ## Home Directory
 The ink home directory is by default `~/.ink`. The `$INK_HOME` variable can overwrite the default.

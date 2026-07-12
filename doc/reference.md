@@ -147,19 +147,6 @@ while assigment of globals in a lambda happen with a double colon `::`
 - `=i` **Unit** - identity matrix
 - `^x` **Null** - boolean mask of null/missing elements
 
-### Math Functions (prelude names, not grammar keywords)
-`sqrt sqr log exp sin cos abs` and the inverse trig `asin acos atan atan2` are **not**
-built-in verbs — they are ordinary names bound in `lib/prelude.k` (loaded into every VM
-at init) to callable symbols: `` sin:`sin@ `` etc. `` `sin@x `` routes through `syms.zig`
-to the same opcode kernel the old verb used, so `sin x` / `sqrt 4 9` behave as before and
-`sqr`/`abs` stay integer-closed on integers. Because they are names (nouns) rather than
-verbs, a bare op-glyph directly after one is **dyadic** — but a `-` glued to a numeric
-literal with a leading space is a negative literal, so `abs -4` applies `abs` to `-4`
-(while `abs-4` subtracts and `abs -x` still needs `abs[-x]`). See
-`src/primitive/intrinsic.zig` (the canonical registry) and
-`doc/design/dye.md`. GPU shaders (lib/dye.k) additionally support `pow min max dot cross
-step mod clamp mix smoothstep floor fract sign tanh length normalize`.
-
 ### Dyadic Operators
 - Right `x:y` - return right-hand side
 - `x#y` **Take** - resize/cycle y to length |x|
@@ -221,6 +208,20 @@ Some adverbs are digrams, like While `f f/` and Stencil `i f'`, they have 2 left
 ## Tables, Queries & Joins
 - Create table `` [[]id:1 2 3; age:20 43 7] ``
 - Created keyes table `` [[]id:1 2 3; age:20 43 7] ``
+
+### Math Functions (prelude names, not grammar keywords)
+`sqrt sqr log exp sin cos abs` and the inverse trig `asin acos atan atan2` are **not**
+built-in verbs — they are ordinary names bound in `lib/prelude.k` (loaded into every VM
+at init) to callable symbols: `` sin:`sin@ `` etc. `` `sin@x `` routes through `syms.zig`
+to the same opcode kernel the old verb used, so `sin x` / `sqrt 4 9` behave as before and
+`sqr`/`abs` stay integer-closed on integers. Because they are names (nouns) rather than
+verbs, a bare op-glyph directly after one is **dyadic** — but a `-` glued to a numeric
+literal with a leading space is a negative literal, so `abs -4` applies `abs` to `-4`
+(while `abs-4` subtracts and `abs -x` still needs `abs[-x]`). See
+`src/primitive/intrinsic.zig` (the canonical registry) and
+`doc/design/dye.md`. GPU shaders (lib/dye.k) additionally support `pow min max dot cross
+step mod clamp mix smoothstep floor fract sign tanh length normalize`.
+
 
 ## Special Symbols
 - `` `argv[] `` **Arguments** - list of cmd-line args (also in global `x`)

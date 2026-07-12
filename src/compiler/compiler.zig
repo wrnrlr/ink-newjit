@@ -1112,6 +1112,14 @@ pub const Compiler = struct {
   }
 
   fn emitOpWithArg(self: *Compiler, op: OpCode, arg: u32, inputs: []const ir.ValueId) !ir.ValueId {
+    // Call/Apply/TailCall marshal their arguments through a fixed 8-slot buffer
+    // in the VM (doCallWithMode/doTailCall). Reject over-long arg lists here so
+    // a 9+ argument call site fails to compile instead of overflowing that
+    // buffer at runtime. Matches the 8-parameter lambda cap.
+    switch (op) {
+      .Call, .TailCall, .Apply => if (arg > 8) return error.TooManyArgs,
+      else => {},
+    }
     return try self.scope.ir.emitWithArg(op, arg, inputs);
   }
 
