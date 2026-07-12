@@ -213,6 +213,8 @@ fn fmtValue(v: V, symbols: *const Pool, out: *std.Io.Writer) anyerror!void {
     .i       => |i| try out.print("{d}", .{i}),
     .n       => |nv| try out.print("{d}", .{nv}),
     .f       => |f| try out.print("{d}", .{f}),
+    .d       => |dv| try out.print("{d}d", .{dv}),
+    .h       => |hv| try out.print("{d}h", .{hv}),
     .c       => |c| try out.print("\"{c}\"", .{c}),
     .s       => |s| try out.print("`{s}", .{symbols.get(s)}),
     .p => |p| try out.print("partial(arity={d})", .{p.arity}),
@@ -222,6 +224,8 @@ fn fmtValue(v: V, symbols: *const Pool, out: *std.Io.Writer) anyerror!void {
     .B => |n| try out.print("B[{d}]", .{n.ptr.len}),
     .F => |n| try out.print("F[{d}]", .{n.ptr.len}),
     .N => |n| try out.print("N[{d}]", .{n.ptr.len}),
+    .D => |n| try out.print("D[{d}]", .{n.ptr.len}),
+    .H => |n| try out.print("H[{d}]", .{n.ptr.len}),
     .S => |n| try out.print("S[{d}]", .{n.ptr.len}),
     .L => |n| try out.print("L[{d}]", .{n.ptr.len}),
 

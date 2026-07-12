@@ -13,7 +13,9 @@ pub const Text = []const u8;
 
 pub const Literal = union(enum) {
   b: bool, i: i32, f: f32, c: []const u8, s: []const u8,
+  n: u32, d: f64, h: f16,
   B: []bool, I: []i32, F: []f32, C: []const u8, S: [][]const u8,
+  N: []u32, D: []f64, H: []f16,
   @"var": []const u8
 };
 
@@ -183,6 +185,27 @@ pub const Node = union(NodeType) {
           .f => |n| try writer.print("{}", .{n}),
           .c => |s| try writer.print("\"{s}\"", .{s}),
           .s => |s| try writer.print("`{s}", .{s}),
+          .n => |n| try writer.print("{d}u", .{n}),
+          .N => |nv| {
+            for (nv, 0..) |val, idx| {
+              if (idx > 0) try writer.writeAll(" ");
+              try writer.print("{d}u", .{val});
+            }
+          },
+          .d => |x| try writer.print("{d}d", .{x}),
+          .h => |x| try writer.print("{d}h", .{x}),
+          .D => |dv| {
+            for (dv, 0..) |val, idx| {
+              if (idx > 0) try writer.writeAll(" ");
+              try writer.print("{d}d", .{val});
+            }
+          },
+          .H => |hv| {
+            for (hv, 0..) |val, idx| {
+              if (idx > 0) try writer.writeAll(" ");
+              try writer.print("{d}h", .{val});
+            }
+          },
           .@"var" => |v| try writer.writeAll(v),
           .B => |bv| {
             for (bv) |val| try writer.print("{d}", .{@intFromBool(val)});

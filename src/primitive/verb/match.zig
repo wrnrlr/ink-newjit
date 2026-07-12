@@ -19,6 +19,8 @@ fn matchB      (_: *VM, x: V, y: V) V { return .{ .b = x.b == y.b }; }
 fn matchI      (_: *VM, x: V, y: V) V { return .{ .b = x.i == y.i }; }
 fn matchF      (_: *VM, x: V, y: V) V { return .{ .b = x.f == y.f }; }
 fn matchN      (_: *VM, x: V, y: V) V { return .{ .b = x.n == y.n }; }
+fn matchD      (_: *VM, x: V, y: V) V { return .{ .b = x.d == y.d }; }
+fn matchH      (_: *VM, x: V, y: V) V { return .{ .b = x.h == y.h }; }
 fn matchS      (_: *VM, x: V, y: V) V { return .{ .b = x.s == y.s }; }
 fn matchC      (_: *VM, x: V, y: V) V { return .{ .b = x.c == y.c }; }
 fn matchFunc   (_: *VM, x: V, y: V) V { return .{ .b = @as(u64, @bitCast(x.o)) == @as(u64, @bitCast(y.o)) }; }
@@ -85,6 +87,8 @@ fn getMatchHandler(comptime k: K) VM.Dyad {
     .i       => &matchI,
     .f       => &matchF,
     .n       => &matchN,
+    .d       => &matchD,
+    .h       => &matchH,
     .s       => &matchS,
     .c       => &matchC,
     .o    => &matchFunc,
@@ -99,6 +103,8 @@ fn getMatchHandler(comptime k: K) VM.Dyad {
     .N       => matchVec(.N),
     .S       => matchVec(.S),
     .C       => matchVec(.C),
+    .D       => matchVec(.D),
+    .H       => matchVec(.H),
   };
 }
 

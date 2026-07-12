@@ -23,6 +23,10 @@ pub const Find = struct {
   _S_s: VM.Dyad = findS_s,
   _S_S: VM.Dyad = findS_S,
   _S_L: VM.Dyad = findS_L,
+
+  _N_n: VM.Dyad = findN_n,
+  _N_N: VM.Dyad = findN_N,
+  _N_L: VM.Dyad = findFallback,
   
   _C_c: VM.Dyad = findC_c,
   _C_C: VM.Dyad = findC_C,
@@ -124,6 +128,31 @@ fn findI_L(vm: *VM, x: V, y: V) V {
 }
 
 // Symbol — same structure as Integer but u32
+// Natural (u32) find — same interned-id scan as symbols on x.N / y.n.
+fn findN_n(vm: *VM, x: V, y: V) V {
+  const data = x.N.slice();
+  const miss: i32 = @intCast(data.len);
+  if (data.len <= so.FIND_THRESHOLD)
+    return .{ .i = if (std.mem.indexOfScalar(u32, data, y.n)) |i| @intCast(i) else miss };
+  var map = so.buildIndexMap(u32, vm.alloc, data) catch return V{ .err = .memory };
+  defer map.deinit();
+  return .{ .i = map.get(y.n) orelse miss };
+}
+fn findN_N(vm: *VM, x: V, y: V) V {
+  const data = x.N.slice();
+  const miss: i32 = @intCast(data.len);
+  const res = N(i32).init(vm.alloc, y.N.ptr.len) catch return V{ .err = .memory };
+  if (data.len <= so.FIND_THRESHOLD) {
+    for (y.N.slice(), res.slice()) |v, *r|
+      r.* = if (std.mem.indexOfScalar(u32, data, v)) |i| @intCast(i) else miss;
+    return .{ .I = res };
+  }
+  var map = so.buildIndexMap(u32, vm.alloc, data) catch return V{ .err = .memory };
+  defer map.deinit();
+  for (y.N.slice(), res.slice()) |v, *r| r.* = map.get(v) orelse miss;
+  return .{ .I = res };
+}
+
 fn findS_s(vm: *VM, x: V, y: V) V {
   const data = x.S.slice();
   const miss: i32 = @intCast(data.len);

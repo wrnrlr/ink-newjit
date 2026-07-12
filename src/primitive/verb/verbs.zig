@@ -31,7 +31,7 @@ pub const monad_table = makeMonadArray(Monads);
 pub const quick_table = makeQuickArray(Dyads);
 
 pub const S1_STRIDE = 16; // power of two: the stage-1 key is pure shifts/ors
-const stage1_types = [_]K{ .b, .i, .f, .n, .B, .I, .F, .N };
+const stage1_types = [_]K{ .b, .i, .f, .n, .d, .h, .B, .I, .F, .N, .D, .H };
 const S1_OTHER: u8 = stage1_types.len; // sentinel code: hits the fallback slots
 
 /// K.code() → dense stage-1 type code (S1_OTHER for container/exotic types).
@@ -134,6 +134,20 @@ pub fn _Cmp(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, h.U
 const nat_types = [_]K{ .n, .N };
 fn Nat2(comptime _: type, comptime _: type) type { return u32; }
 pub fn _U_U(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, Nat2, Nat2, f, &nat_types); }
+
+// Tier-2 explicit-precision floats — f64 (d) and f16 (h). Each is an isolated
+// closed set like naturals: only d⊕d / h⊕h slots exist, so there is no
+// cross-precision mixing and no O(types²) blowup. Cross-precision needs a cast.
+const dbl_types = [_]K{ .d, .D };
+const hlf_types = [_]K{ .h, .H };
+fn Dbl1(comptime _: type) type { return f64; }
+fn Hlf1(comptime _: type) type { return f16; }
+fn Dbl2(comptime _: type, comptime _: type) type { return f64; }
+fn Hlf2(comptime _: type, comptime _: type) type { return f16; }
+pub fn _D_D(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, Dbl2, Dbl2, f, &dbl_types); }
+pub fn _H_H(comptime op: Op2, comptime f: type) type { return h.makeDyad(op, Hlf2, Hlf2, f, &hlf_types); }
+pub fn _Dm(comptime op: Op1, comptime f: type) type { return h.makeMonad(op, Dbl1, Dbl1, f, &dbl_types); }
+pub fn _Hm(comptime op: Op1, comptime f: type) type { return h.makeMonad(op, Hlf1, Hlf1, f, &hlf_types); }
 
 // Comparison over like-typed operands with no numeric upcast: the result stays
 // in the operand's backing type (u8 for chars, u32 for interned symbols), so the
@@ -248,6 +262,24 @@ const Monads = struct {
   // Monadic Primitives
   pub const @"+x" = @import("flip.zig").Flip;
   pub const @"-N" = _N(.@"-", calc.NegOp);
+  // Tier-2 float monadics — negate / abs / sqrt / sqr / exp / log / sin / cos
+  // over f64 (d) and f16 (h). Isolated: they add only _d/_D and _h/_H slots.
+  pub const @"-D"   = _Dm(.@"-", calc.NegOp);
+  pub const @"-H"   = _Hm(.@"-", calc.NegOp);
+  pub const @"absD" = _Dm(.abs,  calc.AbsOp);
+  pub const @"absH" = _Hm(.abs,  calc.AbsOp);
+  pub const @"sqrtD" = _Dm(.sqrt, calc.SqrtOp);
+  pub const @"sqrtH" = _Hm(.sqrt, calc.SqrtOp);
+  pub const @"sqrD" = _Dm(.sqr,  calc.SqrOp);
+  pub const @"sqrH" = _Hm(.sqr,  calc.SqrOp);
+  pub const @"expD" = _Dm(.exp,  calc.ExpOp);
+  pub const @"expH" = _Hm(.exp,  calc.ExpOp);
+  pub const @"logD" = _Dm(.log,  calc.LogOp);
+  pub const @"logH" = _Hm(.log,  calc.LogOp);
+  pub const @"sinD" = _Dm(.sin,  calc.SinOp);
+  pub const @"sinH" = _Hm(.sin,  calc.SinOp);
+  pub const @"cosD" = _Dm(.cos,  calc.CosOp);
+  pub const @"cosH" = _Hm(.cos,  calc.CosOp);
   pub const @"*x" = selection.First;
   pub const @"*|x"  = selection.Last_Name;
   pub const @"⍳i" = @import("iota.zig").Iota;
@@ -318,7 +350,29 @@ const Dyads = struct {
   pub const @"n=n" = _CmpSame(.@"=", EqualOp, &nat_types);
   pub const @"n<n" = _CmpSame(.@"<", LessOp,  &nat_types);
   pub const @"n>n" = _CmpSame(.@">", MoreOp,  &nat_types);
-  
+
+  // f64 (d) arithmetic — closed in f64; % is a true f64 divide.
+  pub const @"d+d" = _D_D(.@"+", calc.AddOp);
+  pub const @"d-d" = _D_D(.@"-", calc.SubOp);
+  pub const @"d*d" = _D_D(.@"*", calc.MulOp);
+  pub const @"d%d" = _D_D(.@"%", calc.DivOp);
+  pub const @"d&d" = _D_D(.@"&", calc.MinOp);
+  pub const @"d|d" = _D_D(.@"|", calc.MaxOp);
+  pub const @"d=d" = _CmpSame(.@"=", EqualOp, &dbl_types);
+  pub const @"d<d" = _CmpSame(.@"<", LessOp,  &dbl_types);
+  pub const @"d>d" = _CmpSame(.@">", MoreOp,  &dbl_types);
+
+  // f16 (h) arithmetic — closed in f16.
+  pub const @"h+h" = _H_H(.@"+", calc.AddOp);
+  pub const @"h-h" = _H_H(.@"-", calc.SubOp);
+  pub const @"h*h" = _H_H(.@"*", calc.MulOp);
+  pub const @"h%h" = _H_H(.@"%", calc.DivOp);
+  pub const @"h&h" = _H_H(.@"&", calc.MinOp);
+  pub const @"h|h" = _H_H(.@"|", calc.MaxOp);
+  pub const @"h=h" = _CmpSame(.@"=", EqualOp, &hlf_types);
+  pub const @"h<h" = _CmpSame(.@"<", LessOp,  &hlf_types);
+  pub const @"h>h" = _CmpSame(.@">", MoreOp,  &hlf_types);
+
   pub const @"X=X" = _Cmp(.@"=", EqualOp);
   pub const @"X<X" = _Cmp(.@"<", LessOp);
   pub const @"X>X" = _Cmp(.@">", MoreOp);

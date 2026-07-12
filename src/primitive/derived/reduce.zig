@@ -111,14 +111,30 @@ pub fn max(comptime T: type, s: []const T) T {
 
 const VM        = @import("../../runtime/vm.zig").VM;
 const V         = @import("../../noun/value.zig").V;
+const K         = @import("../../noun/class.zig").K;
 const Op1       = @import("../../noun/operator.zig").Op1;
 const Op2       = @import("../../noun/operator.zig").Op2;
 const dispatch  = @import("../dispatch.zig");
 
-// typedFold: I or F monadic reducer using the SIMD helpers above.
+// Map a fold backing type to its (atom, vector) K tags. Covers Tier-1 i32/f32
+// plus the isolated Tier-2 numerics (u32 nat, f64, f16).
+fn foldKind(comptime T: type) struct { atom: K, vec: K } {
+  return switch (T) {
+    i32 => .{ .atom = .i, .vec = .I },
+    f32 => .{ .atom = .f, .vec = .F },
+    f64 => .{ .atom = .d, .vec = .D },
+    f16 => .{ .atom = .h, .vec = .H },
+    u32 => .{ .atom = .n, .vec = .N },
+    else => @compileError("typedFold: unsupported element type"),
+  };
+}
+
+// typedFold: monadic reducer over a homogeneous numeric vector using the SIMD
+// helpers above. Works for i32/f32/f64/f16/u32 (int types fold with wrapping).
 pub fn typedFold(comptime T: type, comptime op2: Op2) VM.Monad {
+  const KK = comptime foldKind(T);
   return &struct { fn f(_: *VM, x: V) V {
-    const s = if (T == i32) x.I.slice() else x.F.slice();
+    const s = @field(x, @tagName(KK.vec)).slice();
     if (s.len == 0) return .blank;
     const r = switch (op2) {
       .@"+" => sum(T, s),
@@ -127,7 +143,7 @@ pub fn typedFold(comptime T: type, comptime op2: Op2) VM.Monad {
       .@"|" => max(T, s),
       else => unreachable,
     };
-    return if (T == i32) V{ .i = r } else V{ .f = r };
+    return @unionInit(V, @tagName(KK.atom), r);
   }}.f;
 }
 
@@ -173,12 +189,18 @@ pub const Sum = struct {
   _B: VM.Monad = sumB,
   _I: VM.Monad = typedFold(i32, .@"+"),
   _F: VM.Monad = typedFold(f32, .@"+"),
+  _N: VM.Monad = typedFold(u32, .@"+"),
+  _D: VM.Monad = typedFold(f64, .@"+"),
+  _H: VM.Monad = typedFold(f16, .@"+"),
   _L: VM.Monad = listFold(.@"+"),
 };
 pub const Product = struct {
   pub const op = .@"*/";
   _I: VM.Monad = typedFold(i32, .@"*"),
   _F: VM.Monad = typedFold(f32, .@"*"),
+  _N: VM.Monad = typedFold(u32, .@"*"),
+  _D: VM.Monad = typedFold(f64, .@"*"),
+  _H: VM.Monad = typedFold(f16, .@"*"),
   _L: VM.Monad = listFold(.@"*"),
 };
 pub const Min = struct {
@@ -186,6 +208,9 @@ pub const Min = struct {
   _B: VM.Monad = minB,
   _I: VM.Monad = typedFold(i32, .@"&"),
   _F: VM.Monad = typedFold(f32, .@"&"),
+  _N: VM.Monad = typedFold(u32, .@"&"),
+  _D: VM.Monad = typedFold(f64, .@"&"),
+  _H: VM.Monad = typedFold(f16, .@"&"),
   _L: VM.Monad = listFold(.@"&"),
 };
 pub const Max = struct {
@@ -193,6 +218,9 @@ pub const Max = struct {
   _B: VM.Monad = maxB,
   _I: VM.Monad = typedFold(i32, .@"|"),
   _F: VM.Monad = typedFold(f32, .@"|"),
+  _N: VM.Monad = typedFold(u32, .@"|"),
+  _D: VM.Monad = typedFold(f64, .@"|"),
+  _H: VM.Monad = typedFold(f16, .@"|"),
   _L: VM.Monad = listFold(.@"|"),
 };
 

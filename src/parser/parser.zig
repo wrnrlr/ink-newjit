@@ -64,7 +64,7 @@ pub const Parser = struct {
   fn slice(self: *Parser) []const u8 { return self.tok.slice(self.src); }
   fn isNounStart(self: *Parser) bool {
     return switch (self.tok.tt) {
-      .int, .float, .bit, .bits, .string, .symbol, .iden,
+      .int, .float, .bit, .bits, .nat, .dbl, .hlf, .string, .symbol, .iden,
       .@"(", .@"{", .@"[", .@"$[", .@"[[]", .@"[[", .adverb_val => true,
       else => false,
     };
@@ -278,7 +278,7 @@ pub const Parser = struct {
   fn parseNoun(self: *Parser) ParseError!*Node {
     const start = self.tok.start;
     const n: *Node = switch (self.tok.tt) {
-      .int, .float, .bit, .bits, .string, .symbol, .iden => try self.parseLiteralOrVector(),
+      .int, .float, .bit, .bits, .nat, .dbl, .hlf, .string, .symbol, .iden => try self.parseLiteralOrVector(),
       .@"(" => try self.parseGroupOrList(),
       .@"{" => try self.parseLambda(),
       .@"[" => try self.parseDictOrArgs(),
@@ -336,6 +336,33 @@ pub const Parser = struct {
         const items = try list.toOwnedSlice(self.al());
         if (items.len == 1) { defer self.al().free(items); return self.node(.{ .literal = .{ .f = items[0] } }); }
         return self.node(.{ .literal = .{ .F = items } });
+      },
+      .nat => {
+        // Natural (u32) run: `3u`, `1u 2u 3u`. Unsigned → no interior-negative re-gluing.
+        var list = try std.ArrayList(u32).initCapacity(self.al(), 4);
+        try list.append(self.al(), try parseNatLit(tok.slice(self.src)));
+        while (self.is(.nat)) { try list.append(self.al(), try parseNatLit(self.slice())); self.advance(); }
+        const items = try list.toOwnedSlice(self.al());
+        if (items.len == 1) { defer self.al().free(items); return self.node(.{ .literal = .{ .n = items[0] } }); }
+        return self.node(.{ .literal = .{ .N = items } });
+      },
+      .dbl => {
+        // f64 run: `2.3d`, `1.0d 2.0d`. Isolated precise type — groups only with
+        // its own suffix (no int promotion, no interior-`-` re-gluing).
+        var list = try std.ArrayList(f64).initCapacity(self.al(), 4);
+        try list.append(self.al(), try parseDblLit(tok.slice(self.src)));
+        while (self.is(.dbl)) { try list.append(self.al(), try parseDblLit(self.slice())); self.advance(); }
+        const items = try list.toOwnedSlice(self.al());
+        if (items.len == 1) { defer self.al().free(items); return self.node(.{ .literal = .{ .d = items[0] } }); }
+        return self.node(.{ .literal = .{ .D = items } });
+      },
+      .hlf => {
+        var list = try std.ArrayList(f16).initCapacity(self.al(), 4);
+        try list.append(self.al(), try parseHlfLit(tok.slice(self.src)));
+        while (self.is(.hlf)) { try list.append(self.al(), try parseHlfLit(self.slice())); self.advance(); }
+        const items = try list.toOwnedSlice(self.al());
+        if (items.len == 1) { defer self.al().free(items); return self.node(.{ .literal = .{ .h = items[0] } }); }
+        return self.node(.{ .literal = .{ .H = items } });
       },
       .bit, .bits => {
         var list = try std.ArrayList(bool).initCapacity(self.al(), 4);
@@ -553,6 +580,26 @@ pub const Parser = struct {
     if (eql(u8, s, "0W")) return std.math.maxInt(i32);
     if (eql(u8, s, "-0W")) return std.math.minInt(i32) + 1;
     return std.fmt.parseInt(i32, s, 0) catch error.InvalidCharacter;
+  }
+  fn parseNatLit(s: []const u8) ParseError!u32 {
+    // Strip the trailing 'u' suffix; `0Nu` is the natural null.
+    const body = if (s.len > 0 and s[s.len - 1] == 'u') s[0 .. s.len - 1] else s;
+    if (eql(u8, body, "0N")) return std.math.maxInt(u32);
+    return std.fmt.parseInt(u32, body, 0) catch error.InvalidCharacter;
+  }
+  fn parseDblLit(s: []const u8) ParseError!f64 {
+    const body = if (s.len > 0 and s[s.len - 1] == 'd') s[0 .. s.len - 1] else s;
+    if (eql(u8, body, "0n") or eql(u8, body, "-0n")) return std.math.nan(f64);
+    if (eql(u8, body, "0w")) return std.math.inf(f64);
+    if (eql(u8, body, "-0w")) return -std.math.inf(f64);
+    return std.fmt.parseFloat(f64, body) catch error.InvalidCharacter;
+  }
+  fn parseHlfLit(s: []const u8) ParseError!f16 {
+    const body = if (s.len > 0 and s[s.len - 1] == 'h') s[0 .. s.len - 1] else s;
+    if (eql(u8, body, "0n") or eql(u8, body, "-0n")) return std.math.nan(f16);
+    if (eql(u8, body, "0w")) return std.math.inf(f16);
+    if (eql(u8, body, "-0w")) return -std.math.inf(f16);
+    return std.fmt.parseFloat(f16, body) catch error.InvalidCharacter;
   }
   fn parseFloatLit(s: []const u8) ParseError!f32 {
     if (eql(u8, s, "0n") or eql(u8, s, "-0n")) return std.math.nan(f32);

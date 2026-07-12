@@ -17,11 +17,53 @@ Expressions are evaluated right-to-left. There are no special precedence rules f
 
 ## Datetypes
 
+| s|null|inf|
+|--|---|---|
+| b|0b |
+| u|0Nu|0Wu|
+| i|0N |0W|
+| h|0nh|0wh|
+| f|0n |0w|
+| d|0nd|0wd|
+|q3|0q3|0Wu|
+| s|0nh|
+| c|   |
+--------
+
+### Numeric tiers
+
+Ink's numeric types are split into two tiers so that precision is **explicit**,
+never transparent — the type system will not silently widen one precision to
+another.
+
+- **Tier 1 — the canonical tower** `bool → int(i32) → float(f32)`. These three
+  implicitly promote among themselves (`1b+1` → `2`, an int in a float vector →
+  float). All un-suffixed literals land here. Unchanged from classic k.
+- **Tier 2 — explicit-precision types**, each an *isolated, closed* type that
+  combines **only with itself** — `f32+f64`, `f16+f32`, `nat+int` are all
+  `!type`. You enter a Tier-2 type with a suffixed literal or a cast, and leave
+  it only with an explicit cast. Arithmetic (`+ - * % & |`), comparison
+  (`= < >`), match (`~`), and the monadic math (`- abs sqrt sqr exp log sin
+  cos`) are closed within each Tier-2 type.
+
+| suffix | type | `@`   | example | null | scalar/vector |
+|--------|------|-------|---------|------|---------------|
+| `u`    | u32 natural | `` `u32 `` | `1u 2u 3u` | `0Nu` | `n` / `N` |
+| `d`    | f64 double  | `` `f64 `` | `2.3d` `2d` | `0nd` | `d` / `D` |
+| `h`    | f16 half    | `` `f16 `` | `2.3h` `2h` | `0nh` | `h` / `H` |
+
+Cross-tier conversion is via cast: `` `u32$5 ``, `` `f64$x ``, `` `f16$x ``,
+`` `f$2.5d `` (back to f32), `` `i$2.9d ``. Casts route through the canonical
+f32/i32 hubs. `q3`/`q2` (fp8 e4m3/e5m2) and `bf16` are planned, not yet
+implemented (see the note at the end of this file / doc/design).
+
 ### Scalar types
-- **Boolean** - boolean number `0b 1b`, null `0b`, type `` `b ``
-- **Natural numbers** (no syntax support yet)
-- **Integer** - numbers like `-2 0 1`, null `0N`, infinities `-0W 0W`, type `` `i ``, 32bit signed int.
-- **Float** - floating point numbers `0.1 2. -3.`, null `0n`, infinities `0w -0w`, type `` `f ``, 32bit float
+- `b` **Boolean** - boolean number `0b 1b`, null `0b`, type `` `b ``
+- `u` **Natural** - unsigned `u32`, e.g. `1u 2u 3u`, null `0Nu`, type `` `u32 `` (Tier 2)
+- `i` **Integer** - numbers like `-2 0 1`, null `0N`, infinities `-0W 0W`, 32bit signed int.
+- `f` **Float** - floating point numbers `0.1 2. -3.`, null `0n`, infinities `0w -0w`, 32bit float
+- `d` **Double** - `f64`, e.g. `2.3d`, null `0nd`, type `` `f64 `` (Tier 2)
+- `h` **Half** - `f16`, e.g. `2.3h`, null `0nh`, type `` `f16 `` (Tier 2)
 - **Symbol** - interned string, e.g. `` `px ``, null/empty `` ` ``, type `` `s ``
 - **Char** - a single character, eg `"H"`, null `" "`, type `` `c ``, u8 char
 
@@ -29,11 +71,22 @@ Expressions are evaluated right-to-left. There are no special precedence rules f
 - **Boolean** - boolean number `0b 1b`, null `0b`, type `` `b ``
 - **Integers** - array of integers, null `` &0 ``, type `` `I ``
 - **Floats** - array of floats, null `` 0#0.0 ``, type `` `F ``
+- **Naturals** - array of `u32`, e.g. `` 1u 2u 3u ``, type `` `u32 `` (Tier 2)
+- **Doubles** - array of `f64`, e.g. `` 1.0d 2.0d ``, type `` `f64 `` (Tier 2)
+- **Halves** - array of `f16`, e.g. `` 1.0h 2.0h ``, type `` `f16 `` (Tier 2)
 - **Symbols** - array of symbols, empty value `` 0#` ``, type `` `S ``
 - **Chars** - array of characters, null `""`, type `` `C ``
   - type symbol `` `C ``
   - empty value `` "" ``
   - backed by an array of u8.
+
+> Structural/array verbs cover Tier-2 vectors for: construction, arithmetic,
+> comparison, `~` match, `,` join, `#` tally, `|` reverse, `* *|` first/last,
+> `@` index, `#` take, `+/ */ &/ |/` fused folds, `< >` grade/sort, `^` null
+> mask, and cast. Naturals additionally support `?` distinct and `?` find.
+> Deferred (low-value for precision floats): `?` distinct/find on f64/f16 and `=`
+> group on any Tier-2 type — these need per-bit-width NaN-safe dedup helpers and
+> a kind-tagged key vector. `&` where is int/bool-only by definition.
 
 ### Mapping Types
 - **Dict**

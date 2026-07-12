@@ -17,6 +17,7 @@
 Ink (sometimes called terse) is an array programming language based on k.
 
 ## Tips
+- **Two-tier numerics.** Tier 1 = canonical `bool→i32→f32` (un-suffixed literals, implicit promotion, as in classic k). Tier 2 = explicit-precision types, each *isolated* (combines only with itself; cross-tier arithmetic is `!type`): `u` = u32 natural (`3u`, `@`→`` `u32 ``), `d` = f64 (`2.3d`, `` `f64 ``), `h` = f16 (`2.3h`, `` `f16 ``). Convert with casts: `` `f64$x ``, `` `f$2.5d ``, `` `u32$5 ``. Suffix `e`/`E` stays exponent (so no bf16 `12.3e`; use dedicated letters). bf16/fp8 not yet implemented (needs a `VEC_BIT` re-layout — only slots 14/15 were free, taken by d/h).
 - No `>=`/`<=` - use `~(a>b)` and `~(a<b)` respectively.
 - `_` is always the Drop/WeedOut verb; underscores are never valid in variable names.
 - Expressions evaluate right-to-left; no operator precedence rules.

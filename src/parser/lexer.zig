@@ -4,7 +4,7 @@ const isAlphanumeric = std.ascii.isAlphanumeric;
 const isDigit = std.ascii.isDigit;
 
 pub const TT = enum {
-  int, float, bit, bits,
+  int, float, bit, bits, nat, dbl, hlf,
   string, symbol, iden,
   keyword, op, io,
   adverb, adverb_val,
@@ -371,6 +371,18 @@ pub const Lexer = struct {
     return .{ .tt = .eof, .start = start, .end = self.i };
   }
 
+  // Consume a Tier-2 float precision suffix (d=f64, h=f16) when present and not
+  // glued to a longer identifier (`2.3d` → f64, but `2.3dx` keeps `d` for a
+  // following name). Returns the resulting token type, else `base`.
+  fn floatSuffix(self: *Lexer, base: TT) TT {
+    const s = self.ch(0) orelse return base;
+    if (s != 'd' and s != 'h') return base;
+    const nxt = self.ch(1);
+    if (nxt != null and (isAlphanumeric(nxt.?) or nxt.? == '.')) return base;
+    self.adv();
+    return if (s == 'd') .dbl else .hlf;
+  }
+
   fn lexNumber(self: *Lexer, start: u32) Token {
     const c = self.CR();
 
@@ -384,25 +396,27 @@ pub const Lexer = struct {
         while (self.i < self.src.len and isDigit(self.CR())) self.adv();
       }
       self.tag = .noun;
-      return .{ .tt = .float, .start = start, .end = self.i };
+      return .{ .tt = self.floatSuffix(.float), .start = start, .end = self.i };
     }
 
     // Handle negative sign
     const has_minus = c == '-';
     if (has_minus) self.adv();
 
-    // Special: 0N, 0W, 0n, 0w (null/infinity)
+    // Special: 0N, 0W, 0n, 0w (null/infinity) — with optional Tier-2 suffix
+    // (`0Nu` natural null, `0nd`/`0wd` f64 null/inf, `0nh`/`0wh` f16).
     if (self.ch(0) == '0') {
       const n = self.ch(1);
       if (n == 'N' or n == 'W') {
         self.i += 2;
         self.tag = .noun;
+        if (!has_minus and self.ch(0) == 'u') { self.adv(); return .{ .tt = .nat, .start = start, .end = self.i }; }
         return .{ .tt = .int, .start = start, .end = self.i };
       }
       if (n == 'n' or n == 'w') {
         self.i += 2;
         self.tag = .noun;
-        return .{ .tt = .float, .start = start, .end = self.i };
+        return .{ .tt = self.floatSuffix(.float), .start = start, .end = self.i };
       }
       // hex: 0x...
       if (n == 'x' or n == 'X') {
@@ -419,6 +433,14 @@ pub const Lexer = struct {
     const digits_start = self.i;
     while (self.i < self.src.len and isDigit(self.CR()))
       self.adv();
+
+    // Natural (u32): digits followed by 'u' — a Tier-2 explicit-precision type.
+    // Unsigned, so never after a minus. `3u` is the natural 3.
+    if (self.ch(0) == 'u' and !has_minus and self.i > digits_start) {
+      self.adv(); // consume 'u'
+      self.tag = .noun;
+      return .{ .tt = .nat, .start = start, .end = self.i };
+    }
 
     // Bool/bools: digits followed by 'b' where all digits are 0 or 1
     if (self.ch(0) == 'b' and !has_minus) {
@@ -462,7 +484,7 @@ pub const Lexer = struct {
           while (self.i < self.src.len and isDigit(self.CR())) self.adv();
         }
         self.tag = .noun;
-        return .{ .tt = .float, .start = start, .end = self.i };
+        return .{ .tt = self.floatSuffix(.float), .start = start, .end = self.i };
       }
     }
 
@@ -472,12 +494,12 @@ pub const Lexer = struct {
       if (self.ch(0) == '+' or self.ch(0) == '-') self.adv();
       while (self.i < self.src.len and isDigit(self.CR())) self.adv();
       self.tag = .noun;
-      return .{ .tt = .float, .start = start, .end = self.i };
+      return .{ .tt = self.floatSuffix(.float), .start = start, .end = self.i };
     }
 
-    // Plain integer
+    // Plain integer — or an integer-mantissa float precision literal (`2d` `2h`).
     self.tag = .noun;
-    return .{ .tt = .int, .start = start, .end = self.i };
+    return .{ .tt = self.floatSuffix(.int), .start = start, .end = self.i };
   }
 
   // Peek at the next token without advancing state.

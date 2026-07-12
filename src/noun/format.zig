@@ -93,6 +93,8 @@ pub const TerseFormatter = struct {
       },
       .b => |a| try w.print("{d}b", .{@as(u8, if (a) 1 else 0)}),
       .n => |a| try formatNat(a, w),
+      .d => |a| try formatFloatSuffix(f64, a, "d", w),
+      .h => |a| try formatFloatSuffix(f16, a, "h", w),
       .N => |vec| {
         const s = vec.slice();
         if (s.len == 0) { try w.writeAll("&0"); return; }
@@ -100,6 +102,24 @@ pub const TerseFormatter = struct {
         for (s, 0..) |e, i| {
           if (i > 0) try w.writeAll(" ");
           try formatNat(e, w);
+        }
+      },
+      .D => |vec| {
+        const s = vec.slice();
+        if (s.len == 0) { try w.writeAll("!0.0d"); return; }
+        if (s.len == 1) try w.writeAll(",");
+        for (s, 0..) |e, i| {
+          if (i > 0) try w.writeAll(" ");
+          try formatFloatSuffix(f64, e, "d", w);
+        }
+      },
+      .H => |vec| {
+        const s = vec.slice();
+        if (s.len == 0) { try w.writeAll("!0.0h"); return; }
+        if (s.len == 1) try w.writeAll(",");
+        for (s, 0..) |e, i| {
+          if (i > 0) try w.writeAll(" ");
+          try formatFloatSuffix(f16, e, "h", w);
         }
       },
       .s => |a| {
@@ -283,10 +303,23 @@ pub const TerseFormatter = struct {
     }
   }
 
-  // Naturals print as bare digits (the type has no literal syntax yet).
+  // Naturals print with a `u` suffix so they round-trip and stay visibly
+  // distinct from ints (precision is not transparent). Null is `0Nu`.
   fn formatNat(a: u32, w: anytype) anyerror!void {
-    if (a == std.math.maxInt(u32)) try w.writeAll("0N")
-    else try w.print("{d}", .{a});
+    if (a == std.math.maxInt(u32)) try w.writeAll("0Nu")
+    else try w.print("{d}u", .{a});
+  }
+
+  // Tier-2 float (f64/f16) with a precision suffix so it round-trips and stays
+  // visibly distinct from the default f32. Null/inf mirror `0n`/`0w`.
+  fn formatFloatSuffix(comptime T: type, a: T, comptime suffix: []const u8, w: anytype) anyerror!void {
+    if (std.math.isNan(a)) { try w.writeAll("0n"); try w.writeAll(suffix); return; }
+    if (std.math.isInf(a)) { try w.writeAll(if (a > 0) "0w" else "-0w"); try w.writeAll(suffix); return; }
+    var buf: [64]u8 = undefined;
+    const s = try std.fmt.bufPrint(&buf, "{d}", .{a});
+    try w.writeAll(s);
+    if (std.mem.indexOfScalar(u8, s, '.') == null and std.mem.indexOfScalar(u8, s, 'e') == null) try w.writeAll(".0");
+    try w.writeAll(suffix);
   }
 
   fn formatDictKey(self: *Self, k: V, w: anytype) anyerror!void {

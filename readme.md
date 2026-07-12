@@ -22,6 +22,8 @@ Functional programming with APL2
 - [Variadic functions in Q](https://bodonferenc.github.io/2026/05/13/Variadic-Functions.html)
 - [SIMD: making every cycle count](https://lv1.sh/blog/simd-making-every-cycle-count/)
 - [Leveraging APL and SPIR-V languages to write network functions to be deployed on Vulkan compatible GPUs](https://juuso.dev/papers/msc-thesis-lorraine/msc-thesis-lorraine.html)
+- [InfiniteDiffusion: Open-World Terrain Generation](https://xandergos.github.io/terrain-diffusion/)
+
 ```
  M:2 2#!4
  g:(::; |:; +:; |+:; +|:; +|+:; |+|:; +|+|:)

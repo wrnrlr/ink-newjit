@@ -1190,6 +1190,76 @@ test "natural (n) dispatch" {
   try testing.expectEqualSlices(u32, &.{ 11, 22, 33 }, rv.N.slice());
 }
 
+test "tier-2 float precision (f64/f16) dispatch" {
+  var t = try Tester.init(); defer t.deinit();
+  const dispatch = @import("primitive/dispatch.zig");
+  const vm = t.vm;
+  // f64 stays in f64; % is a true f64 divide; comparison → bool
+  var r = dispatch.dispatch2(vm, .@"+", .{ .d = 2.5 }, .{ .d = 1.5 });
+  try testing.expect(r.tag() == .d and r.d == 4.0);
+  r = dispatch.dispatch2(vm, .@"%", .{ .d = 1.0 }, .{ .d = 2.0 });
+  try testing.expect(r.tag() == .d and r.d == 0.5);
+  r = dispatch.dispatch2(vm, .@">", .{ .d = 2.5 }, .{ .d = 1.5 });
+  try testing.expect(r.tag() == .b and r.b);
+  // f16 closed under its own arithmetic
+  r = dispatch.dispatch2(vm, .@"*", .{ .h = 2.0 }, .{ .h = 3.0 });
+  try testing.expect(r.tag() == .h and r.h == 6.0);
+  // precision never mixes implicitly — every cross-precision pair is !type
+  try testing.expect(dispatch.dispatch2(vm, .@"+", .{ .d = 2.0 }, .{ .f = 3.0 }).tag() == .err);
+  try testing.expect(dispatch.dispatch2(vm, .@"+", .{ .d = 2.0 }, .{ .h = 3.0 }).tag() == .err);
+  try testing.expect(dispatch.dispatch2(vm, .@"+", .{ .h = 2.0 }, .{ .i = 3 }).tag() == .err);
+  // vectors
+  const xv = try V.make(.D, f64, vm.alloc, &.{ 1.0, 2.0, 3.0 });
+  defer xv.deinit(vm.alloc);
+  const yv = try V.make(.D, f64, vm.alloc, &.{ 10.0, 20.0, 30.0 });
+  defer yv.deinit(vm.alloc);
+  const rv = dispatch.dispatch2(vm, .@"+", xv, yv);
+  defer rv.deinit(vm.alloc);
+  try testing.expect(rv.tag() == .D);
+  try testing.expectEqualSlices(f64, &.{ 11.0, 22.0, 33.0 }, rv.D.slice());
+}
+
+test "tier-2 literals and casts round-trip" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("3u", "3u");
+  try t.check("@3u", "`u32");
+  try t.check("2.3d", "2.3d");
+  try t.check("@2.3d", "`f64");
+  try t.check("2.3h", "2.3h");
+  try t.check("@2.3h", "`f16");
+  try t.check("2d", "2.0d");
+  try t.check("`u32$5", "5u");
+  try t.check("`f64$5", "5.0d");
+  try t.check("`f$2.5d", "2.5");
+  try t.check("`i$2.9d", "2");
+  // null literals round-trip
+  try t.check("0Nu", "0Nu");
+  try t.check("0nd", "0nd");
+  try t.check("0nh", "0nh");
+}
+
+test "tier-2 structural verbs" {
+  var t = try Tester.init(); defer t.deinit();
+  // first / last / reverse / tally
+  try t.check("*1.0d 2.0d 3.0d", "1.0d");
+  try t.check("*|1u 2u 3u", "3u");
+  try t.check("|1.0h 2.0h 3.0h", "3.0h 2.0h 1.0h");
+  try t.check("#1.0d 2.0d 3.0d", "3");
+  // index / take
+  try t.check("5u 6u 7u@2", "7u");
+  try t.check("2#3.5d", "3.5d 3.5d");
+  // fused folds
+  try t.check("+/1.0d 2.0d 3.0d", "6.0d");
+  try t.check("+/1u 2u 3u", "6u");
+  try t.check("|/1u 5u 3u", "5u");
+  // grade (returns int indices) + null mask
+  try t.check("<3.0d 1.0d 2.0d", "1 2 0");
+  try t.check("^0Nu 1u 2u", "100b");
+  // naturals: distinct + find
+  try t.check("?1u 2u 2u 3u 1u", "1u 2u 3u");
+  try t.check("1u 2u 3u?2u", "1");
+}
+
 test "dyad dispatch structure" {
   const verbs = @import("primitive/verb/verbs.zig");
   const Op2 = @import("noun/operator.zig").Op2;

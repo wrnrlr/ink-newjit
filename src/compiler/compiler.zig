@@ -503,6 +503,12 @@ pub const Compiler = struct {
         break :blk V{ .C = n };
       },
       .s => |s| V{ .s = try self.symbols.intern(s) },
+      .n => |x| V{ .n = x },
+      .N => |arr| V{ .N = try N(u32).fromSlice(self.alloc, arr) },
+      .d => |x| V{ .d = x },
+      .h => |x| V{ .h = x },
+      .D => |arr| V{ .D = try N(f64).fromSlice(self.alloc, arr) },
+      .H => |arr| V{ .H = try N(f16).fromSlice(self.alloc, arr) },
       .B => |B| V{ .B = try N(bool).fromSlice(self.alloc, B) },
       .I => |I| V{ .I = try N(i32).fromSlice(self.alloc, I) },
       .F => |F| V{ .F = try N(f32).fromSlice(self.alloc, F) },

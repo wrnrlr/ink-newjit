@@ -11,11 +11,17 @@ const FirstImpl = struct {
   _b: VM.Monad = identity,
   _i: VM.Monad = identity,
   _f: VM.Monad = identity,
+  _n: VM.Monad = identity,
+  _d: VM.Monad = identity,
+  _h: VM.Monad = identity,
   _s: VM.Monad = identity,
   _c: VM.Monad = identity,
   _B: VM.Monad = firstVec(.B),
   _I: VM.Monad = firstVec(.I),
   _F: VM.Monad = firstVec(.F),
+  _N: VM.Monad = firstVec(.N),
+  _D: VM.Monad = firstVec(.D),
+  _H: VM.Monad = firstVec(.H),
   _S: VM.Monad = firstVec(.S),
   _C: VM.Monad = firstVec(.C),
   _L: VM.Monad = firstFn,
@@ -31,11 +37,17 @@ pub const Last_Name = struct {
   _b: VM.Monad = identity,
   _i: VM.Monad = identity,
   _f: VM.Monad = identity,
+  _n: VM.Monad = identity,
+  _d: VM.Monad = identity,
+  _h: VM.Monad = identity,
   _s: VM.Monad = identity,
   _c: VM.Monad = identity,
   _B: VM.Monad = lastVec(.B),
   _I: VM.Monad = lastVec(.I),
   _F: VM.Monad = lastVec(.F),
+  _N: VM.Monad = lastVec(.N),
+  _D: VM.Monad = lastVec(.D),
+  _H: VM.Monad = lastVec(.H),
   _S: VM.Monad = lastVec(.S),
   _C: VM.Monad = lastVec(.C),
   _L: VM.Monad = lastFn,
@@ -46,7 +58,7 @@ pub const Last_Name = struct {
 pub fn first(alloc: Alloc, x: V) V {
   if (x.len() == 0) return .blank;
   return switch (x) {
-    inline .I, .F, .S, .C, .B => |n, yk| V.wrap(yk.atom(), n.slice()[0]),
+    inline .I, .F, .S, .C, .B, .N, .D, .H => |n, yk| V.wrap(yk.atom(), n.slice()[0]),
     .L => |n| n.slice()[0].ref(),
     .m => |m| first(alloc, m.bv()),
     else => x.ref(),
@@ -57,7 +69,7 @@ pub fn last(alloc: Alloc, x: V) V {
   const l = x.len();
   if (l == 0) return .blank;
   return switch (x) {
-    inline .I, .F, .S, .C, .B => |n, yk| V.wrap(K.atom(yk), n.slice()[l - 1]),
+    inline .I, .F, .S, .C, .B, .N, .D, .H => |n, yk| V.wrap(K.atom(yk), n.slice()[l - 1]),
     .L => |n| n.slice()[l - 1].ref(),
     .m => |m| last(alloc, m.bv()),
     else => x.ref(),

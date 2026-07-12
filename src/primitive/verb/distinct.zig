@@ -11,10 +11,31 @@ pub const Distinct = struct {
   _B: VM.Monad = distinctB,
   _I: VM.Monad = distinctI,
   _F: VM.Monad = distinctF,
+  _N: VM.Monad = distinctN,
   _S: VM.Monad = distinctS,
   _C: VM.Monad = distinctC,
   _L: VM.Monad = distinctL,
 };
+
+// Natural (u32) distinct — same dedup as symbols, result stays `` `N ``.
+fn distinctN(vm: *VM, x: V) V {
+  const data = x.N.slice();
+  if (data.len <= so.DEDUP_THRESHOLD) {
+    var buf: [so.DEDUP_THRESHOLD]u32 = undefined;
+    var n: usize = 0;
+    for (data) |v| if (std.mem.indexOfScalar(u32, buf[0..n], v) == null) {
+      buf[n] = v; n += 1;
+    };
+    const res = N(u32).init(vm.alloc, n) catch return V{ .err = .memory };
+    @memcpy(res.slice(), buf[0..n]);
+    return .{ .N = res };
+  }
+  var map = so.buildOrderedSet(u32, vm.alloc, data) catch return V{ .err = .memory };
+  defer map.deinit(vm.alloc);
+  const res = N(u32).init(vm.alloc, map.count()) catch return V{ .err = .memory };
+  @memcpy(res.slice(), map.keys());
+  return .{ .N = res };
+}
 
 // Bool: at most 2 distinct values, zero allocation regardless of size
 fn distinctB(vm: *VM, x: V) V {

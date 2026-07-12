@@ -10,7 +10,7 @@ const N = @import("../../noun/array.zig").N;
 const Dict = @import("../../noun/dict.zig").Dict;
 pub const Attr = std.builtin.Type.StructField.Attributes;
 
-pub const all_types = [_]K{ .blank, .err, .b, .i, .f, .s, .c, .m, .B, .I, .F, .S, .C, .M, .L, .x };
+pub const all_types = [_]K{ .blank, .err, .b, .i, .f, .n, .d, .h, .s, .c, .m, .B, .I, .F, .N, .D, .H, .S, .C, .M, .L, .x };
 pub const numeric_types = [_]K{ .b, .i, .f, .B, .I, .F };
 pub const arithmetic_types = [_]K{ .b, .i, .f, .B, .I, .F }; //, .L, .m, .M };
 pub const integer_types = [_]K{ .i, .I };
@@ -125,13 +125,13 @@ pub fn Char1(comptime _: type) type { return u8; }
 
 pub fn resultKind1(comptime xk: K, comptime RT: fn (type) type) K {
   const R = RT(xk.backing());
-  const scalar: K = if (R == f32) .f else if (R == bool) .b else if (R == u8) .c else if (R == u32) .n else .i;
+  const scalar: K = if (R == f32) .f else if (R == f64) .d else if (R == f16) .h else if (R == bool) .b else if (R == u8) .c else if (R == u32) .n else .i;
   return if (xk.isVec()) scalar.container() else scalar;
 }
 
 pub fn resultKind2(comptime xk: K, comptime yk: K, comptime RT: fn (type, type) type) K {
   const R = RT(xk.backing(), yk.backing());
-  const scalar: K = if (R == f32) .f else if (R == bool) .b else if (R == u32) .n else .i;
+  const scalar: K = if (R == f32) .f else if (R == f64) .d else if (R == f16) .h else if (R == bool) .b else if (R == u32) .n else .i;
   return if (xk.isVec() or yk.isVec()) scalar.container() else scalar;
 }
 

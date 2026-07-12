@@ -15,7 +15,9 @@ pub const V = union(K) {
   b: bool, i: i32, f: f32, n: u32, s: u32, c: u8,
   o: Fn, p: *Partial,
   L: N(V), m: Dict, M: Dict, x: *ExtObj,
+  d: f64, h: f16,
   B: N(bool), I: N(i32), F: N(f32), N: N(u32), S: N(u32), C: N(u8),
+  D: N(f64), H: N(f16),
 
   pub const @"0N" = std.math.minInt(i32);
   pub inline fn wrap(comptime k: K, v: holder(k)) V { return @unionInit(V, @tagName(k), v); }
@@ -39,6 +41,8 @@ pub const V = union(K) {
       .b => bool, .B => N(bool),
       .i => i32, .I => N(i32),
       .f => f32, .F => N(f32),
+      .d => f64, .D => N(f64),
+      .h => f16, .H => N(f16),
       .n, .s => u32, .N, .S => N(u32),
       .c => u8, .C => N(u8),
       .m, .M => Dict,
@@ -50,7 +54,7 @@ pub const V = union(K) {
   pub fn ref(v: V) V {
     switch (v) {
       inline .I => |n| { if (n.ptr.rc != std.math.maxInt(u32)) n.ptr.rc += 1; },
-      inline .B, .F, .N, .S, .C, .L => |n| n.ptr.rc += 1,
+      inline .B, .F, .N, .S, .C, .L, .D, .H => |n| n.ptr.rc += 1,
       inline .m, .M => |n| n.ptr.rc += 1,
       .p => |p| p.rc += 1,
       .x => |obj| { _ = obj.ref(); },
@@ -61,7 +65,7 @@ pub const V = union(K) {
 
   pub fn deinit(v: V, alloc: Alloc) void {
     switch (v) {
-      inline .B, .I, .F, .N, .S, .C, .L, .m, .M => |n| n.deinit(alloc),
+      inline .B, .I, .F, .N, .S, .C, .L, .D, .H, .m, .M => |n| n.deinit(alloc),
       .p => |p| p.deinit(alloc),
       .x => |obj| obj.deinit(alloc),
       else => {},
@@ -70,7 +74,7 @@ pub const V = union(K) {
 
   pub fn cow(v: *V, alloc: Alloc) !void {
     switch (v.*) {
-      inline .B, .I, .F, .N, .S, .C, .L, .m, .M => |n, t| {
+      inline .B, .I, .F, .N, .S, .C, .L, .D, .H, .m, .M => |n, t| {
         if (n.ptr.rc > 1 or n.ptr.meta & ArrayFlags.immutable != 0) {
           const next = try n.clone(alloc);  // clone() → init() stamps a fresh epoch
           n.deinit(alloc);
@@ -87,7 +91,7 @@ pub const V = union(K) {
 
   pub fn len(v: V) usize {
     return switch (v) {
-      inline .B, .I, .F, .N, .S, .C, .L => |n| n.ptr.len,
+      inline .B, .I, .F, .N, .S, .C, .L, .D, .H => |n| n.ptr.len,
       inline .m => |n| n.ptr.len,
       inline .M => |n| {
         const bv = n.bv();
@@ -108,6 +112,7 @@ pub const V = union(K) {
     return switch (x) {
       .blank => true, .err => x.err == y.err,
       .b => x.b == y.b, .i => x.i == y.i, .f => x.f == y.f,
+      .d => x.d == y.d, .h => x.h == y.h,
       .n => x.n == y.n, .s => x.s == y.s, .c => x.c == y.c,
       .o => @as(u64, @bitCast(x.o)) == @as(u64, @bitCast(y.o)),
       .p => x.p == y.p, // pointer equality
@@ -129,6 +134,8 @@ pub const V = union(K) {
       .B => |n| .{ .b = n.slice()[i] },
       .I => |n| .{ .i = n.slice()[i] },
       .F => |n| .{ .f = n.slice()[i] },
+      .D => |n| .{ .d = n.slice()[i] },
+      .H => |n| .{ .h = n.slice()[i] },
       .N => |n| .{ .n = n.slice()[i] },
       .S => |n| .{ .s = n.slice()[i] },
       .C => |n| .{ .c = n.slice()[i] },
@@ -150,8 +157,8 @@ pub const V = union(K) {
   pub fn isNull(v: V) bool {
     return switch (v) {
       .blank => false,
-      inline .b, .i, .f, .n, .s, .c => |a, kt| kt.isNullFn()(a),
-      inline .B, .I, .F, .N, .S, .C, .L => |n| n.ptr.len == 0,
+      inline .b, .i, .f, .n, .s, .c, .d, .h => |a, kt| kt.isNullFn()(a),
+      inline .B, .I, .F, .N, .S, .C, .L, .D, .H => |n| n.ptr.len == 0,
       inline .m, .M => |n| n.ptr.len == 0,
       else => false,
     };
@@ -162,8 +169,9 @@ pub const V = union(K) {
       .b => |a| a,
       .c => |a| a != 0, .s => |a| a != 0,
       .i => |a| a != 0 and a != @"0N", .f => |a| a != 0.0 and !std.math.isNan(a),
+      .d => |a| a != 0.0 and !std.math.isNan(a), .h => |a| a != 0.0 and !std.math.isNan(a),
       .n => |a| a != 0 and a != std.math.maxInt(u32),
-      inline .B, .I, .F, .N, .S, .C, .L => |n| n.ptr.len > 0,
+      inline .B, .I, .F, .N, .S, .C, .L, .D, .H => |n| n.ptr.len > 0,
       inline .m, .M => |n| n.ptr.len > 0,
       .o, .p => true,
       else => false,
@@ -172,7 +180,7 @@ pub const V = union(K) {
 
   pub fn rc(v: V) usize {
     return switch (v) {
-      inline .B, .I, .F, .N, .S, .C, .L => |n| n.ptr.rc,
+      inline .B, .I, .F, .N, .S, .C, .L, .D, .H => |n| n.ptr.rc,
       inline .m, .M => |n| n.ptr.rc,
       .p => |p| p.rc,
       .x => |obj| obj.rc,

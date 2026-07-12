@@ -40,4 +40,6 @@ pub const ExpOp  = struct { pub const simd = {}; pub fn f(x: anytype) @TypeOf(x)
 pub const LogOp  = struct { pub const simd = {}; pub fn f(x: anytype) @TypeOf(x) { return @log(x); } };
 pub const SinOp  = struct { pub const simd = {}; pub fn f(x: anytype) @TypeOf(x) { return @sin(x); } };
 pub const CosOp  = struct { pub const simd = {}; pub fn f(x: anytype) @TypeOf(x) { return @cos(x); } };
-pub const AbsOp  = struct { pub fn f(x: anytype) @TypeOf(x) { return if (@TypeOf(x) == f32) @abs(x) else if (x < 0) 0 -% x else x; } };
+pub const AbsOp  = struct { pub fn f(x: anytype) @TypeOf(x) {
+  return if (comptime @typeInfo(@TypeOf(x)) == .float) @abs(x) else if (x < 0) 0 -% x else x;
+} };
