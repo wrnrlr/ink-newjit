@@ -71,18 +71,50 @@ export fn ReadSafetensors(path_k: ?K) callconv(.c) ?K {
   const p = kcp(path_k) orelse return null;
   const n = kn(path_k);
   if (n <= 0) return null;
+  const path = p[0..@intCast(n)];
+
   const io = std.Io.Threaded.global_single_threaded.io();
-  const bytes = std.Io.Dir.cwd().readFileAlloc(io, p[0..@intCast(n)], alloc, std.Io.Limit.limited(4 << 30)) catch return null;
-  defer alloc.free(bytes);
-  return build(alloc, bytes) catch null;
+  const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch |e| {
+    std.debug.print("safetensors: cannot open '{s}': {s}\n", .{ path, @errorName(e) });
+    return null;
+  };
+  defer file.close(io);
+
+  const st = file.stat(io) catch |e| {
+    std.debug.print("safetensors: stat '{s}' failed: {s}\n", .{ path, @errorName(e) });
+    return null;
+  };
+  if (st.size == 0) return null;
+
+  // mmap the file instead of slurping it into one contiguous heap buffer: the
+  // reader treats the tensor data as a plain []u8 indexed by data_offsets, so a
+  // demand-paged mmap view is a drop-in replacement that avoids the single
+  // ~2 GB malloc that used to fail (silently) for multi-gigabyte models.
+  const mapped = std.posix.mmap(
+    null,
+    @intCast(st.size),
+    .{ .READ = true },
+    .{ .TYPE = .PRIVATE },
+    file.handle,
+    0,
+  ) catch |e| {
+    std.debug.print("safetensors: mmap '{s}' failed: {s}\n", .{ path, @errorName(e) });
+    return null;
+  };
+  defer std.posix.munmap(mapped);
+
+  return build(alloc, mapped) catch |e| {
+    std.debug.print("safetensors: decode '{s}' failed: {s}\n", .{ path, @errorName(e) });
+    return null;
+  };
 }
 
-fn build(alloc: Alloc, bytes: []const u8) OOM!K {
+fn build(alloc: Alloc, bytes: []const u8) reader.Error!K {
   var arena = std.heap.ArenaAllocator.init(alloc);
   defer arena.deinit();
   const aa = arena.allocator();
 
-  const file = reader.read(aa, bytes) catch return error.OutOfMemory;
+  const file = try reader.read(aa, bytes);
 
   const has_meta = file.meta.len > 0;
   const nentries = file.tensors.len + @as(usize, if (has_meta) 1 else 0);
