@@ -46,24 +46,28 @@ another.
   (`= < >`), match (`~`), and the monadic math (`- abs sqrt sqr exp log sin
   cos`) are closed within each Tier-2 type.
 
-| suffix | type | `@`   | example | null | scalar/vector |
-|--------|------|-------|---------|------|---------------|
-| `u`    | u32 natural | `` `u32 `` | `1u 2u 3u` | `0Nu` | `n` / `N` |
-| `d`    | f64 double  | `` `f64 `` | `2.3d` `2d` | `0nd` | `d` / `D` |
-| `h`    | f16 half    | `` `f16 `` | `2.3h` `2h` | `0nh` | `h` / `H` |
+Each Tier-2 type has a one-letter type symbol (lowercase = atom, uppercase =
+vector), matching the literal suffix. `@` returns it; the same letter is the
+cast target.
 
-Cross-tier conversion is via cast: `` `u32$5 ``, `` `f64$x ``, `` `f16$x ``,
+| suffix | type | `@` atom / vec | example | null | backing |
+|--------|------|----------------|---------|------|---------|
+| `u`    | u32 natural | `` `u `` / `` `U `` | `1u 2u 3u` | `0Nu` | u32 |
+| `d`    | f64 double  | `` `d `` / `` `D `` | `2.3d` `2d` | `0nd` | f64 |
+| `h`    | f16 half    | `` `h `` / `` `H `` | `2.3h` `2h` | `0nh` | f16 |
+
+Cross-tier conversion is via cast: `` `u$5 ``, `` `d$x ``, `` `h$x ``,
 `` `f$2.5d `` (back to f32), `` `i$2.9d ``. Casts route through the canonical
 f32/i32 hubs. `q3`/`q2` (fp8 e4m3/e5m2) and `bf16` are planned, not yet
 implemented (see the note at the end of this file / doc/design).
 
 ### Scalar types
 - `b` **Boolean** - boolean number `0b 1b`, null `0b`, type `` `b ``
-- `u` **Natural** - unsigned `u32`, e.g. `1u 2u 3u`, null `0Nu`, type `` `u32 `` (Tier 2)
+- `u` **Natural** - unsigned `u32`, e.g. `1u 2u 3u`, null `0Nu`, type `` `u `` (Tier 2)
 - `i` **Integer** - numbers like `-2 0 1`, null `0N`, infinities `-0W 0W`, 32bit signed int.
 - `f` **Float** - floating point numbers `0.1 2. -3.`, null `0n`, infinities `0w -0w`, 32bit float
-- `d` **Double** - `f64`, e.g. `2.3d`, null `0nd`, type `` `f64 `` (Tier 2)
-- `h` **Half** - `f16`, e.g. `2.3h`, null `0nh`, type `` `f16 `` (Tier 2)
+- `d` **Double** - `f64`, e.g. `2.3d`, null `0nd`, type `` `d `` (Tier 2)
+- `h` **Half** - `f16`, e.g. `2.3h`, null `0nh`, type `` `h `` (Tier 2)
 - **Symbol** - interned string, e.g. `` `px ``, null/empty `` ` ``, type `` `s ``
 - **Char** - a single character, eg `"H"`, null `" "`, type `` `c ``, u8 char
 
@@ -71,9 +75,9 @@ implemented (see the note at the end of this file / doc/design).
 - **Boolean** - boolean number `0b 1b`, null `0b`, type `` `b ``
 - **Integers** - array of integers, null `` &0 ``, type `` `I ``
 - **Floats** - array of floats, null `` 0#0.0 ``, type `` `F ``
-- **Naturals** - array of `u32`, e.g. `` 1u 2u 3u ``, type `` `u32 `` (Tier 2)
-- **Doubles** - array of `f64`, e.g. `` 1.0d 2.0d ``, type `` `f64 `` (Tier 2)
-- **Halves** - array of `f16`, e.g. `` 1.0h 2.0h ``, type `` `f16 `` (Tier 2)
+- **Naturals** - array of `u32`, e.g. `` 1u 2u 3u ``, type `` `U `` (Tier 2)
+- **Doubles** - array of `f64`, e.g. `` 1.0d 2.0d ``, type `` `D `` (Tier 2)
+- **Halves** - array of `f16`, e.g. `` 1.0h 2.0h ``, type `` `H `` (Tier 2)
 - **Symbols** - array of symbols, empty value `` 0#` ``, type `` `S ``
 - **Chars** - array of characters, null `""`, type `` `C ``
   - type symbol `` `C ``

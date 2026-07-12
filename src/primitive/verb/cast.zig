@@ -42,9 +42,9 @@ fn castInt(vm: *VM, x: V, y: V) V {
   return if (eql(u8, type_name, "c")) .{ .c = @intCast(y.i) }
          else if (eql(u8, type_name, "i")) y
          else if (eql(u8, type_name, "f")) .{ .f = @floatFromInt(y.i) }
-         else if (eql(u8, type_name, "u32")) .{ .n = i2n(y.i) }
-         else if (eql(u8, type_name, "f64")) .{ .d = @floatFromInt(y.i) }
-         else if (eql(u8, type_name, "f16")) .{ .h = @floatFromInt(y.i) }
+         else if (eql(u8, type_name, "u")) .{ .n = i2n(y.i) }
+         else if (eql(u8, type_name, "d")) .{ .d = @floatFromInt(y.i) }
+         else if (eql(u8, type_name, "h")) .{ .h = @floatFromInt(y.i) }
          else .{ .err = .domain };
 }
 
@@ -54,9 +54,9 @@ fn castFloat(vm: *VM, x: V, y: V) V {
   return if (eql(u8, type_name, "c")) .{ .c = @intFromFloat(y.f) }
          else if (eql(u8, type_name, "i")) .{ .i = @intFromFloat(y.f) }
          else if (eql(u8, type_name, "f")) y
-         else if (eql(u8, type_name, "u32")) .{ .n = f2n(y.f) }
-         else if (eql(u8, type_name, "f64")) .{ .d = y.f }
-         else if (eql(u8, type_name, "f16")) .{ .h = @floatCast(y.f) }
+         else if (eql(u8, type_name, "u")) .{ .n = f2n(y.f) }
+         else if (eql(u8, type_name, "d")) .{ .d = y.f }
+         else if (eql(u8, type_name, "h")) .{ .h = @floatCast(y.f) }
          else if (eql(u8, type_name, "I")) .{ .i = @bitCast(y.f) }
          else .{ .err = .domain };
 }
@@ -64,20 +64,20 @@ fn castFloat(vm: *VM, x: V, y: V) V {
 // f64 / f16 scalar → other types. Identity on same width.
 fn castDbl(vm: *VM, x: V, y: V) V {
   const t = vm.getSymbol(x.s);
-  return if (eql(u8, t, "f64")) y
+  return if (eql(u8, t, "d")) y
          else if (eql(u8, t, "f")) .{ .f = @floatCast(y.d) }
-         else if (eql(u8, t, "f16")) .{ .h = @floatCast(y.d) }
+         else if (eql(u8, t, "h")) .{ .h = @floatCast(y.d) }
          else if (eql(u8, t, "i")) .{ .i = @intFromFloat(y.d) }
-         else if (eql(u8, t, "u32")) .{ .n = f2n(@floatCast(y.d)) }
+         else if (eql(u8, t, "u")) .{ .n = f2n(@floatCast(y.d)) }
          else .{ .err = .domain };
 }
 fn castHlf(vm: *VM, x: V, y: V) V {
   const t = vm.getSymbol(x.s);
-  return if (eql(u8, t, "f16")) y
+  return if (eql(u8, t, "h")) y
          else if (eql(u8, t, "f")) .{ .f = @floatCast(y.h) }
-         else if (eql(u8, t, "f64")) .{ .d = @floatCast(y.h) }
+         else if (eql(u8, t, "d")) .{ .d = @floatCast(y.h) }
          else if (eql(u8, t, "i")) .{ .i = @intFromFloat(y.h) }
-         else if (eql(u8, t, "u32")) .{ .n = f2n(@floatCast(y.h)) }
+         else if (eql(u8, t, "u")) .{ .n = f2n(@floatCast(y.h)) }
          else .{ .err = .domain };
 }
 
@@ -85,7 +85,7 @@ fn castHlf(vm: *VM, x: V, y: V) V {
 // (below), identity on `u32`.
 fn castNat(vm: *VM, x: V, y: V) V {
   const type_name = vm.getSymbol(x.s);
-  return if (eql(u8, type_name, "u32")) y
+  return if (eql(u8, type_name, "u")) y
          else if (eql(u8, type_name, "i")) .{ .i = if (y.n > std.math.maxInt(i32)) V.@"0N" else @intCast(y.n) }
          else if (eql(u8, type_name, "f")) .{ .f = @floatFromInt(y.n) }
          else if (eql(u8, type_name, "c")) .{ .c = @truncate(y.n) }
@@ -137,15 +137,15 @@ fn castInts(vm: *VM, x: V, y: V) V {
     const res = N(f32).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @floatFromInt(v);
     return .{ .F = res };
-  } else if (eql(u8, type_name, "u32")) {
+  } else if (eql(u8, type_name, "u")) {
     const res = N(u32).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = i2n(v);
     return .{ .N = res };
-  } else if (eql(u8, type_name, "f64")) {
+  } else if (eql(u8, type_name, "d")) {
     const res = N(f64).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @floatFromInt(v);
     return .{ .D = res };
-  } else if (eql(u8, type_name, "f16")) {
+  } else if (eql(u8, type_name, "h")) {
     const res = N(f16).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @floatFromInt(v);
     return .{ .H = res };
@@ -165,15 +165,15 @@ fn castFloats(vm: *VM, x: V, y: V) V {
     return .{ .I = res };
   } else if (eql(u8, type_name, "f")) {
     return y.ref();  // identity: caller releases y, so hand back a retained ref
-  } else if (eql(u8, type_name, "u32")) {
+  } else if (eql(u8, type_name, "u")) {
     const res = N(u32).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = f2n(v);
     return .{ .N = res };
-  } else if (eql(u8, type_name, "f64")) {
+  } else if (eql(u8, type_name, "d")) {
     const res = N(f64).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = v;
     return .{ .D = res };
-  } else if (eql(u8, type_name, "f16")) {
+  } else if (eql(u8, type_name, "h")) {
     const res = N(f16).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @floatCast(v);
     return .{ .H = res };
@@ -188,13 +188,13 @@ fn castFloats(vm: *VM, x: V, y: V) V {
 fn castDbls(vm: *VM, x: V, y: V) V {
   const t = vm.getSymbol(x.s);
   const src = y.D.slice();
-  if (eql(u8, t, "f64")) {
+  if (eql(u8, t, "d")) {
     return y.ref();
   } else if (eql(u8, t, "f")) {
     const res = N(f32).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @floatCast(v);
     return .{ .F = res };
-  } else if (eql(u8, t, "f16")) {
+  } else if (eql(u8, t, "h")) {
     const res = N(f16).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @floatCast(v);
     return .{ .H = res };
@@ -207,13 +207,13 @@ fn castDbls(vm: *VM, x: V, y: V) V {
 fn castHlfs(vm: *VM, x: V, y: V) V {
   const t = vm.getSymbol(x.s);
   const src = y.H.slice();
-  if (eql(u8, t, "f16")) {
+  if (eql(u8, t, "h")) {
     return y.ref();
   } else if (eql(u8, t, "f")) {
     const res = N(f32).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @floatCast(v);
     return .{ .F = res };
-  } else if (eql(u8, t, "f64")) {
+  } else if (eql(u8, t, "d")) {
     const res = N(f64).init(vm.alloc, src.len) catch return V{ .err = .memory };
     for (src, res.slice()) |v, *d| d.* = @floatCast(v);
     return .{ .D = res };
@@ -228,7 +228,7 @@ fn castHlfs(vm: *VM, x: V, y: V) V {
 fn castNats(vm: *VM, x: V, y: V) V {
   const type_name = vm.getSymbol(x.s);
   const src = y.N.slice();
-  if (eql(u8, type_name, "u32")) {
+  if (eql(u8, type_name, "u")) {
     return y.ref();  // identity: caller releases y, so hand back a retained ref
   } else if (eql(u8, type_name, "i")) {
     const res = N(i32).init(vm.alloc, src.len) catch return V{ .err = .memory };

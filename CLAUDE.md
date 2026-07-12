@@ -96,5 +96,7 @@ Extensions are shared libraries loaded at runtime via `src/ffi.zig`. Available: 
 ## Useful References
 
 - `AGENT.md` — language tips, known gotchas, full operator reference
-- `doc/spec.md` — language specification (WIP, most up-to-date)
-- `doc/triage.md` — open correctness issues
+- `doc/reference.md` — language specification (WIP, most up-to-date)
+- `.plan/triage.md` — open correctness issues
+- `.plan/tasks.md` — future work 
+- `.plan/ideas.md` — Open questions and research ideas

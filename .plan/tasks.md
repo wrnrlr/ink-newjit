@@ -31,22 +31,6 @@ Add skills for the following task profiles.
   - snapshot tool
 - Ink native module development
 
-## Flip int `` +3 ``
-What do do with flipping an int?
-There is no implementation for the flip verb for scalars.
-```
-~/Code/ink ink
-  +3
-!type
-  +3
-
-~/Code/ink k
-ngn/k, (c) 2019-2024 ngn, GNU AGPLv3. type \ for more info
- +3
-,,3
-```
-Maybe we can use the plus together with a number as the syntax for the new natural number type. The plus works the same way as minus in the float and integers except for natural numbers we always write them beginning with a plus. ex `` +1 +2 +3 ``
-
 ## Doc tool `ink doc`
 
 ## Remove `.blank` type

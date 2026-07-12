@@ -1222,14 +1222,14 @@ test "tier-2 float precision (f64/f16) dispatch" {
 test "tier-2 literals and casts round-trip" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("3u", "3u");
-  try t.check("@3u", "`u32");
+  try t.check("@3u", "`u");
   try t.check("2.3d", "2.3d");
-  try t.check("@2.3d", "`f64");
+  try t.check("@2.3d", "`d");
   try t.check("2.3h", "2.3h");
-  try t.check("@2.3h", "`f16");
+  try t.check("@2.3h", "`h");
   try t.check("2d", "2.0d");
-  try t.check("`u32$5", "5u");
-  try t.check("`f64$5", "5.0d");
+  try t.check("`u$5", "5u");
+  try t.check("`d$5", "5.0d");
   try t.check("`f$2.5d", "2.5");
   try t.check("`i$2.9d", "2");
   // null literals round-trip
