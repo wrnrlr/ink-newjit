@@ -200,8 +200,8 @@ chk[1b; |/wds2=0x3F800000; "1.0 bit pattern present in module"]
 chk[1b; isVecTy[`v4];  "isVecTy `v4 = true"]
 chk[1b; isVecTy[`v2];  "isVecTy `v2 = true"]
 chk[0b; isVecTy[`f32]; "isVecTy `f32 = false"]
-chk[`v4; binRty[`*; `v4; `f32; `v4]; "binRty v4*f32 = v4"]
-chk[`f32; binRty[`+; `f32; `f32; `f32]; "binRty f32+f32 = f32"]
+chk[`v4; binRty[`"*"; `v4; `f32; `v4]; "binRty v4*f32 = v4"]
+chk[`f32; binRty[`"+"; `f32; `f32; `f32]; "binRty f32+f32 = f32"]
 
 / opVTS (OpVectorTimesScalar) = opcode 0x8E
 chk[(0x0005008E; Tv4; 20; 19; 18); opVTS[Tv4; 20; 19; 18]; "opVTS word sequence"]
@@ -209,16 +209,16 @@ chk[5; #opVTS[Tv4; 20; 19; 18]; "opVTS is 5 words"]
 
 / dispBin v4 * f32 → opVTS
 Nid:: 25; Buf:: ()
-wVTS: dispBin[`*; `v4; 25; `v4; 10; `f32; 11]
+wVTS: dispBin[`"*"; `v4; 25; `v4; 10; `f32; 11]
 chk[0x0005008E; wVTS[0]; "dispBin v4*f32 emits opVTS"]
 chk[Tv4; wVTS[1]; "dispBin v4*f32 result type = Tv4"]
 
 / dispBin f32 * v4 → opVTS (commuted)
-wVTSc: dispBin[`*; `v4; 26; `f32; 11; `v4; 10]
+wVTSc: dispBin[`"*"; `v4; 26; `f32; 11; `v4; 10]
 chk[0x0005008E; wVTSc[0]; "dispBin f32*v4 also emits opVTS"]
 
 / dispBin v4 + v4 → opFadd
-wVadd: dispBin[`+; `v4; 27; `v4; 10; `v4; 11]
+wVadd: dispBin[`"+"; `v4; 27; `v4; 10; `v4; 11]
 chk[0x00050081; wVadd[0]; "dispBin v4+v4 emits opFadd"]
 
 / opCons4 (OpCompositeConstruct vec4)

@@ -120,9 +120,10 @@ list / syms dispatch / fuse map / dye lowering from it instead of hand-syncing.
   pass unchanged; `test/spirv.k` golden + earth/pbr/clothgpu/relax demos verified.
 
   **Two known trade-offs (deliberate, documented):**
-  1. *`-` adjacency*: a math name is now a noun, so `abs -4` parses as `abs - 4`
-     (dyadic subtract), not `abs(-4)`. Use `abs[-4]`. Zero existing k files used the
-     regressing pattern; one unit test was updated.
+  1. *`-` adjacency*: a math name is a noun, so `abs-4` is dyadic subtract. A `-`
+     glued to a numeric literal after a space is a negative literal, though, so
+     `abs -4` applies `abs` to `-4` (ngn/k rule); use `abs[-x]` when the operand
+     isn't a literal.
   2. *No fusion yet*: `sin x` is a projection-apply of a global, so it does not fuse
      into an elementwise `KOp` kernel (it still runs one vectorised `dispatch1`).
      The compile-time peephole that recognises an intrinsic symbol / a global bound

@@ -234,8 +234,8 @@ ncVec: [f32:1; v2:2; v3:3; v4:4]
 jnRty: {[a;b] n: ncVec[a]+ncVec[b]; $[n=2;`v2;n=3;`v3;`v4]}
 
 / Comparison ops always produce bool; others propagate vector type or use operand type
-cmpOps: `<`>`=`~`&`|
-binRty: {[op;aty;bty;oty] $[op in cmpOps; `bool; op~`,; jnRty[aty;bty]; isVecTy[aty]; aty; isVecTy[bty]; bty; aty]}
+cmpOps: `"<"`">"`"="`"~"`"&"`"|"
+binRty: {[op;aty;bty;oty] $[op in cmpOps; `bool; op~`","; jnRty[aty;bty]; isVecTy[aty]; aty; isVecTy[bty]; bty; aty]}
 
 / ── Known 1-arg and multi-arg math function names ────────────────────────────
 mathFns1: `abs`floor`fract`sign`sqrt`exp`log`tanh`sqr`sin`cos`asin`acos`atan`length`normalize
@@ -245,19 +245,19 @@ mathFns:  `abs`floor`fract`sign`sqrt`exp`log`tanh`sqr`sin`cos`asin`acos`atan`len
 dispBin: {[op;rty;r;aty;a;bty;b]
   rt: Tid[rty]
   at: Tid[aty]
-  $[op~`+;   opFadd[rt;r;a;b]
-    op~`-;   opFsub[rt;r;a;b]
-    op~`%;   opFdiv[rt;r;a;b]
-    op~`*;   $[isVecTy[aty] & ~isVecTy[bty]; opVTS[rt;r;a;b]
+  $[op~`"+";   opFadd[rt;r;a;b]
+    op~`"-";   opFsub[rt;r;a;b]
+    op~`"%";   opFdiv[rt;r;a;b]
+    op~`"*";   $[isVecTy[aty] & ~isVecTy[bty]; opVTS[rt;r;a;b]
                isVecTy[bty] & ~isVecTy[aty]; opVTS[rt;r;b;a]
                opFmul[rt;r;a;b]]
-    op~`,;   (0x00050050;rt;r;a;b)   / OpCompositeConstruct, 2 constituents: v2+f32→v3, v3+f32→v4, etc.
-    op~`<;   opFOlt[at;r;a;b]   / <= / >= are handled by the compTrans peephole
-    op~`>;   opFOgt[at;r;a;b]
-    op~`=;   opFOeq[at;r;a;b]
-    op~`~;   opFOne[at;r;a;b]
-    op~`&;   opLAnd[at;r;a;b]
-    op~`|;   opLOr[at;r;a;b]
+    op~`",";   (0x00050050;rt;r;a;b)   / OpCompositeConstruct, 2 constituents: v2+f32→v3, v3+f32→v4, etc.
+    op~`"<";   opFOlt[at;r;a;b]   / <= / >= are handled by the compTrans peephole
+    op~`">";   opFOgt[at;r;a;b]
+    op~`"=";   opFOeq[at;r;a;b]
+    op~`"~";   opFOne[at;r;a;b]
+    op~`"&";   opLAnd[at;r;a;b]
+    op~`"|";   opLOr[at;r;a;b]
     opFadd[rt;r;a;b]]}
 
 dispUn: {[op;ty;r;a]
@@ -265,8 +265,8 @@ dispUn: {[op;ty;r;a]
   $[op~`sin;       opSin[t;r;a]
     op~`cos;       opCos[t;r;a]
     op~`sqrt;      opSqrt[t;r;a]
-    op~`-;         opFneg[t;r;a]
-    op~`~;         opLNot[Tbool;r;a]
+    op~`"-";         opFneg[t;r;a]
+    op~`"~";         opLNot[Tbool;r;a]
     op~`abs;       opAbs[t;r;a]
     op~`floor;     opFloor[t;r;a]
     op~`fract;     opFract[t;r;a]
@@ -423,7 +423,7 @@ compLit: {[i; oty]
 compVar: {[i; env] env[kVal i]}
 
 / x<=y → ~(x>y),  x>=y → ~(x<y).  `flip` is the strict comparison to negate;
-/ the b operand is an apposit(`= …) wrapper, so its `a child is the real operand.
+/ the b operand is an apposit(`"=" …) wrapper, so its `a child is the real operand.
 compLeGe: {[i; env; flip]
   ap: compNode[kF1[i;`a];          env; `f32]
   bp: compNode[kF1[kF1[i;`b];`a];  env; `f32]
@@ -437,14 +437,14 @@ compLeGe: {[i; env; flip]
 compTransNorm: {[i; env; oty]
   op: kVal kF1[i;`v]
   / Feed the right hint to operands: numeric comparisons want f32, bool ops want bool
-  opTy: $[op in `<`>`=`~; `f32; op in (`&;`|); `bool; oty]
+  opTy: $[op in `"<"`">"`"="`"~"; `f32; op in (`"&";`"|"); `bool; oty]
   ap: compNode[kF1[i;`a]; env; opTy]
   bp: compNode[kF1[i;`b]; env; opTy]
   aty: ap[1]; bty: bp[1]
   rty: binRty[op; aty; bty; oty]
   / Bug fix: for +,-,% on vector ⊕ scalar, splat the scalar up to the vector type
   / so OpFAdd/Sub/Div see matching operands (* uses OpVectorTimesScalar already).
-  bcast: (op in `+`-`%) & isVecTy[rty] & ~(isVecTy[aty] & isVecTy[bty])
+  bcast: (op in `"+"`"-"`"%") & isVecTy[rty] & ~(isVecTy[aty] & isVecTy[bty])
   aId: $[bcast & ~isVecTy[aty]; splat[rty; ap[0]]; ap[0]]
   bId: $[bcast & ~isVecTy[bty]; splat[rty; bp[0]]; bp[0]]
   da:  $[bcast & ~isVecTy[aty]; rty; aty]
@@ -455,35 +455,35 @@ compTransNorm: {[i; env; oty]
 }
 
 / Peephole for the missing <= / >= operators.  ink has no such tokens: `x<=y`
-/ lexes as `x < (=y)` and `x>=y` as `x > (=y)` (monadic `=` on the right).
+/ lexes as `x < (=y)` and `x>=y` as `x > (=y)` (monadic `"="` on the right).
 / Detect that shape and emit the De Morgan equivalent so shaders can write
-/ `a<=b` / `a>=b` directly instead of `~(a>b)` / `~(a<b)`.
+/ `a<=b` / `a>=b` directly instead of `"~"(a>b)` / `"~"(a<b)`.
 compTrans: {[i; env; oty]
   vN: kF1[i;`v]
-  $[(kKind vN)~`term; compAdverb[i; vN; env; oty]   / adverbed verb: `i f/ x`, `f g/ x`
+  $[(kKind vN)~`term; compAdverb[i; vN; env; oty]   / adverbed verb: `i f/ x`"," `f g/ x`
     compTransOp[i; env; oty]]
 }
 compTransOp: {[i; env; oty]
   op: kVal kF1[i;`v]; b: kF1[i;`b]
-  isEq: ((kKind b)~`apposit) & ((kVal kF1[b;`f])~`=)
-  $[(op~`<) & isEq; compLeGe[i; env; `>]
-    (op~`>) & isEq; compLeGe[i; env; `<]
+  isEq: ((kKind b)~`apposit) & ((kVal kF1[b;`f])~`"=")
+  $[(op~`"<") & isEq; compLeGe[i; env; `">"]
+    (op~`">") & isEq; compLeGe[i; env; `"<"]
     compTransNorm[i; env; oty]]
 }
 
-/ Monadic application written as juxtaposition: `floor px`, `sin px`, `-x`.
-/ The op slot is a bare symbol for built-in verbs (`sin`-x) but a var node
+/ Monadic application written as juxtaposition: `floor px`"," `sin px`"," `"-"x`.
+/ The op slot is a bare symbol for built-in verbs (`sin`"-"x) but a var node
 / (`literal;`var;`floor) for math names that aren't ink keywords — normalise
 / both to the bare symbol so dispUn matches (else floor/fract/sign/length/
 / normalize silently fall through to negate).
-/ Monadic application `floor px`, `-x`. The f slot is a var row (math name) or an
+/ Monadic application `floor px`"," `"-"x`. The f slot is a var row (math name) or an
 / op row (builtin verb); either way its `value holds the glyph/name for dispUn.
 compAppos: {[i; env; oty]
   op: kVal kF1[i;`f]
   ap: compNode[kF1[i;`a]; env; oty]
   r: newId[]
   emitBuf dispUn[op; ap[1]; r; ap[0]]
-  rty: $[op~`length; `f32; op~`~; `bool; ap[1]]
+  rty: $[op~`length; `f32; op~`"~"; `bool; ap[1]]
   (r; rty)
 }
 
@@ -562,9 +562,9 @@ compIset: {[i; env]
 / ── In-kernel bounded loops (control flow for the compute dialect) ───────────
 / The dialect grows ONE loop CFG idiom, shared by three surfaces:
 /   rsum[K; {[k] e}]  — fused index map-reduce (Σ e over k=0..K-1). k has no single
-/                       adverb for this (`+/e'!K` needs a materialised range, which
+/                       adverb for this (`"+/"e'!K` needs a materialised range, which
 /                       a per-thread kernel can't build) so it stays a primitive.
-/   i f/ x  (N-do)    — apply verb `f` to state `x`, `i` times.   ← real k adverb
+/   i f/ x  (N-do)    — apply verb `f` to state `x`"," `i` times.   ← real k adverb
 /   f g/ x  (While)   — apply body `g` to state `x` while cond `f x` holds. ← adverb
 / The verb/cond `{[s] …}` is NOT a runtime closure — its body is INLINED with the
 / param bound to the carried state (and, for rsum, `k` bound to the loop counter as
@@ -644,7 +644,7 @@ compRmax: {[i; env]
   (accPhi; `f32)
 }
 
-/ N-do:  i f/ x  — verb `f` (=`vN`, a 1-param lambda) applied to state x, i times.
+/ N-do:  i f/ x  — verb `f` (=`vN`"," a 1-param lambda) applied to state x, i times.
 / The counter drives trip count only; the verb sees the state, not the counter
 / (pure k n-do). State type follows the seed (f32 / vec2 / …).
 compNdo: {[aN; vN; bN; env; oty]
@@ -660,7 +660,7 @@ compNdo: {[aN; vN; bN; env; oty]
   (sPhi; sty)
 }
 
-/ While:  f g/ x  — body `g` (=`vN`) applied to state x while cond `f` (=`cN`, a
+/ While:  f g/ x  — body `g` (=`vN`) applied to state x while cond `f` (=`cN`"," a
 / 1-param lambda returning bool) holds. No counter: cond is re-tested in the header.
 compWhile: {[cN; vN; bN; env; oty]
   sp:   compNode[bN; env; oty]; sty: sp 1
@@ -681,13 +681,13 @@ compWhile: {[cN; vN; bN; env; oty]
 }
 
 / Adverbed-verb transit: `x adverb-verb y`. The operator node is a `term` whose
-/ value is the adverb glyph and whose `f` child is the verb. `/` splits N-do vs
+/ value is the adverb glyph and whose `f` child is the verb. `"/"` splits N-do vs
 / While by the left arg's kind (a lambda ⇒ While cond; else ⇒ N-do count).
 compAdverb: {[i; vN; env; oty]
   glyph: kVal vN
   verb:  kF1[vN;`f]
   aN:    kF1[i;`a]; bN: kF1[i;`b]
-  $[glyph~`/; $[(kKind aN)~`lambda; compWhile[aN; verb; bN; env; oty]
+  $[glyph~`"/"; $[(kKind aN)~`lambda; compWhile[aN; verb; bN; env; oty]
                 compNdo[aN; verb; bN; env; oty]]
     (0; oty)]                                     / other adverbs: not in kernels yet
 }
@@ -1083,8 +1083,8 @@ compStencil: {[fn]
 shader.stencil: compStencil
 
 / ── compStencilU: stencil + a params buffer (uniforms as an indexable buffer) ────
-/ Kernel {[u; g; i]}: `u`=input (binding 0), `g`=params (binding 2, indexable
-/ g[0],g[1],…), `i`=thread index; result → output (binding 1). Lets ONE compiled
+/ Kernel {[u; g; i]}: `u`"="input (binding 0), `g`"="params (binding 2, indexable
+/ g[0],g[1],…), `i`"="thread index; result → output (binding 1). Lets ONE compiled
 / pipeline serve any grid: pass N/ω/… in the params buffer instead of baking them.
 / nbind=3; gpu.dispatch order is (in; out; params). g is just another storage buffer,
 / so the buffer-index intrinsic reads it for free.
@@ -1134,8 +1134,8 @@ compStencilU: {[fn]
 shader.stencilU: compStencilU
 
 / ── compStencilIP: in-place stencil (single state buffer) + params ──────────────
-/ Kernel {[u; g; i]}: `u`=state (binding 0, read AND written in place), `g`=params
-/ (binding 1), `i`=thread index; result → u[i] (binding 0, same buffer). This is
+/ Kernel {[u; g; i]}: `u`"="state (binding 0, read AND written in place), `g`"="params
+/ (binding 1), `i`"="thread index; result → u[i] (binding 0, same buffer). This is
 / what red-black Gauss-Seidel/SOR needs: reds read blacks and write reds in place,
 / so the just-updated reds are visible to the black pass. Non-updated cells must
 / store their own value (u[i]); the resulting same-value read/write "race" is
@@ -1184,7 +1184,7 @@ compStencilIP: {[fn]
 shader.stencilIP: compStencilIP
 
 / ── compScatter: edge-parallel atomic scatter (the cloth/graph intrinsic) ────────
-/ Kernel {[acc; a; b; g; i]}: one thread per EDGE (i = edge index). `a`,`b` are f32
+/ Kernel {[acc; a; b; g; i]}: one thread per EDGE (i = edge index). `a`","`b` are f32
 / input buffers (endpoint indices / per-edge attributes), read with a[i]; `g` is a
 / params buffer (e.g. g[0]=edge count). `acc` is an i32 accumulator scattered into
 / with scatterAdd[acc; node; val] — OpAtomicIAdd, so many edges hitting the same
@@ -1350,11 +1350,11 @@ xScalarLit: {[i;oty] litTy:kKind i; useTy:$[(litTy~`int)&(oty~`f32);`float;litTy
 
 xTransNorm: {[i;env;oty]
   op: kVal kF1[i;`v]
-  opTy: $[op in `<`>`=`~; `f32; op in (`&;`|); `bool; oty]
+  opTy: $[op in `"<"`">"`"="`"~"; `f32; op in (`"&";`"|"); `bool; oty]
   ap: xNode[kF1[i;`a];env;opTy]; bp: xNode[kF1[i;`b];env;opTy]
   aty: ap 1; bty: bp 1
   rty: binRty[op;aty;bty;oty]
-  bcast: (op in `+`-`%) & isVecTy[rty] & ~(isVecTy[aty] & isVecTy[bty])
+  bcast: (op in `"+"`"-"`"%") & isVecTy[rty] & ~(isVecTy[aty] & isVecTy[bty])
   aN: $[bcast & ~isVecTy[aty]; xSplat[rty; ap 0]; ap 0]
   bN: $[bcast & ~isVecTy[bty]; xSplat[rty; bp 0]; bp 0]
   (xEmit[`arith; rty; (aN;bN); op]; rty)}
@@ -1364,15 +1364,15 @@ xLeGe: {[i;env;flip]
   (xEmit[`lnot;`bool;,rc;`]; `bool)}
 xTransOp: {[i;env;oty]
   op: kVal kF1[i;`v]; b: kF1[i;`b]
-  isEq: ((kKind b)~`apposit) & ((kVal kF1[b;`f])~`=)
-  $[(op~`<)&isEq; xLeGe[i;env;`>]
-    (op~`>)&isEq; xLeGe[i;env;`<]
+  isEq: ((kKind b)~`apposit) & ((kVal kF1[b;`f])~`"=")
+  $[(op~`"<")&isEq; xLeGe[i;env;`">"]
+    (op~`">")&isEq; xLeGe[i;env;`"<"]
     xTransNorm[i;env;oty]]}
 xTrans: {[i;env;oty] $[(kKind kF1[i;`v])~`term; (0;oty); xTransOp[i;env;oty]]}
 xAppos: {[i;env;oty]
   op: kVal kF1[i;`f]; ap: xNode[kF1[i;`a];env;oty]; aty: ap 1
   $[op in mathFns; (xEmit[`math; $[op~`length;`f32;aty]; ,ap 0; op]; $[op~`length;`f32;aty])
-    op~`~; (xEmit[`lnot;`bool;,ap 0;`]; `bool)
+    op~`"~"; (xEmit[`lnot;`bool;,ap 0;`]; `bool)
     (xEmit[`neg;aty;,ap 0;`]; aty)]}
 xFnCall: {[name;i;env;oty]
   args: kF[i;`arg]; n:#args
@@ -1424,7 +1424,7 @@ xSeq: {[stmts;env;oty] n:#stmts; $[n=0;(0;oty); n=1;xNode[stmts 0;env;oty]; xSeq
 xSetConst: {[k;v] xOp[k]::`const; xVal[k]::v; xArg[k]::()}
 / Each $[] branch must be ONE expression, so the multi-statement arith/math folds
 / live in helpers. `sqrt@a etc. run on the host (dye is the CPU compiler).
-xFoldArith: {[k] args:xArg k; g:xVal k; a:xVal args 0; b:xVal args 1; v:$[g~`+;a+b;g~`-;a-b;g~`*;a*b;g~`%;a%b;0n]; $[^v;0;xSetConst[k;v]]}
+xFoldArith: {[k] args:xArg k; g:xVal k; a:xVal args 0; b:xVal args 1; v:$[g~`"+";a+b;g~`"-";a-b;g~`"*";a*b;g~`"%";a%b;0n]; $[^v;0;xSetConst[k;v]]}
 xFoldMath:  {[k] args:xArg k; nm:xVal k; a:xVal args 0; v:$[nm~`sqrt;`sqrt@a;nm~`sqr;a*a;nm~`abs;`abs@a;nm~`sin;`sin@a;nm~`cos;`cos@a;nm~`floor;`floor@a;0n]; $[^v;0;xSetConst[k;v]]}
 xFoldOne: {[k]
   op:xOp k; args:xArg k

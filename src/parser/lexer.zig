@@ -291,20 +291,14 @@ pub const Lexer = struct {
         while (self.i < self.src.len and self.CR() != '"') self.adv();
         if (self.i < self.src.len) self.adv();
       } else {
-        // unquoted symbol: `abc, `123, `+, `<=, etc.
-        // If body starts with an op char, consume all consecutive op chars (greedy).
-        // If body starts with alnum, consume alnum and dots only.
-        // The two modes never mix: `<abc reads as symbol `< then identifier abc.
-        const sym_ops = "%!&+*|<>=~,^#_$?@/-";
-        if (self.i < self.src.len and std.mem.indexOfScalar(u8, sym_ops, self.CR()) != null) {
-          while (self.i < self.src.len and std.mem.indexOfScalar(u8, sym_ops, self.CR()) != null) {
-            self.adv();
-          }
-        } else {
-          while (self.i < self.src.len) {
-            const sc = self.CR();
-            if (isAlphanumeric(sc) or sc == '.') self.adv() else break;
-          }
+        // unquoted symbol: `abc, `123, `a.b — alphanumerics and dots only.
+        // An operator glyph directly after the backtick does NOT join the symbol:
+        // `~ is the null symbol ` followed by the Match verb ~ (so `~` is a Match of
+        // two null symbols, and `~ is a match projection), matching ngn/k. To name a
+        // symbol after an operator, quote it: `"+", `"<=".
+        while (self.i < self.src.len) {
+          const sc = self.CR();
+          if (isAlphanumeric(sc) or sc == '.') self.adv() else break;
         }
       }
       self.tag = .noun;
@@ -318,9 +312,14 @@ pub const Lexer = struct {
 
     // Numbers: digit or minus-then-digit (only when next char is numeric)
     if (isDigit(c)) return self.lexNumber(start);
-    if (c == '-' and self.tag!=.noun) {
+    if (c == '-') {
       const n = self.ch(1);
-      if (n != null and (isDigit(n.?) or n.? == '.')) {
+      const num_follows = n != null and (isDigit(n.?) or n.? == '.');
+      // A '-' glued to a following number is a negative literal unless it sits
+      // directly after a noun with no space — then it is dyadic subtract. So
+      // `a-3` subtracts but `a -3` juxtaposes a and -3 (e.g. `abs -3` applies
+      // abs to -3), matching ngn/k where `cos-3` errors but `cos -3` works.
+      if (num_follows and (self.tag != .noun or had_space)) {
         return self.lexNumber(start);
       }
     }
@@ -633,6 +632,41 @@ test "lexer symbol" {
   const t = lex.next();
   try std.testing.expectEqual(TT.symbol, t.tt);
   try std.testing.expectEqualStrings("`abc", t.slice(src));
+}
+
+test "lexer symbol stops before op glyph" {
+  // `~ is the null symbol ` then the Match verb ~ (dropped op-glyph symbols).
+  const src = "`~`";
+  var lex = Lexer.init(src);
+  const t1 = lex.next();
+  try std.testing.expectEqual(TT.symbol, t1.tt);
+  try std.testing.expectEqualStrings("`", t1.slice(src)); // empty symbol body
+  const t2 = lex.next();
+  try std.testing.expectEqual(TT.op, t2.tt);
+  try std.testing.expectEqualStrings("~", t2.slice(src));
+  const t3 = lex.next();
+  try std.testing.expectEqual(TT.symbol, t3.tt);
+  try std.testing.expectEqualStrings("`", t3.slice(src));
+}
+
+test "lexer minus juxtaposition vs subtract" {
+  // `abs -3` → iden then negative int (juxtapose/apply);
+  // `abs-3`  → iden, op '-', int 3 (subtract).
+  {
+    const src = "abs -3";
+    var lex = Lexer.init(src);
+    try std.testing.expectEqual(TT.iden, lex.next().tt);
+    const t = lex.next();
+    try std.testing.expectEqual(TT.int, t.tt);
+    try std.testing.expectEqualStrings("-3", t.slice(src));
+  }
+  {
+    const src = "abs-3";
+    var lex = Lexer.init(src);
+    try std.testing.expectEqual(TT.iden, lex.next().tt);
+    try std.testing.expectEqual(TT.op, lex.next().tt);
+    try std.testing.expectEqual(TT.int, lex.next().tt);
+  }
 }
 
 test "endsOpenString" {

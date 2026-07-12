@@ -133,7 +133,16 @@ Not yet triaged — likely the `@[x;idxvec;:;computed-vec]` amend path or the
 
 ---
 
-## 8. `` `~ `` (and other op-glyph symbols) glue to a following backtick — Match needs spaces
+## 8. `` `~ `` (and other op-glyph symbols) glue to a following backtick — Match needs spaces — FIXED
+
+**FIXED**: the backtick-symbol lexer no longer consumes operator glyphs. After a
+`` ` `` only alphanumerics and dots join the symbol; an operator glyph is its own
+verb. So `` `~ `` is the null symbol `` ` `` followed by the Match verb (a
+projection), `` `~` `` is a Match of two null symbols (→ `1b`), and `` `=` `` → `1b`,
+matching ngn/k. To NAME a symbol after an operator, quote it: `` `"+" ``, `` `"<=" ``.
+Op-glyph symbols like `` `+ `` / `` `<= `` are gone — every k source that compared
+CST op values (`lib/dye.k`, `test/spirv.k`, `tools/lsp.k`) was migrated to the
+quoted form. Original report below.
 
 ```k-repl
  `~`          / → `~`   (the SYMBOL "~", then a null symbol — NOT a match)
@@ -151,7 +160,12 @@ time while writing `lib`/`tools/lsp.k` (a `` `~w `` blank-check silently misread
 
 ---
 
-## 9. Special-symbol builtins apply by juxtaposition / brackets, not `@`
+## 9. Special-symbol builtins apply by juxtaposition / brackets, not `@` — FIXED
+
+**FIXED**: `marshal.zig`'s Unmarshal handlers register into `@`'s row for the
+byte-ish operand types (`_s_C`/`_s_B`/`_s_s`/`_s_i`) but now delegate any non-`bin`
+symbol back to `syms.apply`, so `@` routes all symbol-applies. `` `dir@"lib" ``,
+`` `argv@0 ``, `` `asin@0.5 ``, `` `abs@3 `` all work. Original report below.
 
 ```k-repl
  `dir "lib"     / → recursive file list (works)

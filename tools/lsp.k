@@ -181,8 +181,8 @@ hoverMd:{[id;md] reply[id;[contents:[kind:"markdown";value:md]]]}
 isDyad:{[t;ni] `transit=(t`kind)@(t`parent)@ni}
 isMono:{[t;ni] `apposit=(t`kind)@(t`parent)@ni}
 / fused reduce: the op's parent is a `term` whose value is `/`.
-/ NB: `/` glued to `=`/`~` lexes as one symbol ("/="), so match a `slash` constant.
-slash:`/
+/ Match against a quoted-symbol constant (`/ is an adverb glyph, not a symbol).
+slash:`"/"
 fusedOf:{[t;ni] p:(t`parent)@ni; $[(`term~(t`kind)@p)&slash~(t`value)@p;look[frk;frd;1_$(t`value)@ni];""]}
 
 hoverVerb:{[t;ni;id]

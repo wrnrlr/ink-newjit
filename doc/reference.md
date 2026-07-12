@@ -9,8 +9,11 @@
 Nouns can be combined into expressions using verbs and adverbs.
 Expressions are evaluated right-to-left. There are no special precedence rules for operators.
 
+#### Binding
 - `n:e` **Single Binding** - When in global scope set a global constant and when in local scope set a local variable
 - `n::e` **Double Binding** - When in global scope set a global variable and when in local scope set a global variable;
+
+#### Juxtaposition
 
 ## Datetypes
 
@@ -32,9 +35,7 @@ Expressions are evaluated right-to-left. There are no special precedence rules f
   - empty value `` "" ``
   - backed by an array of u8.
 
-### Other types
-- **Error**
-- **List** - heterogeneous list; empty list is `` () ``, type symbol `` `L ``.
+### Mapping Types
 - **Dict**
   - The syntax `` [a:1; b:2; c: 3] `` is equivalent to `` `a`b`c!1 2 3 ``
   - Empty dict `` [] ``
@@ -42,6 +43,10 @@ Expressions are evaluated right-to-left. There are no special precedence rules f
 - **Table**
   - The syntax `` [[]a:1 2; b:3 4] `` is equivalent to `` `a`b`c!1 2 3 ``
   - Type symbol `` `M ``.
+
+### Other types
+- **Error**
+- **List** - heterogeneous list; empty list is `` () ``, type symbol `` `L ``.
 
 ### Callable types
 - **Lambda** - a user-defined function, eg `{ a+b*c }`, type `` `o ``
@@ -99,8 +104,9 @@ while assigment of globals in a lambda happen with a double colon `::`
 - `$x` **String** - string representation
 - `i$C` **Pad** - pad string to length |i|
 
-### Array Verbs `*`
-- `*x` **First** - first item
+### Array Verbs `*|`
+- `*x` **First** - first item in x
+- `|x` **Reverse** - elements in reverse order
 
 ### List Verbs `,`
 - `,x` **Enlist** - wrap x in a list
@@ -137,7 +143,6 @@ while assigment of globals in a lambda happen with a double colon `::`
 ### Monadic Operators `:+-*!#@&|<>=?,^~$.`
 - `:x` **Identity** - return right-hand side
 - `&I` **Where** - convert counts to repeated indices
-- `|x` **Reverse** - elements in reverse order
 - `=X` **Group** - for each distinct value, the indices where it occurs
 - `=i` **Unit** - identity matrix
 - `^x` **Null** - boolean mask of null/missing elements
@@ -148,8 +153,10 @@ built-in verbs — they are ordinary names bound in `lib/prelude.k` (loaded into
 at init) to callable symbols: `` sin:`sin@ `` etc. `` `sin@x `` routes through `syms.zig`
 to the same opcode kernel the old verb used, so `sin x` / `sqrt 4 9` behave as before and
 `sqr`/`abs` stay integer-closed on integers. Because they are names (nouns) rather than
-verbs, a bare `-` directly after one is **dyadic subtract**: write `abs[-4]` (or `abs(-4)`),
-not `abs -4`. See `src/primitive/intrinsic.zig` (the canonical registry) and
+verbs, a bare op-glyph directly after one is **dyadic** — but a `-` glued to a numeric
+literal with a leading space is a negative literal, so `abs -4` applies `abs` to `-4`
+(while `abs-4` subtracts and `abs -x` still needs `abs[-x]`). See
+`src/primitive/intrinsic.zig` (the canonical registry) and
 `doc/design/dye.md`. GPU shaders (lib/dye.k) additionally support `pow min max dot cross
 step mod clamp mix smoothstep floor fract sign tanh length normalize`.
 
@@ -216,10 +223,10 @@ Some adverbs are digrams, like While `f f/` and Stencil `i f'`, they have 2 left
 - Created keyes table `` [[]id:1 2 3; age:20 43 7] ``
 
 ## Special Symbols
-- Arguments `` `argv[] `` - list of cmd-line args (also in global `x`)
-- Environment variables `` `env[] `` - dict of env variables
-- Directory walk `` `dir p `` - recursively list file paths under directory `p` (a char vector), skipping hidden/build dirs; returns a list of path strings. Apply by **juxtaposition** (`` `dir p ``), not `@`.
-- Random number `` `prng[] ``
+- `` `argv[] `` **Arguments** - list of cmd-line args (also in global `x`)
+- `` `env[] `` **Environment variables** - dict of env variables
+- `` `dir p `` **Directory walk** - recursively list file paths under directory `p` (a char vector), skipping hidden/build dirs; returns a list of path strings. Apply by **juxtaposition** (`` `dir p ``), not `@`.
+- `` `prng[] `` **Random number**
 - Inverse trig `` `asin@x ``, `` `acos@x ``, `` `atan@x `` (element-wise over F vectors), `` `atan2@(y;x) `` (broadcasts scalar⊕vector) — no verb glyph, added for equirectangular UV mapping (see `test/earth.k`)
 - Exit `` `exit@i ``
 
@@ -237,6 +244,11 @@ The names of exported symbols from a shared library should be prefixed by the na
 ## Fuzed Operators
 - `+/` **Sum**
 - `*/` **Product**
+- `|/` **Maximum**
+- `&/` **Minimum**
+- `=/` 
+- `</` 
+- `>/` 
 - `,/` **Raze**
 
 ## Libraries

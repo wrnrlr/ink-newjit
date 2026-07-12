@@ -156,10 +156,11 @@ Available auto-loaded libraries:
 
 
 ## Language gotchas
-- **Underscores in names:** `_` is always Drop/WeedOut. `foo_bar` parses as `foo _ bar`. Use camelCase.
+- **No underscores in names:** `_` is always Drop/WeedOut. `foo_bar` parses as `foo _ bar`. Use camelCase.
 - **Newlines in list literals:** a newline inside `(a;b;\n c)` injects a null element. Keep list literals on one line.
 - **Fold over empty list:** `,/()` returns a unit value, not an empty list. Use `$[#x;,/x;!0]`.
-- **Multi-char operator symbols:** `` `<= `` is the symbol `<=` (lexer greedily consumes op chars). Operator-char and alnum modes don't mix: `` `<abc `` is symbol `` `< `` then identifier `abc`.
+- **Operator-glyph symbols are quoted:** a backtick symbol joins only alphanumerics and dots, never operator glyphs. `` `~ `` is the null symbol `` ` `` then the Match verb (a projection); `` `~` `` is Match of two null symbols (`1b`); `` `<abc `` is null-symbol `` ` `` then `<` then `abc`. To name a symbol after an operator, quote it: `` `"+" ``, `` `"<=" ``, `` `"," ``.
+- **`-` juxtaposition:** a `-` glued to a following number is a negative literal when it has a space before it (or starts a phrase), else it is dyadic subtract. So `abs -4` applies `abs` to `-4`, but `abs-4` subtracts; `1 -2 3` is a 3-vector, `1-2` is `-1`. Matches ngn/k (`cos -3` works, `cos-3` errors).
 - **`list in symlist`:** returns a boolean list (element-wise), not a scalar - always truthy. Use `~` for scalar match or check a specific element.
 - **`$[cond; a; [stmt;stmt;…]]` hangs the parser:** a bracketed multi-statement block used as a `$[…]` branch makes the whole-file parse loop forever (no output, times out — the file is fully parsed before any statement runs, so nothing prints). Keep `$[]` branches as single expressions; move multi-statement work into a helper function.
 - **`each` over a bare name errors:** `f ' xs` (named function, space, `'`) can return an error (`` `! ``). Wrap it: `{f x}' xs`. Related: `'` binds to the term on its left, so `f g' x` is `(f g)' x`, never `f (g' x)` — inline lambdas/verbs absorb the adverb. Pre-compute the each into a variable, or parenthesize.
