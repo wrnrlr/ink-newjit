@@ -36,16 +36,24 @@ setDoc:{[u;t] k:`s$u; i:docU?k; $[i<#docU;replaceDoc[i;t];appendDoc[k;t]]}
 dropDoc:{[u] k:`s$u; i:docU?k; $[i<#docU;[docU::docU _ i; docT::docT _ i];0]}
 getDoc:{[u] k:`s$u; i:docU?k; $[i<#docU;docT@i;""]}
 
-/ ── position mapping (codepoint offsets; k source treated as ASCII) ─────────
-/ offset → (line;col)
-lc:{[src;o] pre:o#src; nls:&pre=lf; $[#nls;((#nls);o-(1+*|nls));(0;o)]}
+/ ── position mapping (CODEPOINT offsets, to match the parse CST) ─────────────
+/ The CST records codepoint ranges but the document is a byte (char) vector, so
+/ all line/column math must count codepoints, not bytes — otherwise any file with
+/ multi-byte UTF-8 (arrows, ×, ≤, … in comments) desyncs every cursor position
+/ past the first such byte and hover/definition/rename/refs silently return null.
+/ per-byte flag: 1 where a byte starts a codepoint (not a continuation, 128..191)
+cpLead:{[s] i:`i$s; ~(127<i)&i<192}
+cpLen: {[s] +/cpLead s}
+/ codepoint offset of each line's start
+lineOffs:{[src] ls:"\n"\src; (#ls)#0,+\1+cpLen'ls}
+/ codepoint offset → (line;col), both in codepoint units
+lc:{[src;o] co:lineOffs src; line:-1+#&~co>o; (line; o-co@line)}
 / offset → LSP Position dict
 pos:{[src;o] p:lc[src;o]; (`line`character)!(p 0;p 1)}
 / (start;end) offsets → LSP Range dict
 rng:{[src;a;b] (`start`end)!(pos[src;a];pos[src;b])}
-/ (line;character) → offset
-lineOffs:{[src] ls:"\n"\src; (#ls)#0,+\1+#'ls}
-posToOff:{[src;line;ch] os:lineOffs src; ls:"\n"\src; (os@line)+ch&#ls@line}
+/ (line;character) → codepoint offset
+posToOff:{[src;line;ch] os:lineOffs src; ls:"\n"\src; (os@line)+ch&cpLen ls@line}
 
 / ── request param accessors ─────────────────────────────────────────────────
 hasKey:{[d;k] |/k=!d}
@@ -231,7 +239,9 @@ onHover:{[req]
 isName:{[t;ni] k:(t`kind)@ni; (`var~k)|`param~k}
 nameNodes:{[t] ki:t`kind; &(`var=ki)|`param=ki}
 / all var/param node indices whose value = the name symbol
-occurs:{[t;sym] nn:nameNodes t; nn@&sym=(t`value)@nn}
+/ Guard the empty case: with no name nodes, `(t`value)@nn` boxes to a general
+/ list `()`, so `sym=()` / `&()` yield a spurious match — return empty instead.
+occurs:{[t;sym] nn:nameNodes t; $[#nn;nn@&sym=(t`value)@nn;nn]}
 locOf:{[t;src;uri;i] (`uri`range)!(uri;nrng[t;src;i])}
 / other workspace .k files (excluding the current doc's own file)
 otherK:{[curUri] op:p2p curUri; kf:$[0<#wroot;kfiles wroot;()]; $[#kf;kf@&~kf~\:op;()]}
