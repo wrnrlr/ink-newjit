@@ -4,3 +4,7 @@
 [submodule "zed-ink"]
 	path = tools/zed-ink
 	url = https://github.com/wrnrlr/zed-ink.git
+[submodule "tools/tree-sitter-ink-repl"]
+	path = tools/tree-sitter-ink-repl
+	url = https://github.com/wrnrlr/tree-sitter-ink-repl.git
+	branch = main
