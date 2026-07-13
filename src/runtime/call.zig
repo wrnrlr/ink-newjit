@@ -29,7 +29,16 @@ pub const Call = struct {
       .x       => |obj| self.applyExt(obj, args),
       .L, .I, .F, .S, .C, .B, .m, .M => {
         if (args.len == 1) return dispatch.dispatch2(self.vm, .@"@", func, args[0]);
-        return V{ .err = .rank };
+        // Deep index: x[i;j;…] ≡ (…(x@i)@j…) — fold `@` across the path, the
+        // same logic apply/`.` use, so a list or dict indexes at each depth.
+        var res = func.ref();
+        for (args) |a| {
+          const next = dispatch.dispatch2(self.vm, .@"@", res, a);
+          res.deinit(self.vm.alloc);
+          if (next.tag() == .err) return next;
+          res = next;
+        }
+        return res;
       },
       else => V{ .err = .@"type" },
     };

@@ -38,9 +38,9 @@ make info
 
 - 2-space indentation
 - Zig 0.16 — do **not** run `zig fmt`
-- No underscores in variable names
+- No underscores in k variable names.
 - Cast numerics with: `@as(f64, @floatFromInt(a))`
-- Report bugs unrelated to the current task in `doc/bug.md`
+- Report bugs unrelated to the current task in `.plan/triage.md`
 
 ## Architecture
 
@@ -70,7 +70,7 @@ src/
 └── test.zig       # Unit test harness (Tester struct, vm.eval())
 lib/               # Native extensions (gpu, font, json, csv, md5)
 test/              # Integration test scripts (.k files)
-doc/               # spec.md, triage.md, changelog.md, future.md
+doc/               # changelog.md
 ```
 
 **Execution pipeline:** source → Lexer → Parser → AST → Compiler (IR) → bytecode → VM

@@ -211,6 +211,16 @@ pub fn pickDictIntFn(vm: *VM, x: V, y: V) V  {
   return pickAtom(x, y.i);
 }
 pub fn pickDictSymVecFn(vm: *VM, x: V, y: V) V { return pickDictSymVec(vm.alloc, x.m, y.S.slice()); }
+pub fn pickDictKeyFn(vm: *VM, x: V, y: V) V { return pickDictKey(vm.alloc, x.m, y); }
+pub fn pickDictKeyVecFn(vm: *VM, x: V, y: V) V {
+  const res = N(V).init(vm.alloc, y.len()) catch return V{ .err = .memory };
+  for (0..y.len()) |k| {
+    const key = y.at(k);
+    defer key.deinit(vm.alloc);
+    res.slice()[k] = pickDictKey(vm.alloc, x.m, key);
+  }
+  return promote(vm.alloc, res);
+}
 pub fn pickTableRowFn(vm: *VM, x: V, y: V) V  { return pickTableRow(vm.alloc, x.M, y.i); }
 pub fn pickTableRowVecFn(vm: *VM, x: V, y: V) V { return pickTableRowVec(vm.alloc, x, y.I.slice()); }
 pub fn pickTableColFn(_: *VM, x: V, y: V) V  { return pickTableCol(x.M, y.s); }
@@ -276,6 +286,21 @@ fn pickDictSym(m: Dict, s: u32) V {
   if (keys.tag() == .S) {
     for (keys.S.slice(), 0..) |k, idx| if (k == s) return vals.at(idx);
   } else if (keys.tag() == .s and keys.s == s) return vals.at(0);
+  return .blank;
+}
+
+// Generic key lookup for non-symbol/int key types (chars, floats, …): scan the
+// key array comparing each candidate with `.eq()` and return its value (or the
+// null `.blank` on a miss). Symbols keep their dedicated u32 path; ints stay
+// positional (see pickDictIntFn) so `(1 2 3!…)0` indexes by position.
+fn pickDictKey(alloc: Alloc, m: Dict, key: V) V {
+  const keys = m.av();
+  const vals = m.bv();
+  for (0..keys.len()) |idx| {
+    const k = keys.at(idx);
+    defer k.deinit(alloc);
+    if (k.eq(key)) return vals.at(idx);
+  }
   return .blank;
 }
 

@@ -92,6 +92,12 @@ pub const SelectDict = struct {
   _m_S: VM.Dyad = pick.pickDictSymVecFn,
   _m_i: VM.Dyad = pick.pickDictIntFn,
   _m_I: VM.Dyad = pick.pickVecFn,
+  // Non-symbol/int keys (chars, floats) look up by value like apply does, so a
+  // char-keyed dict `"abc"!0 1 2` indexes with `d"b"`. Ints stay positional.
+  _m_c: VM.Dyad = pick.pickDictKeyFn,
+  _m_C: VM.Dyad = pick.pickDictKeyVecFn,
+  _m_f: VM.Dyad = pick.pickDictKeyFn,
+  _m_F: VM.Dyad = pick.pickDictKeyVecFn,
 };
 
 // ── SelectTable: M@x → row(s) by integer index or column(s) by symbol ────────

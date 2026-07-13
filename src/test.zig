@@ -317,7 +317,31 @@ test "deep indexed assign" {
   try t.check("G:((1 2 3);(4 5 6)); G[1;2]:99; G", "(1 2 3;4 5 99)");
 }
 
-// Variadics
+test "juxtaposition" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("(1 2 3 4)2 3", "3 4");
+  try t.check("(`a`b`c!1 2 3) `b`a", "2 1");
+  try t.check("(1 2 3!`a`b`c) 2 0", "`c`a");
+}
+
+test "gather" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("(`a`b`c!1 2 3)[`b`a]", "2 1");
+  // char-keyed dict indexes by value like apply does (not `!type`)
+  try t.check("(\"abc\"!0 1 2)\"b\"", "1");
+  try t.check("(\"abc\"!0 1 2)\"bca\"", "1 2 0");
+  try t.check("(\"abc\"!0 1 2)[\"b\"]", "1");
+  // float-keyed dict too; int keys stay positional
+  try t.check("(1.5 2.5!`a`b) 2.5", "`b");
+}
+
+test "deep index" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("(1 2 3;4 5 6)[1;2]", "6");
+  try t.check("(1 2 3;4 5 6)[1;0 2]", "4 6");
+  try t.check("(`a`b!(10 20;30 40))[`a;1]", "20");
+}
+
 test "lambda" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("f: {x+1};f", "{x+1}"); // TODO fix space

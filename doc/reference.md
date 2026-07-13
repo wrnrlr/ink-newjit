@@ -14,6 +14,7 @@ Expressions are evaluated right-to-left. There are no special precedence rules f
 - `n::e` **Double Binding** - When in global scope set a global variable and when in local scope set a global variable;
 
 #### Juxtaposition
+Juxtoposition is 
 
 ## Datetypes
 

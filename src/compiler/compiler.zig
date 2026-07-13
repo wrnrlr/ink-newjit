@@ -417,7 +417,7 @@ pub const Compiler = struct {
     // (`` `sin x `` — which is exactly what the lib/prelude.k bodies `{`sin x}`
     // compile to) lowers straight to the Op1/Op2 kernel. That is fusable by the
     // optimizer, and it skips both the syms.apply string-match and the buggy
-    // `@`(symbol, int-scalar) dispatch (doc/bug.md). A literal symbol can't be
+    // `@`(symbol, int-scalar) dispatch (.plan/triage.md). A literal symbol can't be
     // shadowed, so this needs no scope analysis. See src/primitive/intrinsic.zig.
     if (n == 1 and ap.f.* == .literal and ap.f.literal == .@"var") {
       const nm = ap.f.literal.@"var";

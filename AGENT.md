@@ -10,7 +10,7 @@
 - Don't use `zig fmt` on code.
 - Cast ints and floats in Zig like this: `@as(f64, @floatFromInt(a))`.
 - Add debug statements to verify your thinking.
-- Report issues and bugs unrelated to the current task to `doc/triage.md`.
+- Report issues and bugs unrelated to the current task to `.plan/triage.md`.
 - See `doc/spec.md` for the most up-to-date specification (WIP).
 
 # Ink Language Overview
@@ -53,7 +53,6 @@ The parser, compiler, and runtime are all written in Zig 0.16.
   - `bivector`
   - `papers`
   - `ten-minute-physics`
-  - `triage.md` - open correctness issues
   - `spec.md` - language specification (WIP)
   - `changelog.md` - change log
   - `future.md` - planned features

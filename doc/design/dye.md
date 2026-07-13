@@ -109,7 +109,7 @@ list / syms dispatch / fuse map / dye lowering from it instead of hand-syncing.
   `mapUnary` used for `asin`/`acos`/`atan`/`atan2`).
 - `lib/prelude.k` binds the ink names to juxtaposition lambdas (`` sin:{`sin x} ``,
   …) — deliberately NOT the `` `sin@ `` projection: `` `sym@<int-scalar> `` hits a
-  pre-existing `@`-dyad dispatch bug (routes to the `2:` loader — see `doc/bug.md`),
+  pre-existing `@`-dyad dispatch bug (routes to the `2:` loader — see `.plan/triage.md`),
   whereas `` `sin x `` routes Call.apply → syms.apply and handles every int/float
   scalar and vector. Loaded into every VM at init (`VM.create` → `loadPrelude`,
   best-effort, top-level so no nested-`2:`). `sin x` / `sqrt 4 9` / `abs 3` behave
