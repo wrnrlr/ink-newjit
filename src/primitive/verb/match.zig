@@ -110,23 +110,14 @@ fn getMatchHandler(comptime k: K) VM.Dyad {
 
 fn makeMatch() type {
   @setEvalBranchQuota(1000000);
-  const op_default: Op2 = .@"~";
-  var names: []const []const u8 = &.{"op"};
-  var field_types: []const type = &.{Op2};
-  var attrs: []const h.Attr = &.{
-    .{ .default_value_ptr = @ptrCast(&op_default) },
-  };
   // Only the diagonal is registered: mismatched tags hit the stage-2 row
   // fallback, which verbs.zig points at matchFalse for ~.
+  const Entry = struct { name: []const u8, fun: VM.Dyad };
+  var entries: []const Entry = &.{};
   for (all_k_types) |xk| {
-    const handler: VM.Dyad = getMatchHandler(xk);
-    names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(xk)};
-    field_types = field_types ++ .{VM.Dyad};
-    const attr: h.Attr = .{ .default_value_ptr = @ptrCast(&handler) };
-    attrs = attrs ++ .{attr};
+    entries = entries ++ .{Entry{ .name = "_" ++ @tagName(xk) ++ "_" ++ @tagName(xk), .fun = getMatchHandler(xk) }};
   }
-  const n = names.len;
-  return @Struct(.auto, null, names[0..n], &(field_types[0..n].*), &(attrs[0..n].*));
+  return h.OpStruct(Op2, .@"~", VM.Dyad, entries);
 }
 
 pub const Match = makeMatch();

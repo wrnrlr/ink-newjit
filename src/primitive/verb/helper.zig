@@ -35,18 +35,35 @@ pub fn _X(comptime EnumT: type, comptime op: EnumT, comptime Impl: type) type {
   return @Struct(.auto, null, names[0..n], &(types[0..n].*), &(attrs[0..n].*));
 }
 
-pub fn _Y(comptime op: Op1, comptime ks: []const K, comptime f: VM.Monad) type {
+/// The one dispatch-handler struct builder. Produces a struct with an `op`
+/// field (default = op) followed by one `FieldT` field per entry, each named
+/// by its signature with its handler installed as the field default — exactly
+/// what the verbs.zig table reflection reads back. `entries` is a comptime
+/// slice/array of `struct { name, fun }`. Shared by makeMonad/makeDyad/_Y here
+/// and by the bespoke concat/match builders.
+pub fn OpStruct(comptime EnumT: type, comptime op: EnumT, comptime FieldT: type, comptime entries: anytype) type {
+  const op_default: EnumT = op;
   var names: []const []const u8 = &.{ "op" };
-  var types: []const type = &.{ Op1 };
-  var attrs: []const Attr = &.{ .{ .default_value_ptr = @ptrCast(&op) } };
-  for (ks) |xk| {
-    names = names ++ .{"_" ++ @tagName(xk)};
-    types = types ++ .{VM.Monad};
-    const attr: Attr = .{ .default_value_ptr = @ptrCast(&f) };
+  var types: []const type = &.{ EnumT };
+  var attrs: []const Attr = &.{ .{ .default_value_ptr = @ptrCast(&op_default) } };
+  for (entries) |e| {
+    const fun: FieldT = e.fun;
+    const attr: Attr = .{ .default_value_ptr = @ptrCast(&fun) };
+    names = names ++ .{e.name};
+    types = types ++ .{FieldT};
     attrs = attrs ++ .{attr};
   }
   const n = names.len;
   return @Struct(.auto, null, names[0..n], &(types[0..n].*), &(attrs[0..n].*));
+}
+
+const MonadEntry = struct { name: []const u8, fun: VM.Monad };
+const DyadEntry  = struct { name: []const u8, fun: VM.Dyad };
+
+pub fn _Y(comptime op: Op1, comptime ks: []const K, comptime f: VM.Monad) type {
+  var entries: []const MonadEntry = &.{};
+  for (ks) |xk| entries = entries ++ .{MonadEntry{ .name = "_" ++ @tagName(xk), .fun = f }};
+  return OpStruct(Op1, op, VM.Monad, entries);
 }
 
 pub fn makeMonad(
@@ -56,23 +73,12 @@ pub fn makeMonad(
   comptime Impl: type,
   comptime ks: []const K,
 ) type {
-  const op_default: Op1 = operator;
-  var names: []const []const u8 = &.{ "op" };
-  var types: []const type = &.{ Op1 };
-  var attrs: []const Attr = &.{
-    .{ .default_value_ptr = @ptrCast(&op_default) },
-  };
+  var entries: []const MonadEntry = &.{};
   for (ks) |xk| {
-    const maybe: ?VM.Monad = monadKernel(xk, CastType, ResultType, Impl);
-    if (maybe) |handler| {
-      names = names ++ .{"_" ++ @tagName(xk)};
-      types = types ++ .{VM.Monad};
-      const attr: Attr = .{ .default_value_ptr = @ptrCast(&handler) };
-      attrs = attrs ++ .{attr};
-    }
+    const handler = monadKernel(xk, CastType, ResultType, Impl);
+    entries = entries ++ .{MonadEntry{ .name = "_" ++ @tagName(xk), .fun = handler }};
   }
-  const n = names.len;
-  return @Struct(.auto, null, names[0..n], &(types[0..n].*), &(attrs[0..n].*));
+  return OpStruct(Op1, operator, VM.Monad, entries);
 }
 
 pub fn makeDyad(
@@ -83,25 +89,14 @@ pub fn makeDyad(
   comptime types: []const K,
 ) type {
   @setEvalBranchQuota(2000000);
-  const op_default: Op2 = operator;
-  var names: []const []const u8 = &.{ "op" };
-  var field_types: []const type = &.{ Op2 };
-  var attrs: []const Attr = &.{
-    .{ .default_value_ptr = @ptrCast(&op_default) },
-  };
+  var entries: []const DyadEntry = &.{};
   for (types) |xk| {
     for (types) |yk| {
-      const maybe: ?VM.Dyad = dyadKernel(xk, yk, CastType, ResultType, Impl);
-      if (maybe) |handler| {
-        names = names ++ .{"_" ++ @tagName(xk) ++ "_" ++ @tagName(yk)};
-        field_types = field_types ++ .{VM.Dyad};
-        const attr: Attr = .{ .default_value_ptr = @ptrCast(&handler) };
-        attrs = attrs ++ .{attr};
-      }
+      const handler = dyadKernel(xk, yk, CastType, ResultType, Impl);
+      entries = entries ++ .{DyadEntry{ .name = "_" ++ @tagName(xk) ++ "_" ++ @tagName(yk), .fun = handler }};
     }
   }
-  const n = names.len;
-  return @Struct(.auto, null, names[0..n], &(field_types[0..n].*), &(attrs[0..n].*));
+  return OpStruct(Op2, operator, VM.Dyad, entries);
 }
 
 
