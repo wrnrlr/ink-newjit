@@ -15,8 +15,8 @@ sign     = "-" ;
 exponent = ( "e" | "E" ) , [ "+" | "-" ] , digit , { digit } ;
 mantissa = ( digit , { digit } , [ "." , { digit } ]
             | "." , digit , { digit } ) , [ exponent ] ;
-bit   = ( "0" | "1" ) , "b" ;
-nat   = ( digit , { digit } | "0" , ( "N" | "W" ) ) , "u" ;
+bit = ( "0" | "1" ) , "b" ;
+nat = ( digit , { digit } | "0" , ( "N" | "W" ) ) , "u" ;
 int   = [ sign ] , ( "0" , ( "x" | "X" ) , hex , { hex }
           | "0" , ( "N" | "W" )
           | digit , { digit } ) ;
@@ -42,7 +42,7 @@ Four tokenizer behaviors the grammar above can't fully express:
   content unless the next character is whitespace, a bracket, an operator glyph
   or a digit, so `"""` is a 1-char string holding `"`. A `"` immediately
   followed by a newline opens a multi-line string that runs to its closing `"`.
-  A single-character string like `"H"` is a **char** atom, not a string.
+- A **char** is a single-character like `"H"` is atom, not a string.
 - **`symbol`** joins only `letter | digit | "."` in its unquoted body; an
   operator glyph ends it (`` `~ `` is the null symbol `` ` `` then Match `~`).
   Quote the body to include glyphs: `` `"+" ``, `` `"<=" ``.
@@ -56,15 +56,83 @@ containing only `\`. Newlines and `;` are statement separators (`sep`).
 
 ### Syntactical Grammar
 Nouns can be combined into expressions using verbs and adverbs.
-Expressions are evaluated right-to-left. There are no special precedence rules for operators.
+Expressions are evaluated **right-to-left**; there is no operator precedence, so
+`2*3+4` is `2*(3+4)` = `14`. A verb with a noun on both sides is **dyadic**
+(infix); with only a noun to its right it is **monadic** (prefix).
+
+The grammar below is a readable distillation of the tree-sitter grammar
+(`tools/tree-sitter-ink/grammar.js`), which resolves the monadic/dyadic valence
+and the noun/verb ambiguity through dynamic precedence rather than the plain
+productions shown here.
+
+```ebnf
+(* A program is statements separated by newlines or ';'. *)
+program   = [ line ] , { sep , [ line ] } ;
+sep       = ";" | newline ;
+line      = statement | comment | namespace | command ;
+(* A statement is one right-to-left expression. *)
+statement = verb | noun | clause ;
+clause    = binding | dyad | monad ;
+binding   = noun , [ op ] , ( ":" | "::" ) , [ clause ] ;   (* x:e  x+:e  x::e *)
+dyad      = noun , verb , statement ;                       (* a f b  — infix  *)
+monad     = verb , statement ;                              (* f x    — prefix *)
+phrase    = verb | noun ;
+(* Verbs *)
+verb      = op | verb_io | derived ;
+derived   = phrase , adverb ;                               (* +/  f'  {x}\ *)
+op        = "+" | "-" | "*" | "%" | "!" | "&" | "|" | "<" | ">" | "="
+          | "~" | "," | "^" | "#" | "_" | "$" | "?" | "@" | "." | ":"
+          | "in" | "has" | "mod" | "div" ;
+verb_io   = digit , ":" ;                                   (* 0: 1: 2: *)
+adverb    = [ ":" ] , ( "'" | "/" | "\" ) , [ ":" ] ;       (* ' / \ ': /: \: *)
+(* Nouns *)
+noun      = literal | name | group | list | lambda
+          | dict | table | ktable | apply | amend | cond ;
+group     = "(" , statement , ")" ;                         (* precedence grouping *)
+list      = "(" , [ seq ] , ")" ;                           (* (1;2;3)  () *)
+apply     = phrase , "[" , [ seq ] , "]" ;                  (* f[x;y]  m[k] *)
+amend     = ( "@" | "." ) , "[" , seq , "]" ;               (* @[x;i;f]  .[x;i;f;y] *)
+cond      = "$[" , statement , { div , statement } , "]" ;  (* $[c;t;…;e] *)
+lambda    = "{" , [ params ] , [ seq ] , "}" ;              (* {x+y}  {[a;b] a+b} *)
+params    = "[" , [ name , { div , name } ] , "]" ;
+(* Dictionaries and tables *)
+dict      = "[" , [ items ] , "]" ;                         (* [a:1;b:2]  [] *)
+table     = "[[]" , [ items ] , "]" ;                       (* [[]a:1 2;b:3 4] *)
+ktable    = "[[" , items , "]" , [ items ] , "]" ;          (* keyed table *)
+items     = item , { div , item } ;
+item      = name , ":" , [ statement ] ;
+
+seq       = statement , { div , statement } ;
+div       = ";" | newline ;
+```
+
+## Operational Semantics
 
 #### Binding
 - `n:e` **Single Binding** - When in global scope set a global constant and when in local scope set a local variable
 - `n::e` **Double Binding** - When in global scope set a global variable and when in local scope set a global variable;
+- `n f:e` **Compound Binding** - modify in place through verb `f`: `x+:1` is `x:x+1`, `x,:y` appends. The value is required (`x+:` alone is not a binding), so `1<:\y` still reads as a transit with the scanned grade-up verb `<:\`.
+
+An empty right-hand side (`x:` continued on the next line) is allowed for plain
+`:`/`::` binding but not for the compound form.
 
 #### Juxtaposition
-Juxtaposition is an expression with two ink values witten next to each other. The semantic of this expression depends on the type of the values.
-The operator and partial type 
+Juxtaposition is two ink values written next to each other; its meaning depends
+on the type of the left value:
+
+- **callable on the left** (lambda `` `o ``, operator, partial `` `p ``,
+  composition `` `q ``) — the left value is *applied* to the right: `sqrt 4`,
+  `(1+) 2`, `f x`.
+- **array on the left** (vectors and list) — pick the rhs indexes from the rhs array.
+- **mapping on the left** (dict and table) — select by key.
+- **verb between two nouns** — the verb applies **dyadically**: `2+3`, `a,b`.
+- **verb with a noun only to its right** — the verb applies **monadically**:
+  `-x`, `#l`, `|v`.
+
+Bracket application `f[a;b]` is the explicit form and disambiguates valence and
+argument count; `f[;b]` fixes only the second argument (a projection). Because
+evaluation is right-to-left, a chain of juxtaposed monads reads outermost-last:
+`f g h x` is `f(g(h(x)))`.
 
 
 
