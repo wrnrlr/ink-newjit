@@ -101,6 +101,11 @@ implemented (see the note at the end of this file / doc/design).
   - The syntax `` [[]a:1 2; b:3 4] `` is equivalent to `` `a`b`c!1 2 3 ``
   - Type symbol `` `M ``.
 
+### Error Values
+- `!type` **Type Error**
+- `!rank` **Rank Error**
+- `!domain` **Domain Error**
+
 ### Other types
 - **Error**
 - **List** - heterogeneous list; empty list is `` () ``, type symbol `` `L ``.

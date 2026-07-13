@@ -17,6 +17,12 @@ so: "./zig-out/lib/libgpu.dylib"
 /                                 unused cells are 0N/0n nulls — filter them.
 / For held keys/buttons, track down/up events yourself (see lib/camera.k).
 window.run:    so 2: (`gpuRun;       2)   / (loop_fn; config) → 0 : blocking event loop
+/ Headless one-shot compute: no window, no event loop. Creates a GPU device,
+/ calls fn once (write it {[x] …}; x is an ignored placeholder), then tears the
+/ device down. Like window.run, stash results in a global from inside fn:
+/   gpu.computeRun[{[x] out:: gpu.runShader[shader.compute[{[v] v*2.}]; 1. 2. 3.]}]
+/   out   / -> 2. 4. 6.
+gpu.computeRun: so 2: (`gpuComputeRun; 1)   / fn → 0 : headless compute, no window
 gpu.fill:    so 2: (`gpuFill;      2)   / (verts_F; frag_F) → 0 : draw triangles with built-in shader
 gpu.tessellate:   so 2: (`gpuTess;      1)   / pts_F → verts_F   : gpu.tessellate polygon
 gpu.compileSpirv: so 2: (`gpuSpirv;     2)   / (spirv_I; 0) → handle : compile SPIR-V fragment shader
@@ -31,6 +37,12 @@ gpu.write:  so 2: (`gpuBufferWrite;2)   / (bufHandle; F) → 0 : overwrite a res
 gpu.read:   so 2: (`gpuBufferRead; 1)   / bufHandle → F : read a resident buffer back to host
 gpu.readI:  so 2: (`gpuBufferReadI;1)   / bufHandle → I : read a resident buffer back as ints (atomic accumulators)
 gpu.compileCompute: so 2: (`gpuComputeNew; 2) / (spirv_I; nbind) → pipeHandle : compile+cache a compute pipeline
+/ Uniform buffers in compute (true UBO for constants, not a storage buffer):
+/   p: gpu.compileComputeU[shader.computeU[{[x;u] (x*u[0])+u[1]}]; 2]  / storage@0,1 + uniform@2
+/   u: gpu.uniform[3. 1. 0. 0.]                                        / a vec4 (scale;bias;…)
+/   gpu.dispatch[p; (inBuf;outBuf;u); n]                              / u bound at binding 2
+gpu.uniform:         so 2: (`gpuUniformNew;  1)   / F → bufHandle : resident UNIFORM buffer (pass a vec4)
+gpu.compileComputeU: so 2: (`gpuComputeNewU; 2)   / (spirv_I; nStorage) → pipe : storage@0..nStorage-1 + uniform@nStorage
 gpu.dispatch:     so 2: (`gpuDispatch;   3)   / (pipeHandle; bufHandles_I; nThreads) → 0 : bind buffers @0..; dispatch; no readback
 gpuDispatchLoop0: so 2: (`gpuDispatchLoop; 3) / (pipe; (nThreads,bufsA,bufsB)_I; reps) → 0 : reps passes in ONE encoder, A on even/B on odd
 / Batched iteration in one submit (no per-step host round-trip). Alternates two

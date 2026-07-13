@@ -732,6 +732,83 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   return ki(0);
 }
 
+// ── gpuComputeRun ─────────────────────────────────────────────────────────────
+//
+// Headless one-shot compute: create a GPU device+queue with no visible window,
+// set up g_renderer, invoke the k callback ONCE, tear everything down, and return
+// the callback's result. The callback runs compute (gpu.runShader / gpu.dispatch)
+// exactly as it would inside a gpuRun frame — the only difference is there is no
+// event loop and no window. Device lifetime is scoped to this call (all releases
+// happen via defer, and the DebugAllocator asserts no leak at deinit), so callers
+// can't forget to close it. The GLFW window is created hidden (Visible=0), so
+// this still needs a display/GLFW to succeed — like snapshot mode, it is headless
+// in the no-visible-window sense.
+//
+//   fn: K lambda called once. Receives a placeholder arg (0) for arity — write
+//       it as {[x] …}. Stash results in a k global (out:: …), exactly as
+//       window.run callbacks do; the callback's return value is discarded.
+// Returns 0 on success, ki(-1) on device setup failure.
+export fn gpuComputeRun(fn_k: ?K) callconv(.c) ?K {
+  const cbk = fn_k orelse return ki(0);
+
+  var da = std.heap.DebugAllocator(.{}).init;
+  defer _ = da.deinit();
+  const alloc = da.allocator();
+
+  zglfw.init() catch return ki(-1);
+  defer zglfw.terminate();
+  zglfw.windowHint(zglfw.ClientAPI, zglfw.NoAPI);
+  zglfw.windowHint(zglfw.Visible, 0); // never shown — headless
+  const window = zglfw.createWindow(64, 64, "ink-compute", null, null) catch return ki(-1);
+  defer zglfw.destroyWindow(window);
+
+  const gctx = zgpu.GraphicsContext.create(alloc, .{
+    .window                = window,
+    .fn_getTime            = getTime,
+    .fn_getFramebufferSize = getFramebufferSize,
+    .fn_getCocoaWindow     = getCocoaWindow,
+  }, .{}) catch return ki(-1);
+  defer gctx.destroy(alloc);
+
+  gctx.device.setUncapturedErrorCallback(struct {
+    fn cb(typ: wgpu.ErrorType, msg: ?[*:0]const u8, _: ?*anyopaque) callconv(.c) void {
+      std.debug.print("[Dawn error] type={} msg={s}\n", .{ typ, msg orelse "(null)" });
+    }
+  }.cb, null);
+
+  // Renderer needs the fill pipeline+bgl; compute only touches device/queue/allocator,
+  // but Renderer.init requires them, so build them the same way gpuRun does.
+  const bgl_entries = [_]wgpu.BindGroupLayoutEntry{
+    zgpu.bufferEntry(0, .{ .vertex = true, .fragment = true }, .uniform, false, 0),
+    zgpu.bufferEntry(1, .{ .fragment = true }, .uniform, false, 0),
+    .{ .binding = 2, .visibility = .{ .fragment = true }, .texture = .{ .sample_type = .float } },
+    zgpu.samplerEntry(3, .{ .fragment = true }, .filtering),
+    .{ .binding = 4, .visibility = .{ .fragment = true }, .texture = .{ .sample_type = .float } },
+    zgpu.samplerEntry(5, .{ .fragment = true }, .filtering),
+  };
+  const bgl = gctx.device.createBindGroupLayout(.{
+    .label = "gpu_ext bgl", .entry_count = bgl_entries.len, .entries = &bgl_entries,
+  });
+  defer bgl.release();
+  const pipeline = createPipeline(gctx.device, bgl) catch return ki(-1);
+  defer pipeline.release();
+  const renderer = Renderer.init(alloc, gctx.device, gctx.queue, pipeline, bgl, 2_000_000) catch return ki(-1);
+  defer renderer.deinit();
+  defer resetResidentCompute(alloc); // free resident buffers/pipelines before the device dies
+
+  g_renderer = renderer;
+  defer g_renderer = null;
+
+  // Mirror gpuRun: the callback's return value is a VM-allocated K that must be
+  // released with ku (the FFI return path would wrongly free it via c_alloc).
+  // Results come back to k through globals the callback assigns (out:: …).
+  const arg = ki(0) orelse return ki(-1);
+  const result = k_call(cbk, arg);
+  ku(result);
+  ku(arg);
+  return ki(0);
+}
+
 // WebGPU SPIRV descriptor (not in zgpu bindings — defined manually from Dawn C API).
 const ShaderModuleSPIRVDescriptor = extern struct {
   chain: wgpu.ChainedStruct,
@@ -1132,6 +1209,33 @@ export fn gpuBufferNew(data_k: ?K) callconv(.c) ?K {
   return ki(@intCast(g_sbuf.items.len));
 }
 
+// gpuUniformNew[F] -> handle : create a resident UNIFORM buffer (UBO) seeded from
+// F. Like gpuBufferNew but usage=uniform, so it binds at a pipeline's uniform slot
+// (see gpuComputeNewU / shader.computeU) to pass compute constants — scale, bias,
+// array length — without a runtime-array storage buffer. Registered in the same
+// registry as storage buffers, so gpuBufferWrite/Read work on the handle too.
+// Pass a vec4's worth of floats (the shader reads a uniform vec4); the size is
+// rounded up to the 16-byte uniform-buffer alignment.
+export fn gpuUniformNew(data_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const fp = kfp(data_k) orelse return ki(0);
+  const n = kn(data_k);
+  if (n <= 0) return ki(0);
+  const nn: usize = @intCast(n);
+  const raw: u64 = @intCast(nn * @sizeOf(f32));
+  const byte_size: u64 = (raw + 15) & ~@as(u64, 15); // uniform buffers need 16-byte size
+  const buf = r.device.createBuffer(.{
+    .label = "ubuf",
+    .usage = .{ .uniform = true, .copy_dst = true },
+    .size = byte_size,
+    .mapped_at_creation = .false,
+  });
+  r.queue.writeBuffer(buf, 0, f32, fp[0..nn]);
+  g_sbuf.append(r.allocator, buf) catch { buf.release(); return ki(0); };
+  g_ssize.append(r.allocator, byte_size) catch return ki(0);
+  return ki(@intCast(g_sbuf.items.len));
+}
+
 // gpuBufferWrite[handle; F] -> 0 : overwrite an existing buffer (clamped to its size).
 export fn gpuBufferWrite(h_k: ?K, data_k: ?K) callconv(.c) ?K {
   const r = g_renderer orelse return ki(0);
@@ -1237,6 +1341,55 @@ export fn gpuComputeNew(words_k: ?K, nbind_k: ?K) callconv(.c) ?K {
   var i: usize = 0;
   while (i < nb) : (i += 1)
     entries[i] = .{ .binding = @intCast(i), .visibility = .{ .compute = true }, .buffer = .{ .binding_type = .storage } };
+  const bgl = r.device.createBindGroupLayout(.{ .entry_count = @intCast(nb), .entries = &entries });
+
+  const pl = r.device.createPipelineLayout(.{
+    .bind_group_layout_count = 1,
+    .bind_group_layouts = &[_]wgpu.BindGroupLayout{bgl},
+  });
+  defer pl.release();
+
+  const pipe = r.device.createComputePipeline(.{
+    .layout = pl,
+    .compute = .{ .module = cs, .entry_point = "main" },
+  });
+  g_cpipe.append(r.allocator, pipe) catch { pipe.release(); bgl.release(); return ki(0); };
+  g_cbgl.append(r.allocator, bgl) catch return ki(0);
+  g_cnb.append(r.allocator, nb) catch return ki(0);
+  g_cwg.append(r.allocator, localSizeX(words, @intCast(n_words))) catch return ki(0);
+  return ki(@intCast(g_cpipe.items.len));
+}
+
+// gpuComputeNewU[spirv; nStorage] -> handle : like gpuComputeNew, but the bind
+// group has nStorage storage bindings (0..nStorage-1) plus ONE uniform binding at
+// index nStorage. Pair with shader.computeU (which declares a uniform vec4 at that
+// binding) and dispatch with the uniform buffer (from gpuUniformNew) as the last
+// handle — gpuDispatch binds it positionally like any other buffer.
+export fn gpuComputeNewU(words_k: ?K, nstore_k: ?K) callconv(.c) ?K {
+  const r = g_renderer orelse return ki(0);
+  const ip = kip(words_k) orelse return ki(0);
+  const n_words = kn(words_k);
+  if (n_words < 5) return ki(0);
+  var nstore = ki_val(nstore_k);
+  if (nstore < 1) nstore = 2;
+  if (nstore > MAX_BIND - 1) nstore = MAX_BIND - 1; // leave room for the uniform binding
+  const ns: usize = @intCast(nstore);
+  const nb: usize = ns + 1; // storage bindings + the uniform binding
+  const words: [*]const u32 = @ptrCast(@alignCast(ip));
+
+  const spirv_desc = ShaderModuleSPIRVDescriptor{
+    .chain = .{ .next = null, .struct_type = .shader_module_spirv_descriptor },
+    .code_size = @intCast(n_words),
+    .code = words,
+  };
+  const cs = r.device.createShaderModule(.{ .next_in_chain = @ptrCast(&spirv_desc) });
+  defer cs.release();
+
+  var entries: [MAX_BIND]wgpu.BindGroupLayoutEntry = undefined;
+  var i: usize = 0;
+  while (i < ns) : (i += 1)
+    entries[i] = .{ .binding = @intCast(i), .visibility = .{ .compute = true }, .buffer = .{ .binding_type = .storage } };
+  entries[ns] = .{ .binding = @intCast(ns), .visibility = .{ .compute = true }, .buffer = .{ .binding_type = .uniform } };
   const bgl = r.device.createBindGroupLayout(.{ .entry_count = @intCast(nb), .entries = &entries });
 
   const pl = r.device.createPipelineLayout(.{
@@ -1873,6 +2026,7 @@ fn inkInit(reg: *anyopaque) void {
   };
   // Register callable functions by name (works dlopen'd or statically linked).
   r.k_register("gpuRun", @ptrCast(&gpuRun), 2);
+  r.k_register("gpuComputeRun", @ptrCast(&gpuComputeRun), 1);
   r.k_register("gpuFill", @ptrCast(&gpuFill), 2);
   r.k_register("gpuTess", @ptrCast(&gpuTess), 1);
   r.k_register("gpuSpirv", @ptrCast(&gpuSpirv), 2);
@@ -1884,6 +2038,8 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuBufferRead", @ptrCast(&gpuBufferRead), 1);
   r.k_register("gpuBufferReadI", @ptrCast(&gpuBufferReadI), 1);
   r.k_register("gpuComputeNew", @ptrCast(&gpuComputeNew), 2);
+  r.k_register("gpuComputeNewU", @ptrCast(&gpuComputeNewU), 2);
+  r.k_register("gpuUniformNew", @ptrCast(&gpuUniformNew), 1);
   r.k_register("gpuDispatch", @ptrCast(&gpuDispatch), 3);
   r.k_register("gpuDispatchLoop", @ptrCast(&gpuDispatchLoop), 3);
   r.k_register("gpuMesh", @ptrCast(&gpuMesh), 2);

@@ -943,6 +943,101 @@ compCompute: {[fn]
 / map): compile once, then gpu.runShader the column each frame inside a gpuRun frame.
 shader.compute: compCompute
 
+/ ── compComputeU: element-wise compute + a uniform vec4 ──────────────────────────
+/ Kernel {[x;u] ...}: x = element from the input buffer (binding 0), u = a uniform
+/ vec4 (a true UBO at binding 2 — pass constants like scale/bias/length without a
+/ storage buffer). Writes binding 1. Mirrors compCompute, adding the render path's
+/ uniform block (struct{vec4}, Uniform storage class, Block/Offset/DescriptorSet/
+/ Binding decorations) and loading the member via loadUniMember. Run on the resident
+/ path: p:gpu.compileComputeU[shader.computeU[fn]; 2]; u:gpu.uniform[…];
+/ gpu.dispatch[p; (in;out;u); n].
+compComputeU: {[fn]
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
+
+  Tu32:    newId[]
+  Tv3u32:  newId[]
+  Trta:    newId[]
+  Tbuf:    newId[]
+  Pbufs:   newId[]
+  Pf32s:   newId[]
+  Pv3u32i: newId[]
+
+  gidVar: newId[]
+  inBuf:  newId[]
+  outBuf: newId[]
+
+  Ku32z: newId[]
+  emitCon (0x0004002B; Tu32; Ku32z; 0)
+
+  / uniform block scratch: struct{vec4} at set 0 binding 2
+  Tuni:   newId[]
+  Puni:   newId[]
+  PuniV4: newId[]
+  uniVar: newId[]
+  Ki0:    newId[]
+  emitCon opConst[Ti32; Ki0; 0]
+  UTuni::Tuni; UPv4::PuniV4; UVar::uniVar   / publish for loadUniMember (lambdas can't close)
+
+  lam: lamOf fn
+  argNames: lamArgs lam
+
+  gidId:    newId[]; emitBuf opLoad[Tv3u32; gidId; gidVar]
+  gidXId:   newId[]; emitBuf opXtract[Tu32; gidXId; gidId; 0]
+  inPtrId:  newId[]; emitBuf opAccChain[Pf32s; inPtrId; inBuf; Ku32z; gidXId]
+  xId:      newId[]; emitBuf opLoad[Tf32; xId; inPtrId]
+  uPair:    loadUniMember[Ki0]
+  env:      argNames!((xId; `f32); uPair)
+  stmts:   lamBody lam
+  rp:      compSeq[stmts; env; `f32]
+  outPtrId: newId[]; emitBuf opAccChain[Pf32s; outPtrId; outBuf; Ku32z; gidXId]
+  emitBuf opStore[outPtrId; rp[0]]
+
+  bnd: Nid+1
+  iface: (,gidVar)
+
+  hdr: (0x07230203; 0x00010300; 0; bnd; 0)
+  cap: (0x00020011; 1)
+  ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
+  mem: (0x0003000E; 0; 1)
+  ep:  (0x000F+(0x10000*(5+#iface)); 5; Fmain; 0x6E69616D; 0), iface
+  exm: (0x00060010; Fmain; 17; wg; 1; 1)
+
+  decGid:    (0x00040047; gidVar; 11; 28)
+  decStride: (0x00040047; Trta; 6; 4)
+  decMem:    (0x00050048; Tbuf; 0; 35; 0)
+  decBlk:    (0x00030047; Tbuf; 2)
+  decInDs:   (0x00040047; inBuf; 34; 0)
+  decInBnd:  (0x00040047; inBuf; 33; 0)
+  decOutDs:  (0x00040047; outBuf; 34; 0)
+  decOutBnd: (0x00040047; outBuf; 33; 1)
+  decUBlk:   (0x00030047; Tuni; 2)              / OpDecorate Tuni Block
+  decUMem:   (0x00050048; Tuni; 0; 35; 0)       / OpMemberDecorate Offset 0
+  decUDs:    (0x00040047; uniVar; 34; 0)        / DescriptorSet 0
+  decUBnd:   (0x00040047; uniVar; 33; 2)        / Binding 2
+
+  sTypes: (0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid)
+  cTypes: (0x00040015;Tu32;32;0;0x00040017;Tv3u32;Tu32;3;0x0003001D;Trta;Tf32;0x0003001E;Tbuf;Trta;0x00040020;Pbufs;12;Tbuf;0x00040020;Pf32s;12;Tf32;0x00040020;Pv3u32i;1;Tv3u32)
+  uTypes: (0x0003001E;Tuni;Tv4;0x00040020;Puni;2;Tuni;0x00040020;PuniV4;2;Tv4)
+
+  varGid: (0x0004003B; Pv3u32i; gidVar; 1)
+  varIn:  (0x0004003B; Pbufs;   inBuf;  12)
+  varOut: (0x0004003B; Pbufs;   outBuf; 12)
+  varUni: (0x0004003B; Puni;    uniVar; 2)
+
+  label: newId[]
+  fnh: (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
+  ret: (0x000100FD; 0x00010038)
+
+  conWds: $[#Con; ,/Con; !0]
+  bodWds: $[#Buf; ,/Buf; !0]
+
+  decs: decGid,decStride,decMem,decBlk,decInDs,decInBnd,decOutDs,decOutBnd,decUBlk,decUMem,decUDs,decUBnd
+  vars: varGid,varIn,varOut,varUni
+
+  ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;uTypes;vars;conWds;fnh;bodWds;ret)}
+
+shader.computeU: compComputeU
+
 / ── compCompute2: two-input element-wise compute shader ──────────────────────────
 / Kernel {[x;y] ...} reads input1 at binding 0 and input2 at binding 2, writes the
 / result to output at binding 1. Run with gpu.runShader2[shader.compute2[fn]; in1; in2].
