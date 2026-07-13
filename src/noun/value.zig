@@ -38,16 +38,11 @@ pub const V = union(K) {
   fn holder(comptime k: K) type {
     return switch (k) {
       .blank => void,
-      .b => bool, .B => N(bool),
-      .i => i32, .I => N(i32),
-      .f => f32, .F => N(f32),
-      .d => f64, .D => N(f64),
-      .h => f16, .H => N(f16),
-      .n, .s => u32, .N, .S => N(u32),
-      .c => u8, .C => N(u8),
       .m, .M => Dict,
       .L => V,
-      else => @compileError("no backing type for " ++ @tagName(k)),
+      // Backed scalar/vector kinds derive from class.zig's one table:
+      // vectors hold N(T), atoms hold the element type T directly.
+      else => if (k.isVec()) N(K.backing(k)) else K.backing(k),
     };
   }
   
@@ -130,19 +125,17 @@ pub const V = union(K) {
   }
 
   pub fn at(v: V, i: usize) V {
-    return switch (v) {
-      .B => |n| .{ .b = n.slice()[i] },
-      .I => |n| .{ .i = n.slice()[i] },
-      .F => |n| .{ .f = n.slice()[i] },
-      .D => |n| .{ .d = n.slice()[i] },
-      .H => |n| .{ .h = n.slice()[i] },
-      .N => |n| .{ .n = n.slice()[i] },
-      .S => |n| .{ .s = n.slice()[i] },
-      .C => |n| .{ .c = n.slice()[i] },
-      .L => |n| n.slice()[i].ref(),
-      inline .m, .M => |n| n.bv().at(i),
-      else => v.ref(),
-    };
+    switch (v) {
+      .L => |n| return n.slice()[i].ref(),
+      inline .m, .M => |n| return n.bv().at(i),
+      else => {},
+    }
+    // Vector kinds project element i into the matching atom kind, derived from
+    // class.zig's one table; atoms and exotics ref the whole value.
+    inline for (K.backed) |e| {
+      if (v.tag() == e.vec) return V.wrap(e.atom, V.unwrap(v, e.vec).slice()[i]);
+    }
+    return v.ref();
   }
 
   pub fn arity(v: V) u8 {

@@ -13,9 +13,36 @@ pub const K = enum(u8) {
   D = 14 | VEC_BIT, H = 15 | VEC_BIT,
 
   pub const VEC_BIT: u8       = 16;   // bit 4
-  pub const NON_VEC_COUNT: u8 = 14;   // blank(0)..x(13); code() offset for the
-                                      // original vec types (d/h/D/H are special-cased below)
   pub const COUNT: usize      = @typeInfo(K).@"enum".fields.len; // 24
+
+  // ── Single source of truth ──────────────────────────────────────────────────
+  // Every K→element-type / atom↔vector mapping derives from this one table, so
+  // adding a numeric type is a single row here (plus a serial_order slot below).
+  pub const Backed = struct { atom: K, vec: K, T: type };
+  pub const backed = [_]Backed{
+    .{ .atom = .b, .vec = .B, .T = bool },
+    .{ .atom = .i, .vec = .I, .T = i32 },
+    .{ .atom = .f, .vec = .F, .T = f32 },
+    .{ .atom = .n, .vec = .N, .T = u32 },
+    .{ .atom = .s, .vec = .S, .T = u32 },
+    .{ .atom = .c, .vec = .C, .T = u8 },
+    .{ .atom = .d, .vec = .D, .T = f64 },
+    .{ .atom = .h, .vec = .H, .T = f16 },
+  };
+
+  // Stable serialization / dense dispatch-index order. `code()` is the index
+  // into this array and `fromCode()` its inverse — kept in sync by construction.
+  // Order must not change: it is the on-disk tag encoding (binary.zig) and the
+  // key space for the dispatch tables (verbs.zig).
+  pub const serial_order = [_]K{
+    .blank, .err, .b, .i, .f, .n, .s, .c, .o, .p, .L, .m, .M, .x,
+    .B, .I, .F, .N, .S, .C, .d, .h, .D, .H,
+  };
+  const code_table: [32]u8 = blk: {
+    var t: [32]u8 = .{0} ** 32;
+    for (serial_order, 0..) |sk, i| t[@intFromEnum(sk)] = @intCast(i);
+    break :blk t;
+  };
 
   pub inline fn serCode(k: K) u8 { return @intCast(k.code()); }
   pub fn isFloat(k: K) bool { return switch (k) { .f, .F, .d, .D, .h, .H => true, else => false }; }
@@ -28,41 +55,14 @@ pub const K = enum(u8) {
   pub fn isNumeric(k: K) bool {
     return switch (k) { .b, .B, .i, .I, .f, .F, .n, .N, .d, .D, .h, .H => true, else => false };
   }
-  pub inline fn code(k: K) usize {
-    // d/h/D/H get dense codes appended after the original 0..19 range so
-    // serialization (binary.zig via serCode/fromCode) stays stable.
-    return switch (k) {
-      .d => 20, .h => 21, .D => 22, .H => 23,
-      else => {
-        const v = @intFromEnum(k);
-        if (v & VEC_BIT != 0) return @as(usize, v & ~@as(u8, VEC_BIT)) - 2 + NON_VEC_COUNT;
-        return v;
-      },
-    };
-  }
+  pub inline fn code(k: K) usize { return code_table[@intFromEnum(k)]; }
   pub fn fromCode(c: u8) ?K {
-    return switch (c) {
-      0  => .blank, 1  => .err,
-      2  => .b, 3 => .i, 4 => .f, 5 => .n, 6 => .s, 7 => .c,
-      8  => .o, 9 => .p, 10 => .L, 11 => .m, 12 => .M, 13 => .x,
-      14 => .B, 15 => .I, 16 => .F, 17 => .N, 18 => .S, 19 => .C,
-      20 => .d, 21 => .h, 22 => .D, 23 => .H,
-      else => null,
-    };
+    return if (c < serial_order.len) serial_order[c] else null;
   }
   pub fn backing(comptime k: K) type {
-    return switch (k) {
-      .blank => void,
-      .b, .B => bool,
-      .i, .I => i32,
-      .f, .F => f32,
-      .d, .D => f64,
-      .h, .H => f16,
-      .n, .N => u32,
-      .s, .S => u32,
-      .c, .C => u8,
-      else => @compileError("no backing type for " ++ @tagName(k)),
-    };
+    if (k == .blank) return void;
+    inline for (backed) |e| if (k == e.atom or k == e.vec) return e.T;
+    @compileError("no backing type for " ++ @tagName(k));
   }
   pub fn isNullFn(comptime k: K) fn(K.backing(k)) bool {
     return switch (k) {

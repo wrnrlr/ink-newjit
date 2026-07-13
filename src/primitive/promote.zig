@@ -70,15 +70,9 @@ pub fn promote(alloc: Alloc, n: N(V)) V {
 /// source type is known — an empty typed vector, never a general `` `L `` or the
 /// untyped empty that would otherwise break `=`/`&`/table columns downstream.
 pub fn emptyOf(alloc: Alloc, k: K) V {
-  return switch (k) {
-    .b, .B => V.wrap(.B, N(bool).init(alloc, 0) catch return V{ .err = .memory }),
-    .i, .I => V.wrap(.I, N(i32).init(alloc, 0) catch return V{ .err = .memory }),
-    .f, .F => V.wrap(.F, N(f32).init(alloc, 0) catch return V{ .err = .memory }),
-    .d, .D => V.wrap(.D, N(f64).init(alloc, 0) catch return V{ .err = .memory }),
-    .h, .H => V.wrap(.H, N(f16).init(alloc, 0) catch return V{ .err = .memory }),
-    .n, .N => V.wrap(.N, N(u32).init(alloc, 0) catch return V{ .err = .memory }),
-    .s, .S => V.wrap(.S, N(u32).init(alloc, 0) catch return V{ .err = .memory }),
-    .c, .C => V.wrap(.C, N(u8).init(alloc, 0) catch return V{ .err = .memory }),
-    else => V{ .L = N(V).init(alloc, 0) catch return V{ .err = .memory } },
-  };
+  inline for (K.backed) |e| {
+    if (k == e.atom or k == e.vec)
+      return V.wrap(e.vec, N(e.T).init(alloc, 0) catch return V{ .err = .memory });
+  }
+  return V{ .L = N(V).init(alloc, 0) catch return V{ .err = .memory } };
 }
