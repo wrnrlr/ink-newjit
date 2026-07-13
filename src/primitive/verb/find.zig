@@ -3,6 +3,7 @@ const VM = @import("../../runtime/vm.zig").VM;
 const so = @import("setops.zig");
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
+const K = @import("../../noun/class.zig").K;
 
 // Find the first index of x that matches y; if not found return the length of x (#x).
 // Returning #x (not 0N) is deliberate, matching k9/ngn-k: it makes find compose with
@@ -16,16 +17,18 @@ const N = @import("../../noun/array.zig").N;
 // list, not a null, or raze/count-each pollute the result with phantom 0N entries.
 pub const Find = struct {
   pub const op = .@"?";
-  _I_i: VM.Dyad = findI_i,
-  _I_I: VM.Dyad = findI_I,
-  _I_L: VM.Dyad = findI_L,
-  
-  _S_s: VM.Dyad = findS_s,
-  _S_S: VM.Dyad = findS_S,
-  _S_L: VM.Dyad = findS_L,
+  // Integer / symbol / natural share one exact-match scan (linear below the
+  // threshold, hash map above) generic over the u32/i32 backing type.
+  _I_i: VM.Dyad = intFindScalar(i32, .I, .i),
+  _I_I: VM.Dyad = intFindVec(i32, .I, .I),
+  _I_L: VM.Dyad = intFindList(i32, .I, .i),
 
-  _N_n: VM.Dyad = findN_n,
-  _N_N: VM.Dyad = findN_N,
+  _S_s: VM.Dyad = intFindScalar(u32, .S, .s),
+  _S_S: VM.Dyad = intFindVec(u32, .S, .S),
+  _S_L: VM.Dyad = intFindList(u32, .S, .s),
+
+  _N_n: VM.Dyad = intFindScalar(u32, .N, .n),
+  _N_N: VM.Dyad = intFindVec(u32, .N, .N),
   _N_L: VM.Dyad = findFallback,
   
   _C_c: VM.Dyad = findC_c,
@@ -82,119 +85,62 @@ fn findC_L(vm: *VM, x: V, y: V) V {
   return .{ .I = res };
 }
 
-// Integer — linear (≤ FIND_THRESHOLD) or hash map
-fn findI_i(vm: *VM, x: V, y: V) V {
-  const data = x.I.slice();
-  const miss: i32 = @intCast(data.len);
-  if (data.len <= so.FIND_THRESHOLD)
-    return .{ .i = if (std.mem.indexOfScalar(i32, data, y.i)) |i| @intCast(i) else miss };
-  var map = so.buildIndexMap(i32, vm.alloc, data) catch return V{ .err = .memory };
-  defer map.deinit();
-  return .{ .i = map.get(y.i) orelse miss };
+// Integer / symbol / natural exact-match find, generic over the i32/u32
+// backing type. x is a vector of tag `xk`; the scalar/list element tag is `sk`.
+// Linear scan up to FIND_THRESHOLD, hash map above; a miss returns #x.
+fn intFindScalar(comptime T: type, comptime xk: K, comptime sk: K) VM.Dyad {
+  return &struct {
+    fn f(vm: *VM, x: V, y: V) V {
+      const data = V.unwrap(x, xk).slice();
+      const probe = V.unwrap(y, sk);
+      const miss: i32 = @intCast(data.len);
+      if (data.len <= so.FIND_THRESHOLD)
+        return .{ .i = if (std.mem.indexOfScalar(T, data, probe)) |i| @intCast(i) else miss };
+      var map = so.buildIndexMap(T, vm.alloc, data) catch return V{ .err = .memory };
+      defer map.deinit();
+      return .{ .i = map.get(probe) orelse miss };
+    }
+  }.f;
 }
 
-fn findI_I(vm: *VM, x: V, y: V) V {
-  const data = x.I.slice();
-  const miss: i32 = @intCast(data.len);
-  const res = N(i32).init(vm.alloc, y.I.ptr.len) catch return V{ .err = .memory };
-  if (data.len <= so.FIND_THRESHOLD) {
-    for (y.I.slice(), res.slice()) |v, *r|
-      r.* = if (std.mem.indexOfScalar(i32, data, v)) |i| @intCast(i) else miss;
-    return .{ .I = res };
-  }
-  var map = so.buildIndexMap(i32, vm.alloc, data) catch return V{ .err = .memory };
-  defer map.deinit();
-  for (y.I.slice(), res.slice()) |v, *r| r.* = map.get(v) orelse miss;
-  return .{ .I = res };
+fn intFindVec(comptime T: type, comptime xk: K, comptime yk: K) VM.Dyad {
+  return &struct {
+    fn f(vm: *VM, x: V, y: V) V {
+      const data = V.unwrap(x, xk).slice();
+      const ys = V.unwrap(y, yk).slice();
+      const miss: i32 = @intCast(data.len);
+      const res = N(i32).init(vm.alloc, ys.len) catch return V{ .err = .memory };
+      if (data.len <= so.FIND_THRESHOLD) {
+        for (ys, res.slice()) |v, *r| r.* = if (std.mem.indexOfScalar(T, data, v)) |i| @intCast(i) else miss;
+        return .{ .I = res };
+      }
+      var map = so.buildIndexMap(T, vm.alloc, data) catch return V{ .err = .memory };
+      defer map.deinit();
+      for (ys, res.slice()) |v, *r| r.* = map.get(v) orelse miss;
+      return .{ .I = res };
+    }
+  }.f;
 }
 
-fn findI_L(vm: *VM, x: V, y: V) V {
-  const data = x.I.slice();
-  const miss: i32 = @intCast(data.len);
-  const res = N(i32).init(vm.alloc, y.L.ptr.len) catch return V{ .err = .memory };
-  if (data.len <= so.FIND_THRESHOLD) {
-    for (y.L.slice(), res.slice()) |yv, *r|
-      r.* = switch (yv) {
-        .i => |v| if (std.mem.indexOfScalar(i32, data, v)) |i| @intCast(i) else miss,
-        else => miss,
-      };
-    return .{ .I = res };
-  }
-  var map = so.buildIndexMap(i32, vm.alloc, data) catch return V{ .err = .memory };
-  defer map.deinit();
-  for (y.L.slice(), res.slice()) |yv, *r|
-    r.* = switch (yv) { .i => |v| map.get(v) orelse miss, else => miss };
-  return .{ .I = res };
-}
-
-// Symbol — same structure as Integer but u32
-// Natural (u32) find — same interned-id scan as symbols on x.N / y.n.
-fn findN_n(vm: *VM, x: V, y: V) V {
-  const data = x.N.slice();
-  const miss: i32 = @intCast(data.len);
-  if (data.len <= so.FIND_THRESHOLD)
-    return .{ .i = if (std.mem.indexOfScalar(u32, data, y.n)) |i| @intCast(i) else miss };
-  var map = so.buildIndexMap(u32, vm.alloc, data) catch return V{ .err = .memory };
-  defer map.deinit();
-  return .{ .i = map.get(y.n) orelse miss };
-}
-fn findN_N(vm: *VM, x: V, y: V) V {
-  const data = x.N.slice();
-  const miss: i32 = @intCast(data.len);
-  const res = N(i32).init(vm.alloc, y.N.ptr.len) catch return V{ .err = .memory };
-  if (data.len <= so.FIND_THRESHOLD) {
-    for (y.N.slice(), res.slice()) |v, *r|
-      r.* = if (std.mem.indexOfScalar(u32, data, v)) |i| @intCast(i) else miss;
-    return .{ .I = res };
-  }
-  var map = so.buildIndexMap(u32, vm.alloc, data) catch return V{ .err = .memory };
-  defer map.deinit();
-  for (y.N.slice(), res.slice()) |v, *r| r.* = map.get(v) orelse miss;
-  return .{ .I = res };
-}
-
-fn findS_s(vm: *VM, x: V, y: V) V {
-  const data = x.S.slice();
-  const miss: i32 = @intCast(data.len);
-  if (data.len <= so.FIND_THRESHOLD)
-    return .{ .i = if (std.mem.indexOfScalar(u32, data, y.s)) |i| @intCast(i) else miss };
-  var map = so.buildIndexMap(u32, vm.alloc, data) catch return V{ .err = .memory };
-  defer map.deinit();
-  return .{ .i = map.get(y.s) orelse miss };
-}
-
-fn findS_S(vm: *VM, x: V, y: V) V {
-  const data = x.S.slice();
-  const miss: i32 = @intCast(data.len);
-  const res = N(i32).init(vm.alloc, y.S.ptr.len) catch return V{ .err = .memory };
-  if (data.len <= so.FIND_THRESHOLD) {
-    for (y.S.slice(), res.slice()) |v, *r|
-      r.* = if (std.mem.indexOfScalar(u32, data, v)) |i| @intCast(i) else miss;
-    return .{ .I = res };
-  }
-  var map = so.buildIndexMap(u32, vm.alloc, data) catch return V{ .err = .memory };
-  defer map.deinit();
-  for (y.S.slice(), res.slice()) |v, *r| r.* = map.get(v) orelse miss;
-  return .{ .I = res };
-}
-
-fn findS_L(vm: *VM, x: V, y: V) V {
-  const data = x.S.slice();
-  const miss: i32 = @intCast(data.len);
-  const res = N(i32).init(vm.alloc, y.L.ptr.len) catch return V{ .err = .memory };
-  if (data.len <= so.FIND_THRESHOLD) {
-    for (y.L.slice(), res.slice()) |yv, *r|
-      r.* = switch (yv) {
-        .s => |v| if (std.mem.indexOfScalar(u32, data, v)) |i| @intCast(i) else miss,
-        else => miss,
-      };
-    return .{ .I = res };
-  }
-  var map = so.buildIndexMap(u32, vm.alloc, data) catch return V{ .err = .memory };
-  defer map.deinit();
-  for (y.L.slice(), res.slice()) |yv, *r|
-    r.* = switch (yv) { .s => |v| map.get(v) orelse miss, else => miss };
-  return .{ .I = res };
+fn intFindList(comptime T: type, comptime xk: K, comptime sk: K) VM.Dyad {
+  return &struct {
+    fn f(vm: *VM, x: V, y: V) V {
+      const data = V.unwrap(x, xk).slice();
+      const yl = y.L.slice();
+      const miss: i32 = @intCast(data.len);
+      const res = N(i32).init(vm.alloc, yl.len) catch return V{ .err = .memory };
+      if (data.len <= so.FIND_THRESHOLD) {
+        for (yl, res.slice()) |yv, *r|
+          r.* = if (yv.tag() == sk) (if (std.mem.indexOfScalar(T, data, V.unwrap(yv, sk))) |i| @intCast(i) else miss) else miss;
+        return .{ .I = res };
+      }
+      var map = so.buildIndexMap(T, vm.alloc, data) catch return V{ .err = .memory };
+      defer map.deinit();
+      for (yl, res.slice()) |yv, *r|
+        r.* = if (yv.tag() == sk) (map.get(V.unwrap(yv, sk)) orelse miss) else miss;
+      return .{ .I = res };
+    }
+  }.f;
 }
 
 // Float — NaN-safe via bit pattern; linear or hash map
