@@ -2,7 +2,9 @@ const std = @import("std");
 const radix = @import("sort/radixsort.zig");
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
+const K = @import("../../noun/class.zig").K;
 const VM = @import("../../runtime/vm.zig").VM;
+const h = @import("helper.zig");
 const Alloc = std.mem.Allocator;
 
 fn asc(vm: *VM, x: V) V { return sortIndices(vm.alloc, x, false); }
@@ -12,24 +14,34 @@ fn dsc(vm: *VM, x: V) V { return sortIndices(vm.alloc, x, true); }
 pub fn gradeDescend(vm: *VM, x: V) V { return dsc(vm, x); }
 pub fn gradeAscend(vm: *VM, x: V) V { return asc(vm, x); }
 
-pub const Ascend = struct {
-  pub const op = .@"<";
-  _b: VM.Monad = asc, _i: VM.Monad = asc, _f: VM.Monad = asc,
-  _n: VM.Monad = asc, _d: VM.Monad = asc, _h: VM.Monad = asc,
-  _c: VM.Monad = asc, _B: VM.Monad = asc, _I: VM.Monad = asc,
-  _F: VM.Monad = asc, _N: VM.Monad = asc, _D: VM.Monad = asc, _H: VM.Monad = asc,
-  _S: VM.Monad = asc, _C: VM.Monad = asc, _L: VM.Monad = asc,
-};
+// Grade-up (`<`) has no scalar-symbol slot; grade-down (`>`) does. Kept exact.
+const asc_kinds = [_]K{ .b, .i, .f, .n, .d, .h, .c, .B, .I, .F, .N, .D, .H, .S, .C, .L };
+const dsc_kinds = [_]K{ .b, .i, .f, .n, .d, .h, .s, .c, .B, .I, .F, .N, .D, .H, .S, .C, .L };
+pub const Ascend  = h._Y(.@"<", &asc_kinds, asc);
+pub const Descend = h._Y(.@">", &dsc_kinds, dsc);
 
-pub const Descend = struct {
-  pub const op = .@">";
-  _b: VM.Monad = dsc, _i: VM.Monad = dsc, _f: VM.Monad = dsc,
-  _n: VM.Monad = dsc, _d: VM.Monad = dsc, _h: VM.Monad = dsc,
-  _s: VM.Monad = dsc, _c: VM.Monad = dsc, _B: VM.Monad = dsc,
-  _I: VM.Monad = dsc, _F: VM.Monad = dsc, _N: VM.Monad = dsc,
-  _D: VM.Monad = dsc, _H: VM.Monad = dsc, _S: VM.Monad = dsc,
-  _C: VM.Monad = dsc, _L: VM.Monad = dsc,
-};
+// NaN-aware scalar order: NaNs sort below everything and compare equal to each
+// other (matches the grade semantics the vector/float paths rely on).
+inline fn orderFloat(a: anytype, b: @TypeOf(a)) std.math.Order {
+  const an = std.math.isNan(a); const bn = std.math.isNan(b);
+  if (an and bn) return .eq;
+  if (an) return .lt;
+  if (bn) return .gt;
+  return std.math.order(a, b);
+}
+
+// Lexicographic order over two same-typed slices; shorter-is-less on a common
+// prefix. Floats use the NaN-aware order, bools compare as 0/1.
+fn orderElems(comptime T: type, sa: []const T, sb: []const T) std.math.Order {
+  const n = @min(sa.len, sb.len);
+  for (sa[0..n], sb[0..n]) |ai, bi| {
+    const o = if (comptime @typeInfo(T) == .float) orderFloat(ai, bi)
+              else if (comptime T == bool) std.math.order(@intFromBool(ai), @intFromBool(bi))
+              else std.math.order(ai, bi);
+    if (o != .eq) return o;
+  }
+  return std.math.order(sa.len, sb.len);
+}
 
 fn compareV(a: V, b: V) std.math.Order {
   const at = a.tag();
@@ -37,89 +49,20 @@ fn compareV(a: V, b: V) std.math.Order {
   if (at != bt) return std.math.order(@intFromEnum(at), @intFromEnum(bt));
   return switch (at) {
     .i => std.math.order(a.i, b.i),
-    .f => blk: {
-      const an = std.math.isNan(a.f);
-      const bn = std.math.isNan(b.f);
-      if (an and bn) break :blk .eq;
-      if (an) break :blk .lt;
-      if (bn) break :blk .gt;
-      break :blk std.math.order(a.f, b.f);
-    },
+    .f => orderFloat(a.f, b.f),
+    .d => orderFloat(a.d, b.d),
+    .h => orderFloat(a.h, b.h),
     .c => std.math.order(a.c, b.c),
     .n => std.math.order(a.n, b.n),
-    .d => blk: {
-      const an = std.math.isNan(a.d); const bn = std.math.isNan(b.d);
-      if (an and bn) break :blk .eq;
-      if (an) break :blk .lt;
-      if (bn) break :blk .gt;
-      break :blk std.math.order(a.d, b.d);
-    },
-    .h => blk: {
-      const an = std.math.isNan(a.h); const bn = std.math.isNan(b.h);
-      if (an and bn) break :blk .eq;
-      if (an) break :blk .lt;
-      if (bn) break :blk .gt;
-      break :blk std.math.order(a.h, b.h);
-    },
-    .b => std.math.order(@intFromBool(a.b), @intFromBool(b.b)),
     .s => std.math.order(a.s, b.s),
-    .I => blk: {
-      const sa = a.I.slice(); const sb = b.I.slice();
-      const n = @min(sa.len, sb.len);
-      for (sa[0..n], sb[0..n]) |ai, bi| { const o = std.math.order(ai, bi); if (o != .eq) break :blk o; }
-      break :blk std.math.order(sa.len, sb.len);
-    },
-    .F => blk: {
-      const sa = a.F.slice(); const sb = b.F.slice();
-      const n = @min(sa.len, sb.len);
-      for (sa[0..n], sb[0..n]) |ai, bi| {
-        const an2 = std.math.isNan(ai); const bn2 = std.math.isNan(bi);
-        if (an2 and bn2) continue;
-        if (an2) break :blk .lt;
-        if (bn2) break :blk .gt;
-        const o = std.math.order(ai, bi); if (o != .eq) break :blk o;
-      }
-      break :blk std.math.order(sa.len, sb.len);
-    },
-    .N => blk: {
-      const sa = a.N.slice(); const sb = b.N.slice();
-      const n = @min(sa.len, sb.len);
-      for (sa[0..n], sb[0..n]) |ai, bi| { const o = std.math.order(ai, bi); if (o != .eq) break :blk o; }
-      break :blk std.math.order(sa.len, sb.len);
-    },
-    .D => blk: {
-      const sa = a.D.slice(); const sb = b.D.slice();
-      const n = @min(sa.len, sb.len);
-      for (sa[0..n], sb[0..n]) |ai, bi| {
-        const an2 = std.math.isNan(ai); const bn2 = std.math.isNan(bi);
-        if (an2 and bn2) continue;
-        if (an2) break :blk .lt;
-        if (bn2) break :blk .gt;
-        const o = std.math.order(ai, bi); if (o != .eq) break :blk o;
-      }
-      break :blk std.math.order(sa.len, sb.len);
-    },
-    .H => blk: {
-      const sa = a.H.slice(); const sb = b.H.slice();
-      const n = @min(sa.len, sb.len);
-      for (sa[0..n], sb[0..n]) |ai, bi| {
-        const an2 = std.math.isNan(ai); const bn2 = std.math.isNan(bi);
-        if (an2 and bn2) continue;
-        if (an2) break :blk .lt;
-        if (bn2) break :blk .gt;
-        const o = std.math.order(ai, bi); if (o != .eq) break :blk o;
-      }
-      break :blk std.math.order(sa.len, sb.len);
-    },
-    .C => blk: {
-      break :blk std.mem.order(u8, a.C.slice(), b.C.slice());
-    },
-    .B => blk: {
-      const sa = a.B.slice(); const sb = b.B.slice();
-      const n = @min(sa.len, sb.len);
-      for (sa[0..n], sb[0..n]) |ai, bi| { const o = std.math.order(@intFromBool(ai), @intFromBool(bi)); if (o != .eq) break :blk o; }
-      break :blk std.math.order(sa.len, sb.len);
-    },
+    .b => std.math.order(@intFromBool(a.b), @intFromBool(b.b)),
+    .I => orderElems(i32,  a.I.slice(), b.I.slice()),
+    .N => orderElems(u32,  a.N.slice(), b.N.slice()),
+    .F => orderElems(f32,  a.F.slice(), b.F.slice()),
+    .D => orderElems(f64,  a.D.slice(), b.D.slice()),
+    .H => orderElems(f16,  a.H.slice(), b.H.slice()),
+    .B => orderElems(bool, a.B.slice(), b.B.slice()),
+    .C => std.mem.order(u8, a.C.slice(), b.C.slice()),
     .L => blk: {
       const la = a.L.slice(); const lb = b.L.slice();
       const n = @min(la.len, lb.len);
