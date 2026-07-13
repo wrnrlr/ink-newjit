@@ -4,6 +4,55 @@
 
 ### Lexical Grammar
 
+Source is tokenized into literals, names, operators, adverbs, delimiters and
+comments. The literal grammar in EBNF:
+
+```ebnf
+digit    = "0" | "1" | ... | "9" ;
+hex      = digit | "a" ... "f" | "A" ... "F" ;
+letter   = "a" ... "z" | "A" ... "Z" ;
+sign     = "-" ;
+exponent = ( "e" | "E" ) , [ "+" | "-" ] , digit , { digit } ;
+mantissa = ( digit , { digit } , [ "." , { digit } ]
+            | "." , digit , { digit } ) , [ exponent ] ;
+bit   = ( "0" | "1" ) , "b" ;
+nat   = ( digit , { digit } | "0" , ( "N" | "W" ) ) , "u" ;
+int   = [ sign ] , ( "0" , ( "x" | "X" ) , hex , { hex }
+          | "0" , ( "N" | "W" )
+          | digit , { digit } ) ;
+float = [ sign ] , ( "0" , ( "n" | "w" )
+          | ( digit , { digit } , "." , { digit }
+          | "." , digit , { digit } ) , [ exponent ]
+          | digit , { digit } , exponent ) ;
+double = [ sign ] , ( "0" , ( "n" | "w" ) | mantissa ) , "d" ;
+half   = [ sign ] , ( "0" , ( "n" | "w" ) | mantissa ) , "h" ;
+bits   = ( "0" | "1" ) , ( "0" | "1" ) , { "0" | "1" } , "b" ;
+string = '"' , { stringchar } , '"' ;
+symbol = "`" , ( { letter | digit | "." }| '"' , { ? any char except '"' ? } , '"' ) ;
+name   = letter , { letter | digit } ,
+         { "." , letter , { letter | digit } } ;
+```
+
+Four tokenizer behaviors the grammar above can't fully express:
+
+- **`sign`** attaches as a negative literal only when the `-` isn't glued to a
+  preceding noun: `abs -3` → negative `-3`, but `abs-3` → dyadic subtract
+  (`abs` minus `3`). Matches ngn/k, where `cos -3` works but `cos-3` errors.
+- **`stringchar`** follows the K doubling convention — an interior `"` is
+  content unless the next character is whitespace, a bracket, an operator glyph
+  or a digit, so `"""` is a 1-char string holding `"`. A `"` immediately
+  followed by a newline opens a multi-line string that runs to its closing `"`.
+  A single-character string like `"H"` is a **char** atom, not a string.
+- **`symbol`** joins only `letter | digit | "."` in its unquoted body; an
+  operator glyph ends it (`` `~ `` is the null symbol `` ` `` then Match `~`).
+  Quote the body to include glyphs: `` `"+" ``, `` `"<=" ``.
+- **`name`** extends across a `.` only when the dot is followed by a letter —
+  `a.b` is one name, but `a.1` and `a. b` keep `.` as the Apply/index operator.
+  `_` is never part of a name (it is always the Drop/Cut/Delete primitive).
+
+Comments: a `/` preceded by whitespace (or starting a line) runs to end of line.
+A line containing only `/` opens a block comment that runs until a line
+containing only `\`. Newlines and `;` are statement separators (`sep`).
 
 ### Syntactical Grammar
 Nouns can be combined into expressions using verbs and adverbs.
@@ -14,7 +63,10 @@ Expressions are evaluated right-to-left. There are no special precedence rules f
 - `n::e` **Double Binding** - When in global scope set a global variable and when in local scope set a global variable;
 
 #### Juxtaposition
-Juxtoposition is 
+Juxtaposition is an expression with two ink values witten next to each other. The semantic of this expression depends on the type of the values.
+The operator and partial type 
+
+
 
 ## Datetypes
 
