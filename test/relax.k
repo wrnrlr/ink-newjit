@@ -32,4 +32,4 @@ pong:{[i] $[0=i mod 2; gpu.dispatch[relax;(A;B);8]; gpu.dispatch[relax;(B;A);8]]
 gDone::0
 go::{[] gDone::1; demo[]}
 loop:{[props] $[gDone=0; go[]; 0]}
-window.run[loop; 0]
+gpu.computeRun[{[x] demo[]}]

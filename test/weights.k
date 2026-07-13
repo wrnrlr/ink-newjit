@@ -56,4 +56,4 @@ demo:{[]
 gDone::0
 go::{[] gDone::1; demo[]}
 loop:{[props] $[gDone=0; go[]; 0]}
-window.run[loop; 0]
+gpu.computeRun[{[x] demo[]}]

@@ -400,16 +400,29 @@ before running it:
 Dawn's ingestion target here is pinned to SPIR-V 1.3 / Vulkan 1.1, so *any* 1.4
 module is invalid regardless of correctness. Both changes were reverted.
 
-**Assessment:** even setting the block aside, the only capability 1.4 adds *for
-us* is `OpSelect` on composite/array types (1.3 restricts it to scalars/vectors),
-which our `$[cond;a;b]` branching doesn't need. So the cost is: rebuild the
-vendored Dawn with a newer SPIR-V/Vulkan target environment (a deep change to a
-prebuilt dependency) to unlock a feature we have no use for. Not worth it.
+**A Dawn rebuild does NOT unblock this (investigated 2026-07-13).** The block is
+not a target-env knob in this particular prebuilt — it is inherent to the WebGPU
+raw-SPIR-V ingestion path. ink hands SPIR-V to Dawn via
+`ShaderModuleSPIRVDescriptor` (`lib/gpu/gpu.zig`), which routes through Tint's
+**SPIR-V reader**. That reader validates against the **Vulkan 1.1** environment
+(`spirv-val --target-env vulkan1.1`), which caps input at **SPIR-V 1.3** (Vulkan
+1.1↔SPIR-V 1.3; ingesting 1.4 would require the Vulkan 1.2 env). Dawn/Tint's own
+docs state "SPIR-V 1.4 and later are not supported in Tint's SPIR-V reader." So
+*no* Dawn version — rebuilt or newer prebuilt — accepts a 1.4 module through this
+API. (The 1.4 support that shipped on Android/ChromeOS is Tint's *writer*,
+WGSL→SPIR-V for the Vulkan backend — opposite direction, moot on macOS/Metal.)
+Also: the vendored `dawn_aarch64_macos` prebuilt (michal-z) has no build newer
+than July 2023, so there is no drop-in newer prebuilt anyway.
 
-**Fix (only if a 1.4-only feature ever becomes necessary):** first raise Dawn's
-SPIR-V target env (rebuild `patches`/the prebuilt Dawn), then bump the version
-word and expand each `OpEntryPoint` interface to list all referenced global
-variables (verified working locally, just version-gated). See `.plan/tasks.md`.
+**Assessment:** the only capability 1.4 adds *for us* is `OpSelect` on
+composite/array types (1.3 restricts it to scalars/vectors), which our
+`$[cond;a;b]` branching doesn't need. Combined with the reader constraint above,
+this is **WON'T-DO**, not merely deferred.
+
+**Only routes that could ever run 1.4-era features (both out of scope):**
+(a) emit or transpile to **WGSL** instead of raw SPIR-V (no version cap, but
+rewrites the GPU back-end); (b) drop WebGPU for a raw **Metal/Vulkan** backend
+(abandons Dawn). Neither is justified for an unused feature. See `.plan/tasks.md`.
 
 ### i32 / bool as shader I/O types
 
