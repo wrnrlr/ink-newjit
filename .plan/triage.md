@@ -380,7 +380,15 @@ compiler emits valid SPIR-V for everything it supports.
 
 ## Open
 
-### SPIR-V 1.4 upgrade — BLOCKED by Dawn; do not attempt without a Dawn rebuild
+### SPIR-V 1.4 upgrade — RESOLVED via the Vulkan/MoltenVK migration (2026-07-13)
+
+**Outcome:** SPIR-V 1.4 is no longer blocked — it works on the new Vulkan/MoltenVK
+backend (`-Dgpu-backend=vulkan`, `INK_SPV14=1`). The whole compute/nn stack runs on
+genuine 1.4, bit-identical to 1.3. See `.plan/tasks.md` "GPU: Dawn → Vulkan
+migration" and `doc/design/vulkan-migration.md`. The analysis below remains correct
+for *WebGPU/Dawn* (which still refuses 1.4) and is why the migration was needed.
+
+### SPIR-V 1.4 on Dawn — BLOCKED (unchanged; Dawn's Tint reader caps at 1.3)
 
 Header is `0x00010300` (SPIR-V 1.3) in every emitter (vertex `buildMod`, all
 compute variants). `OpEntryPoint` uses 1.3 subset-interface semantics — only

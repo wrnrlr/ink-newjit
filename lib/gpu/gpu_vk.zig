@@ -10,6 +10,7 @@ const std = @import("std");
 const vk = @import("vk.zig");
 const zglfw = @import("zglfw");
 const png = @import("png.zig");
+const tri = @import("triangulate");
 extern fn getenv(name: [*:0]const u8) ?[*:0]const u8;
 
 const K = *anyopaque;
@@ -118,10 +119,18 @@ fn resetRegistries() void {
   for (g_pipes.items) |p| v.destroyPipeline(p);
   for (g_mesh_pipes.items) |mp| v.destroyMeshPipeline(mp);
   if (g_vbuf) |b| v.destroyBuffer(b);
+  if (g_fbuf) |b| v.destroyBuffer(b);
+  for (g_spirv_pipes.items) |fp| v.destroyFillShaderPipe(fp);
+  for (g_textures.items) |t| v.destroyTexture(t);
+  for (g_geoms.items) |gm| v.destroyBuffer(gm.buf);
   g_bufs.deinit(alloc); g_pipes.deinit(alloc); g_mesh_pipes.deinit(alloc);
   g_mesh_verts.deinit(alloc); g_mesh_calls.deinit(alloc);
+  g_fill_verts.deinit(alloc); g_fill_calls.deinit(alloc); g_spirv_pipes.deinit(alloc);
+  g_textures.deinit(alloc); g_geoms.deinit(alloc); g_geom_calls.deinit(alloc);
   g_bufs = .empty; g_pipes = .empty; g_mesh_pipes = .empty;
   g_mesh_verts = .empty; g_mesh_calls = .empty; g_vbuf = null; g_vbuf_cap = 0;
+  g_fill_verts = .empty; g_fill_calls = .empty; g_fbuf = null; g_fbuf_cap = 0; g_spirv_pipes = .empty;
+  g_textures = .empty; g_geoms = .empty; g_geom_calls = .empty;
 }
 
 fn wordsOf(k: ?K) ?[]const u32 {
@@ -135,6 +144,7 @@ fn wordsOf(k: ?K) ?[]const u32 {
 // ── gpuComputeRun[fn] : create a headless device, run fn once, tear down ───────
 export fn gpuComputeRun(fn_k: ?K) callconv(.c) ?K {
   const cbk = fn_k orelse return ki(0);
+  vk.force_spv14 = getenv("INK_SPV14") != null; // run dye.k output at SPIR-V 1.4
   var v = vk.Vk.init() catch return ki(-1);
   g_vk = &v;
   g_bufs = .empty; g_pipes = .empty;
@@ -407,6 +417,21 @@ fn hasUniformVar(words: []const u32) bool {
   return false;
 }
 
+// Textures sampled at @group(1): count OpVariables in UniformConstant storage (0)
+// in the fragment; n_tex = that count minus the one shared sampler.
+fn texCount(words: []const u32) u32 {
+  var uc: u32 = 0;
+  var i: usize = 5;
+  while (i < words.len) {
+    const w0 = words[i];
+    const wc: usize = w0 >> 16;
+    if (wc == 0) break;
+    if ((w0 & 0xffff) == 59 and i + 3 < words.len and words[i + 3] == 0) uc += 1;
+    i += wc;
+  }
+  return if (uc > 0) uc - 1 else 0;
+}
+
 export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
   const v = g_vk orelse return ki(0);
   const vwords = wordsOf(vtx_k) orelse return ki(0);
@@ -415,9 +440,106 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
   const li = meshVtxLayout(vwords, &attrs);
   if (li.count == 0) return ki(0);
   const has_uni = hasUniformVar(vwords) or hasUniformVar(fwords);
-  const mp = v.createMeshPipeline(vwords, fwords, attrs[0..li.count], li.stride_floats * 4, has_uni) catch return ki(0);
+  const n_tex = texCount(fwords);
+  const mp = v.createMeshPipeline(vwords, fwords, attrs[0..li.count], li.stride_floats * 4, has_uni, n_tex) catch return ki(0);
   g_mesh_pipes.append(alloc, mp) catch { v.destroyMeshPipeline(mp); return ki(0); };
   return ki(@intCast(g_mesh_pipes.items.len));
+}
+
+// ── textures + retained geometry (Phase 3, increment 2c) ──────────────────────
+var g_textures: std.ArrayList(vk.Texture) = .empty; // 1-based handles
+const Geom = struct { buf: vk.Buffer, count: u32, pipe: usize };
+var g_geoms: std.ArrayList(Geom) = .empty; // 1-based handles
+const MAX_TEX = 8;
+const GeomCall = struct { geom: usize, has_uni: bool, uniform: [vk.MESH_UNI_FLOATS]f32, tex: [MAX_TEX]i32, ntex: usize };
+var g_geom_calls: std.ArrayList(GeomCall) = .empty; // this frame's retained draws
+
+// gpuTexture[(w;h;comp)_I; data_I] -> handle : upload an image (expanded to RGBA).
+export fn gpuTexture(whc_k: ?K, data_k: ?K) callconv(.c) ?K {
+  const v = g_vk orelse return ki(0);
+  const wp = kip(whc_k) orelse return ki(0);
+  if (kn(whc_k) < 3) return ki(0);
+  const w = wp[0]; const h = wp[1]; const comp = wp[2];
+  if (w <= 0 or h <= 0 or comp <= 0) return ki(0);
+  const dp = kip(data_k) orelse return ki(0);
+  const wu: usize = @intCast(w); const hu: usize = @intCast(h); const cu: usize = @intCast(comp);
+  const npix = wu * hu;
+  if (kn(data_k) < @as(i32, @intCast(npix * cu))) return ki(0);
+  const rgba = alloc.alloc(u8, npix * 4) catch return ki(0);
+  defer alloc.free(rgba);
+  const cl = struct { fn f(x: i32) u8 { return @intCast(@min(@as(i32, 255), @max(@as(i32, 0), x))); } }.f;
+  var p: usize = 0;
+  while (p < npix) : (p += 1) {
+    const s = p * cu; const d = p * 4;
+    if (cu >= 3) {
+      rgba[d] = cl(dp[s]); rgba[d + 1] = cl(dp[s + 1]); rgba[d + 2] = cl(dp[s + 2]); rgba[d + 3] = if (cu >= 4) cl(dp[s + 3]) else 255;
+    } else {
+      const g = cl(dp[s]); rgba[d] = g; rgba[d + 1] = g; rgba[d + 2] = g; rgba[d + 3] = if (cu == 2) cl(dp[s + 1]) else 255;
+    }
+  }
+  const t = v.createTexture(@intCast(w), @intCast(h), rgba) catch return ki(0);
+  g_textures.append(alloc, t) catch { v.destroyTexture(t); return ki(0); };
+  return ki(@intCast(g_textures.items.len));
+}
+
+// gpuUploadMesh[verts_F; meshHandle] -> geomHandle : upload geometry to a retained
+// vertex buffer (once, not per frame).
+export fn gpuUploadMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
+  const v = g_vk orelse return ki(0);
+  const h = ki_val(handle_k);
+  if (h <= 0 or h > g_mesh_pipes.items.len) return ki(0);
+  const stride_floats: usize = g_mesh_pipes.items[@intCast(h - 1)].stride / 4;
+  if (stride_floats == 0) return ki(0);
+  const vf = kfp(verts_k) orelse return ki(0);
+  const vn = kn(verts_k);
+  if (vn < @as(i32, @intCast(stride_floats))) return ki(0);
+  const nfloats: usize = (@as(usize, @intCast(vn)) / stride_floats) * stride_floats;
+  const buf = v.createVertexBuffer(nfloats * @sizeOf(f32)) catch return ki(0);
+  @memcpy(buf.mapped[0 .. nfloats * 4], std.mem.sliceAsBytes(vf[0..nfloats]));
+  g_geoms.append(alloc, .{ .buf = buf, .count = @intCast(nfloats / stride_floats), .pipe = @intCast(h - 1) }) catch { v.destroyBuffer(buf); return ki(0); };
+  return ki(@intCast(g_geoms.items.len));
+}
+
+// gpuDrawGeomT[geom; uni_F; texHandles_I] : draw retained geometry with a per-draw
+// uniform block (@group0) and textures (@group1).
+export fn gpuDrawGeomT(geom_k: ?K, uni_k: ?K, tex_k: ?K) callconv(.c) ?K {
+  const g = ki_val(geom_k);
+  if (g <= 0 or g > g_geoms.items.len) return ki(0);
+  var gc: GeomCall = .{ .geom = @intCast(g - 1), .has_uni = false, .uniform = [_]f32{0} ** vk.MESH_UNI_FLOATS, .tex = [_]i32{0} ** MAX_TEX, .ntex = 0 };
+  if (kfp(uni_k)) |up| {
+    const m: usize = @min(@as(usize, @intCast(@max(kn(uni_k), 0))), vk.MESH_UNI_FLOATS);
+    var j: usize = 0;
+    while (j < m) : (j += 1) gc.uniform[j] = up[j];
+    gc.has_uni = m > 0;
+  }
+  if (kip(tex_k)) |tp| {
+    const nt: usize = @min(@as(usize, @intCast(@max(kn(tex_k), 0))), MAX_TEX);
+    var j: usize = 0;
+    while (j < nt) : (j += 1) gc.tex[j] = tp[j];
+    gc.ntex = nt;
+  }
+  g_geom_calls.append(alloc, gc) catch return ki(0);
+  return ki(0);
+}
+
+// Record retained-geometry draws (after per-frame meshes).
+fn recordGeoms(v: *vk.Vk, cb: anytype) void {
+  var tbuf: [MAX_TEX]vk.Texture = undefined;
+  for (g_geom_calls.items) |gc| {
+    const geom = g_geoms.items[gc.geom];
+    const mp = g_mesh_pipes.items[geom.pipe];
+    const uset = if (gc.has_uni) v.meshUniformSet(gc.uniform[0..]) else vk.Vk.nullSet();
+    var tset = vk.Vk.nullSet();
+    if (mp.n_tex > 0 and gc.ntex > 0) {
+      var k: usize = 0;
+      while (k < gc.ntex) : (k += 1) {
+        const th = gc.tex[k];
+        tbuf[k] = if (th > 0 and th <= g_textures.items.len) g_textures.items[@intCast(th - 1)] else g_textures.items[0];
+      }
+      tset = v.texSet(mp, tbuf[0..gc.ntex]);
+    }
+    v.drawMesh(cb, mp, geom.buf, 0, geom.count, uset, tset);
+  }
 }
 
 fn drawMeshCommon(verts_k: ?K, handle: i32, uni: [vk.MESH_UNI_FLOATS]f32, has_uni: bool) void {
@@ -464,13 +586,127 @@ fn recordMeshes(v: *vk.Vk, cb: anytype) void {
   @memcpy(vb.mapped[0..need], std.mem.sliceAsBytes(g_mesh_verts.items[0..nf]));
   for (g_mesh_calls.items) |mc| {
     const set = if (mc.has_uni) v.meshUniformSet(mc.uniform[0..]) else null;
-    v.drawMesh(cb, g_mesh_pipes.items[mc.pipe], vb, mc.byte_offset, mc.count, set);
+    v.drawMesh(cb, g_mesh_pipes.items[mc.pipe], vb, mc.byte_offset, mc.count, set, vk.Vk.nullSet());
   }
 }
 
 fn resetFrameMeshes() void {
   g_mesh_verts.clearRetainingCapacity();
   g_mesh_calls.clearRetainingCapacity();
+  g_fill_verts.clearRetainingCapacity();
+  g_fill_calls.clearRetainingCapacity();
+  g_geom_calls.clearRetainingCapacity();
+}
+
+// ── 2-D fill pipeline (Phase 3, increment 3) ──────────────────────────────────
+const FillCall = struct { byte_offset: u64, count: u32, frag: [44]f32, spirv: i32 }; // spirv=-1 → built-in fill
+var g_fill_calls: std.ArrayList(FillCall) = .empty;
+var g_fill_verts: std.ArrayList(f32) = .empty; // [x,y,u,v] per vertex
+var g_fbuf: ?vk.Buffer = null;
+var g_fbuf_cap: u64 = 0;
+var g_spirv_pipes: std.ArrayList(vk.Vk.FillPipe) = .empty; // custom fill-shader pipelines
+
+fn fillAccumulate(verts_k: ?K, frag: [44]f32, spirv: i32) void {
+  const vf = kfp(verts_k) orelse return;
+  const vn = kn(verts_k);
+  if (vn < 4) return;
+  const nfloats: usize = (@as(usize, @intCast(vn)) / 4) * 4;
+  const byte_offset: u64 = g_fill_verts.items.len * @sizeOf(f32);
+  g_fill_verts.appendSlice(alloc, vf[0..nfloats]) catch return;
+  g_fill_calls.append(alloc, .{ .byte_offset = byte_offset, .count = @intCast(nfloats / 4), .frag = frag, .spirv = spirv }) catch return;
+}
+
+export fn gpuFill(verts_k: ?K, frag_k: ?K) callconv(.c) ?K {
+  const ff = kfp(frag_k) orelse return ki(0);
+  if (kn(frag_k) != 44) return ki(0);
+  var frag: [44]f32 = undefined;
+  var i: usize = 0;
+  while (i < 44) : (i += 1) frag[i] = ff[i];
+  fillAccumulate(verts_k, frag, -1);
+  return ki(0);
+}
+
+// gpuSpirv[frag_words; _] -> negative handle : compile a custom fill-shader
+// pipeline (dye.k fragment SPIR-V over the built-in fill vertex shader).
+export fn gpuSpirv(words_k: ?K, _: ?K) callconv(.c) ?K {
+  const v = g_vk orelse return ki(0);
+  const words = wordsOf(words_k) orelse return ki(0);
+  const fp = v.createFillShaderPipe(words) orelse return ki(0);
+  g_spirv_pipes.append(alloc, fp) catch { v.destroyFillShaderPipe(fp); return ki(0); };
+  return ki(-@as(i32, @intCast(g_spirv_pipes.items.len)));
+}
+
+// gpuFillShader[verts_F; handle] : draw 2-D triangles with a custom fill shader.
+export fn gpuFillShader(verts_k: ?K, shader_k: ?K) callconv(.c) ?K {
+  const sh = ki_val(shader_k);
+  if (sh >= 0) return ki(0);
+  const idx: usize = @intCast(-sh - 1);
+  if (idx >= g_spirv_pipes.items.len) return ki(0);
+  fillAccumulate(verts_k, [_]f32{0} ** 44, @intCast(idx));
+  return ki(0);
+}
+
+// gpuTess[pts_F] -> [x,y,u,v,...] : CPU polygon triangulation (verbatim from the
+// Dawn backend; no device). Multiple contours split on NaN x/y pairs.
+export fn gpuTess(pts_k: ?K) callconv(.c) ?K {
+  const pf = kfp(pts_k) orelse return ki(0);
+  const pn = kn(pts_k);
+  if (pn < 6) return ki(0);
+  const npair: usize = @as(usize, @intCast(pn)) / 2;
+  var da = std.heap.DebugAllocator(.{}).init;
+  defer _ = da.deinit();
+  const a = da.allocator();
+  var contours = std.ArrayList(tri.Contour).initCapacity(a, 4) catch return ki(0);
+  defer { for (contours.items) |c| a.free(c.pts); contours.deinit(a); }
+  var cur = std.ArrayList(tri.Pt).initCapacity(a, 32) catch return ki(0);
+  defer cur.deinit(a);
+  for (0..npair) |i| {
+    const x = pf[i * 2];
+    const y = pf[i * 2 + 1];
+    if (std.math.isNan(x) or std.math.isNan(y)) {
+      if (cur.items.len >= 3) {
+        const slice = a.dupe(tri.Pt, cur.items) catch return ki(0);
+        contours.append(a, .{ .pts = slice }) catch return ki(0);
+      }
+      cur.clearRetainingCapacity();
+    } else cur.append(a, .{ .x = x, .y = y }) catch return ki(0);
+  }
+  if (cur.items.len >= 3) {
+    const slice = a.dupe(tri.Pt, cur.items) catch return ki(0);
+    contours.append(a, .{ .pts = slice }) catch return ki(0);
+  }
+  var out = std.ArrayList(tri.Pt).initCapacity(a, 64) catch return ki(0);
+  defer out.deinit(a);
+  tri.triangulate(a, contours.items, &out) catch return ki(0);
+  const n_out = out.items.len;
+  const result_k = KF(@intCast(n_out * 4)) orelse return ki(0);
+  const rf = kfp(result_k) orelse { ku(result_k); return ki(0); };
+  for (out.items, 0..) |p, i| {
+    rf[i * 4 + 0] = p.x; rf[i * 4 + 1] = p.y; rf[i * 4 + 2] = 0.5; rf[i * 4 + 3] = 1.0;
+  }
+  return result_k;
+}
+
+// Upload this frame's 2-D fill vertices and record all fill draws (base layer,
+// before meshes). vw/vh = framebuffer size (the fill vertex shader's viewSize).
+fn recordFills(v: *vk.Vk, cb: anytype, vw: f32, vh: f32) void {
+  const nf = g_fill_verts.items.len;
+  if (nf == 0) return;
+  const need: u64 = nf * @sizeOf(f32);
+  if (g_fbuf == null or need > g_fbuf_cap) {
+    if (g_fbuf) |b| v.destroyBuffer(b);
+    const cap = need * 2;
+    g_fbuf = v.createVertexBuffer(cap) catch { g_fbuf = null; return; };
+    g_fbuf_cap = cap;
+  }
+  const fb = g_fbuf.?;
+  @memcpy(fb.mapped[0..need], std.mem.sliceAsBytes(g_fill_verts.items[0..nf]));
+  for (g_fill_calls.items) |fc| {
+    const set = v.fillSet(vw, vh, fc.frag[0..]);
+    if (set == null) continue;
+    const pipe = if (fc.spirv >= 0) g_spirv_pipes.items[@intCast(fc.spirv)].pipe else vk.Vk.nullPipe();
+    v.drawFill(cb, fb, fc.byte_offset, fc.count, set, pipe);
+  }
 }
 
 // Write a captured BGRA frame to <INK_SNAP_BASE|ink>-snap.png (png.zig swizzles).
@@ -579,7 +815,9 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
       snap_buf = v.createBuffer(@as(u64, ext[0]) * ext[1] * 4, false) catch null;
     }
     if (v.beginFrame(@intCast(fbw), @intCast(fbh), .{ 0, 0, 0, 1 })) |cb| {
-      recordMeshes(&v, cb);
+      recordFills(&v, cb, @floatFromInt(fbw), @floatFromInt(fbh)); // 2-D base layer
+      recordMeshes(&v, cb); // 3-D on top (depth-tested)
+      recordGeoms(&v, cb); // retained 3-D geometry (uniform + textures)
       v.endFrame(@intCast(fbw), @intCast(fbh), if (do_snap) snap_buf else null);
       if (do_snap) if (snap_buf) |sb| {
         v.waitIdle();
@@ -596,17 +834,10 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
 }
 
 // ── Render/window exports — stubs until Phase 3 increment 2 ───────────────────
-export fn gpuFill(_: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
-export fn gpuTess(_: ?K) callconv(.c) ?K { return ki(0); }
-export fn gpuSpirv(_: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
-export fn gpuFillShader(_: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
-export fn gpuUploadMesh(_: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
 export fn gpuDrawInstanced(_: ?K, _: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
 export fn gpuDrawGeomResident(_: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
 export fn gpuDrawInstancedT(_: ?K, _: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
 export fn gpuDrawMeshT(_: ?K, _: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
-export fn gpuDrawGeomT(_: ?K, _: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
-export fn gpuTexture(_: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
 export fn gpuWgsl(_: ?K) callconv(.c) ?K { return ki(0); }
 
 // ── registry install ──────────────────────────────────────────────────────────

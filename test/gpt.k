@@ -6,7 +6,7 @@ encode:chars!!N;
 decode:(!N)!chars;
 data:encode text
 n:_0.9*#data
-(td;vd):(0,n)_data:
+(td;vd):(0,n)_data
 cs:!8 / context size
 ctx:td cs
 next:td 1+cs

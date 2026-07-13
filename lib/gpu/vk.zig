@@ -97,6 +97,9 @@ extern fn vkCmdDraw(c.VkCommandBuffer, u32, u32, u32, u32) void;
 extern fn vkCmdSetViewport(c.VkCommandBuffer, u32, u32, [*]const c.VkViewport) void;
 extern fn vkCmdSetScissor(c.VkCommandBuffer, u32, u32, [*]const c.VkRect2D) void;
 extern fn vkCmdCopyImageToBuffer(c.VkCommandBuffer, c.VkImage, c.VkImageLayout, c.VkBuffer, u32, [*]const c.VkBufferImageCopy) void;
+extern fn vkCreateSampler(c.VkDevice, *const c.VkSamplerCreateInfo, ?*const c.VkAllocationCallbacks, *c.VkSampler) c.VkResult;
+extern fn vkDestroySampler(c.VkDevice, c.VkSampler, ?*const c.VkAllocationCallbacks) void;
+extern fn vkCmdCopyBufferToImage(c.VkCommandBuffer, c.VkBuffer, c.VkImage, c.VkImageLayout, u32, [*]const c.VkBufferImageCopy) void;
 extern fn vkGetInstanceProcAddr(c.VkInstance, [*c]const u8) c.PFN_vkVoidFunction;
 // GLFW Vulkan surface (libglfw3). glfwInitVulkanLoader points GLFW at MoltenVK's
 // directly-linked vkGetInstanceProcAddr (no libvulkan loader present).
@@ -116,6 +119,71 @@ fn ok(r: c.VkResult) bool {
 
 pub const MAX_BIND = 8;
 pub const FRAMES = 2; // frames in flight for windowed rendering
+
+// When set (INK_SPV14=1), rewrite every module's version word to SPIR-V 1.4 before
+// vkCreateShaderModule — proves the migration's whole point (MoltenVK runs dye.k's
+// output at 1.4, which Dawn's Tint reader refuses). See doc/design/vulkan-migration.md.
+pub var force_spv14 = false;
+var spv_scratch: [65536]u32 = undefined;
+
+// Rewrite a SPIR-V module to version 1.4: bump the version word AND expand the
+// OpEntryPoint interface to list every global (non-Function) variable — the two
+// changes 1.4 requires. (Proven by spike/vkspike.zig + spirv-val; a bare version
+// bump is invalid and MoltenVK silently miscomputes.) This is the Phase-6 transform
+// applied live, so dye.k stays 1.3 (Dawn keeps working) while Vulkan runs 1.4.
+fn maybeBump(spirv: []const u32) []const u32 {
+  if (!force_spv14 or spirv.len < 6 or spirv.len + 64 > spv_scratch.len) return spirv;
+
+  // Collect global variable ids (module scope, storage class != Function=7) and
+  // locate the OpEntryPoint instruction.
+  var globals: [64]u32 = undefined;
+  var nglob: usize = 0;
+  var ep_pos: usize = 0;
+  var i: usize = 5;
+  while (i < spirv.len) {
+    const wc: usize = spirv[i] >> 16;
+    const op: u32 = spirv[i] & 0xffff;
+    if (wc == 0) break;
+    if (op == 15 and ep_pos == 0) ep_pos = i; // OpEntryPoint
+    if (op == 54) break; // OpFunction — end of the global section
+    if (op == 59 and i + 3 < spirv.len and spirv[i + 3] != 7 and nglob < 64) { globals[nglob] = spirv[i + 2]; nglob += 1; }
+    i += wc;
+  }
+  if (ep_pos == 0) return spirv;
+  const ep_wc: usize = spirv[ep_pos] >> 16;
+  const ep_end = ep_pos + ep_wc;
+
+  // The interface list starts after the entry-point name (a NUL-terminated string
+  // beginning at ep_pos+3): find the word containing the terminating NUL byte.
+  var name_end = ep_pos + 3;
+  while (name_end < ep_end) : (name_end += 1) {
+    const w = spirv[name_end];
+    if ((w & 0xff) == 0 or (w & 0xff00) == 0 or (w & 0xff0000) == 0 or (w & 0xff000000) == 0) { name_end += 1; break; }
+  }
+
+  // Which globals aren't already listed in the interface (ids name_end..ep_end)?
+  var add: [64]u32 = undefined;
+  var nadd: usize = 0;
+  for (globals[0..nglob]) |gid| {
+    var present = false;
+    var k = name_end;
+    while (k < ep_end) : (k += 1) if (spirv[k] == gid) { present = true; break; };
+    if (!present) { add[nadd] = gid; nadd += 1; }
+  }
+  if (nadd == 0) { // just the version bump
+    @memcpy(spv_scratch[0..spirv.len], spirv);
+    spv_scratch[1] = 0x00010400;
+    return spv_scratch[0..spirv.len];
+  }
+
+  // Rebuild: [0..ep_end) ++ add ++ [ep_end..len), version bumped, ep word count +nadd.
+  @memcpy(spv_scratch[0..ep_end], spirv[0..ep_end]);
+  @memcpy(spv_scratch[ep_end .. ep_end + nadd], add[0..nadd]);
+  @memcpy(spv_scratch[ep_end + nadd .. spirv.len + nadd], spirv[ep_end..spirv.len]);
+  spv_scratch[1] = 0x00010400;
+  spv_scratch[ep_pos] = (@as(u32, @intCast(ep_wc + nadd)) << 16) | 15;
+  return spv_scratch[0 .. spirv.len + nadd];
+}
 pub const MESH_UNI_FLOATS = 32; // 8 vec4 per-draw uniform block
 const UNI_SLOT = 256; // bytes per uniform slot (alignment-friendly)
 const MAX_MCALLS = 1024; // max uniform mesh draws per frame
@@ -154,6 +222,15 @@ pub const MeshPipe = struct {
   fmod: c.VkShaderModule,
   stride: u32, // vertex stride in bytes
   has_uniform: bool, // pipeline layout includes the @group(0) uniform block
+  n_tex: u32, // textures sampled at @group(1) (0 = none)
+  tex_dsl: c.VkDescriptorSetLayout, // @group(1) layout (n images + 1 sampler), or null
+};
+
+pub const Texture = struct {
+  img: c.VkImage,
+  mem: c.VkDeviceMemory,
+  view: c.VkImageView,
+  sampler: c.VkSampler,
 };
 
 pub const Vk = struct {
@@ -196,6 +273,21 @@ pub const Vk = struct {
   mesh_upool: [FRAMES]c.VkDescriptorPool,
   mesh_ubuf: [FRAMES]Buffer,
   mesh_uslot: [FRAMES]u32,
+  // 2-D fill pipeline (fill.vert/frag) + its 6-binding set + dummy texture
+  fill_dsl: c.VkDescriptorSetLayout,
+  fill_pipe: c.VkPipeline,
+  fill_layout: c.VkPipelineLayout,
+  fill_vmod: c.VkShaderModule,
+  fill_fmod: c.VkShaderModule,
+  dummy_img: c.VkImage,
+  dummy_mem: c.VkDeviceMemory,
+  dummy_view: c.VkImageView,
+  dummy_sampler: c.VkSampler,
+  view_ubuf: [FRAMES]Buffer, // viewSize, per frame
+  frag_ubuf: [FRAMES]Buffer, // per-draw frag uniform ring
+  fill_upool: [FRAMES]c.VkDescriptorPool,
+  fill_uslot: [FRAMES]u32,
+  tex_upool: [FRAMES]c.VkDescriptorPool, // per-draw @group(1) texture sets
 
   pub fn init() Error!Vk {
     var self: Vk = undefined;
@@ -275,8 +367,21 @@ pub const Vk = struct {
         vkDestroyFence(self.dev, self.in_flight[i], null);
         vkDestroyDescriptorPool(self.dev, self.mesh_upool[i], null);
         self.destroyBuffer(self.mesh_ubuf[i]);
+        vkDestroyDescriptorPool(self.dev, self.fill_upool[i], null);
+        vkDestroyDescriptorPool(self.dev, self.tex_upool[i], null);
+        self.destroyBuffer(self.view_ubuf[i]);
+        self.destroyBuffer(self.frag_ubuf[i]);
       }
       vkDestroyDescriptorSetLayout(self.dev, self.mesh_dsl, null);
+      vkDestroyPipeline(self.dev, self.fill_pipe, null);
+      vkDestroyPipelineLayout(self.dev, self.fill_layout, null);
+      vkDestroyDescriptorSetLayout(self.dev, self.fill_dsl, null);
+      vkDestroyShaderModule(self.dev, self.fill_vmod, null);
+      vkDestroyShaderModule(self.dev, self.fill_fmod, null);
+      vkDestroySampler(self.dev, self.dummy_sampler, null);
+      vkDestroyImageView(self.dev, self.dummy_view, null);
+      vkDestroyImage(self.dev, self.dummy_img, null);
+      vkFreeMemory(self.dev, self.dummy_mem, null);
       self.destroySwapObjects();
       vkDestroyRenderPass(self.dev, self.render_pass, null);
       vkDestroyCommandPool(self.dev, self.frame_pool, null);
@@ -429,10 +534,225 @@ pub const Vk = struct {
       }
     }
 
+    self.setupFill() catch return Error.VulkanInit;
+
     self.frame = 0;
     self.windowed = true;
     self.createSwapObjects(w, h);
     return self;
+  }
+
+  // Build the 2-D fill pipeline (fill.vert/frag SPIR-V), its 6-binding descriptor
+  // set layout, a 1×1 dummy texture+sampler (for the texture bindings on non-image
+  // fills), and per-frame view/frag uniform buffers + descriptor pools.
+  fn setupFill(self: *Vk) Error!void {
+    // 6-binding DSL: view(u) frag(u) tex(img) samp colormap(img) samp
+    const fb = [6]c.VkDescriptorSetLayoutBinding{
+      .{ .binding = 0, .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT },
+      .{ .binding = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT },
+      .{ .binding = 2, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT },
+      .{ .binding = 3, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT },
+      .{ .binding = 4, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT },
+      .{ .binding = 5, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT },
+    };
+    const dsli = c.VkDescriptorSetLayoutCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 6, .pBindings = &fb };
+    if (!ok(vkCreateDescriptorSetLayout(self.dev, &dsli, null, &self.fill_dsl))) return Error.VulkanInit;
+
+    // shader modules from the GLSL→SPIR-V bridge output
+    const vspv align(4) = @embedFile("fill.vert.spv").*;
+    const fspv align(4) = @embedFile("fill.frag.spv").*;
+    const vsmi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = vspv.len, .pCode = @ptrCast(&vspv) };
+    if (!ok(vkCreateShaderModule(self.dev, &vsmi, null, &self.fill_vmod))) return Error.VulkanInit;
+    const fsmi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = fspv.len, .pCode = @ptrCast(&fspv) };
+    if (!ok(vkCreateShaderModule(self.dev, &fsmi, null, &self.fill_fmod))) return Error.VulkanInit;
+
+    const plci = c.VkPipelineLayoutCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1, .pSetLayouts = &self.fill_dsl };
+    if (!ok(vkCreatePipelineLayout(self.dev, &plci, null, &self.fill_layout))) return Error.VulkanInit;
+
+    self.fill_pipe = self.buildFillPipe(self.fill_fmod) orelse return Error.VulkanInit;
+
+    // 1×1 dummy texture (never sampled on solid/gradient fills; just satisfies the
+    // layout). Transitioned UNDEFINED→SHADER_READ_ONLY via a one-time submit.
+    const ici = c.VkImageCreateInfo{
+      .sType = c.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = c.VK_IMAGE_TYPE_2D, .format = c.VK_FORMAT_R8G8B8A8_UNORM,
+      .extent = .{ .width = 1, .height = 1, .depth = 1 }, .mipLevels = 1, .arrayLayers = 1, .samples = c.VK_SAMPLE_COUNT_1_BIT,
+      .tiling = c.VK_IMAGE_TILING_OPTIMAL, .usage = c.VK_IMAGE_USAGE_SAMPLED_BIT, .sharingMode = c.VK_SHARING_MODE_EXCLUSIVE, .initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    if (!ok(vkCreateImage(self.dev, &ici, null, &self.dummy_img))) return Error.VulkanInit;
+    var req: c.VkMemoryRequirements = undefined;
+    vkGetImageMemoryRequirements(self.dev, self.dummy_img, &req);
+    const ai = c.VkMemoryAllocateInfo{ .sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size, .memoryTypeIndex = self.memtype };
+    _ = vkAllocateMemory(self.dev, &ai, null, &self.dummy_mem);
+    _ = vkBindImageMemory(self.dev, self.dummy_img, self.dummy_mem, 0);
+    const ivci = c.VkImageViewCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = self.dummy_img, .viewType = c.VK_IMAGE_VIEW_TYPE_2D, .format = c.VK_FORMAT_R8G8B8A8_UNORM, .components = .{}, .subresourceRange = .{ .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 } };
+    _ = vkCreateImageView(self.dev, &ivci, null, &self.dummy_view);
+    const smci = c.VkSamplerCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, .magFilter = c.VK_FILTER_LINEAR, .minFilter = c.VK_FILTER_LINEAR, .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, .maxLod = 1.0 };
+    _ = vkCreateSampler(self.dev, &smci, null, &self.dummy_sampler);
+    // one-time layout transition
+    {
+      var tcb: c.VkCommandBuffer = undefined;
+      const cbai = c.VkCommandBufferAllocateInfo{ .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = self.cmd_pool, .level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1 };
+      _ = vkAllocateCommandBuffers(self.dev, &cbai, &tcb);
+      const bi = c.VkCommandBufferBeginInfo{ .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+      _ = vkBeginCommandBuffer(tcb, &bi);
+      const bar = c.VkImageMemoryBarrier{ .sType = c.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .srcAccessMask = 0, .dstAccessMask = c.VK_ACCESS_SHADER_READ_BIT, .oldLayout = c.VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, .srcQueueFamilyIndex = c.VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = c.VK_QUEUE_FAMILY_IGNORED, .image = self.dummy_img, .subresourceRange = .{ .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 } };
+      vkCmdPipelineBarrier(tcb, c.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, c.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, null, 0, null, 1, @ptrCast(&bar));
+      _ = vkEndCommandBuffer(tcb);
+      const si = c.VkSubmitInfo{ .sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = @ptrCast(&tcb) };
+      _ = vkQueueSubmit(self.queue, 1, @ptrCast(&si), null);
+      _ = vkQueueWaitIdle(self.queue);
+      _ = vkResetCommandPool(self.dev, self.cmd_pool, 0);
+    }
+
+    // per-frame view uniform + frag ring + descriptor pool
+    var i: u32 = 0;
+    while (i < FRAMES) : (i += 1) {
+      self.view_ubuf[i] = try self.createBuffer(UNI_SLOT, true);
+      self.frag_ubuf[i] = try self.createBuffer(MAX_MCALLS * UNI_SLOT, true);
+      const ps = [3]c.VkDescriptorPoolSize{
+        .{ .type = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 2 * MAX_MCALLS },
+        .{ .type = c.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 2 * MAX_MCALLS },
+        .{ .type = c.VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 2 * MAX_MCALLS },
+      };
+      const dpci = c.VkDescriptorPoolCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = MAX_MCALLS, .poolSizeCount = 3, .pPoolSizes = &ps };
+      _ = vkCreateDescriptorPool(self.dev, &dpci, null, &self.fill_upool[i]);
+      self.fill_uslot[i] = 0;
+      // texture @group(1) sets: up to 256 draws × (MAX_BIND images + 1 sampler)
+      const tps = [2]c.VkDescriptorPoolSize{
+        .{ .type = c.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 256 * MAX_BIND },
+        .{ .type = c.VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 256 },
+      };
+      const tdpci = c.VkDescriptorPoolCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 256, .poolSizeCount = 2, .pPoolSizes = &tps };
+      _ = vkCreateDescriptorPool(self.dev, &tdpci, null, &self.tex_upool[i]);
+    }
+  }
+
+  // Allocate a @group(1) descriptor set binding `texs` (n sampled images + one
+  // shared sampler) for pipeline `mp`, from the current frame's texture pool.
+  pub fn texSet(self: *Vk, mp: MeshPipe, texs: []const Texture) c.VkDescriptorSet {
+    if (mp.n_tex == 0 or texs.len == 0) return null;
+    var set: c.VkDescriptorSet = undefined;
+    const dsai = c.VkDescriptorSetAllocateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = self.tex_upool[self.frame], .descriptorSetCount = 1, .pSetLayouts = &mp.tex_dsl };
+    if (!ok(vkAllocateDescriptorSets(self.dev, &dsai, &set))) return null;
+    var imgs: [MAX_BIND]c.VkDescriptorImageInfo = undefined;
+    var writes: [MAX_BIND + 1]c.VkWriteDescriptorSet = undefined;
+    var i: u32 = 0;
+    while (i < mp.n_tex) : (i += 1) {
+      const ti = if (i < texs.len) i else 0;
+      imgs[i] = .{ .imageView = texs[ti].view, .imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+      writes[i] = .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = i, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .pImageInfo = &imgs[i] };
+    }
+    const smp = c.VkDescriptorImageInfo{ .sampler = texs[0].sampler };
+    writes[mp.n_tex] = .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = mp.n_tex, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLER, .pImageInfo = &smp };
+    vkUpdateDescriptorSets(self.dev, mp.n_tex + 1, &writes, 0, null);
+    return set;
+  }
+
+  // Graphics pipeline: fill vertex shader + given fragment module, [vec2 pos, vec2
+  // uv] stride-16 vertices, no depth, alpha blend, dynamic viewport/scissor.
+  fn buildFillPipe(self: *Vk, fmod: c.VkShaderModule) ?c.VkPipeline {
+    const stages = [2]c.VkPipelineShaderStageCreateInfo{
+      .{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = c.VK_SHADER_STAGE_VERTEX_BIT, .module = self.fill_vmod, .pName = "main" },
+      .{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = c.VK_SHADER_STAGE_FRAGMENT_BIT, .module = fmod, .pName = "main" },
+    };
+    const vattrs = [2]c.VkVertexInputAttributeDescription{
+      .{ .location = 0, .binding = 0, .format = c.VK_FORMAT_R32G32_SFLOAT, .offset = 0 },
+      .{ .location = 1, .binding = 0, .format = c.VK_FORMAT_R32G32_SFLOAT, .offset = 8 },
+    };
+    const vbind = c.VkVertexInputBindingDescription{ .binding = 0, .stride = 16, .inputRate = c.VK_VERTEX_INPUT_RATE_VERTEX };
+    const vin = c.VkPipelineVertexInputStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, .vertexBindingDescriptionCount = 1, .pVertexBindingDescriptions = &vbind, .vertexAttributeDescriptionCount = 2, .pVertexAttributeDescriptions = &vattrs };
+    const ia = c.VkPipelineInputAssemblyStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, .topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST };
+    const vps = c.VkPipelineViewportStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1 };
+    const rs = c.VkPipelineRasterizationStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, .polygonMode = c.VK_POLYGON_MODE_FILL, .cullMode = c.VK_CULL_MODE_NONE, .frontFace = c.VK_FRONT_FACE_COUNTER_CLOCKWISE, .lineWidth = 1.0 };
+    const mss = c.VkPipelineMultisampleStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, .rasterizationSamples = c.VK_SAMPLE_COUNT_1_BIT };
+    const ds = c.VkPipelineDepthStencilStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO, .depthTestEnable = c.VK_FALSE, .depthWriteEnable = c.VK_FALSE, .depthCompareOp = c.VK_COMPARE_OP_ALWAYS };
+    const cba = c.VkPipelineColorBlendAttachmentState{
+      .blendEnable = c.VK_TRUE,
+      .srcColorBlendFactor = c.VK_BLEND_FACTOR_SRC_ALPHA, .dstColorBlendFactor = c.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, .colorBlendOp = c.VK_BLEND_OP_ADD,
+      .srcAlphaBlendFactor = c.VK_BLEND_FACTOR_ONE, .dstAlphaBlendFactor = c.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, .alphaBlendOp = c.VK_BLEND_OP_ADD,
+      .colorWriteMask = c.VK_COLOR_COMPONENT_R_BIT | c.VK_COLOR_COMPONENT_G_BIT | c.VK_COLOR_COMPONENT_B_BIT | c.VK_COLOR_COMPONENT_A_BIT,
+    };
+    const cb = c.VkPipelineColorBlendStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &cba };
+    const dyn_states = [2]c.VkDynamicState{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR };
+    const dyn = c.VkPipelineDynamicStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 2, .pDynamicStates = &dyn_states };
+    const gpci = c.VkGraphicsPipelineCreateInfo{
+      .sType = c.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+      .stageCount = 2, .pStages = &stages,
+      .pVertexInputState = &vin, .pInputAssemblyState = &ia, .pViewportState = &vps,
+      .pRasterizationState = &rs, .pMultisampleState = &mss, .pDepthStencilState = &ds,
+      .pColorBlendState = &cb, .pDynamicState = &dyn,
+      .layout = self.fill_layout, .renderPass = self.render_pass, .subpass = 0, .basePipelineIndex = -1,
+    };
+    var pipe: c.VkPipeline = undefined;
+    if (!ok(vkCreateGraphicsPipelines(self.dev, null, 1, @ptrCast(&gpci), null, @ptrCast(&pipe)))) return null;
+    return pipe;
+  }
+
+  // Custom fragment (user SPIR-V from dye.k) over the fill vertex shader. Reuses
+  // the fill layout, so the shader may read the frag uniform/textures or nothing.
+  pub const FillPipe = struct { pipe: c.VkPipeline, fmod: c.VkShaderModule };
+  pub fn createFillShaderPipe(self: *Vk, frag: []const u32) ?FillPipe {
+    var fmod: c.VkShaderModule = undefined;
+    const smi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = frag.len * 4, .pCode = frag.ptr };
+    if (!ok(vkCreateShaderModule(self.dev, &smi, null, &fmod))) return null;
+    const pipe = self.buildFillPipe(fmod) orelse { vkDestroyShaderModule(self.dev, fmod, null); return null; };
+    return .{ .pipe = pipe, .fmod = fmod };
+  }
+  pub fn destroyFillShaderPipe(self: *Vk, fp: FillPipe) void {
+    vkDestroyPipeline(self.dev, fp.pipe, null);
+    vkDestroyShaderModule(self.dev, fp.fmod, null);
+  }
+
+  // Reserve a per-draw fill descriptor set: view uniform (viewSize), frag uniform
+  // slot (44 floats), and the dummy texture/sampler bindings.
+  pub fn fillSet(self: *Vk, vw: f32, vh: f32, frag: []const f32) c.VkDescriptorSet {
+    const f = self.frame;
+    const slot = self.fill_uslot[f];
+    if (slot >= MAX_MCALLS) return null;
+    self.fill_uslot[f] = slot + 1;
+    // view (write every draw; cheap)
+    const view = [4]f32{ vw, vh, 0, 0 };
+    @memcpy(self.view_ubuf[f].mapped[0..16], std.mem.sliceAsBytes(view[0..]));
+    // frag slot
+    const off: usize = @as(usize, slot) * UNI_SLOT;
+    const n = @min(frag.len, @as(usize, 44));
+    const src = std.mem.sliceAsBytes(frag[0..n]);
+    @memcpy(self.frag_ubuf[f].mapped[off..][0..src.len], src);
+
+    var set: c.VkDescriptorSet = undefined;
+    const dsai = c.VkDescriptorSetAllocateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = self.fill_upool[f], .descriptorSetCount = 1, .pSetLayouts = &self.fill_dsl };
+    if (!ok(vkAllocateDescriptorSets(self.dev, &dsai, &set))) return null;
+    const vi = c.VkDescriptorBufferInfo{ .buffer = self.view_ubuf[f].buf, .offset = 0, .range = 16 };
+    const fi = c.VkDescriptorBufferInfo{ .buffer = self.frag_ubuf[f].buf, .offset = off, .range = 176 };
+    const img = c.VkDescriptorImageInfo{ .imageView = self.dummy_view, .imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    const smp = c.VkDescriptorImageInfo{ .sampler = self.dummy_sampler };
+    const writes = [6]c.VkWriteDescriptorSet{
+      .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 0, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &vi },
+      .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 1, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &fi },
+      .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 2, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .pImageInfo = &img },
+      .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 3, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLER, .pImageInfo = &smp },
+      .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 4, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .pImageInfo = &img },
+      .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 5, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLER, .pImageInfo = &smp },
+    };
+    vkUpdateDescriptorSets(self.dev, 6, &writes, 0, null);
+    return set;
+  }
+
+  // Record a 2-D fill draw (no depth) into the render-pass command buffer. `pipe`
+  // null → the built-in fill pipeline; else a custom fill-shader pipeline.
+  pub fn drawFill(self: *Vk, cb: c.VkCommandBuffer, vbuf: Buffer, byte_offset: u64, vcount: u32, set: c.VkDescriptorSet, pipe: c.VkPipeline) void {
+    const off: c.VkDeviceSize = byte_offset;
+    vkCmdBindPipeline(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, if (pipe != null) pipe else self.fill_pipe);
+    vkCmdBindDescriptorSets(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.fill_layout, 0, 1, @ptrCast(&set), 0, null);
+    vkCmdBindVertexBuffers(cb, 0, 1, @ptrCast(&vbuf.buf), @ptrCast(&off));
+    vkCmdDraw(cb, vcount, 1, 0, 0);
+  }
+
+  pub fn nullPipe() c.VkPipeline {
+    return null;
+  }
+  pub fn nullSet() c.VkDescriptorSet {
+    return null;
   }
 
   // Reserve a per-draw uniform slot in the current frame's buffer, upload `floats`,
@@ -570,6 +890,9 @@ pub const Vk = struct {
     // this frame's prior uniform sets are done (fence waited) — recycle them
     _ = vkResetDescriptorPool(self.dev, self.mesh_upool[self.frame], 0);
     self.mesh_uslot[self.frame] = 0;
+    _ = vkResetDescriptorPool(self.dev, self.fill_upool[self.frame], 0);
+    self.fill_uslot[self.frame] = 0;
+    _ = vkResetDescriptorPool(self.dev, self.tex_upool[self.frame], 0);
 
     const cb = self.frame_cmd[self.frame];
     const bi = c.VkCommandBufferBeginInfo{ .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
@@ -675,7 +998,9 @@ pub const Vk = struct {
   // Basic mesh graphics pipeline: vertex+fragment SPIR-V, one vertex binding with
   // caller-derived attributes, depth-test on, alpha blend, dynamic viewport/scissor.
   // (Increment 2: no descriptor sets — uniform/texture/instance variants come next.)
-  pub fn createMeshPipeline(self: *Vk, vtx: []const u32, frg: []const u32, in_attrs: []const VtxAttr, stride_bytes: u32, has_uniform: bool) Error!MeshPipe {
+  pub fn createMeshPipeline(self: *Vk, vtx: []const u32, frg: []const u32, in_attrs: []const VtxAttr, stride_bytes: u32, has_uniform_in: bool, n_tex: u32) Error!MeshPipe {
+    // A textured mesh always carries the @group(0) uniform block too (matches Dawn).
+    const has_uniform = has_uniform_in or n_tex > 0;
     var attr_buf: [16]c.VkVertexInputAttributeDescription = undefined;
     for (in_attrs, 0..) |a, i| {
       attr_buf[i] = .{
@@ -691,16 +1016,30 @@ pub const Vk = struct {
       };
     }
     const attrs = attr_buf[0..in_attrs.len];
-    var mp: MeshPipe = .{ .pipe = undefined, .layout = undefined, .vmod = undefined, .fmod = undefined, .stride = stride_bytes, .has_uniform = has_uniform };
+    var mp: MeshPipe = .{ .pipe = undefined, .layout = undefined, .vmod = undefined, .fmod = undefined, .stride = stride_bytes, .has_uniform = has_uniform, .n_tex = n_tex, .tex_dsl = null };
     const vsmi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = vtx.len * 4, .pCode = vtx.ptr };
     if (!ok(vkCreateShaderModule(self.dev, &vsmi, null, &mp.vmod))) return Error.ShaderModule;
     const fsmi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = frg.len * 4, .pCode = frg.ptr };
     if (!ok(vkCreateShaderModule(self.dev, &fsmi, null, &mp.fmod))) { vkDestroyShaderModule(self.dev, mp.vmod, null); return Error.ShaderModule; }
 
+    // @group(1) texture layout: n_tex sampled images (0..n-1) + one shared sampler (n).
+    if (n_tex > 0) {
+      var tb: [MAX_BIND + 1]c.VkDescriptorSetLayoutBinding = undefined;
+      var i: u32 = 0;
+      while (i < n_tex) : (i += 1) tb[i] = .{ .binding = i, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT };
+      tb[n_tex] = .{ .binding = n_tex, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT };
+      const tdsli = c.VkDescriptorSetLayoutCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = n_tex + 1, .pBindings = &tb };
+      _ = vkCreateDescriptorSetLayout(self.dev, &tdsli, null, &mp.tex_dsl);
+    }
+
+    var set_layouts: [2]c.VkDescriptorSetLayout = undefined;
+    var nset: u32 = 0;
+    if (has_uniform) { set_layouts[nset] = self.mesh_dsl; nset += 1; }
+    if (n_tex > 0) { set_layouts[nset] = mp.tex_dsl; nset += 1; }
     const plci = c.VkPipelineLayoutCreateInfo{
       .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-      .setLayoutCount = if (has_uniform) 1 else 0,
-      .pSetLayouts = if (has_uniform) @ptrCast(&self.mesh_dsl) else null,
+      .setLayoutCount = nset,
+      .pSetLayouts = if (nset > 0) &set_layouts else null,
     };
     if (!ok(vkCreatePipelineLayout(self.dev, &plci, null, &mp.layout))) return Error.Pipeline;
 
@@ -749,18 +1088,22 @@ pub const Vk = struct {
   pub fn destroyMeshPipeline(self: *Vk, mp: MeshPipe) void {
     vkDestroyPipeline(self.dev, mp.pipe, null);
     vkDestroyPipelineLayout(self.dev, mp.layout, null);
+    if (mp.tex_dsl != null) vkDestroyDescriptorSetLayout(self.dev, mp.tex_dsl, null);
     vkDestroyShaderModule(self.dev, mp.vmod, null);
     vkDestroyShaderModule(self.dev, mp.fmod, null);
   }
 
   // Record a mesh draw into the given (render-pass-open) command buffer, binding
   // the shared vertex buffer at byte_offset so meshes of different strides coexist.
-  // `uset` is a per-draw uniform descriptor set (from meshUniformSet) or null.
-  pub fn drawMesh(_: *Vk, cb: c.VkCommandBuffer, mp: MeshPipe, vbuf: Buffer, byte_offset: u64, vcount: u32, uset: c.VkDescriptorSet) void {
+  // `uset` = per-draw uniform set (@group0) or null; `tset` = texture set (@group1)
+  // or null. `vbuf`/`byte_offset`/`vcount` describe the vertices (per-frame or retained).
+  pub fn drawMesh(_: *Vk, cb: c.VkCommandBuffer, mp: MeshPipe, vbuf: Buffer, byte_offset: u64, vcount: u32, uset: c.VkDescriptorSet, tset: c.VkDescriptorSet) void {
     const off: c.VkDeviceSize = byte_offset;
     vkCmdBindPipeline(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, mp.pipe);
     if (mp.has_uniform and uset != null)
       vkCmdBindDescriptorSets(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, mp.layout, 0, 1, @ptrCast(&uset), 0, null);
+    if (mp.n_tex > 0 and tset != null)
+      vkCmdBindDescriptorSets(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, mp.layout, 1, 1, @ptrCast(&tset), 0, null);
     vkCmdBindVertexBuffers(cb, 0, 1, @ptrCast(&vbuf.buf), @ptrCast(&off));
     vkCmdDraw(cb, vcount, 1, 0, 0);
   }
@@ -816,10 +1159,67 @@ pub const Vk = struct {
     return b.mapped[0..b.size]; // valid after a preceding waitIdle
   }
 
+  // Upload RGBA8 pixel data to a sampled texture (staging buffer + copy + layout
+  // transitions via a one-time submit), returning image+view+sampler.
+  pub fn createTexture(self: *Vk, w: u32, h: u32, rgba: []const u8) Error!Texture {
+    var t: Texture = undefined;
+    const ici = c.VkImageCreateInfo{
+      .sType = c.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = c.VK_IMAGE_TYPE_2D, .format = c.VK_FORMAT_R8G8B8A8_UNORM,
+      .extent = .{ .width = w, .height = h, .depth = 1 }, .mipLevels = 1, .arrayLayers = 1, .samples = c.VK_SAMPLE_COUNT_1_BIT,
+      .tiling = c.VK_IMAGE_TILING_OPTIMAL, .usage = c.VK_IMAGE_USAGE_SAMPLED_BIT | c.VK_IMAGE_USAGE_TRANSFER_DST_BIT, .sharingMode = c.VK_SHARING_MODE_EXCLUSIVE, .initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    if (!ok(vkCreateImage(self.dev, &ici, null, &t.img))) return Error.OutOfMemory;
+    var req: c.VkMemoryRequirements = undefined;
+    vkGetImageMemoryRequirements(self.dev, t.img, &req);
+    const ai = c.VkMemoryAllocateInfo{ .sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size, .memoryTypeIndex = self.memtype };
+    if (!ok(vkAllocateMemory(self.dev, &ai, null, &t.mem))) { vkDestroyImage(self.dev, t.img, null); return Error.OutOfMemory; }
+    _ = vkBindImageMemory(self.dev, t.img, t.mem, 0);
+
+    // staging buffer with the pixel data
+    const stage = try self.createBuffer(@as(u64, w) * h * 4, false);
+    defer self.destroyBuffer(stage);
+    @memcpy(stage.mapped[0 .. rgba.len], rgba);
+
+    // one-time: UNDEFINED→TRANSFER_DST, copy, →SHADER_READ_ONLY
+    var tcb: c.VkCommandBuffer = undefined;
+    const cbai = c.VkCommandBufferAllocateInfo{ .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = self.cmd_pool, .level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1 };
+    _ = vkAllocateCommandBuffers(self.dev, &cbai, &tcb);
+    const bi = c.VkCommandBufferBeginInfo{ .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+    _ = vkBeginCommandBuffer(tcb, &bi);
+    var b = c.VkImageMemoryBarrier{ .sType = c.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .srcAccessMask = 0, .dstAccessMask = c.VK_ACCESS_TRANSFER_WRITE_BIT, .oldLayout = c.VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, .srcQueueFamilyIndex = c.VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = c.VK_QUEUE_FAMILY_IGNORED, .image = t.img, .subresourceRange = .{ .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 } };
+    vkCmdPipelineBarrier(tcb, c.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, c.VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, null, 0, null, 1, @ptrCast(&b));
+    const region = c.VkBufferImageCopy{ .bufferOffset = 0, .bufferRowLength = 0, .bufferImageHeight = 0, .imageSubresource = .{ .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 }, .imageOffset = .{ .x = 0, .y = 0, .z = 0 }, .imageExtent = .{ .width = w, .height = h, .depth = 1 } };
+    vkCmdCopyBufferToImage(tcb, stage.buf, t.img, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, @ptrCast(&region));
+    b.srcAccessMask = c.VK_ACCESS_TRANSFER_WRITE_BIT;
+    b.dstAccessMask = c.VK_ACCESS_SHADER_READ_BIT;
+    b.oldLayout = c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    b.newLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkCmdPipelineBarrier(tcb, c.VK_PIPELINE_STAGE_TRANSFER_BIT, c.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, null, 0, null, 1, @ptrCast(&b));
+    _ = vkEndCommandBuffer(tcb);
+    const si = c.VkSubmitInfo{ .sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = @ptrCast(&tcb) };
+    _ = vkQueueSubmit(self.queue, 1, @ptrCast(&si), null);
+    _ = vkQueueWaitIdle(self.queue);
+    _ = vkResetCommandPool(self.dev, self.cmd_pool, 0);
+
+    const ivci = c.VkImageViewCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = t.img, .viewType = c.VK_IMAGE_VIEW_TYPE_2D, .format = c.VK_FORMAT_R8G8B8A8_UNORM, .components = .{}, .subresourceRange = .{ .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 } };
+    _ = vkCreateImageView(self.dev, &ivci, null, &t.view);
+    const smci = c.VkSamplerCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, .magFilter = c.VK_FILTER_LINEAR, .minFilter = c.VK_FILTER_LINEAR, .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT, .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT, .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT, .maxLod = 1.0 };
+    _ = vkCreateSampler(self.dev, &smci, null, &t.sampler);
+    return t;
+  }
+
+  pub fn destroyTexture(self: *Vk, t: Texture) void {
+    vkDestroySampler(self.dev, t.sampler, null);
+    vkDestroyImageView(self.dev, t.view, null);
+    vkDestroyImage(self.dev, t.img, null);
+    vkFreeMemory(self.dev, t.mem, null);
+  }
+
   pub fn createComputePipeline(self: *Vk, spirv: []const u32, nbind: u32, uni_idx: i32, wgx: u32) Error!Pipeline {
     var p: Pipeline = .{ .pipe = undefined, .layout = undefined, .dsl = undefined, .module = undefined, .nbind = nbind, .uni_idx = uni_idx, .wgx = if (wgx == 0) 64 else wgx };
 
-    const smi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = spirv.len * 4, .pCode = spirv.ptr };
+    const code = maybeBump(spirv);
+    const smi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = code.len * 4, .pCode = code.ptr };
     if (!ok(vkCreateShaderModule(self.dev, &smi, null, &p.module))) return Error.ShaderModule;
 
     var binds: [MAX_BIND]c.VkDescriptorSetLayoutBinding = undefined;

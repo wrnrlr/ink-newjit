@@ -271,16 +271,47 @@ tripped a checked-overflow panic; use `mapped[off..][0..len]`.)
 2c. **Textured/instanced meshes** — `gpuDrawMeshT` (textures @group(1)),
     `gpuUploadMesh`+`gpuDrawInstanced{,T}`/`gpuDrawGeom{Resident,T}`. Unblocks
     `scene`/`earth`/`clothpull`.
-3. **2D fill pipeline** — `gpuFill`/`gpuTess`/`gpuFillShader`/`gpuSpirv`. **Shaders
-   ported + validated:** `fill.wgsl` → `lib/gpu/fill.vert`+`fill.frag` (GLSL) →
-   `fill.vert.spv`/`fill.frag.spv` via `glslangValidator` (installed; `brew install
-   glslang`), both pass `spirv-val --target-env vulkan1.1`. **Wiring remaining:** the
-   6-binding descriptor set (view+frag uniforms + 2 dummy textures/samplers), the
-   per-draw frag-uniform ring (reuse the 2b per-frame pool pattern), record the 2D
-   layer *before* meshes (depth-test off), `gpuTess` = CPU (`triangulate.zig`), and
-   the `gpuSpirv`/`gpuFillShader` custom-fragment path (fill vertex + user frag).
-   Unblocks `eyes`/`circle`/`planes`/`drawing`/`typeset`/`edit`.
-4. **`gpuTexture`** + multi-time `-snap` scheduling.
+**Increment 3 (2D fill pipeline) — ✅ DONE (2026-07-13).** `fill.wgsl` → GLSL
+(`lib/gpu/fill.vert`+`.frag`) → `fill.vert.spv`/`fill.frag.spv` via
+`glslangValidator` (`brew install glslang`; `.spv` `@embedFile`'d — regen command
+in the shader headers). Fill pipeline = fill vertex + frag, 6-binding descriptor
+set (view+frag uniforms + 1×1 dummy texture/sampler ×2), no depth, alpha blend;
+per-draw frag-uniform ring (per-frame pool, reset in `beginFrame`); 2D layer
+recorded *before* meshes. `gpuTess` = CPU (`triangulate.zig`, verbatim).
+**`gpuSpirv`/`gpuFillShader` custom-fragment path** = user dye.k fragment over the
+fill vertex (`buildFillPipe` shared). **Verified pixel-identical to Dawn** (exact
+per-channel): `eyes`, `circle` (SDF frag), `planes`, `drawing`, `typeset`, `demo`,
+`edit`. `gpuWgsl` will be dropped at cutover.
+
+**Increment 2c — textures + retained geometry — ✅ DONE (2026-07-13).**
+`gpuTexture` (RGBA-expand + staging upload + layout transitions),
+`Vk.createTexture`/`Texture`; `gpuMesh` detects `@group(1)` textures
+(UniformConstant vars − 1 sampler) and builds the 2-set layout (uniform @group0 +
+n images + shared sampler @group1); `texSet` per-draw; `gpuUploadMesh` (retained
+vertex buffers) + `gpuDrawGeomT` (retained geom + uniform + textures).
+**Verified pixel-identical to Dawn**: `test/earth.k` (5 textures, equirectangular,
+retained mesh, uniform camera) at 96.9% coverage, per-channel identical.
+**Still stubbed:** instancing (`gpuDrawInstanced`/`gpuDrawGeomResident`/
+`gpuDrawInstancedT`, instance storage buffer @group0). Its test targets `scene`/
+`clothpull` render all-black even on Dawn in headless snapshot mode, so they're not
+snapshot-verifiable — deferred as low-value/unverifiable.
+
+### Phase 6 — SPIR-V 1.4 — ✅ ACHIEVED LIVE (2026-07-13), the original goal
+Rather than edit dye.k (which would break Dawn before cutover), the Phase-6
+transform runs **live in the Vulkan backend**: `vk.maybeBump` (gated by
+`INK_SPV14=1`) rewrites each compute module to 1.4 — version word `0x00010400` +
+`OpEntryPoint` interface expanded to list every non-Function global variable —
+right before `vkCreateShaderModule`. **The whole compute/neural-net stack runs on
+genuine SPIR-V 1.4 through MoltenVK, bit-identical to 1.3:** `computevk`, `nn.k`
+(GEMM/Softmax/LayerNorm/Linear/SiLU/GELU/FFN/MHSA ≤7e-7), `conformer.k` (7e-7/3e-7).
+Proof it's real 1.4, not ignored: a bare version bump (no iface expansion) produces
+**wrong** output (MoltenVK validates 1.4 semantics); the full transform is correct.
+This is the migration's purpose delivered — Dawn's Tint reader refuses 1.4; MoltenVK
+runs it. At final cutover (Phase 5), fold `maybeBump` into dye.k and drop the flag.
+
+**Remaining (post-goal cleanup):** instancing (unverifiable, deferred); Phase 5
+cutover (Vulkan default, delete Dawn/zgpu/`gpuWgsl`, make 1.4 unconditional);
+Phase 7 self-host `fill` in dye.k; multi-time `-snap` scheduling.
 
 Consider **dynamic rendering** later to drop explicit `VkFramebuffer` objects.
 **Validated by:** `test/sphere.k`, `pbr.k`, `scene.k`, `eyes.k`, `circle.k`,

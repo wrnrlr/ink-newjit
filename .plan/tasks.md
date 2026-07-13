@@ -42,45 +42,51 @@ Maybe we can use the digram form of the each adverb for parallel each.
 There is already stencil and window, we can add `` `ncpu f'!1000 `` to mean
 that the function f should be applied to `!1000` distributed over number of cpu cores.
 
-## SPIR-V 1.4 upgrade (blocked — NOT fixable by a Dawn rebuild; WON'T-DO)
-Blocked, not just deferred. Bumping the shader version word to `0x00010400` and
-expanding every `OpEntryPoint` interface to list all referenced globals (the two
-changes 1.4 requires) was implemented and tested — the prebuilt Dawn rejects it:
-"Invalid SPIR-V binary version 1.4 for target environment SPIR-V 1.3 (under
-Vulkan 1.1 semantics)". Changes were reverted.
+## GPU: Dawn → Vulkan (MoltenVK) migration — IN PROGRESS
+Full design + phase log: `doc/design/vulkan-migration.md`. Why: WebGPU/Dawn's Tint
+SPIR-V reader is permanently capped at Vulkan 1.1 / SPIR-V 1.3, so it refuses the
+SPIR-V 1.4 that `lib/dye.k` can emit. MoltenVK ingests SPIR-V 1.4 natively. The
+k-facing FFI (30 `gpu*` exports) is frozen, so `lib/gpu.k` + all `test/*.k` are
+unchanged; backend chosen with `-Dgpu-backend=vulkan` (default still `dawn`).
+Toolchain: `brew install molten-vk vulkan-headers glslang`.
 
-Why do it (someday): the only capability 1.4 adds for us is `OpSelect` on
-composite/array types (1.3 limits it to scalars/vectors), which would let
-`$[cond;a;b]` return structs/arrays — we don't need that yet.
+**DONE + verified (pixel/numerically identical to Dawn):**
+- Phase 0 spike, Phase 1 build plumbing, Phase 2 **compute backend** — full ASR/nn
+  stack (nn/conformer/weights/gpusolve/stencil/relax/subsample/frontend) headless.
+- Phase 3 render increments 1 (window/swapchain/present/events), 2 (basic mesh),
+  2b (uniform mesh), 3 (2D fill + custom SDF fragment), 2c (textures + retained
+  geometry). 11 render tests pixel-identical: sphere/pbr/sword/eyes/circle/planes/
+  drawing/typeset/demo/edit/earth. Snapshot path: `INK_SNAP=frame`→`<base>-snap.png`.
+- **Phase 6 SPIR-V 1.4 — achieved live**: `vk.maybeBump` (`INK_SPV14=1`) rewrites
+  compute modules to 1.4 (version word + `OpEntryPoint` iface expansion); whole
+  compute/nn stack runs on genuine 1.4 via MoltenVK, bit-identical to 1.3.
 
-Why a Dawn upgrade CANNOT unblock it (investigated 2026-07-13). The earlier "to
-unblock, rebuild Dawn against a newer target env" plan was wrong — it rested on a
-misread of the error. ink submits SPIR-V via `ShaderModuleSPIRVDescriptor`
-(`lib/gpu/gpu.zig`), which routes through Dawn's **Tint SPIR-V reader**. That
-reader is the raw-SPIR-V *ingestion* path WebGPU exposes, and it is fixed to the
-**Vulkan 1.1** validation environment (`spirv-val --target-env vulkan1.1`) — which
-caps input at **SPIR-V 1.3** (Vulkan 1.1↔1.3; 1.4 would need Vulkan 1.2 env). Per
-Dawn/Tint's own docs, "SPIR-V 1.4 and later are not supported in Tint's SPIR-V
-reader." This is a property of the WebGPU ingestion path, **not** a build-time
-target-env knob in this particular prebuilt, so no Dawn rebuild — and no newer
-Dawn — accepts a 1.4 module. (The 1.4 support that "shipped on Android/ChromeOS"
-is Tint's *writer*, WGSL→SPIR-V for the Vulkan backend — opposite direction,
-irrelevant on macOS/Metal.)
+### Follow-up tasks (remaining, in rough priority order)
+1. **Instancing** (`gpuDrawInstanced`/`gpuDrawGeomResident`/`gpuDrawInstancedT`,
+   `gpuDrawMeshT`) — instance storage buffer @group(0). NOTE: current test targets
+   `scene`/`clothpull` render all-black even on Dawn in headless `-snap`, so they're
+   not snapshot-verifiable as-is; add a verifiable instancing test (or drive them
+   enough frames to have on-screen geometry) before/while implementing.
+2. **Phase 5 cutover**: make `vulkan` the default backend; delete Dawn/zgpu/zdawn/
+   zpool + the lazy `dawn_aarch64_macos` dep + `patches/`; rework `ink bundle`/`make
+   static` to link MoltenVK; **remove `gpuWgsl`** (still a stub) and delete
+   `blit.wgsl`. Update `AGENT.md`/`CLAUDE.md`.
+3. **Phase 6 make unconditional**: after cutover, fold `vk.maybeBump` into `lib/dye.k`
+   (emit 1.4 directly: version word `0x00010400` + per-emitter `OpEntryPoint` iface
+   expansion) and drop the `INK_SPV14` flag + `maybeBump`. Re-baseline `test/spirv.k`
+   golden (version word + word counts change).
+4. **Phase 7 self-host `fill`**: re-author `lib/gpu/fill.vert`/`.frag` (currently GLSL
+   → `.spv` via `glslangValidator`) in the ink shader dialect compiled by `dye.k`;
+   delete the GLSL sources + `.spv` + the glslang dependency. End state: zero
+   `.wgsl`/`.glsl`, no external shader compiler.
+5. **Cross-platform**: the Vulkan backend is macOS/arm64-only for now; the `vk.zig`
+   surface/extension seam was written to admit Linux/Windows later — wire those up.
+6. **Multi-time `-snap` scheduling** (single-frame capture works; port the Dawn
+   scheduler that shoots at several sim-times).
+7. **Perf pass**: compute is correctness-first (deferred submission, `vkQueueWaitIdle`
+   at each readback). Revisit with fences / overlap if profiling shows it matters.
 
-Separately: the vendored `dawn_aarch64_macos` prebuilt (michal-z) has had no new
-build since **July 2023** (3 commits total), so there is no newer prebuilt to
-point at regardless. Alternative prebuilts exist (jspanchu/webgpu-dawn-binaries,
-mach-gpu-dawn) but switching is a real integration project and still wouldn't
-lift the reader's 1.3 cap.
-
-The only routes that could ever run 1.4-era features: (a) emit/transpile to WGSL
-instead of raw SPIR-V (no version cap, but rewrites the whole GPU back-end), or
-(b) drop WebGPU for a raw Metal/Vulkan backend (abandons Dawn). Treat as WON'T-DO
-*on WebGPU*. See `.plan/triage.md` "SPIR-V 1.4 upgrade" for evidence.
-
-**If 1.4 IS wanted:** the only path is a SPIR-V-native runtime — full plan in
-`doc/design/vulkan-migration.md`. Migrate the GPU host from Dawn/WebGPU to raw
-Vulkan via MoltenVK (feeds dye.k's SPIR-V straight to `vkCreateShaderModule`, any
-version). ~3–4 weeks; compute half (which delivers 1.4) reachable in week 1.
-Mandatory Phase 0 spike proves MoltenVK accepts our 1.4 module before committing.
-K-facing FFI stays frozen so all lib/*.k + test/*.k keep working.
+### Housekeeping
+- `spike/` (vkspike.zig + run.sh) is the throwaway Phase-0 proof — keep or delete.
+- `test/computevk.k` is the headless Vulkan compute smoke test — keep.
+- The 8 ported compute tests now use `gpu.computeRun` (run on both backends).
