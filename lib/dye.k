@@ -22,7 +22,7 @@
 / fn:      ink lambda whose args become shader inputs, return value → output
 / Lambdas can have local bindings: {[uv] d: sqrt[...]; (d;d;d;1.0)}
 shader.fragment: {[ioTypes; fn]
-  Nid::Nfixed; Buf::(); Con::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
   TexVars:: ()                      / no texture section (see shader.fragmentTexN)
 
   lam: lamOf fn
@@ -59,7 +59,7 @@ shader.fragment: {[ioTypes; fn]
 / wires the textures with gpuTexture + mesh.drawT/mesh.drawGeomT/mesh.drawInstancedT, passing
 / a list of texture handles.  Interpolate the UV(s) as v2 vertex varyings.
 shader.fragmentTexN: {[ioTypes; nTex; fn]
-  Nid::Nfixed; Buf::(); Con::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
 
   lam: lamOf fn
   argNames: lamArgs lam
@@ -115,7 +115,7 @@ shader.vertex: {[inTypes; varyTypes; fn] shader.vertexU[inTypes; varyTypes; (); 
 / via mesh.drawU (slot k = uniform floats 4k..4k+3).  uniNames:() ⇒ no block, and
 / the emitted module is byte-identical to the old shader.vertex.
 shader.vertexU: {[inTypes; varyTypes; uniNames; fn]
-  Nid::Nfixed; Buf::(); Con::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
 
   lam:      lamOf fn
   argNames: lamArgs lam
@@ -280,6 +280,17 @@ dispUn: {[op;ty;r;a]
 Nid:: Nfixed
 Con:: ()
 Buf:: ()
+/ Constant cache: parallel lists (typeId, encoded-word) → constant id, so an
+/ identical literal (e.g. 0.0) emits a single OpConstant per module.
+ConKeyT:: ()
+ConKeyV:: ()
+ConVal::  ()
+
+/ Compute workgroup size baked into OpExecutionMode LocalSize (x,1,1). Sticky
+/ setting: assign before compiling to tune for a GPU (e.g. wg:128). The host
+/ reads this value back out of the shader's OpExecutionMode when it computes the
+/ dispatch workgroup count, so shader and dispatch stay in sync automatically.
+wg:: 64
 
 / shader.vertexU uniform-block scratch: the current block's struct type id, the
 / Uniform→vec4 pointer type id, and the block variable id.  Set per shader and
@@ -318,6 +329,19 @@ newId:   {[] r:Nid; Nid::Nid+1; r}
 emitCon: {[ws] Con,:: ,ws}
 emitBuf: {[ws] Buf,:: ,ws}
 emitW:   emitBuf
+
+/ constId[t;v] — id of an f32/int OpConstant, deduplicated within the module.
+/ The value is encoded exactly as opConst does (f32 → bit pattern); the key
+/ carries t too, so i32 0 and f32 0.0 (both encode to word 0) never collide.
+/ Match both key columns with a boolean mask (Find on a vector key would search
+/ element-wise). constMiss emits+caches a miss (each $[] arm is one expression).
+constMiss: {[t;v;e] r:newId[]; emitCon opConst[t;r;v]; ConKeyT,:: t; ConKeyV,:: e; ConVal,:: r; r}
+constId: {[t;v]
+  e: $[t=Tf32; `I$v; v]
+  / Where over the match mask (Find of 1b is broken); guard the empty cache, since
+  / ()=t is a general list that & rejects. w = indices of matching cached constants.
+  w: $[#ConKeyT; &((ConKeyT=t) & (ConKeyV=e)); !0]
+  $[#w; ConVal w 0; constMiss[t;v;e]]}
 
 / One OpMemberDecorate Offset for uniform member i (std140: vec4 at byte i*16).
 memberDecOne: {[i] (0x00050048; UTuni; i; 35; i*16)}
@@ -399,7 +423,7 @@ compFnCall: {[name; i; env; oty]
 compVecLit: {[i]
   vals: 0.+kVal i
   n:    #vals
-  ids:  {[v] r: newId[]; emitCon opConst[Tf32;r;v]; r}' vals
+  ids:  {[v] constId[Tf32;v]}' vals
   rty:  $[n=2;`v2; n=3;`v3; `v4]
   r:    newId[]
   emitCon (0x2C+(0x10000*(3+n)); Tid[rty]; r),ids   / OpConstantComposite 44
@@ -411,8 +435,7 @@ compScalarLit: {[i; oty]
   useTy: $[(litTy~`int) & (oty~`f32); `float; litTy]
   t:   LitTid[useTy]
   val: $[(litTy~`int) & (useTy~`float); 0.+kVal i; kVal i]
-  r: newId[]
-  emitCon opConst[t;r;val]
+  r: constId[t;val]
   (r; LitSym[useTy])
 }
 
@@ -844,7 +867,7 @@ buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
 
 / ── compCompute: compile element-wise compute shader ─────────────────────────
 compCompute: {[fn]
-  Nid::Nfixed; Buf::(); Con::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
 
   Tu32:    newId[]
   Tv3u32:  newId[]
@@ -882,7 +905,7 @@ compCompute: {[fn]
   ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
   mem: (0x0003000E; 0; 1)
   ep:  (0x000F+(0x10000*(5+#iface)); 5; Fmain; 0x6E69616D; 0), iface
-  exm: (0x00060010; Fmain; 17; 64; 1; 1)
+  exm: (0x00060010; Fmain; 17; wg; 1; 1)
 
   decGid:    (0x00040047; gidVar; 11; 28)
   decStride: (0x00040047; Trta; 6; 4)
@@ -925,7 +948,7 @@ shader.compute: compCompute
 / result to output at binding 1. Run with gpu.runShader2[shader.compute2[fn]; in1; in2].
 / Enables real systems that combine two columns, e.g. {[px;vx] px+vx*dt}.
 compCompute2: {[fn]
-  Nid::Nfixed; Buf::(); Con::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
 
   Tu32:    newId[]
   Tv3u32:  newId[]
@@ -966,7 +989,7 @@ compCompute2: {[fn]
   ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
   mem: (0x0003000E; 0; 1)
   ep:  (0x000F+(0x10000*(5+#iface)); 5; Fmain; 0x6E69616D; 0), iface
-  exm: (0x00060010; Fmain; 17; 64; 1; 1)
+  exm: (0x00060010; Fmain; 17; wg; 1; 1)
 
   decGid:    (0x00040047; gidVar; 11; 28)
   decStride: (0x00040047; Trta; 6; 4)
@@ -1012,7 +1035,7 @@ shader.compute2: compCompute2
 / (it's compiled per problem); conditionals ($[…]) and floor/mod handle edges.
 / Run on the resident path: p:gpu.compileCompute[shader.stencil[fn]; 2]; then gpu.dispatch.
 compStencil: {[fn]
-  Nid::Nfixed; Buf::(); Con::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
 
   Tu32:    newId[]
   Tv3u32:  newId[]
@@ -1050,7 +1073,7 @@ compStencil: {[fn]
   ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
   mem: (0x0003000E; 0; 1)
   ep:  (0x000F+(0x10000*(5+#iface)); 5; Fmain; 0x6E69616D; 0), iface
-  exm: (0x00060010; Fmain; 17; 64; 1; 1)
+  exm: (0x00060010; Fmain; 17; wg; 1; 1)
 
   decGid:    (0x00040047; gidVar; 11; 28)
   decStride: (0x00040047; Trta; 6; 4)
@@ -1089,7 +1112,7 @@ shader.stencil: compStencil
 / nbind=3; gpu.dispatch order is (in; out; params). g is just another storage buffer,
 / so the buffer-index intrinsic reads it for free.
 compStencilU: {[fn]
-  Nid::Nfixed; Buf::(); Con::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
   Tu32:newId[]; Tv3u32:newId[]; Trta:newId[]; Tbuf:newId[]
   Pbufs:newId[]; Pf32s:newId[]; Pv3u32i:newId[]
   gidVar:newId[]; inBuf:newId[]; outBuf:newId[]; in2Buf:newId[]
@@ -1110,7 +1133,7 @@ compStencilU: {[fn]
   ext:(0x0006000B;Glsl;0x4C534C47;0x6474732E;0x3035342E;0)
   mem:(0x0003000E;0;1)
   ep:(0x000F+(0x10000*(5+#iface));5;Fmain;0x6E69616D;0),iface
-  exm:(0x00060010;Fmain;17;64;1;1)
+  exm:(0x00060010;Fmain;17;wg;1;1)
   decGid:(0x00040047;gidVar;11;28)
   decStride:(0x00040047;Trta;6;4)
   decMem:(0x00050048;Tbuf;0;35;0)
@@ -1141,7 +1164,7 @@ shader.stencilU: compStencilU
 / store their own value (u[i]); the resulting same-value read/write "race" is
 / benign on real hardware (and Dawn doesn't flag it). nbind=2; gpu.dispatch (state;params).
 compStencilIP: {[fn]
-  Nid::Nfixed; Buf::(); Con::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
   Tu32:newId[]; Tv3u32:newId[]; Trta:newId[]; Tbuf:newId[]
   Pbufs:newId[]; Pf32s:newId[]; Pv3u32i:newId[]
   gidVar:newId[]; inBuf:newId[]; parBuf:newId[]
@@ -1162,7 +1185,7 @@ compStencilIP: {[fn]
   ext:(0x0006000B;Glsl;0x4C534C47;0x6474732E;0x3035342E;0)
   mem:(0x0003000E;0;1)
   ep:(0x000F+(0x10000*(5+#iface));5;Fmain;0x6E69616D;0),iface
-  exm:(0x00060010;Fmain;17;64;1;1)
+  exm:(0x00060010;Fmain;17;wg;1;1)
   decGid:(0x00040047;gidVar;11;28)
   decStride:(0x00040047;Trta;6;4)
   decMem:(0x00050048;Tbuf;0;35;0)
@@ -1195,7 +1218,7 @@ shader.stencilIP: compStencilIP
 / ($[i<g[0];val;0.]) — atomic-add of 0 is a harmless no-op (OpSelect can't guard
 / the side effect itself). Read back with gpu.readI. nbind=4; gpu.dispatch (acc;a;b;g).
 compScatter: {[fn]
-  Nid::Nfixed; Buf::(); Con::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
   Tu32:newId[]; Tv3u32:newId[]
   Trta:newId[]; Tbuf:newId[]; Pbufs:newId[]; Pf32s:newId[]
   TrtaI:newId[]; TbufI:newId[]; PbufsI:newId[]; Pi32s:newId[]
@@ -1217,7 +1240,7 @@ compScatter: {[fn]
   ext:(0x0006000B;Glsl;0x4C534C47;0x6474732E;0x3035342E;0)
   mem:(0x0003000E;0;1)
   ep:(0x000F+(0x10000*(5+#iface));5;Fmain;0x6E69616D;0),iface
-  exm:(0x00060010;Fmain;17;64;1;1)
+  exm:(0x00060010;Fmain;17;wg;1;1)
   decGid:(0x00040047;gidVar;11;28)
   decStr:(0x00040047;Trta;6;4);   decMem:(0x00050048;Tbuf;0;35;0);  decBlk:(0x00030047;Tbuf;2)
   decStrI:(0x00040047;TrtaI;6;4); decMemI:(0x00050048;TbufI;0;35;0);decBlkI:(0x00030047;TbufI;2)
@@ -1259,7 +1282,7 @@ gpBufDec: {[k] (0x00040047;GBuf[k];34;0),(0x00040047;GBuf[k];33;GNAcc+k)}
 gpAccVar: {[k] (0x0004003B;GPbufsI;GAcc[k];12)}
 gpBufVar: {[k] (0x0004003B;GPbufs;GBuf[k];12)}
 compGpN: {[fn; nAcc; nBuf]
-  Nid::Nfixed; Buf::(); Con::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
   Tu32:newId[]; Tv3u32:newId[]
   Trta:newId[]; Tbuf:newId[]; Pbufs:newId[]; Pf32s:newId[]
   TrtaI:newId[]; TbufI:newId[]; PbufsI:newId[]; Pi32s:newId[]
@@ -1292,7 +1315,7 @@ compGpN: {[fn; nAcc; nBuf]
   ext:(0x0006000B;Glsl;0x4C534C47;0x6474732E;0x3035342E;0)
   mem:(0x0003000E;0;1)
   ep:(0x000F+(0x10000*(5+#iface));5;Fmain;0x6E69616D;0),iface
-  exm:(0x00060010;Fmain;17;64;1;1)
+  exm:(0x00060010;Fmain;17;wg;1;1)
   decGid:(0x00040047;gidVar;11;28)
   decStr:(0x00040047;Trta;6;4);   decMem:(0x00050048;Tbuf;0;35;0);  decBlk:(0x00030047;Tbuf;2)
   decStrI:(0x00040047;TrtaI;6;4); decMemI:(0x00050048;TbufI;0;35;0);decBlkI:(0x00030047;TbufI;2)
@@ -1457,7 +1480,7 @@ xMathW: {[name;ty;r;ids;at]
     name~`smoothstep;opSS[at;r;ids 0;ids 1;ids 2]; opFneg[at;r;ids 0]]}
 / One helper per op (each $[] branch must be a single expression). Each allocates
 / an id, emits its op* words (into Con for constants, else Buf), and records xId[k].
-xLoConst:   {[k] r:newId[]; emitCon opConst[Tid[xTy k];r;xVal k]; xId[k]::r}
+xLoConst:   {[k] xId[k]:: constId[Tid[xTy k]; xVal k]}
 xLoCons:    {[k] r:newId[]; emitBuf xConsW[xTy k;r;xId@xArg k]; xId[k]::r}
 xLoExtract: {[k] r:newId[]; emitBuf opXtract[Tf32;r;(xId@xArg k)0;xVal k]; xId[k]::r}
 xLoSelect:  {[k] r:newId[]; ids:xId@xArg k; emitBuf opSel[Tid[xTy k];r;ids 0;ids 1;ids 2]; xId[k]::r}
@@ -1486,7 +1509,7 @@ xDump: {[] {[k] `0 0: ($k),": ",($xOp k)," :",($xTy k)," (",xArgStr[k],") ",$xVa
 
 / ── Entry point: fragment shader compiled through the neutral IR ──────────────
 shader.fragmentIr: {[ioTypes; fn]
-  Nid::Nfixed; Buf::(); Con::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
   TexVars:: ()
   xReset[]
   lam: lamOf fn; argNames: lamArgs lam
