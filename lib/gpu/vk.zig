@@ -910,8 +910,15 @@ pub const Vk = struct {
       .pClearValues = &cvs,
     };
     vkCmdBeginRenderPass(cb, &rpbi, c.VK_SUBPASS_CONTENTS_INLINE);
-    // dynamic viewport+scissor so pipelines are resize-independent
-    const vp = c.VkViewport{ .x = 0, .y = 0, .width = @floatFromInt(self.swap_extent.width), .height = @floatFromInt(self.swap_extent.height), .minDepth = 0, .maxDepth = 1 };
+    // dynamic viewport+scissor so pipelines are resize-independent.
+    // NEGATIVE height (base at y=h, core since Vulkan 1.1/Maintenance1): Vulkan's
+    // NDC is Y-down while every shader in the tree (dye output + fill.vert) was
+    // authored for WebGPU/GL Y-up NDC — without the flip the whole frame renders
+    // vertically mirrored (upside-down earth/text; caught 2026-07-15, the
+    // migration-era "identical" snapshot stats were flip-blind). Cull is NONE in
+    // both pipelines, so the winding inversion is harmless.
+    const fh: f32 = @floatFromInt(self.swap_extent.height);
+    const vp = c.VkViewport{ .x = 0, .y = fh, .width = @floatFromInt(self.swap_extent.width), .height = -fh, .minDepth = 0, .maxDepth = 1 };
     const sc = c.VkRect2D{ .offset = .{ .x = 0, .y = 0 }, .extent = self.swap_extent };
     vkCmdSetViewport(cb, 0, 1, @ptrCast(&vp));
     vkCmdSetScissor(cb, 0, 1, @ptrCast(&sc));
