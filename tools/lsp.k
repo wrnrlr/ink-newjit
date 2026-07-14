@@ -44,8 +44,14 @@ getDoc:{[u] k:`s$u; i:docU?k; $[i<#docU;docT@i;""]}
 / per-byte flag: 1 where a byte starts a codepoint (not a continuation, 128..191)
 cpLead:{[s] i:`i$s; ~(127<i)&i<192}
 cpLen: {[s] +/cpLead s}
-/ codepoint offset of each line's start
-lineOffs:{[src] ls:"\n"\src; (#ls)#0,+\1+cpLen'ls}
+/ codepoint offset of each line's start.  Memoised on src identity: this is a
+/ hot path (called via nrng/nsAt once per top-level bind), and its per-line
+/ cpLen each was the dominant cost when indexing large files.
+loSrc:""
+loVal:()
+lineOffsC:{[src] ls:"\n"\src; (#ls)#0,+\1+cpLen'ls}
+lineOffsSet:{[src] loSrc::src; loVal::lineOffsC src; loVal}
+lineOffs:{[src] $[loSrc~src;loVal;lineOffsSet src]}
 / codepoint offset → (line;col), both in codepoint units
 lc:{[src;o] co:lineOffs src; line:-1+#&~co>o; (line; o-co@line)}
 / offset → LSP Position dict
@@ -77,12 +83,17 @@ trimL:{[s] $[(0<#s)&(*s)=" ";trimL 1_s;s]}
 word1:{[s] i:s?" "; i#s}
 dirNs:{[line] rest:trimL 2_line; $[0=#line;"";word1 rest]}
 isDir:{[line] (1<#line)&(2#line)~bs,"d"}
+/ directive table (offsets; namespaces) for the `\d` lines, memoised on src
+/ identity so the per-line isDir each runs once per file, not once per bind.
+ndSrc:""
+ndVal:()
+dtabC:{[src] ls:"\n"\src; d:&isDir'ls; ((lineOffs src)@d;dirNs'(ls@d))}
+dtabSet:{[src] ndSrc::src; ndVal::dtabC src; ndVal}
+dtabOf:{[src] $[ndSrc~src;ndVal;dtabSet src]}
 nsAt:{[src;o]
-  ls:"\n"\src
-  os:lineOffs src
-  d:&isDir'ls               / directive line indices
-  d:d@&(os@d)<o             / those starting before o
-  $[#d;dirNs ls@*|d;""]}
+  tab:dtabOf src
+  d:&(tab 0)<o              / directives starting before o
+  $[#d;(tab 1)@*|d;""]}
 
 / qualify a bare name with the active namespace (dotted names stay as written)
 qual:{[ns;nm] $[(0<#ns)&~|/"."=nm;ns,".",nm;nm]}
