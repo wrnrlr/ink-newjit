@@ -27,6 +27,9 @@ extern fn vkEnumeratePhysicalDevices(c.VkInstance, *u32, ?[*]c.VkPhysicalDevice)
 extern fn vkGetPhysicalDeviceProperties(c.VkPhysicalDevice, *c.VkPhysicalDeviceProperties) void;
 extern fn vkGetPhysicalDeviceQueueFamilyProperties(c.VkPhysicalDevice, *u32, ?[*]c.VkQueueFamilyProperties) void;
 extern fn vkGetPhysicalDeviceMemoryProperties(c.VkPhysicalDevice, *c.VkPhysicalDeviceMemoryProperties) void;
+extern fn vkGetPhysicalDeviceProperties2(c.VkPhysicalDevice, *c.VkPhysicalDeviceProperties2) void;
+extern fn vkGetPhysicalDeviceFeatures2(c.VkPhysicalDevice, *c.VkPhysicalDeviceFeatures2) void;
+extern fn vkEnumerateDeviceExtensionProperties(c.VkPhysicalDevice, ?[*:0]const u8, *u32, ?[*]c.VkExtensionProperties) c.VkResult;
 extern fn vkCreateDevice(c.VkPhysicalDevice, *const c.VkDeviceCreateInfo, ?*const c.VkAllocationCallbacks, *c.VkDevice) c.VkResult;
 extern fn vkDestroyDevice(c.VkDevice, ?*const c.VkAllocationCallbacks) void;
 extern fn vkGetDeviceQueue(c.VkDevice, u32, u32, *c.VkQueue) void;
@@ -172,6 +175,24 @@ pub const Texture = struct {
   sampler: c.VkSampler,
 };
 
+// Device capabilities the kk compiler schedules around (doc/design/kk.md §4):
+// subgroup ops → whole-buffer reductions/scans; descriptor indexing → bindless
+// textures; buffer device address → bindless buffers; float atomics → native
+// f32 scatter-add (else the fixed-point trick). Feature-gated, never assumed.
+pub const Caps = struct {
+  api_major: u32,
+  api_minor: u32,
+  subgroup_size: u32,
+  sg_arith: bool,   // OpGroupNonUniform arithmetic (reduce/scan)
+  sg_ballot: bool,
+  sg_shuffle: bool,
+  desc_index: bool,     // Vulkan12Features.descriptorIndexing
+  runtime_array: bool,  // …runtimeDescriptorArray (bindless texture arrays)
+  bda: bool,            // …bufferDeviceAddress (PhysicalStorageBuffer64)
+  f16: bool,            // …shaderFloat16
+  atomic_fadd: bool,    // VK_EXT_shader_atomic_float shaderBufferFloat32AtomicAdd
+};
+
 pub const Vk = struct {
   instance: c.VkInstance,
   pdev: c.VkPhysicalDevice,
@@ -227,6 +248,46 @@ pub const Vk = struct {
   fill_upool: [FRAMES]c.VkDescriptorPool,
   fill_uslot: [FRAMES]u32,
   tex_upool: [FRAMES]c.VkDescriptorPool, // per-draw @group(1) texture sets
+
+  // Query Caps from the live physical device (cheap; no state kept).
+  pub fn queryCaps(self: *Vk) Caps {
+    // properties2 chain: subgroup properties (core 1.1)
+    var sub = c.VkPhysicalDeviceSubgroupProperties{ .sType = c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES };
+    var p2 = c.VkPhysicalDeviceProperties2{ .sType = c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = @ptrCast(&sub) };
+    vkGetPhysicalDeviceProperties2(self.pdev, &p2);
+
+    // VK_EXT_shader_atomic_float joins the features chain only when the device
+    // lists it (querying an unknown struct is undefined behaviour per spec).
+    var has_af = false;
+    var next: u32 = 0;
+    _ = vkEnumerateDeviceExtensionProperties(self.pdev, null, &next, null);
+    var exts: [256]c.VkExtensionProperties = undefined;
+    if (next > exts.len) next = exts.len;
+    _ = vkEnumerateDeviceExtensionProperties(self.pdev, null, &next, &exts);
+    for (exts[0..next]) |e| {
+      if (std.mem.eql(u8, std.mem.sliceTo(&e.extensionName, 0), "VK_EXT_shader_atomic_float")) has_af = true;
+    }
+    var af = c.VkPhysicalDeviceShaderAtomicFloatFeaturesEXT{ .sType = c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT };
+    var v12 = c.VkPhysicalDeviceVulkan12Features{ .sType = c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = if (has_af) @as(?*anyopaque, @ptrCast(&af)) else null };
+    var f2 = c.VkPhysicalDeviceFeatures2{ .sType = c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = @ptrCast(&v12) };
+    vkGetPhysicalDeviceFeatures2(self.pdev, &f2);
+
+    var props: c.VkPhysicalDeviceProperties = undefined;
+    vkGetPhysicalDeviceProperties(self.pdev, &props);
+    return .{
+      .api_major = (props.apiVersion >> 22) & 0x7f,
+      .api_minor = (props.apiVersion >> 12) & 0x3ff,
+      .subgroup_size = sub.subgroupSize,
+      .sg_arith = (sub.supportedOperations & c.VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) != 0,
+      .sg_ballot = (sub.supportedOperations & c.VK_SUBGROUP_FEATURE_BALLOT_BIT) != 0,
+      .sg_shuffle = (sub.supportedOperations & c.VK_SUBGROUP_FEATURE_SHUFFLE_BIT) != 0,
+      .desc_index = v12.descriptorIndexing != 0,
+      .runtime_array = v12.runtimeDescriptorArray != 0,
+      .bda = v12.bufferDeviceAddress != 0,
+      .f16 = v12.shaderFloat16 != 0,
+      .atomic_fadd = has_af and af.shaderBufferFloat32AtomicAdd != 0,
+    };
+  }
 
   pub fn init() Error!Vk {
     var self: Vk = undefined;

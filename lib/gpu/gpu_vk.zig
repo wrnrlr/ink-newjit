@@ -832,6 +832,29 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   return ki(0);
 }
 
+// ── gpuCaps: device capability dict (doc/design/kk.md §4) ─────────────────────
+// Feature-gated capabilities the kk compiler schedules around; query inside a
+// gpu.computeRun / window.run (needs the live device). All values numeric:
+// api = major + minor/10 (e.g. 1.2), subgroup = lane count, rest are 0/1 flags.
+export fn gpuCaps(_: ?K) callconv(.c) ?K {
+  const v = g_vk orelse return ki(0);
+  const cp = v.queryCaps();
+  const keys = [_][*:0]const u8{ "api", "subgroup", "sgArith", "sgBallot", "sgShuffle", "descIndex", "runtimeArray", "bda", "f16", "atomicFadd" };
+  const vals = [_]?K{
+    kf(@as(f32, @floatFromInt(cp.api_major)) + @as(f32, @floatFromInt(cp.api_minor)) / 10.0),
+    ki(@intCast(cp.subgroup_size)),
+    ki(@intFromBool(cp.sg_arith)),
+    ki(@intFromBool(cp.sg_ballot)),
+    ki(@intFromBool(cp.sg_shuffle)),
+    ki(@intFromBool(cp.desc_index)),
+    ki(@intFromBool(cp.runtime_array)),
+    ki(@intFromBool(cp.bda)),
+    ki(@intFromBool(cp.f16)),
+    ki(@intFromBool(cp.atomic_fadd)),
+  };
+  return k_make_dict(10, &keys, &vals);
+}
+
 // ── Render/window exports — stubs until Phase 3 increment 2 ───────────────────
 export fn gpuDrawInstanced(_: ?K, _: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
 export fn gpuDrawGeomResident(_: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
@@ -877,6 +900,7 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuDrawMeshT", @ptrCast(&gpuDrawMeshT), 3);
   r.k_register("gpuDrawGeomT", @ptrCast(&gpuDrawGeomT), 3);
   r.k_register("gpuTexture", @ptrCast(&gpuTexture), 2);
+  r.k_register("gpuCaps", @ptrCast(&gpuCaps), 1);
 }
 
 export fn terse_init(reg: *anyopaque) callconv(.c) void { inkInit(reg); }

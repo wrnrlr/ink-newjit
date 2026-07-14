@@ -225,9 +225,22 @@ be **queried, not assumed** (MoltenVK caps vary by Metal version/hardware):
 | buffer device address (`PhysicalStorageBuffer64`) | 1.2 feature `bufferDeviceAddress` | buffers as 64-bit pointers: one address table = fully bindless buffers, binding tables disappear | supported on Apple silicon in recent MoltenVK — **query** |
 | float atomics (`VK_EXT_shader_atomic_float`) | extension | native f32 `@[d;I;+;v]` (drop the fixed-point SC dance in clothgpu) | partial on Metal — **query**; keep fixed-point fallback |
 
-**Action:** add a `gpu.caps` query (chain `VkPhysicalDeviceVulkan12Features` +
-subgroup properties at init, expose as a k dict). Then: subgroup reductions
-first (biggest kk win), descriptor indexing / BDA only after caps confirm.
+**Action:** ✅ `gpu.caps` landed (2026-07-14) — `Vk.queryCaps` chains
+`VkPhysicalDeviceVulkan12Features` + subgroup properties + (extension-gated)
+`VkPhysicalDeviceShaderAtomicFloatFeaturesEXT`; exposed as a k dict. Measured
+on the M1 Pro / MoltenVK:
+
+```
+[api:1.2;subgroup:32;sgArith:1;sgBallot:1;sgShuffle:1;descIndex:1;runtimeArray:1;bda:1;f16:1;atomicFadd:1]
+```
+
+**Every capability in the table is present** — subgroup reductions/scans,
+bindless textures (descriptor indexing + runtime arrays), bindless buffers
+(BDA), f16, and native f32 atomic-add (clothgpu's fixed-point `SC` dance can
+go). Caveat for the lowering work: these are *supported* bits; each feature
+must also be **enabled** in `VkDeviceCreateInfo.pNext` at device creation
+before shaders may use it. Order of attack: subgroup reductions first
+(biggest kk win), then float atomics, then descriptor indexing / BDA.
 
 **Vertex pulling needs none of the above** — storage buffers in the vertex
 stage are base Vulkan. The vertex shader becomes a kernel-shaped function of

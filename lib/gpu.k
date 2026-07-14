@@ -23,6 +23,12 @@ window.run:    so 2: (`gpuRun;       2)   / (loop_fn; config) → 0 : blocking e
 /   gpu.computeRun[{[x] out:: gpu.runShader[shader.compute[{[v] v*2.}]; 1. 2. 3.]}]
 /   out   / -> 2. 4. 6.
 gpu.computeRun: so 2: (`gpuComputeRun; 1)   / fn → 0 : headless compute, no window
+/ Device capability dict (query inside gpu.computeRun / window.run): api (1.2),
+/ subgroup (lane count), and 0/1 flags sgArith sgBallot sgShuffle (subgroup ops →
+/ whole-buffer reductions/scans), descIndex runtimeArray (bindless textures),
+/ bda (buffer device address), f16, atomicFadd (native f32 scatter-add).
+/ The kk compiler schedules around these — see doc/design/kk.md §4.
+gpu.caps:    so 2: (`gpuCaps;      1)   / x → dict : device capability flags
 gpu.fill:    so 2: (`gpuFill;      2)   / (verts_F; frag_F) → 0 : draw triangles with built-in shader
 gpu.tessellate:   so 2: (`gpuTess;      1)   / pts_F → verts_F   : gpu.tessellate polygon
 gpu.compileSpirv: so 2: (`gpuSpirv;     2)   / (spirv_I; 0) → handle : compile SPIR-V fragment shader

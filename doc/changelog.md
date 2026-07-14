@@ -1,6 +1,12 @@
 # Changelog
 
 ## 2026-07-14
+- **`gpu.caps`** (completes kk increment 0): device capability dict from the
+  live Vulkan device (`Vk.queryCaps` → `gpuCaps` FFI). M1 Pro/MoltenVK reports
+  ALL of: subgroup arithmetic (32 lanes), descriptor indexing + runtime
+  descriptor arrays, buffer device address, f16, and VK_EXT_shader_atomic_float
+  f32 add — so subgroup reductions, bindless, and native float scatter-add are
+  all on the table (features still need enabling at device creation to use).
 - **Vulkan cutover** (kk increment 0 / migration Phase 5): Dawn/WebGPU backend
   deleted (`lib/gpu/gpu.zig`, `render.zig`, `fill.wgsl`, `blit.wgsl`,
   `patches/`, zon deps, `gpuWgsl`); raw Vulkan/MoltenVK (`gpu_vk.zig`) is the
