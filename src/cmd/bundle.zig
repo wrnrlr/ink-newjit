@@ -325,6 +325,10 @@ fn bundleStatic(gpa: std.mem.Allocator, sp: []const u8, outname: []const u8, tar
   // (OS-provided, so they can't live inside a .a).
   if (needs_frameworks) {
     try argv.append(gpa, try gpa.dupe(u8, "-lc++"));
+    // Keep dead-strip off: release links otherwise strip MoltenVK's ObjC
+    // metadata out of libgpu-bundle.a and vkCreateInstance crashes (see the
+    // vk_lib.link_gc_sections note in build.zig).
+    try argv.append(gpa, try gpa.dupe(u8, "--no-gc-sections"));
     for ([_][]const u8{ "Metal", "QuartzCore", "Foundation", "IOKit", "IOSurface", "CoreGraphics", "Cocoa", "AppKit" }) |fw| {
       try argv.append(gpa, try gpa.dupe(u8, "-framework"));
       try argv.append(gpa, try gpa.dupe(u8, fw));

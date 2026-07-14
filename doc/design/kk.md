@@ -271,8 +271,14 @@ Each increment independently shippable; oracle in parentheses.
    `spirv-val --target-env vulkan1.2`; full demo suite re-verified.)
 3. **IR data ops + i32 + opaque loops**; compute path onto the IR; bindings
    derived from free variables (`gpu.kernel` infers its table; entry points
-   become aliases). `:`-const folding into kernels. (record-then-replay
-   byte-oracle where no optimization fires; demos.)
+   become aliases). (record-then-replay byte-oracle where no optimization
+   fires; demos.) ◐ **Host-global baking DONE** (2026-07-15): a kernel name
+   that isn't a param/local bakes the host global's current numeric-scalar
+   value as an f32 constant (both compVar and IR xVar paths; unknown/non-
+   scalar warns + bakes NaN). clothgpu.k's `SC` is the demo — the keep-in-sync
+   literals are gone. Note this is bake-at-compile-time semantics (recompile
+   to update), simpler than the CPU compiler's `:`-vs-`::` rule — kernels are
+   compiled explicitly, so "current value at compile" is the natural contract.
 4. **Placed arrays + `9:`/`8:`** — ◐ verb surface DONE (2026-07-14): `8:`
    added to the grammar (`9:` was reserved), both wired as thin trampolines in
    `io.zig` (`callGlobal` → `Call.apply`) to `gpu.hold`/`holdInto`/`fetch`/

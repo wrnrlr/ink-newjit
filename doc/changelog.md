@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-07-15
+- **Host-global baking in kernels** (kk increment 3, first slice): a name in a
+  dye kernel that isn't a param/local now resolves to the HOST global's current
+  value, baked as an f32 constant at kernel-compile time — "host globals are
+  invisible inside shaders" is gone, and with it the keep-in-sync-by-comment
+  literals (clothgpu.k's `SC` now referenced directly in kCon/kApp). Unknown or
+  non-scalar names warn and bake NaN (loud, since ink has no signal verb).
+  Both compiler paths (compVar + IR xVar).
+- **Fix: ReleaseFast GPU builds crashed at vkCreateInstance** — the release
+  link dead-stripped static MoltenVK's ObjC selector metadata
+  (`+[NSProcessInfo processInfo]: unrecognized selector`). `link_gc_sections =
+  false` on libgpu.dylib (and `--no-gc-sections` in `ink bundle`'s link).
+  Debug builds only worked because they don't gc sections.
+
 ## 2026-07-14
 - **`9:`/`8:` io verbs** (kk increment 4, verb surface): the GPU is an io
   channel — `9: x` places (upload → descriptor `[gpu;t;n]`), `d 9: x`

@@ -24,8 +24,9 @@ SDT::(1.%60.)%15.                        / substep dt (60fps, 15 substeps)
 / Fixed-point scale for the scatter accumulator. This also sets the velocity jitter
 / floor: the smallest position correction is 1/SC, so residual |v| ~ (1/SC)/SDT.
 / 2^16 leaves ~0.013 m/s of permanent jitter (visible "buzzing"); 2^20 drops it ~16x.
-/ Baked as a literal in kCon/kApp (host globals aren't visible inside shaders) — keep
-/ those two literals in sync with this value.
+/ Referenced directly by kCon/kApp: dye bakes a host global's CURRENT value into
+/ the kernel as a constant at gpu.kernel-compile time (doc/design/kk.md §2), so
+/ there is exactly one definition — no keep-in-sync literals.
 SC::1048576.                             / 2^20
 / Velocity damping per substep (1 = none). XPBD's v=(x-prev)/dt conserves energy, so
 / without this the cloth swings forever and the fixed-point noise keeps re-exciting it.
@@ -46,7 +47,7 @@ kInt::gpu.kernel[{[p;v;prev;im;g;d]
 / constraint scatter: one thread per edge; XPBD correction scattered (± w0/w1) into
 / DP for both endpoints, all three axes. guard value 0 for over-dispatched threads.
 kCon::gpu.kernel[{[dp;p;e;g;ee]
-  sc:1048576.
+  sc:SC                                  / host global, baked at compile time
   ne:g[0]; sdt:g[1]; ok:$[ee<ne;1.;0.]
   base:7.*ee
   pi:e[base]; pj:e[base+1.]; l0:e[base+2.]; al:e[base+3.]; w0:e[base+4.]; w1:e[base+5.]; wt:e[base+6.]
@@ -61,7 +62,7 @@ kCon::gpu.kernel[{[dp;p;e;g;ee]
   b0:scatterAdd[dp;bj;(0.-cx)*w1]; b1:scatterAdd[dp;bj+1.;(0.-cy)*w1]; scatterAdd[dp;bj+2.;(0.-cz)*w1]}; 1; 3]
 
 / apply: fold the fixed-point accumulator into positions, then clear it.
-kApp::gpu.kernel[{[dp;p;g;d] set[p; d; (p[d])+(iget[dp;d])%1048576.]; iset[dp;d;0.]}; 1; 2]
+kApp::gpu.kernel[{[dp;p;g;d] set[p; d; (p[d])+(iget[dp;d])%SC]; iset[dp;d;0.]}; 1; 2]
 
 / velocity recovery with damping: v = damp*free*(p-prev)/dt.  g[1] = damping factor.
 kVel::gpu.kernel[{[v;p;prev;im;g;d]

@@ -124,6 +124,12 @@ pub fn build(b: *std.Build) !void {
   vk_ext_mod.linkFramework("Cocoa", .{});
   vk_ext_mod.linkFramework("AppKit", .{});
   const vk_lib = b.addLibrary(.{ .name = "gpu", .root_module = vk_ext_mod, .linkage = .dynamic });
+  // Keep dead-strip OFF: a ReleaseFast link otherwise strips the static
+  // MoltenVK archive's ObjC selector/class metadata and every vkCreateInstance
+  // crashes with "+[NSProcessInfo processInfo]: unrecognized selector" inside
+  // mvkGetEnvVarNumber (Debug links only worked because they don't gc). The
+  // ~1MB size cost is the price of a working release GPU extension.
+  vk_lib.link_gc_sections = false;
   b.installArtifact(vk_lib);
   const vk_step = b.step("gpu", "Build the GPU extension shared library (Vulkan/MoltenVK)");
   vk_step.dependOn(&b.addInstallArtifact(vk_lib, .{}).step);

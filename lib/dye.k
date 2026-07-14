@@ -444,7 +444,16 @@ compLit: {[i; oty]
   $[(kKind i) in `floats`ints; compVecLit[i]; compScalarLit[i;oty]]
 }
 
-compVar: {[i; env] env[kVal i]}
+/ Name resolution: the kernel env first (params, locals, loop vars); any other
+/ name is a HOST global whose CURRENT VALUE is baked in as an f32 constant
+/ (doc/design/kk.md §2 — kills the "keep host and kernel literals in sync"
+/ comment-contract; recompile the kernel to pick up a new value). Numeric
+/ scalar globals only; an undefined or non-scalar name warns on stderr-ish
+/ stdout and bakes NaN (ink has no signal verb), so results scream instead of
+/ silently using garbage.
+kBakeBad: {[nm] `0 0: "dye: cannot bake ",($nm)," (not a param/local, and not a numeric scalar host global)\n"; (constId[Tf32; 0n]; `f32)}
+kBake:    {[nm] v: . nm; $[(@v) in `b`i`f; (constId[Tf32; 0.+v]; `f32); kBakeBad nm]}
+compVar:  {[i; env] nm: kVal i; $[nm in !env; env nm; kBake nm]}
 
 / x<=y → ~(x>y),  x>=y → ~(x<y).  `flip` is the strict comparison to negate;
 / the b operand is an apposit(`"=" …) wrapper, so its `a child is the real operand.
@@ -1152,9 +1161,13 @@ xCondS: {[ss;env;oty]
   n:#ss; cp:xNode[ss 0;env;`bool]; tp:xNode[ss 1;env;oty]
   ep: $[n=3; xNode[ss 2;env;oty]; xCondS[2_ss;env;oty]]
   (xEmit[`select; tp 1; (cp 0;tp 0;ep 0); 0n]; tp 1)}
+/ Host-global baking on the IR path (mirrors compVar/kBake).
+xBakeBad: {[nm] `0 0: "dye: cannot bake ",($nm)," (not a param/local, and not a numeric scalar host global)\n"; (xEmit[`const;`f32;();0n]; `f32)}
+xBake: {[nm] v: . nm; $[(@v) in `b`i`f; (xEmit[`const;`f32;();0.+v]; `f32); xBakeBad nm]}
+xVar:  {[i;env] nm: kVal i; $[nm in !env; env nm; xBake nm]}
 xNode: {[i;env;oty]
   tag: kKind i
-  $[tag~`var;     env[kVal i]
+  $[tag~`var;     xVar[i;env]
     tag in `int`float`ints`floats`bool`string`symbol; xLit[i;oty]
     tag~`transit;  xTrans[i;env;oty]
     tag~`apposit;  xAppos[i;env;oty]
