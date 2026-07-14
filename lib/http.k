@@ -21,9 +21,11 @@
 \d http
   so: "./zig-out/lib/libhttp.dylib"
   raw: so 2:(`HttpRequest; 1)   / (method;url;headers;body) → dict | error
-  / streaming: calls the callback with each response body chunk (C bytes) as it
-  / arrives; returns dict[status;headers] (no body — it went to the callback).
-  streamRaw: so 2:(`HttpStream; 2)   / [(method;url;headers;body); {[chunk]…}]
+  / streaming: calls the callback with each response body LINE (C bytes, newline
+  / stripped) as it arrives; returns dict[status;headers] (no body — it went to
+  / the callback).  Line framing is done host-side, which suits SSE and keeps the
+  / callback a light per-line handler (see lib/llm.k for the token-stream user).
+  streamRaw: so 2:(`HttpStream; 2)   / [(method;url;headers;body); {[line]…}]
 
   / method, url, headers (flat C pairs), body → response dict
   request:{[m;u;h;b] http.raw (m;u;h;b)}

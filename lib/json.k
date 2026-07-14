@@ -7,10 +7,12 @@
 / NB: `parse` is a reserved verb, so the member is written with its explicit
 / qualified name `json.parse:` (which lexes as one identifier, not the verb).
 
-\d json read gen
+\d json read gen parse list
 so: "./zig-out/lib/libjson.dylib"
 read:       so 2: (`ReadJson; 1)   / json.read  "path.json"  → K value
 json.parse: so 2: (`ParseJson; 1)  / json.parse "{...}"      → K value (from a string)
+list:       so 2: (`ParseJsonList; 1) / like parse, but keeps object arrays as
+  / general lists instead of promoting them to a column table (for API responses)
 
 / ── gen: K value → JSON text (pure k, rough inverse of json.parse) ──────────
 /   dict→object, general/typed vector→array, char-vec/symbol→string,
@@ -25,9 +27,9 @@ esc:  {[s] $[0=#s;s;,/({ec x}'s)]}
 jstr: {[c] "\"",(esc c),"\""}
 gen: {[x] t:@x;
   $[x~`null; "null"
-   / `. x` returns a value list, but UNWRAPS a single-key dict's lone value —
-   / enlist that case so keys and values stay length-aligned for the Zip.
-   ;t=`m; $[0=#x;"{}";"{",(","/((!x){[ky;vl](jstr(1_$ky)),":",gen vl}'($[1=#!x;,(. x);. x]))),"}"]
+   / values via `x@!x` (index the dict by its own keys) — arity-correct for any
+   / key count and, unlike `. x`, never unwraps a single-key dict's lone value.
+   ;t=`m; $[0=#x;"{}";"{",(","/((!x){[ky;vl](jstr(1_$ky)),":",gen vl}'(x@!x))),"}"]
    ;t=`C; jstr x
    ;t=`c; jstr(,x)
    ;t=`s; jstr(1_$x)
