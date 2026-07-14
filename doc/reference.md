@@ -356,6 +356,10 @@ The IO system is organized around file descriptors (filename, port number, etc.)
 - `` `stdout 1: y `` / `` `stderr 1: y `` write raw bytes with **no** trailing newline and flush (unlike `` `0 0:y `` which appends `\n`).
 - Writing to a path that doesn't exist **creates** the file (`` "new.txt" 1: bytes ``); the same holds for `` x 0: y ``. (Reads still require the file to exist.)
 - `` 2: y `` **LoadCode** - used for importing other files
+- `` 9: x `` **Place** — upload x to the GPU; returns a placed-array descriptor dict `[gpu:handle;t;n]`. The device is an io channel: work recorded on placed arrays only submits at the `8:` sync point. Requires `lib/gpu.k` (else `!io`). See `doc/design/kk.md` §1.
+- `` d 9: x `` **PlaceInto** — overwrite placement `d`'s buffer in place (no realloc); returns `d`
+- `` 8: d `` **Fetch** — sync + read a placed array back to the host
+- `` n 8: d `` **FetchN** — first n elements (trims the ×64 dispatch padding)
 
 ## Adverbs `` ' / \ ': /: \: ``
 An adverb is one of the glyphs: `` ' / \ ': /: \: `` when it is used as a modifier 

@@ -317,6 +317,8 @@ const Monads = struct {
   pub const @"0:x" = io.ReadLines;
   pub const @"1:x" = io.ReadBytes;
   pub const @"2:x" = io.ReadData;
+  pub const @"8:x" = io.Fetch;
+  pub const @"9:x" = io.Place;
   pub const @">x"  = io.NetOpen;
   pub const @".m"  = Values;
   pub const @".s"  = @import("get.zig").GetSymbol;
@@ -418,6 +420,8 @@ const Dyads = struct {
   pub const @"x 0: x" = io.WriteLines;
   pub const @"x 1: x" = io.WriteBytes;
   pub const @"x 2: x" = io.WriteData;
+  pub const @"x 8: x" = io.FetchN;
+  pub const @"x 9: x" = io.PlaceInto;
   pub const @"x: y"    = @import("right.zig").Right;
   pub const @"x exec" = @import("exec.zig").ExecDyad;
 };

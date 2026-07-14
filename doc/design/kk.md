@@ -273,9 +273,13 @@ Each increment independently shippable; oracle in parentheses.
    derived from free variables (`gpu.kernel` infers its table; entry points
    become aliases). `:`-const folding into kernels. (record-then-replay
    byte-oracle where no optimization fires; demos.)
-4. **Placed arrays + `9:`/`8:`** — v1 dict + `gpu.hold`/`fetch`; Zig verb
-   wiring through the kabi hook; `n f/ d` → dispatchLoop recording.
-   (walk3 rewritten with io verbs, same numbers.)
+4. **Placed arrays + `9:`/`8:`** — ◐ verb surface DONE (2026-07-14): `8:`
+   added to the grammar (`9:` was reserved), both wired as thin trampolines in
+   `io.zig` (`callGlobal` → `Call.apply`) to `gpu.hold`/`holdInto`/`fetch`/
+   `fetchN` in lib/gpu.k; descriptor = `[gpu:handle;t;n]`; `!io` when gpu.k
+   isn't loaded, so the core stays GPU-free. Verified: upload/fetch/overwrite/
+   trimmed-fetch roundtrip on-device. REMAINING: shape in the descriptor used
+   by verbs, `n f/ d` → dispatchLoop recording, kernel compile-on-apply.
 5. **kk tier 1 rewrites** — each/zip/gather/amend/amend-+/fold-over-iota,
    stencil adverb, eachprior. (`walk.k`'s `f` verbatim on GPU == CPU result;
    `clothgpu` kernels rewritten in array form.)

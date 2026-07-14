@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const VM = @import("../../runtime/vm.zig").VM;
 const Conns = @import("../../runtime/registry.zig").Conns;
+const Call = @import("../../runtime/call.zig").Call;
 
 // Raw socket read for binary IPC. Windows uses Winsock recv (not posix.read)
 // and IPC is unsupported there, so this errors on Windows without referencing
@@ -335,6 +336,52 @@ pub fn writeDataFallback(vm: *VM, x: V, y: V) V {
   writeFile(vm, id, mock.getText()) catch return V{ .err = .io };
   return .blank;
 }
+
+// ---------------------------------------------------------------------------
+// Place 9: / Fetch 8: — device (GPU) io verbs (doc/design/kk.md §1)
+// ---------------------------------------------------------------------------
+// The GPU is an io channel: `2:` loads code into the process, `9:` loads data
+// into the device. Thin trampolines to the k implementations in lib/gpu.k:
+//   9: x     → gpu.hold x        upload; returns a placed-array descriptor dict
+//   d 9: x   → gpu.holdInto[d;x] overwrite placement d in place; returns d
+//   8: d     → gpu.fetch d       sync + read back
+//   n 8: d   → gpu.fetchN[n;d]   first n elements (trims dispatch padding)
+// The core stays GPU-free: when lib/gpu.k isn't loaded the verbs are `!io`.
+
+fn callGlobal(vm: *VM, name: []const u8, args: []const V) V {
+  const idx = vm.names.get(name) orelse return V{ .err = .io };
+  const f = vm.globals[idx];
+  if (f.tag() == .blank) return V{ .err = .io };
+  var fc = Call{ .vm = vm };
+  return fc.apply(f, args, true);
+}
+fn placeAny(vm: *VM, x: V) V { return callGlobal(vm, "gpu.hold", &.{x}); }
+fn placeInto(vm: *VM, x: V, y: V) V { return callGlobal(vm, "gpu.holdInto", &.{ x, y }); }
+fn fetchDesc(vm: *VM, x: V) V { return callGlobal(vm, "gpu.fetch", &.{x}); }
+fn fetchFirstN(vm: *VM, x: V, y: V) V { return callGlobal(vm, "gpu.fetchN", &.{ x, y }); }
+
+pub const Place = struct {
+  pub const op = .@"9:";
+  _F: VM.Monad = placeAny,
+  _I: VM.Monad = placeAny,
+  _B: VM.Monad = placeAny,
+  _L: VM.Monad = placeAny,
+};
+pub const PlaceInto = struct {
+  pub const op = .@"9:";
+  _m_F: VM.Dyad = placeInto,
+  _m_I: VM.Dyad = placeInto,
+  _m_B: VM.Dyad = placeInto,
+  _m_L: VM.Dyad = placeInto,
+};
+pub const Fetch = struct {
+  pub const op = .@"8:";
+  _m: VM.Monad = fetchDesc,
+};
+pub const FetchN = struct {
+  pub const op = .@"8:";
+  _i_m: VM.Dyad = fetchFirstN,
+};
 
 // ---------------------------------------------------------------------------
 // Network open/close (> and < verbs)

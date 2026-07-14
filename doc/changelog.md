@@ -1,6 +1,12 @@
 # Changelog
 
 ## 2026-07-14
+- **`9:`/`8:` io verbs** (kk increment 4, verb surface): the GPU is an io
+  channel — `9: x` places (upload → descriptor `[gpu;t;n]`), `d 9: x`
+  overwrites in place, `8: d` fetches, `n 8: d` fetches n. Implemented as
+  `io.zig` trampolines to `gpu.hold`/`holdInto`/`fetch`/`fetchN` (new, in
+  lib/gpu.k); `8:` added to the grammar (`9:` was a reserved stub); `!io`
+  when lib/gpu.k isn't loaded.
 - **`gpu.caps`** (completes kk increment 0): device capability dict from the
   live Vulkan device (`Vk.queryCaps` → `gpuCaps` FFI). M1 Pro/MoltenVK reports
   ALL of: subgroup arithmetic (32 lanes), descriptor indexing + runtime

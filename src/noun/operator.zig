@@ -27,8 +27,10 @@ pub const Op1 = enum(u8) {
   depth,
   // dirty-epoch: array/dict version stamp for change detection
   epoch,
-  // io verbs (monadic forms)
-  @"0:", @"1:", @"2:", @"9:",
+  // io verbs (monadic forms). 9: places data on the GPU (returns a placed-array
+  // descriptor dict), 8: fetches it back — thin trampolines to gpu.hold /
+  // gpu.fetch in lib/gpu.k (doc/design/kk.md §1).
+  @"0:", @"1:", @"2:", @"8:", @"9:",
   exec,
   // fused monad-only derived verbs (sum, product, min, max)
   @"+/", @"*/", @"|/", @"&/",
@@ -53,7 +55,7 @@ pub const Op2 = enum(u8) {
   @",", @"^", @"#", @"_", @"$", @"?", @"@", @".",
   in, has,
   mod, div,
-  @"0:", @"1:", @"2:", @"9:",
+  @"0:", @"1:", @"2:", @"8:", @"9:",
   @":",
   exec,
 

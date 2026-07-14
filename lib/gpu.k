@@ -74,6 +74,20 @@ mesh.drawGeomT: {[geom; uni; texs] gpuDrawGeomT0[geom; uni; texs]}
 texture.upload: {[img] w:img`width; h:img`height; c:img`comp; d:img`data; gpuTexture0[(w;h;c); d]}
 / mesh.upload / mesh.drawInstanced (retained geometry + instancing) live in lib/instancing.k
 
+/ ── Placed arrays: the 9:/8: io-verb targets (doc/design/kk.md §1) ────────────
+/ The GPU is an io channel: 9: places data on the device, 8: fetches it back;
+/ dispatches recorded in between only submit at the 8: sync point (vk.zig's
+/ deferred submission). The descriptor is a dict [gpu:handle; t:type; n:count]
+/ so shape-aware verbs (and the kk compiler) can see what they hold.
+/   d: 9: x       upload (f32 for now), returns descriptor
+/   d 9: x        overwrite d's buffer in place (no realloc), returns d
+/   8: d          sync + read all n elements back
+/   n 8: d        first n elements (trims the ×64 dispatch padding)
+gpu.hold:     {[x] [gpu: gpu.buffer[0.+x]; t: `f; n: #x]}
+gpu.holdInto: {[d;x] gpu.write[d`gpu; 0.+x]; d}
+gpu.fetch:    {[d] (d`n) # gpu.read[d`gpu]}
+gpu.fetchN:   {[n;d] n # gpu.read[d`gpu]}
+
 / Solid-color fragment uniforms (44 floats matching fill.wgsl FragUniforms).
 / r,g,b,a in [0,1].  Returns a flat F vector.
 gpu.solid: {[r;g;b;a] ,/(1. 0. 0. 0.;0. 1. 0. 0.;0. 0. 1. 0.;1. 0. 0. 0.;0. 1. 0. 0.;0. 0. 1. 0.;r,g,b,a;r,g,b,a;1e10 1e10 1. 1.;0. 0. 0. 0.;0. 0. 0. 0.)}
