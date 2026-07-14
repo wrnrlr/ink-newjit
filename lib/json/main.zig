@@ -68,26 +68,37 @@ export fn ReadJson(path_k: ?K) callconv(.c) ?K {
     const io = std.Io.Threaded.global_single_threaded.io();
     const text = std.Io.Dir.cwd().readFileAlloc(io, p[0..@intCast(n)], alloc, std.Io.Limit.limited(256 << 20)) catch return null;
     defer alloc.free(text);
-    return parseText(alloc, text);
+    return parseText(alloc, text, true);
 }
 
 /// ParseJson "<json text>" → K value.  Parses an in-memory char vector instead
 /// of a file path; used to decode the JSON chunk embedded in a GLB container.
 export fn ParseJson(text_k: ?K) callconv(.c) ?K {
+    return parseTextK(text_k, true);
+}
+
+/// ParseJsonList — like ParseJson but arrays of uniform objects stay as general
+/// lists (L) instead of being promoted to a column-oriented table.  Needed to
+/// navigate API responses (e.g. `choices`/`content`/`tool_use` arrays) as lists.
+export fn ParseJsonList(text_k: ?K) callconv(.c) ?K {
+    return parseTextK(text_k, false);
+}
+
+fn parseTextK(text_k: ?K, promote: bool) ?K {
     const alloc = std.heap.c_allocator;
     const p = kcp(text_k) orelse return null;
     const n = kn(text_k);
     if (n <= 0) return null;
-    return parseText(alloc, p[0..@intCast(n)]);
+    return parseText(alloc, p[0..@intCast(n)], promote);
 }
 
-fn parseText(alloc: Alloc, text: []const u8) ?K {
+fn parseText(alloc: Alloc, text: []const u8, promote: bool) ?K {
     const parsed = std.json.parseFromSlice(std.json.Value, alloc, text, .{}) catch return null;
     defer parsed.deinit();
-    return convertVal(alloc, parsed.value) catch null;
+    return convertVal(alloc, parsed.value, promote) catch null;
 }
 
-fn convertVal(alloc: Alloc, jv: std.json.Value) OOM!K {
+fn convertVal(alloc: Alloc, jv: std.json.Value, promote: bool) OOM!K {
     return switch (jv) {
         .null          => ki(0) orelse error.OutOfMemory,
         .bool          => |b| kb(if (b) 1 else 0) orelse error.OutOfMemory,
@@ -95,8 +106,8 @@ fn convertVal(alloc: Alloc, jv: std.json.Value) OOM!K {
         .float         => |f| kf(@floatCast(f)) orelse error.OutOfMemory,
         .number_string => |s| try numStr(s),
         .string        => |s| try makeStr(s),
-        .array         => |a| try convertArr(alloc, a.items),
-        .object        => |o| try convertObj(alloc, &o),
+        .array         => |a| try convertArr(alloc, a.items, promote),
+        .object        => |o| try convertObj(alloc, &o, promote),
     };
 }
 
@@ -142,7 +153,7 @@ fn toF32(jv: std.json.Value) f32 {
     };
 }
 
-fn convertArr(alloc: Alloc, items: []const std.json.Value) OOM!K {
+fn convertArr(alloc: Alloc, items: []const std.json.Value, promote: bool) OOM!K {
     if (items.len == 0) return KL(0) orelse error.OutOfMemory;
 
     var all_int = true;
@@ -165,17 +176,18 @@ fn convertArr(alloc: Alloc, items: []const std.json.Value) OOM!K {
         return out;
     }
 
-    // Array of same-key dicts → promote to column-oriented table
+    // Array of same-key dicts → promote to column-oriented table (unless the
+    // caller asked to keep arrays as lists, e.g. for API-response navigation).
     const first_is_obj = switch (items[0]) { .object => true, else => false };
-    if (first_is_obj) {
-        if (try tryTable(alloc, items)) |t| return t;
+    if (promote and first_is_obj) {
+        if (try tryTable(alloc, items, promote)) |t| return t;
     }
 
     // Generic mixed list
     const list = KL(@intCast(items.len)) orelse return error.OutOfMemory;
     errdefer ku(list);
     for (items, 0..) |item, i| {
-        const v = try convertVal(alloc, item);
+        const v = try convertVal(alloc, item, promote);
         _ = kls(list, @intCast(i), v);  // kls consumes v
     }
     return list;
@@ -183,7 +195,7 @@ fn convertArr(alloc: Alloc, items: []const std.json.Value) OOM!K {
 
 // Try to build a column-oriented dict from a uniform array of objects.
 // Returns null if the array can't be promoted (non-uniform keys/types).
-fn tryTable(alloc: Alloc, items: []const std.json.Value) OOM!?K {
+fn tryTable(alloc: Alloc, items: []const std.json.Value, promote: bool) OOM!?K {
     const first = switch (items[0]) { .object => |o| o, else => return null };
     const ncols = first.count();
     if (ncols == 0) return null;
@@ -209,7 +221,7 @@ fn tryTable(alloc: Alloc, items: []const std.json.Value) OOM!?K {
     var n: usize = 0;
     errdefer for (col_ks[0..n]) |ck| ku(ck);
     for (0..ncols) |ci| {
-        col_ks[ci] = try buildCol(alloc, items, ci);
+        col_ks[ci] = try buildCol(alloc, items, ci, promote);
         n += 1;
     }
     n = 0;  // disarm errdefer — mkdict takes ownership via ref()
@@ -220,7 +232,7 @@ fn tryTable(alloc: Alloc, items: []const std.json.Value) OOM!?K {
 }
 
 // Build one column (ci) from a verified-uniform array of object rows.
-fn buildCol(alloc: Alloc, items: []const std.json.Value, ci: usize) OOM!K {
+fn buildCol(alloc: Alloc, items: []const std.json.Value, ci: usize, promote: bool) OOM!K {
     var all_int = true;
     var all_num = true;
     for (items) |item| {
@@ -254,13 +266,13 @@ fn buildCol(alloc: Alloc, items: []const std.json.Value, ci: usize) OOM!K {
     errdefer ku(col);
     for (items, 0..) |item, ri| {
         const obj = switch (item) { .object => |o| o, else => return error.OutOfMemory };
-        const kv = try convertVal(alloc, obj.values()[ci]);
+        const kv = try convertVal(alloc, obj.values()[ci], promote);
         _ = kls(col, @intCast(ri), kv);  // consumes kv
     }
     return col;
 }
 
-fn convertObj(alloc: Alloc, obj: *const std.json.ObjectMap) OOM!K {
+fn convertObj(alloc: Alloc, obj: *const std.json.ObjectMap, promote: bool) OOM!K {
     const count = obj.count();
     if (count == 0) return KL(0) orelse error.OutOfMemory;
 
@@ -277,7 +289,7 @@ fn convertObj(alloc: Alloc, obj: *const std.json.ObjectMap) OOM!K {
     var n: usize = 0;
     errdefer for (vals[0..n]) |v| ku(v);
     for (obj.values(), 0..) |v, i| {
-        vals[i] = try convertVal(alloc, v);
+        vals[i] = try convertVal(alloc, v, promote);
         n += 1;
     }
     n = 0;  // disarm errdefer
@@ -309,6 +321,7 @@ fn initApi(reg: *anyopaque) void {
     // dlsym (works the same when this extension is statically linked).
     r.k_register("ReadJson", @ptrCast(&ReadJson), 1);
     r.k_register("ParseJson", @ptrCast(&ParseJson), 1);
+    r.k_register("ParseJsonList", @ptrCast(&ParseJsonList), 1);
 }
 
 // Entry point for dlopen loading (host looks up "terse_init").

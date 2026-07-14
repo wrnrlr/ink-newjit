@@ -167,9 +167,12 @@ fn doRequest(arena: Alloc, rq: Req) !?K {
 }
 
 // HttpStream [(method; url; headers; body); callback] — streams the response
-// body to `callback` one buffered chunk (C bytes) at a time as it arrives, then
-// returns dict[status;headers] (no body — it was delivered to the callback).
-// The callback's return value is discarded. Used for SSE (LLM token streaming).
+// body to `callback` one line at a time (each C vector is a complete line, the
+// trailing newline stripped; a final unterminated line is delivered too), then
+// returns dict[status;headers] (no body — it went to the callback). The
+// callback's return value is discarded. Line framing is done here (not in k) so
+// the callback stays a simple per-line handler — this is what SSE wants, and it
+// keeps the reentrant k_call callback allocation-light. Used for LLM streaming.
 export fn HttpStream(arg_k: ?K, cb_k: ?K) callconv(.c) ?K {
   var arena_state = std.heap.ArenaAllocator.init(alloc);
   defer arena_state.deinit();
@@ -197,16 +200,33 @@ fn doStream(arena: Alloc, rq: Req, cb_k: ?K) !?K {
   var decompress: http.Decompress = undefined;
   const reader = response.readerDecompressing(&transfer_buffer, &decompress, dbuf);
 
-  // Deliver each buffered chunk to the k callback as it arrives.
+  // Reframe the byte stream into lines and hand each complete line to the k
+  // callback (newline stripped). Partial lines accumulate in `line` until their
+  // terminator arrives.
+  var line: std.ArrayList(u8) = .empty;
+  defer line.deinit(alloc);
   while (reader.peekGreedy(1)) |chunk| {
-    const ck = outBytes(chunk) orelse break;
-    const r = kcall(cb_k, ck);
-    ku(ck);
-    if (r) |rr| ku(rr);
+    for (chunk) |byte| {
+      if (byte == '\n') {
+        const trimmed = std.mem.trimEnd(u8, line.items, "\r");
+        const ck = outBytes(trimmed) orelse continue;
+        const r = kcall(cb_k, ck);
+        ku(ck);
+        if (r) |rr| ku(rr);
+        line.clearRetainingCapacity();
+      } else {
+        line.append(alloc, byte) catch {};
+      }
+    }
     reader.toss(chunk.len);
   } else |e| switch (e) {
     error.EndOfStream => {},
     else => { ku(hdict); return error.ReadFailed; },
+  }
+  // Flush a final unterminated line.
+  if (line.items.len > 0) {
+    const ck = outBytes(std.mem.trimEnd(u8, line.items, "\r"));
+    if (ck) |c| { const r = kcall(cb_k, c); ku(c); if (r) |rr| ku(rr); }
   }
 
   const rkeys = [_][*:0]const u8{ "status", "headers" };
