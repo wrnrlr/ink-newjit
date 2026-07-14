@@ -83,6 +83,12 @@ texture.upload: {[img] w:img`width; h:img`height; c:img`comp; d:img`data; gpuTex
 /   d 9: x        overwrite d's buffer in place (no realloc), returns d
 /   8: d          sync + read all n elements back
 /   n 8: d        first n elements (trims the ×64 dispatch padding)
+/ Compile a kernel lambda straight to a cached compute pipeline: bindings are
+/ inferred by shader.kernel (accumulator params first, LAST param = thread
+/ index), nbind = (#params)-1 (published by dye as KKnb). Needs a live device:
+/   p: gpu.pipeline[{[c;a;b;g;d] ... set[c;d;v]}]   / == compileCompute+counts
+gpu.pipeline: {[fn] w: shader.kernel fn; gpu.compileCompute[w; KKnb]}
+
 gpu.hold:     {[x] [gpu: gpu.buffer[0.+x]; t: `f; n: #x]}
 gpu.holdInto: {[d;x] gpu.write[d`gpu; 0.+x]; d}
 gpu.fetch:    {[d] (d`n) # gpu.read[d`gpu]}

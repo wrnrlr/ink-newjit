@@ -279,6 +279,13 @@ Each increment independently shippable; oracle in parentheses.
    literals are gone. Note this is bake-at-compile-time semantics (recompile
    to update), simpler than the CPU compiler's `:`-vs-`::` rule — kernels are
    compiled explicitly, so "current value at compile" is the natural contract.
+   ◐ **Binding inference DONE** (2026-07-15): `shader.kernel[fn]` derives the
+   table from the lambda (scatterAdd/iget/iset first-args → accumulators,
+   last param → thread index, rest → buffers; byte-identical to explicit
+   `gpu.kernel[fn;nAcc;nBuf]`), and `gpu.pipeline[fn]` goes lambda→pipeline
+   in one call. Still open in incr 3: the IR migration itself (effects/loads/
+   loops/i32) — inference currently reads the CST, and will move to the IR
+   with the rest of the walkers.
 4. **Placed arrays + `9:`/`8:`** — ◐ verb surface DONE (2026-07-14): `8:`
    added to the grammar (`9:` was reserved), both wired as thin trampolines in
    `io.zig` (`callGlobal` → `Call.apply`) to `gpu.hold`/`holdInto`/`fetch`/

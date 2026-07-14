@@ -1,6 +1,14 @@
 # Changelog
 
 ## 2026-07-15
+- **Binding inference: `shader.kernel[fn]` + `gpu.pipeline[fn]`** (kk incr 3,
+  bindings-from-the-lambda): params passed to scatterAdd/iget/iset are i32
+  accumulators (must come first; warned otherwise), the last param is the
+  thread index, the rest are f32 buffers. Byte-identical to
+  `gpu.kernel[fn;nAcc;nBuf]` with the right counts. `gpu.pipeline[fn]`
+  compiles lambda→SPIR-V→cached pipeline in one call (nbind published as
+  KKnb). New gotcha documented in code: `kVal *kF[…]` is kVal TIMES kF
+  (noun-adjacency); use kF1.
 - **Host-global baking in kernels** (kk increment 3, first slice): a name in a
   dye kernel that isn't a param/local now resolves to the HOST global's current
   value, baked as an f32 constant at kernel-compile time — "host globals are

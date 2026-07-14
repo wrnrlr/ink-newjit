@@ -570,7 +570,12 @@ pipeline builders above. Types are symbols like `` `f32`v3`v4 ``.
 - **Vertex:** `shader.vertex[inTypes; varyTypes; fn]`,
   `shader.vertexU[…; uniNames; fn]` (with a uniform block),
   `shader.instancedVertex` (`lib/instancing.k`).
-- **Compute:** `shader.compute` / `shader.computeU` / `shader.compute2`.
+- **Compute:** `shader.kernel[fn]` — the general kernel with the binding table
+  INFERRED from the lambda (params fed to `scatterAdd`/`iget`/`iset` are i32
+  accumulators and must come first; the LAST param is the thread index; the
+  rest are f32 buffers). `gpu.pipeline[fn]` compiles lambda → SPIR-V → cached
+  pipeline in one call. Explicit forms remain: `gpu.kernel[fn;nAcc;nBuf]`,
+  `shader.compute` / `shader.computeU` / `shader.compute2`.
 - **Stencil/scatter kernels:** `shader.stencil` / `shader.stencilU` /
   `shader.stencilIP` and `shader.scatter` — buffer-gather + in-kernel bounded
   loops for GPU-resident numerics (the basis of `lib/nn.k`).
@@ -578,8 +583,11 @@ pipeline builders above. Types are symbols like `` `f32`v3`v4 ``.
 The shader dialect adds vector literals, monadic math names, and `<=`/`>=`
 peephole support on top of ink; extra GPU builtins include `pow min max dot
 cross step mod clamp mix smoothstep floor fract sign tanh length normalize`.
+A name that is not a param or local resolves to the HOST global's current
+numeric-scalar value, baked in as a constant at kernel-compile time
+(recompile to pick up changes; unknown names warn and bake NaN).
 Gotchas: `|` is logical-or (not max) in shaders — use `max[0.;x]` for ReLU;
-there is no `>=`, use `~(a<b)`. See `doc/design/dye.md`.
+there is no `>=`, use `~(a<b)`. See `doc/design/dye.md` and `doc/design/kk.md`.
 
 #### Fonts & color
 - `lib/font.k` — native sfnt reader. `font.read "path"` → list of face dicts

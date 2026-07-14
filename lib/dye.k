@@ -1074,6 +1074,28 @@ compGpN: {[fn; nAcc; nBuf]
   kAsm[]}
 gpu.kernel: compGpN
 
+/ ── shader.kernel[fn] — gpu.kernel with the binding table INFERRED ───────────
+/ Roles come from the lambda itself (kk.md incr 3, bindings-from-free-vars):
+/ a param passed as the FIRST argument of scatterAdd/iget/iset anywhere in the
+/ body is an i32 accumulator; the LAST param is the thread index; every other
+/ param is an f32 buffer. Accumulator params must come first (bindings are
+/ accs 0..nAcc-1 then bufs) — misordering warns and mis-binds, so don't.
+/ nbind for the host pipeline = (#params)-1; published as KKnb so gpu.pipeline
+/ (lib/gpu.k) can compile SPIR-V + pipeline in one call without re-parsing.
+KKnb:: 0
+/ Distinct names appearing as the first arg of an accumulator intrinsic.
+kkScats: {[]
+  ap: & `apply = Cst`kind
+  ss: ap @ & {[i] (kVal kF1[i;`f]) in `scatterAdd`iget`iset}' ap
+  ? {[i] kVal kF1[i;`arg]}' ss}    / kF1 not *kF: `kVal *kF[…]` parses as kVal TIMES kF (noun-adjacency)
+shader.kernel: {[fn]
+  ps: lamArgs lamOf fn                 / lamOf parses fn → Cst for kkScats
+  am: ps in kkScats[]                  / per-param accumulator mask
+  nAcc: +/ -1 _ am                     / the index param can't be an accumulator
+  $[nAcc; $[&/ nAcc # am; 0; `0 0: "dye: accumulator params must come FIRST in a shader.kernel lambda\n"]; 0]
+  KKnb:: (#ps)-1
+  compGpN[fn; nAcc; ((#ps)-1)-nAcc]}
+
 varOutOne:   {[ptr;vid]    (0x0004003B;ptr;vid;3)}    / OpVariable Output storage class
 
 / Helper: run stmts as binds building up env; return extended env (not last value).
