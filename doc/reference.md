@@ -134,6 +134,7 @@ argument count; `f[;b]` fixes only the second argument (a projection). Because
 evaluation is right-to-left, a chain of juxtaposed monads reads outermost-last:
 `f g h x` is `f(g(h(x)))`.
 
+### Branching
 
 
 ## Datetypes
@@ -449,7 +450,37 @@ The names of exported symbols from a shared library should be prefixed by the na
 - `audio.save["take.wav"; audio.rec.channels[]; audio.rec.rate[]; s]`
 - `clip: audio.decode "take.wav"` - load a file to a PCM dict
 
-### Crypto Library TODO
+### Crypto Library
+Thin bindings over Zig's `std.crypto` (`lib/crypto.k`, build `zig build crypto`).
+Everything is bytes (C vectors), so primitives compose.
+- Hashes: `crypto.md5` `sha1` `sha224` `sha256` `sha384` `sha512` `sha3256`
+  `sha3512` `blake2b` `blake2b512` `blake3` — `msg → raw digest`
+- MAC: `crypto.hmac[key;msg]` (SHA-256), `crypto.hmac512[key;msg]`
+- KDF: `crypto.hkdf[salt;ikm;info]` (SHA-256), `crypto.hkdf512[…]`,
+  `crypto.pbkdf2[password;salt;rounds]`
+- AEAD (encrypt → `ct||tag`, decrypt → plaintext or error `'`):
+  `crypto.encrypt`/`decrypt` (XChaCha20-Poly1305, key 32 / nonce 24),
+  `crypto.aesEncrypt`/`aesDecrypt` (AES-256-GCM, key 32 / nonce 12)
+- Ed25519: `crypto.keypair seed(32) → pub(32)||secret(64)`,
+  `crypto.sign[secret;msg]`, `crypto.verify[public;sig;msg]`
+- X25519: `crypto.x25519pub secret(32)`, `crypto.x25519[secret;public] → shared`
+- Random & encoding: `crypto.random n`, `crypto.hex`/`unhex`, `crypto.b64`/`unb64`,
+  `crypto.equal[a;b]` (constant-time)
+
+### Compression Library
+DEFLATE over Zig's `std.compress.flate` (`lib/compress.k`, build `zig build compress`).
+Bytes in, bytes out; decompressors return an error `'` on corrupt input.
+- `compress.deflate`/`inflate` — raw DEFLATE
+- `compress.gzip`/`gunzip` — gzip container (RFC 1952)
+- `compress.zlib`/`unzlib` — zlib container (RFC 1950)
+- `compress.crc32 bytes`, `compress.adler32 bytes` — i32 checksums
+
+ZIP archives via `std.zip` + flate (`lib/zip.k`, build `zig build zip`).
+Store + deflate, non-encrypted, non-zip64.
+- `zip.list "a.zip"` → table `[name;size;csize;method;crc]`
+- `zip.read "a.zip"` → dict name→decompressed bytes
+- `zip.entry["a.zip"; name]` → one entry's bytes (error if absent)
+- `zip.write["out.zip"; names; datas]` → create archive → `1b`
 
 ### Data Library
 - `csv.read`
@@ -464,7 +495,106 @@ The names of exported symbols from a shared library should be prefixed by the na
 - `image.write[path;img]`
 - `image.scale[img;w;h]`
 
+### Text Processing
+- `regex`
+
 ### Graphics Library
-- `window.run`
+Ink's GPU stack is three layers that load on demand:
+`lib/gpu.k` (the native `libgpu.dylib` bindings — WebGPU/Vulkan), `lib/dye.k`
+(the **dye** shader compiler that turns ink lambdas into SPIR-V, backed by the
+pure instruction stencils in `lib/spirv.k`), and a set of higher-level helpers
+(`draw.k`, `camera.k`, `pbr.k`, `instancing.k`, `layout.k`, `font.k`, `color.k`).
+
+#### Window & event loop (`lib/gpu.k`)
+- `window.run[loop; cfg]` — open a window and call `loop[props]` every frame
+  (blocking). `props` is a dict: `` `width`height`mx`my`time `` plus `` `events ``,
+  a **table** of input events since the last frame. Event columns: `kind`
+  (`` `text`key`mouse`scroll ``), `code`, `mods` (1=shift 2=ctrl 4=alt 8=super),
+  `down` (1=press/0=release), `x`/`y`, `amt` (scroll delta). Track held keys
+  yourself (see `camera.k`). Unused cells are nulls — filter them.
+- `gpu.computeRun[fn]` — headless one-shot: create a device, call `fn` once, tear
+  it down. Stash results in a global from inside `fn`.
+
+#### 2D drawing
+- `gpu.fill[verts; frag]` — draw triangles with the built-in shader. `verts` is a
+  flat `F` of `[x,y,u,v]` per vertex; `frag` is a 44-float uniform block.
+- `gpu.solid[r;g;b;a]` — build a solid-color `frag` block (channels in `[0,1]`).
+- `gpu.tessellate[pts]` — triangulate a polygon `F` to a vertex buffer (NaN x/y
+  pairs separate contours to cut holes).
+- `lib/draw.k` immediate-mode helpers: `rectV[x;y;w;h]` (rect → 6 verts),
+  `rect[x;y;w;h;col]` (filled rect), `drawGlyph[h;id;ox;oy;size;frag]`
+  (tessellate + draw a font glyph).
+
+#### Meshes & 3D
+- `mesh.compile[vtx; frg]` — compile a vertex+fragment SPIR-V pair into a
+  pipeline; the vertex stride is derived from the shader's declared inputs.
+- `mesh.draw[verts; h]`, `mesh.drawU[verts; h; uni]` (per-draw uniform block, 8
+  vec4 slots), `mesh.drawT[verts; h; uni; texs]` (uniform + textures).
+- `mesh.upload[verts; h]` → persistent geometry buffer; then `mesh.drawGeomT`,
+  `mesh.drawInstanced[geom; count; inst]` / `mesh.drawInstancedT`,
+  `mesh.drawResident` (`lib/instancing.k`) draw it without re-uploading.
+- `lib/pbr.k` — a physically-based `pbrVtx` / `PbrFragment` shader pair;
+  `lib/camera.k` — orbit camera (`CamNew`, `CamUpdate[c;props]`) folding one
+  frame of input into a camera-state dict (WASD pan, scroll zoom, right-drag
+  rotate/tilt).
+
+#### Textures
+- `texture.upload[img]` — upload an image dict (`` `width`height`comp`data ``,
+  e.g. from `image.read`) as a sampled GPU texture. In a fragment shader,
+  `sample[k; uv]` reads texture `k` (see `shader.fragmentTexN`).
+
+#### Compute
+- `gpu.runShader[spirv; in]` / `gpu.runShader2[spirv; in1; in2]` — one-shot
+  compute with host round-trip.
+- Resident buffers keep data on the GPU across dispatches (iterative solvers):
+  `gpu.buffer[F]` → handle, `gpu.write[buf; F]`, `gpu.read[buf]` / `gpu.readI`,
+  `gpu.uniform[vec4]`.
+- `gpu.compileCompute[spirv; nbind]` / `gpu.compileComputeU[spirv; nStorage]`
+  cache a pipeline; `gpu.dispatch[pipe; bufs; nThreads]` runs it with no
+  readback. `gpu.dispatchLoop[pipe; bufsA; bufsB; nThreads; reps]` batches N
+  ping-pong passes into a single encoder (Jacobi / red-black SOR).
+
+#### The dye shader compiler (`lib/dye.k`)
+`dye` compiles ink lambdas to SPIR-V word lists (int lists) you feed to the
+pipeline builders above. Types are symbols like `` `f32`v3`v4 ``.
+- **Fragment:** `shader.fragment[ioTypes; fn]`, `shader.fragmentTex[ioTypes; fn]`
+  / `shader.fragmentTexN[ioTypes; nTex; fn]` (sampled textures),
+  `shader.fragmentIr` (neutral-IR path).
+- **Vertex:** `shader.vertex[inTypes; varyTypes; fn]`,
+  `shader.vertexU[…; uniNames; fn]` (with a uniform block),
+  `shader.instancedVertex` (`lib/instancing.k`).
+- **Compute:** `shader.compute` / `shader.computeU` / `shader.compute2`.
+- **Stencil/scatter kernels:** `shader.stencil` / `shader.stencilU` /
+  `shader.stencilIP` and `shader.scatter` — buffer-gather + in-kernel bounded
+  loops for GPU-resident numerics (the basis of `lib/nn.k`).
+
+The shader dialect adds vector literals, monadic math names, and `<=`/`>=`
+peephole support on top of ink; extra GPU builtins include `pow min max dot
+cross step mod clamp mix smoothstep floor fract sign tanh length normalize`.
+Gotchas: `|` is logical-or (not max) in shaders — use `max[0.;x]` for ReLU;
+there is no `>=`, use `~(a<b)`. See `doc/design/dye.md`.
+
+#### Fonts & color
+- `lib/font.k` — native sfnt reader. `font.read "path"` → list of face dicts
+  (keyed by table name). `font.scale[f;sz]`, `font.metrics[f;sz]`,
+  `font.glyph[f;cp]` (codepoint → gid), `font.shape[f;s]` (string → gids),
+  `font.outline[f;gid;sz]` / `font.outlines` → flat `F` contours to tessellate,
+  `font.family`/`subfamily`/`fullName`.
+- `lib/color.k` — `hsl2rgb`, `pct2rgb`, and the full OKLCH Tailwind palette as
+  named constants (`Red500`, `Amber300`, …), each an `[r,g,b,a]` vector.
+- `lib/layout.k` — a small constraint-based view layout solver
+  (`View`, `Pin`, `Eq`, `Contain`, `Layout`, `DrawLayout`).
 
 ### Network Library
+HTTP client over Zig's `std.http.Client` (`lib/http.k`, build `zig build http`).
+For web/JSON APIs: https (TLS), redirects and gzip/deflate/zstd response
+decompression are automatic.  Every call returns a dict `[status; headers; body]`
+(`status` i, `headers` dict of lowercased name→value, `body` C) or an error `'`
+if the request could not be completed.
+- `http.get url`, `http.del url`, `http.head url`
+- `http.post[url; body]`, `http.put[url; body]`, `http.patch[url; body]`
+  (default `content-type: application/json`)
+- `http.request[method; url; headers; body]` — headers are flat C name/value
+  pairs `("accept";"application/json";…)`; `http.raw (method;url;headers;body)`
+  is the underlying primitive
+- Decode a JSON response with `json.parse r`body`
