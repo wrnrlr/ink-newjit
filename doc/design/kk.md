@@ -283,9 +283,22 @@ Each increment independently shippable; oracle in parentheses.
    table from the lambda (scatterAdd/iget/iset first-args → accumulators,
    last param → thread index, rest → buffers; byte-identical to explicit
    `gpu.kernel[fn;nAcc;nBuf]`), and `gpu.pipeline[fn]` goes lambda→pipeline
-   in one call. Still open in incr 3: the IR migration itself (effects/loads/
-   loops/i32) — inference currently reads the CST, and will move to the IR
-   with the rest of the walkers.
+   in one call.
+   ✅ **COMPUTE PATH ON THE IR** (2026-07-15): every compute body now builds
+   the neutral IR and lowers it (`kSeqIr`). The IR gained loads (`bufidx`,
+   `igetb`), effects (`setb`, `sadd`, `isetb`), explicit `f2s` conversion
+   nodes (placed where the direct path allocated its OpConvertFToS ids — the
+   1:1 id-order discipline), binding refs (`bufp`), and **loops as opaque
+   region nodes** (`rsum`/`rmax`/`ndo`/`whileL` + `kparam`/`lparam`): body
+   nodes carry an owner in `xRgn`, the main pass skips them, and the loop's
+   lowerer replays them inside its basic blocks via the loopOpen/loopClose
+   scaffold (phi ids travel through save/restored RK* globals, so nesting
+   works). Oracle: all 12 kkgold modules **byte-identical** to the direct
+   path; spirv.k golden, walk3/nn/clothgpu numerics, baking, inference and
+   the fragment-IR twin all green. Prologue/epilogue (gid, elem loads,
+   auto-store) stay direct by design. Still open in incr 3: fold/DCE for
+   compute (flip once oracles move to numeric parity), fragment/vertex onto
+   the same path (then delete the direct comp* walkers), i32 index type.
 4. **Placed arrays + `9:`/`8:`** — ◐ verb surface DONE (2026-07-14): `8:`
    added to the grammar (`9:` was reserved), both wired as thin trampolines in
    `io.zig` (`callGlobal` → `Call.apply`) to `gpu.hold`/`holdInto`/`fetch`/

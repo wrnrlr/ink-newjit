@@ -973,7 +973,7 @@ compCompute: {[fn]
   gx: kGidX[]
   xp: kElem[ids 0; gx]
   env: (,argNames 0)!(,xp)
-  rp: compSeq[lamBody lam; env; `f32]
+  rp: kSeqIr[lamBody lam; env]
   kStore[ids 1; gx; rp 0]
   kAsm[]}
 shader.compute: compCompute
@@ -987,7 +987,7 @@ compComputeU: {[fn]
   xp: kElem[ids 0; gx]
   uPair: loadUniMember[AKuniKi]
   env: argNames!(xp;uPair)
-  rp: compSeq[lamBody lam; env; `f32]
+  rp: kSeqIr[lamBody lam; env]
   kStore[ids 1; gx; rp 0]
   kAsm[]}
 shader.computeU: compComputeU
@@ -1000,7 +1000,7 @@ compCompute2: {[fn]
   xp: kElem[ids 0; gx]
   yp: kElem[ids 2; gx]
   env: argNames!(xp;yp)
-  rp: compSeq[lamBody lam; env; `f32]
+  rp: kSeqIr[lamBody lam; env]
   kStore[ids 1; gx; rp 0]
   kAsm[]}
 shader.compute2: compCompute2
@@ -1013,7 +1013,7 @@ compStencil: {[fn]
   lam: lamOf fn; argNames: lamArgs lam
   gx: kGidX[]; gf: kGidF[gx]
   env: argNames!((ids 0;`buf);(gf;`f32))
-  rp: compSeq[lamBody lam; env; `f32]
+  rp: kSeqIr[lamBody lam; env]
   kStore[ids 1; gx; rp 0]
   kAsm[]}
 shader.stencil: compStencil
@@ -1026,7 +1026,7 @@ compStencilU: {[fn]
   lam: lamOf fn; argNames: lamArgs lam
   gx: kGidX[]; gf: kGidF[gx]
   env: argNames!((ids 0;`buf);(ids 2;`buf);(gf;`f32))
-  rp: compSeq[lamBody lam; env; `f32]
+  rp: kSeqIr[lamBody lam; env]
   kStore[ids 1; gx; rp 0]
   kAsm[]}
 shader.stencilU: compStencilU
@@ -1040,7 +1040,7 @@ compStencilIP: {[fn]
   lam: lamOf fn; argNames: lamArgs lam
   gx: kGidX[]; gf: kGidF[gx]
   env: argNames!((ids 0;`buf);(ids 1;`buf);(gf;`f32))
-  rp: compSeq[lamBody lam; env; `f32]
+  rp: kSeqIr[lamBody lam; env]
   kStore[ids 0; gx; rp 0]                       / write in place (binding 0)
   kAsm[]}
 shader.stencilIP: compStencilIP
@@ -1054,7 +1054,7 @@ compScatter: {[fn]
   lam: lamOf fn; argNames: lamArgs lam
   gx: kGidX[]; gf: kGidF[gx]
   env: argNames!((ids 0;`scat);(ids 1;`buf);(ids 2;`buf);(ids 3;`buf);(gf;`f32))
-  rp: compSeq[lamBody lam; env; `f32]           / side effects only
+  rp: kSeqIr[lamBody lam; env]           / side effects only
   kAsm[]}
 shader.scatter: compScatter
 
@@ -1070,7 +1070,7 @@ compGpN: {[fn; nAcc; nBuf]
   accPairs: {[id] (id;`scat)}' nAcc#ids
   bufPairs: {[id] (id;`buf)}' nAcc _ ids
   env: argNames!(accPairs,bufPairs,(,(gf;`f32)))
-  rp: compSeq[lamBody lam; env; `f32]
+  rp: kSeqIr[lamBody lam; env]
   kAsm[]}
 gpu.kernel: compGpN
 
@@ -1112,19 +1112,29 @@ compSeqEnv: {[stmts; env]
 / ════════════════════════════════════════════════════════════════════════════
 / Neutral IR seam (the Tiramisu "Layer 1/2"). Instead of emitting SPIR-V inline,
 / the walker below builds a target-neutral, typed SSA op list; a lowering pass then
-/ turns it into a target — SPIR-V words (xLowerSpirv, reusing the op* stencils) or a
-/ textual dump (xDump). Optimizations (xFold, xReach/DCE) run once on the neutral IR
-/ and help every target. shader.fragmentIr drives the fragment-expression subset
-/ through it; the compute/loop machinery stays on the direct compNode path for now.
-/ See doc/design/dye.md.  IR node = an index into these parallel lists:
-xOp::  ()   / op sym:  param const cons extract select arith math neg lnot
+/ turns it into a target — SPIR-V words (reusing the op* stencils) or a textual
+/ dump (xDump). EVERY COMPUTE BODY compiles through this IR (kSeqIr: build →
+/ lower-all in build order; loops are opaque region nodes replayed by their
+/ lowerer — byte-identical to the retired direct path by 1:1 id-order
+/ construction). shader.fragmentIr additionally drives the fragment subset with
+/ xFold const-folding + xReach DCE; the compute path keeps those OFF until its
+/ oracle moves from byte-identity to numeric parity. The fragment/vertex entry
+/ points still walk compNode directly (their migration is next).
+/ See doc/design/dye.md + doc/design/kk.md.  IR node = an index into these lists:
+xOp::  ()   / op sym: param const cons extract select arith math neg lnot, plus
+            / bufp f2s bufidx sadd setb igetb isetb (loads/effects) and the
+            / opaque loop region ops rsum rmax ndo whileL kparam lparam
 xTy::  ()   / result type sym
 xArg:: ()   / operand node indices (a list) per node
-xVal:: ()   / const value / extract index / verb glyph / math name
+xVal:: ()   / const value / extract index / verb glyph / math name / loop meta
 xId::  ()   / SPIR-V id per node, filled by lowering
 xRe::  ()   / reachability mask (DCE)
-xReset: {[] xOp::(); xTy::(); xArg::(); xVal::(); xId::(); xRe::()}
-xEmit: {[op;ty;args;val] xOp,:: ,op; xTy,:: ,ty; xArg,:: ,args; xVal,:: ,val; -1+#xOp}
+xRgn:: ()   / owning loop node per node (-1 = top level). A loop's body/cond
+            / nodes are "owned": the main lowering pass skips them and the
+            / loop node's lowerer replays them inside its basic blocks.
+XOwn:: -1   / current region owner during build (set by the loop builders)
+xReset: {[] xOp::(); xTy::(); xArg::(); xVal::(); xId::(); xRe::(); xRgn::(); XOwn::-1}
+xEmit: {[op;ty;args;val] xOp,:: ,op; xTy,:: ,ty; xArg,:: ,args; xVal,:: ,val; xRgn,:: XOwn; -1+#xOp}
 xSplat: {[vty;snode] xEmit[`cons; vty; (ncVec[vty])#snode; 0n]}
 
 / ── IR builder: mirrors compNode, but returns (nodeIdx; ty) and records IR ──
@@ -1152,7 +1162,7 @@ xTransOp: {[i;env;oty]
   $[(op~`"<")&isEq; xLeGe[i;env;`">"]
     (op~`">")&isEq; xLeGe[i;env;`"<"]
     xTransNorm[i;env;oty]]}
-xTrans: {[i;env;oty] $[(kKind kF1[i;`v])~`term; (0;oty); xTransOp[i;env;oty]]}
+xTrans: {[i;env;oty] $[(kKind kF1[i;`v])~`term; xAdverb[i; kF1[i;`v]; env; oty]; xTransOp[i;env;oty]]}
 xAppos: {[i;env;oty]
   op: kVal kF1[i;`f]; ap: xNode[kF1[i;`a];env;oty]; aty: ap 1
   $[op in mathFns; (xEmit[`math; $[op~`length;`f32;aty]; ,ap 0; op]; $[op~`length;`f32;aty])
@@ -1167,7 +1177,118 @@ xFnCall: {[name;i;env;oty]
   ids: $[n=1;,a0 0; n=2;(a0 0;a1 0); (a0 0;a1 0;a2 0)]
   (xEmit[`math;rty;ids;name]; rty)}
 xApplyIdx: {[fr;i;env;oty] ap:xNode[fr;env;oty]; (xEmit[`extract;`f32;,ap 0; kVal kF1[i;`arg]]; `f32)}
-xApply: {[i;env;oty] fr:kF1[i;`f]; nm:kVal fr; $[nm in mathFns; xFnCall[nm;i;env;oty]; xApplyIdx[fr;i;env;oty]]}
+xApply: {[i;env;oty]
+  fr: kF1[i;`f]; nm: kVal fr
+  $[nm~`scatterAdd;  xSadd[i;env]
+    nm~`set;         xSet[i;env]
+    nm~`iget;        xIget[i;env]
+    nm~`iset;        xIset[i;env]
+    nm~`rsum;        xRsum[i;env]
+    nm~`rmax;        xRmax[i;env]
+    nm in mathFns;   xFnCall[nm;i;env;oty]
+    isBuf[nm;env];   xBufIdx[(env nm) 0; i; env]
+    xApplyIdx[fr;i;env;oty]]}
+
+/ ── IR builders for the compute dialect (mirror the comp* direct walkers) ────
+/ Every f32→i32 index truncation is its OWN `f2s node, emitted at the same
+/ position the direct path allocates its OpConvertFToS id — that 1:1 id-order
+/ correspondence is what keeps the IR path byte-identical (record-then-replay).
+xBufIdx: {[bufN; i; env]
+  ip: xNode[kF1[i;`arg]; env; `f32]
+  si: xEmit[`f2s; `i32; ,ip 0; 0n]
+  (xEmit[`bufidx; `f32; (bufN; si); 0n]; `f32)}
+xSadd: {[i; env]
+  args: kF[i;`arg]
+  accN: (env kVal args 0) 0
+  ip: xNode[args 1; env; `f32]; si: xEmit[`f2s;`i32;,ip 0;0n]
+  vp: xNode[args 2; env; `f32]; vi: xEmit[`f2s;`i32;,vp 0;0n]
+  (xEmit[`sadd; `i32; (accN; si; vi); 0n]; `i32)}
+xSet: {[i; env]
+  args: kF[i;`arg]
+  bufN: (env kVal args 0) 0
+  ip: xNode[args 1; env; `f32]; si: xEmit[`f2s;`i32;,ip 0;0n]
+  vp: xNode[args 2; env; `f32]
+  z: xEmit[`setb; `f32; (bufN; si; vp 0); 0n]
+  vp}
+xIget: {[i; env]
+  args: kF[i;`arg]
+  accN: (env kVal args 0) 0
+  ip: xNode[args 1; env; `f32]; si: xEmit[`f2s;`i32;,ip 0;0n]
+  (xEmit[`igetb; `f32; (accN; si); 0n]; `f32)}
+xIset: {[i; env]
+  args: kF[i;`arg]
+  accN: (env kVal args 0) 0
+  ip: xNode[args 1; env; `f32]; si: xEmit[`f2s;`i32;,ip 0;0n]
+  vp: xNode[args 2; env; `f32]; vi: xEmit[`f2s;`i32;,vp 0;0n]
+  z: xEmit[`isetb; `i32; (accN; si; vi); 0n]
+  (vi; `i32)}
+
+/ ── Loops as opaque region nodes ─────────────────────────────────────────────
+/ The loop node is emitted BEFORE its body so it lowers at the position the
+/ direct path called loopOpen; body nodes built after it are owned (xRgn) and
+/ replayed inside the loop's basic blocks by the loop lowerer. xVal carries
+/ (param-node; result-root; owned-end[; …]) patched after the body is built.
+xRsum: {[i; env]
+  args: kF[i;`arg]; lamN: args 1
+  pn: *(Cst`value)@kF[lamN;`param]
+  kp: xNode[args 0; env; `f32]
+  kx: xEmit[`f2s; `i32; ,kp 0; 0n]
+  L: xEmit[`rsum; `f32; ,kx; 0n]
+  sav: XOwn; XOwn:: L
+  kpar: xEmit[`kparam; `f32; (); 0n]
+  benv: ((!env),pn)!(env[!env],(,(kpar;`f32)))
+  bp: xSeq[kF[lamN;`stmt]; benv; `f32]
+  XOwn:: sav
+  xVal[L]:: (kpar; bp 0; #xOp)
+  (L; `f32)}
+xRmax: {[i; env]
+  args: kF[i;`arg]; lamN: args 1
+  pn: *(Cst`value)@kF[lamN;`param]
+  kp: xNode[args 0; env; `f32]
+  kx: xEmit[`f2s; `i32; ,kp 0; 0n]
+  L: xEmit[`rmax; `f32; ,kx; 0n]
+  sav: XOwn; XOwn:: L
+  kpar: xEmit[`kparam; `f32; (); 0n]
+  benv: ((!env),pn)!(env[!env],(,(kpar;`f32)))
+  bp: xSeq[kF[lamN;`stmt]; benv; `f32]
+  XOwn:: sav
+  xVal[L]:: (kpar; bp 0; #xOp)
+  (L; `f32)}
+xNdo: {[aN; vN; bN; env; oty]
+  cp: xNode[aN; env; `f32]
+  cx: xEmit[`f2s; `i32; ,cp 0; 0n]
+  sp: xNode[bN; env; oty]; sty: sp 1
+  L: xEmit[`ndo; sty; (cx; sp 0); 0n]
+  sav: XOwn; XOwn:: L
+  spar: xEmit[`lparam; sty; (); 0n]
+  vpn: *(Cst`value)@kF[vN;`param]
+  venv: ((!env),vpn)!(env[!env],(,(spar;sty)))
+  bp: xSeq[kF[vN;`stmt]; venv; sty]
+  XOwn:: sav
+  xVal[L]:: (spar; bp 0; #xOp)
+  (L; sty)}
+xWhile: {[cN; vN; bN; env; oty]
+  sp: xNode[bN; env; oty]; sty: sp 1
+  L: xEmit[`whileL; sty; ,sp 0; 0n]
+  sav: XOwn; XOwn:: L
+  spar: xEmit[`lparam; sty; (); 0n]      / the state phi, shared by cond + body
+  cpn: *(Cst`value)@kF[cN;`param]
+  cenv: ((!env),cpn)!(env[!env],(,(spar;sty)))
+  cc: xSeq[kF[cN;`stmt]; cenv; `bool]
+  cEnd: #xOp
+  vpn: *(Cst`value)@kF[vN;`param]
+  venv: ((!env),vpn)!(env[!env],(,(spar;sty)))
+  bp: xSeq[kF[vN;`stmt]; venv; sty]
+  XOwn:: sav
+  xVal[L]:: (spar; cc 0; cEnd; bp 0; #xOp)
+  (L; sty)}
+xAdverb: {[i; vN; env; oty]
+  glyph: kVal vN
+  verb: kF1[vN;`f]
+  aN: kF1[i;`a]; bN: kF1[i;`b]
+  $[glyph~`"/"; $[(kKind aN)~`lambda; xWhile[aN; verb; bN; env; oty]
+                xNdo[aN; verb; bN; env; oty]]
+    (0; oty)]}
 / Unrolled (an inner `{[e] xNode[e;env;…]}` each can't see env — lambdas don't
 / close over parent scope), like the direct compList.
 xList: {[i;env;oty]
@@ -1253,9 +1374,66 @@ xLoNeg:     {[k] r:newId[]; emitBuf opFneg[Tid[xTy k];r;(xId@xArg k)0]; xId[k]::
 xLoLnot:    {[k] r:newId[]; emitBuf opLNot[Tbool;r;(xId@xArg k)0]; xId[k]::r}
 xLoArith:   {[k] a:xArg k; ids:xId@a; r:newId[]; emitBuf dispBin[xVal k; xTy k; r; xTy a 0; ids 0; xTy a 1; ids 1]; xId[k]::r}
 xLoMath:    {[k] a:xArg k; ids:xId@a; r:newId[]; emitBuf xMathW[xVal k; xTy k; r; ids; Tid[xTy a 0]]; xId[k]::r}
+/ ── Compute-dialect lowerers (1:1 id-order with the direct comp* emitters) ───
+xLoF2s:    {[k] r:newId[]; emitBuf opF2s[Ti32; r; (xId@xArg k)0]; xId[k]::r}
+xLoBufIdx: {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPf32; p; xId a 0; CKz; xId a 1]; r:newId[]; emitBuf opLoad[Tf32; r; p]; xId[k]::r}
+xLoSadd:   {[k] a:xArg k; ptr:newId[]; emitBuf opAccChain[CPi32; ptr; xId a 0; CKz; xId a 1]; old:newId[]; emitBuf opAtomicIAdd[Ti32; old; ptr; CScope; CKz; xId a 2]; xId[k]::old}
+xLoSet:    {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPf32; p; xId a 0; CKz; xId a 1]; emitBuf opStore[p; xId a 2]; xId[k]::0}
+xLoIget:   {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPi32; p; xId a 0; CKz; xId a 1]; iv:newId[]; emitBuf opLoad[Ti32; iv; p]; fv:newId[]; emitBuf opI2f[Tf32; fv; iv]; xId[k]::fv}
+xLoIset:   {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPi32; p; xId a 0; CKz; xId a 1]; emitBuf opStore[p; xId a 2]; xId[k]:: xId a 2}
+
+/ Loop lowerers: replay the owned nodes inside the loop's basic blocks. The
+/ phi ids travel through RKiPhi/RKsPhi globals (lambdas can't close); each
+/ loop saves/restores them so nesting is safe. XLk is the region filter owner.
+RKiPhi:: 0; RKsPhi:: 0; XLk:: -1
+xLoKparam: {[k] r:newId[]; emitBuf opI2f[Tf32; r; RKiPhi]; xId[k]::r}
+xLoLparam: {[k] xId[k]:: RKsPhi}
+xLoRegion: {[k; lo; hi] sav: XLk; XLk:: k; {[j] $[(xRgn j)=XLk; xLowerOne j; 0]}' lo+!hi-lo; XLk:: sav; 0}
+xLoRsum: {[k]
+  a: xArg k; v: xVal k
+  h: loopOpen[xId a 0; RCf0; `f32]
+  svi: RKiPhi; RKiPhi:: h 0
+  xLoRegion[k; 1+k; v 2]
+  RKiPhi:: svi
+  nv: newId[]; emitBuf opFadd[Tf32; nv; h 1; xId v 1]
+  loopClose[nv; `f32; h 3; h 2; h 0; h 4; h 5; h 6]
+  xId[k]:: h 1}
+xLoRmax: {[k]
+  a: xArg k; v: xVal k
+  h: loopOpen[xId a 0; RCfNeg; `f32]
+  svi: RKiPhi; RKiPhi:: h 0
+  xLoRegion[k; 1+k; v 2]
+  RKiPhi:: svi
+  nv: newId[]; emitBuf opFmax[Tf32; nv; h 1; xId v 1]
+  loopClose[nv; `f32; h 3; h 2; h 0; h 4; h 5; h 6]
+  xId[k]:: h 1}
+xLoNdo: {[k]
+  a: xArg k; v: xVal k; sty: xTy k
+  h: loopOpen[xId a 0; xId a 1; sty]
+  svs: RKsPhi; RKsPhi:: h 1
+  xLoRegion[k; 1+k; v 2]
+  RKsPhi:: svs
+  loopClose[xId v 1; sty; h 3; h 2; h 0; h 4; h 5; h 6]
+  xId[k]:: h 1}
+xLoWhile: {[k]
+  a: xArg k; v: xVal k; sty: xTy k
+  preL:newId[]; hdrL:newId[]; bodL:newId[]; conL:newId[]; mrgL:newId[]
+  sPhi:newId[]; sNext:newId[]
+  emitBuf opBranch[preL]; emitBuf opLabel[preL]; emitBuf opBranch[hdrL]; emitBuf opLabel[hdrL]
+  emitBuf opPhi2[Tid[sty]; sPhi; xId a 0; preL; sNext; conL]
+  svs: RKsPhi; RKsPhi:: sPhi
+  xLoRegion[k; 1+k; v 2]                       / lparam + cond nodes (header)
+  emitBuf opLoopMrg[mrgL; conL]; emitBuf opBrCond[xId v 1; bodL; mrgL]; emitBuf opLabel[bodL]
+  xLoRegion[k; v 2; v 4]                       / body nodes
+  RKsPhi:: svs
+  emitBuf opCopy[Tid[sty]; sNext; xId v 3]
+  emitBuf opBranch[conL]; emitBuf opLabel[conL]; emitBuf opBranch[hdrL]; emitBuf opLabel[mrgL]
+  xId[k]:: sPhi}
+
 xLowerOne: {[k]
   op:xOp k
   $[op~`param;   xId[k]:: xVal k
+    op~`bufp;    xId[k]:: xVal k
     op~`const;   xLoConst[k]
     op~`cons;    xLoCons[k]
     op~`extract; xLoExtract[k]
@@ -1264,9 +1442,37 @@ xLowerOne: {[k]
     op~`lnot;    xLoLnot[k]
     op~`arith;   xLoArith[k]
     op~`math;    xLoMath[k]
+    op~`f2s;     xLoF2s[k]
+    op~`bufidx;  xLoBufIdx[k]
+    op~`sadd;    xLoSadd[k]
+    op~`setb;    xLoSet[k]
+    op~`igetb;   xLoIget[k]
+    op~`isetb;   xLoIset[k]
+    op~`kparam;  xLoKparam[k]
+    op~`lparam;  xLoLparam[k]
+    op~`rsum;    xLoRsum[k]
+    op~`rmax;    xLoRmax[k]
+    op~`ndo;     xLoNdo[k]
+    op~`whileL;  xLoWhile[k]
     0]}
 / xRe is a GLOBAL so the each's lambda can read it (no closure over the local mask).
 xLowerSpirv: {[root] xId::(#xOp)#-1; xRe:: xReach[root]; {[k] $[xRe k; xLowerOne k; 0]}' !#xOp; 0}
+
+/ ── Compute bodies through the IR (kk.md incr 3: the seam migration) ─────────
+/ Build the whole body as IR, then lower every top-level node in build order —
+/ loop-owned nodes are replayed by their loop's lowerer. No DCE/fold yet: the
+/ migration oracle is BYTE-IDENTITY with the old direct path (test/kkgold.k);
+/ optimizations turn on once oracles move to numeric parity. Env pairs from
+/ the prologue become param (loaded value) / bufp (binding var) nodes; the
+/ prologue/epilogue stay direct — the IR owns only the body.
+kIrEnvOne: {[p] $[(p 1) in `buf`scat; (xEmit[`bufp; p 1; (); p 0]; p 1); (xEmit[`param; p 1; (); p 0]; p 1)]}
+xLowerAll: {[] xId:: (#xOp)#-1; {[j] $[0 > xRgn j; xLowerOne j; 0]}' !#xOp; 0}
+kSeqIr: {[stmts; env]
+  xReset[]
+  e2: (!env) ! kIrEnvOne' env[!env]
+  rp: xSeq[stmts; e2; `f32]
+  xLowerAll[]
+  ((xId rp 0); rp 1)}
 
 / ── Back-end 2: textual IR dump (proves the same IR retargets) ────────────────
 xArgStr: {[k] a:xArg k; $[0=#a;"[]"; ","/$'a]}

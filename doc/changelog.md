@@ -1,6 +1,16 @@
 # Changelog
 
 ## 2026-07-15
+- **Compute bodies compile through the neutral IR** (kk incr 3, the seam
+  migration): kSeqIr builds typed SSA for every compute entry point and
+  lowers it in build order. New IR ops: bufidx/igetb loads, setb/sadd/isetb
+  effects, f2s conversions, bufp binding refs, and rsum/rmax/ndo/whileL as
+  opaque region nodes (xRgn owner column; loop lowerers replay their owned
+  nodes inside loopOpen/loopClose blocks; nesting via saved RK* phi globals).
+  All 12 kkgold modules byte-identical to the retired direct path; golden,
+  walk3, nn, clothgpu, baking, inference, fragment-IR all verified. The
+  second backend (bits → FusedMap) and IR-level rewrites now have the full
+  compute dialect to target.
 - **Binding inference: `shader.kernel[fn]` + `gpu.pipeline[fn]`** (kk incr 3,
   bindings-from-the-lambda): params passed to scatterAdd/iget/iset are i32
   accumulators (must come first; warned otherwise), the last param is the
