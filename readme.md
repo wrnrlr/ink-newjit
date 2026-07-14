@@ -23,6 +23,7 @@ Functional programming with APL2
 - [SIMD: making every cycle count](https://lv1.sh/blog/simd-making-every-cycle-count/)
 - [Leveraging APL and SPIR-V languages to write network functions to be deployed on Vulkan compatible GPUs](https://juuso.dev/papers/msc-thesis-lorraine/msc-thesis-lorraine.html)
 - [InfiniteDiffusion: Open-World Terrain Generation](https://xandergos.github.io/terrain-diffusion/)
+- [Writing Bindless GPU Abstraction layer](https://www.kevin-gibson.com/blog/writing-a-bindless-gpu-abstraction-layer/)
 
 ```
  M:2 2#!4

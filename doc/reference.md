@@ -17,7 +17,7 @@ mantissa = ( digit , { digit } , [ "." , { digit } ]
             | "." , digit , { digit } ) , [ exponent ] ;
 bit = ( "0" | "1" ) , "b" ;
 nat = ( digit , { digit } | "0" , ( "N" | "W" ) ) , "u" ;
-int   = [ sign ] , ( "0" , ( "x" | "X" ) , hex , { hex }
+int   §= [ sign ] , ( "0" , ( "x" | "X" ) , hex , { hex }
           | "0" , ( "N" | "W" )
           | digit , { digit } ) ;
 float = [ sign ] , ( "0" , ( "n" | "w" )
@@ -598,3 +598,25 @@ if the request could not be completed.
   pairs `("accept";"application/json";…)`; `http.raw (method;url;headers;body)`
   is the underlying primitive
 - Decode a JSON response with `json.parse r`body`
+- Streaming: `http.stream[method; url; headers; body; {[line]…}]` calls the
+  callback with each response line (newline stripped) as it arrives and returns
+  `[status; headers]`.  Used for Server-Sent Events / LLM token streams.
+
+### LLM Library
+Chat + streaming for Anthropic and xAI (Grok) over the http + json modules
+(`lib/llm.k`, pure k — no build step).  Keys come from the environment
+(`ANTHROPIC_API_KEY`, `XAI_API_KEY`).  Streaming is built in: `llm.ask` prints
+tokens live as they arrive and returns the full assistant text.
+- `llm.anthropic model` / `llm.grok model` → a provider config dict
+- `llm.ask[cfg; prompt]` — one-shot; streams live, returns the text
+- `llm.turn[cfg; history; text]` (alias `llm.say`) — multi-turn; returns the
+  history extended with the user + assistant turns (start from `()`)
+- `llm.stream[cfg; messages]` — lower level; `messages` is a list of
+  `[role;content]` dicts (`llm.msg[role;text]`)
+- Agent (buffered tool-use loop, both providers): `llm.agent[cfg; tools; task]`.
+  A tool is `llm.tool[name; desc; params; fn]` where `params` is a JSON-schema
+  object (`llm.obj[properties; required]`, `llm.prop[type; desc]`) and `fn` is a
+  k lambda `inputDict → resultString`.  The loop runs the model, dispatches any
+  tool calls to your `fn`s, feeds results back, and returns the final text.
+  `json.list` (a non-columnarising `json.parse`) makes the response arrays
+  navigate as lists.

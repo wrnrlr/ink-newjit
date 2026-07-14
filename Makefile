@@ -32,6 +32,15 @@ test:
 	$(INK) test/usd.k
 	zig build json
 	$(INK) test/gltf.k
+	zig build crypto
+	$(INK) test/crypto.k
+	zig build compress
+	$(INK) test/compress.k
+	zig build zip
+	$(INK) test/zip.k
+	zig build http
+	$(INK) test/http.k
+	$(INK) test/llm.k
 	# $(INK) test/font.k
 	sh test/ipc.sh
 

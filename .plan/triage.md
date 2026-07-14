@@ -372,6 +372,49 @@ would let the projection form work too.
 
 ---
 
+## 20. `json.parse` columnarises arrays of uniform objects (design note / API footgun)
+
+`json.parse "[{\"x\":1},{\"x\":2}]"` returns the **table/dict** `{x: 1 2}`, not a
+list of two dicts (`lib/json/main.zig` → `convertArr` → `tryTable`). Deliberate
+for data-shaped JSON (array-of-rows → columns), but a footgun when navigating API
+responses: xAI's `choices:[…]` and Anthropic's `content:[…]`/`tool_use` arrays
+don't index as lists. Mixed-key arrays fall back to a general list `L` (fine); only
+uniform-key object arrays collapse. RESOLVED for callers who need lists: added
+`json.list` (native `ParseJsonList`, a `promote=false` variant of `json.parse`)
+that keeps arrays as general lists — `lib/llm.k`'s agent tool-use path uses it to
+navigate `choices`/`content`/`tool_use`. `json.parse` still promotes (intentional
+for data-shaped JSON). Streaming still uses the small `llm.jstr` line scanner
+(avoids parsing per chunk). Left open as a design note: the default `json.parse`
+promoting surprises API callers — consider documenting or flipping the default.
+
+---
+
+## 19. Upstream (Zig 0.16 std): `std.zip.EndRecord.findBuffer` doesn't compile
+
+`std.zip.EndRecord.findBuffer` (`lib/std/zip.zig`) is declared
+`fn findBuffer(buffer) FindBufferError!EndRecord` where
+`FindBufferError = error{ ZipNoEndRecord, ZipTruncated }`, but its body does
+`if (pos + @sizeOf(EndRecord) > buffer.len) return error.EndOfStream;` —
+`error.EndOfStream` is not a member of the declared set, so the function fails to
+compile the moment it is referenced:
+
+```
+zip.zig:113: error: expected type 'error{ZipNoEndRecord,ZipTruncated}!zip.EndRecord',
+             found 'error{EndOfStream}'
+```
+
+Upstream bug in the Zig standard library (0.16.0), not ink. It only bites when
+the function is actually instantiated, which is why most code never hits it.
+Worked around in `lib/zip/main.zig` (`findEnd`) by locating the End-Of-Central-
+Directory record ourselves — `std.mem.lastIndexOf(buf, &zip.end_record_sig)` then
+`@ptrCast(*align(1) const zip.EndRecord)` (little-endian host assumed). The rest
+of the in-memory parse reuses `std.zip`'s `align(1)` extern struct layouts
+(`CentralDirectoryFileHeader`, `LocalFileHeader`), which are fine. Revisit if a
+future Zig fixes `findBuffer` (either the declared error set gains `EndOfStream`
+or the body stops returning it) — the workaround can then be dropped.
+
+---
+
 # GPU shader compiler
 
 Enhancement tracking for the SPIR-V shader compiler (`lib/dye.k`, `lib/spirv.k`,

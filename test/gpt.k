@@ -1,6 +1,6 @@
-
 text:1:"./test/data/shakespear.txt"
-chars:{x@<x}@!=text;
+tokenize:{x@<x}@!=
+chars:tokenize text;
 N:#chars;
 encode:chars!!N;
 decode:(!N)!chars;
@@ -16,6 +16,6 @@ bs:4 / batch size
 batch:{[split]
   d:$[split;td;vd];l:#d
   ix: / 4 numbers
-  }
+}
 
 offsets

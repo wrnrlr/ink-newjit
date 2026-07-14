@@ -265,6 +265,54 @@ pub fn build(b: *std.Build) !void {
   const csv_step = b.step("csv", "Build the CSV extension shared library");
   csv_step.dependOn(&b.addInstallArtifact(csv_lib, .{}).step);
 
+  // --- Crypto extension shared library ---
+  const crypto_ext_mod = b.createModule(.{
+    .root_source_file = b.path("lib/crypto/main.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+  });
+  crypto_ext_mod.addImport("kabi", kabi_mod);
+
+  const crypto_lib = b.addLibrary(.{ .name = "crypto", .root_module = crypto_ext_mod, .linkage = .dynamic });
+  b.installArtifact(crypto_lib);
+  const crypto_step = b.step("crypto", "Build the crypto extension shared library");
+  crypto_step.dependOn(&b.addInstallArtifact(crypto_lib, .{}).step);
+
+  // --- Compress extension shared library ---
+  const compress_ext_mod = b.createModule(.{
+    .root_source_file = b.path("lib/compress/main.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+  });
+  compress_ext_mod.addImport("kabi", kabi_mod);
+
+  const compress_lib = b.addLibrary(.{ .name = "compress", .root_module = compress_ext_mod, .linkage = .dynamic });
+  b.installArtifact(compress_lib);
+  const compress_step = b.step("compress", "Build the compress extension shared library");
+  compress_step.dependOn(&b.addInstallArtifact(compress_lib, .{}).step);
+
+  // --- Zip extension shared library ---
+  const zip_ext_mod = b.createModule(.{
+    .root_source_file = b.path("lib/zip/main.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+  });
+  zip_ext_mod.addImport("kabi", kabi_mod);
+
+  const zip_lib = b.addLibrary(.{ .name = "zip", .root_module = zip_ext_mod, .linkage = .dynamic });
+  b.installArtifact(zip_lib);
+  const zip_step = b.step("zip", "Build the zip extension shared library");
+  zip_step.dependOn(&b.addInstallArtifact(zip_lib, .{}).step);
+
+  // --- HTTP client extension shared library ---
+  const http_ext_mod = b.createModule(.{
+    .root_source_file = b.path("lib/http/main.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+  });
+  http_ext_mod.addImport("kabi", kabi_mod);
+
+  const http_lib = b.addLibrary(.{ .name = "http", .root_module = http_ext_mod, .linkage = .dynamic });
+  b.installArtifact(http_lib);
+  const http_step = b.step("http", "Build the HTTP client extension shared library");
+  http_step.dependOn(&b.addInstallArtifact(http_lib, .{}).step);
+
   // --- Parquet extension shared library ---
   const parquet_ext_mod = b.createModule(.{
     .root_source_file = b.path("lib/parquet/src/main.zig"),
@@ -373,7 +421,9 @@ pub fn build(b: *std.Build) !void {
   inline for (.{
     .{ "json", json_ext_mod },   .{ "csv", csv_ext_mod }, .{ "md5", md5_ext_mod },
     .{ "font", font_ext_mod }, .{ "parquet", parquet_ext_mod }, .{ "shp", shp_ext_mod },
-    .{ "safetensors", safetensors_ext_mod },
+    .{ "safetensors", safetensors_ext_mod }, .{ "crypto", crypto_ext_mod },
+    .{ "compress", compress_ext_mod }, .{ "zip", zip_ext_mod },
+    .{ "http", http_ext_mod },
   }) |pair| {
     const slib = b.addLibrary(.{ .name = pair[0], .root_module = pair[1], .linkage = .static });
     static_step.dependOn(&b.addInstallArtifact(slib, .{}).step);
