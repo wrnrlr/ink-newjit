@@ -251,8 +251,8 @@ dispBin: {[op;rty;r;aty;a;bty;b]
     op~`"*";   $[isVecTy[aty] & ~isVecTy[bty]; opVTS[rt;r;a;b]
                isVecTy[bty] & ~isVecTy[aty]; opVTS[rt;r;b;a]
                opFmul[rt;r;a;b]]
-    op~`",";   (0x00050050;rt;r;a;b)   / OpCompositeConstruct, 2 constituents: v2+f32→v3, v3+f32→v4, etc.
-    op~`"<";   opFOlt[at;r;a;b]   / <= / >= are handled by the compTrans peephole
+    op~`",";   (0x00050050;rt;r;a;b);   / OpCompositeConstruct, 2 constituents: v2+f32→v3, v3+f32→v4, etc.
+    op~`"<";   opFOlt[at;r;a;b];   / <= / >= are handled by the compTrans peephole
     op~`">";   opFOgt[at;r;a;b]
     op~`"=";   opFOeq[at;r;a;b]
     op~`"~";   opFOne[at;r;a;b]

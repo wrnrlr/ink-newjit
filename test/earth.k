@@ -159,8 +159,8 @@ earthFrag: shader.fragmentTexN[[wNor:`v3; wTan:`v3; wUvF:`v3; wSun:`v3; out:`v4]
 / yaw/pitch as the globe, converted to equirectangular UV and sampled from the sky
 / map.  So the stars turn with the earth and sit at infinity (zoom doesn't move
 / them).  Drawn before the earth, which then depth-tests in front.
-starQuad: -1. -1.  1. -1.  1. 1.  -1. -1.  1. 1.  -1. 1.
-STARFOV:  0.85                                   / how much sky fills the view
+starQuad: -1. -1. 1. -1. 1. 1. -1. -1. 1. 1. -1. 1.
+STARFOV:  0.85      / how much sky fills the view
 
 starVtx: shader.vertexU[[pos:`v2]; [wRay:`v2;wRot:`v4]; `uRot`uView; {[pos]
   cy:uRot[0]; sy:uRot[1]; cp:uRot[2]; sp:uRot[3]
@@ -196,12 +196,10 @@ ZMIN:   0.55; ZMAX: 30.0
 SUNSPD: 0.02                                     / sun radians per held frame
 SUNEL:  0.40                                     / sun elevation above the view horizon
 
-yaw::    0.6
-pitch::  0.35
-zoom::   0.9
-sunAz::  0.6                                      / sun azimuth (arrow keys)
-lastMx:: 0.; lastMy:: 0.
-held:: 0; hL:: 0; hR:: 0                          / held: left-mouse, ←, →
+yaw::0.6;pitch::0.35;zoom::0.9
+sunAz::0.6                                      / sun azimuth (arrow keys)
+lastMx::0.; lastMy:: 0.
+held::0;hL::0;hR::0                          / held: left-mouse, ←, →
 cloudsOn:: 1.
 
 earthHandle:: 0
@@ -227,18 +225,18 @@ window.run[{[props]
   lk:  (E`down)@&(`key=E`kind)&(263=E`code);   hL::   $[#lk;  *|lk;  hL]
   rk:  (E`down)@&(`key=E`kind)&(262=E`code);   hR::   $[#rk;  *|rk;  hR]
   / drag → spin with the cursor (angle/pixel = ndc/pixel ÷ zoom); clamp pitch
-  dx: $[held; mx-lastMx; 0.]; dy: $[held; my-lastMy; 0.]
-  yaw::   yaw + (2.0*dx)%(w*zoom)
-  pitch:: (0.0-PLIM)|PLIM&(pitch + (2.0*dy)%(h*zoom))
-  lastMx:: mx; lastMy:: my
+  dx:$[held; mx-lastMx; 0.]; dy: $[held; my-lastMy; 0.]
+  yaw::yaw + (2.0*dx)%(w*zoom)
+  pitch::(0.0-PLIM)|PLIM&(pitch + (2.0*dy)%(h*zoom))
+  lastMx::mx; lastMy::my
   / sun azimuth: arrows move the day (→ ahead, ← back)
-  sunAz:: sunAz + SUNSPD*(hR-hL)
+  sunAz::sunAz+SUNSPD*(hR-hL)
   / scroll zoom (clamped)
-  sc: (E`amt)@&`scroll=E`kind
-  zoom:: ZMIN|ZMAX&(zoom*(1.+0.1*$[#sc;+/sc;0.]))
+  sc:(E`amt)@&`scroll=E`kind
+  zoom::ZMIN|ZMAX&(zoom*(1.+0.1*$[#sc;+/sc;0.]))
   / '1' toggles clouds
-  dn: (E`code)@&(`key=E`kind)&(1=E`down)
-  $[#dn; $[|/49=dn; cloudsOn:: 1.-cloudsOn; 0]; 0]
+  dn:(E`code)@&(`key=E`kind)&(1=E`down)
+  $[#dn;$[|/49=dn;cloudsOn::1.-cloudsOn;0];0]
 
   / view-space sun direction from azimuth + fixed elevation
   ce: cos SUNEL

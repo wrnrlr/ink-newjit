@@ -1,8 +1,6 @@
 / http://www.math.bas.bg/bantchev/place/k.html
 / K crash course https://github.com/kparc/kcc
 
-
-
 activity: 0: <`"data/activity.csv"
 address: 0: <`"data/address.csv"
 branch: 0: <`"data/branch.csv"
