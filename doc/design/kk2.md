@@ -220,24 +220,36 @@ loses `SC` entirely, and the velocity-jitter floor it causes. Keep the
 fixed-point lowering as the caps=0 fallback. Needs the §6 device-enable
 plumbing first.
 
-## 8. Open questions (for Werner)
+## 8. Decisions (reviewed 2026-07-15) + remaining questions
 
-1. **Error signaling.** dye can only warn+NaN on bad kernels because ink has
-   no signal verb. Should the language grow one (`'"msg"` k-style), or is a
-   dedicated error-value constructor enough? This bites every future
-   compile-error path in kk.compile.
-2. **Placed-array v2.** Dict descriptors work but verbs can't dispatch on
-   them (`d+e` can't trigger kernel compile from k). A runtime class (new K
-   tag) makes placements first-class — when? It gates "verbs on placements"
-   but not kk.compile (which is called explicitly / via `9:`-typed args).
-3. **rsum/rmax retirement.** Once `+/{…}'!k` is recognized, keep the
-   intrinsic names as documented aliases or deprecate?
-4. **Shapes in descriptors.** `[gpu;t;n]` today; add `s` (shape) now so 2-D
-   stencils and `(k;n)` index matrices carry pitch, or wait for kk.compile?
-   (Lean: add now, it's one field.)
-5. **RNG.** walk.k's Monte-Carlo half needs a device RNG (philox
-   counter-based is the standard choice; `?` verb lowering). Tier 2 or its
-   own increment?
+1. **Error signaling — DECIDED: quoted-symbol errors, `` `"msg" ``.** User
+   errors carry a quoted symbol as their name — signaling `` `"cannot bake
+   FOO" `` produces an err-class value that prints `` !"cannot bake FOO" ``
+   and aborts evaluation like `!type` does, so dye/kk compile errors become
+   real errors instead of the current warn+bake-NaN. Micro-decision still
+   open: the raising *spelling* (a small `signal`-style prelude name backed
+   by an Op1 is the least grammar-invasive candidate). Replaces `kBakeBad`/
+   `xBakeBad` and every future kk.compile error path.
+2. **Placed-array v2 — DEFERRED indefinitely.** The only thing it buys is
+   sugar: `d+e` on two placements silently compiling a kernel requires the
+   runtime to dispatch verbs on a new placement class. Explicit compilation
+   (`kk.compile` / `gpu.pipeline`) plus the `9:`/`8:` io verbs cover the
+   whole roadmap without it; revisit only if the sugar is ever actually
+   missed.
+3. **rsum/rmax — DECIDED: full syntax is canonical.** `+/{[k] e}'!K` (and
+   `|/…`) is the spelling everywhere — demos, libs, docs; `rsum`/`rmax`
+   remain as documented equivalents (teaching code / spec of the lowering),
+   not deprecated, but no new code uses them. Raises the priority of the
+   §2.4-1 recognition, and lib/nn.k migrates to the full syntax once it
+   lands.
+4. **Shapes in descriptors — add `s` now.** `s` is the array's SHAPE, e.g.
+   `(N;N)` for the walk.k grid or `(nP;3)` for cloth positions, alongside
+   the flat count `n`. Placed via `9: (N;N)#x` (or a reshape on the
+   descriptor). It's what lets 2-D stencils know their row pitch, `(k;n)`
+   index matrices know k vs n, and kk.compile size dispatches and check
+   conformance — the host side of the data layer.
+5. **RNG** (walk.k's Monte-Carlo half; philox counter-based; `?` lowering) —
+   still open: tier 2 or its own increment.
 
 ## 9. Suggested order
 
