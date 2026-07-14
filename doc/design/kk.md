@@ -1,5 +1,12 @@
 # kk: idiomatic k → GPU (SPIR-V) and CPU (ink bytecode)
 
+> **Phase 1 (increments 0–3) is DONE — see `doc/design/kk2.md`** for the
+> recap, the techniques to keep (record-then-replay, opaque region nodes,
+> the oracle ladder), and the phase-2 design: tier-1 rewrites / kk.compile
+> (walk.k verbatim), fragment/vertex IR migration, bits, vertex pulling,
+> subgroup reductions, float atomics. This file remains the original plan
+> plus per-increment status notes.
+
 Status: **design agreed; increment 1 (assembleCompute consolidation) DONE** —
 `lib/dye.k`'s eight compute emitters are thin wrappers over `kAlloc`/`kAsm`
 (~370 lines deleted). Oracle: `test/kkgold.k` dumps all 12 representative
