@@ -1,6 +1,18 @@
 # GPU backend migration: Dawn/WebGPU → Vulkan (MoltenVK)
 
-Status: **proposed**. Author's note: written after establishing that Dawn's Tint
+Status: **DONE — cut over 2026-07-14.** Phase 5 (Dawn/zgpu/zpool/`gpuWgsl`/
+`blit.wgsl`/`fill.wgsl` deleted, vulkan is the only backend, static bundle
+merges gpu+MoltenVK+GLFW) and Phase 6 (dye.k emits SPIR-V **1.4 natively** —
+version word + full-interface `OpEntryPoint` in all four assemblers: `kAsm`,
+`buildMod`, `shader.vertexU`, `lib/instancing.k`; `maybeBump`/`INK_SPV14`
+removed) landed together after the kk emitter consolidation left one `hdr:`
+site per assembler. Verified: `test/spirv.k` golden (version chks now 1.4),
+12/12 kkgold modules `spirv-val --target-env vulkan1.2` clean, walk3/nn
+numerics unchanged, sphere/circle/eyes/earth/clothgpu render stats identical.
+Remaining from the old list: instancing exports are still stubs (subsumed by
+vertex pulling — doc/design/kk.md §4/§5.7); Phase 7 (self-host fill.k) open.
+
+Original document below. Author's note: written after establishing that Dawn's Tint
 SPIR-V *reader* is permanently capped at Vulkan 1.1 / SPIR-V 1.3 (see
 `.plan/triage.md` "SPIR-V 1.4 upgrade"). The only way to actually run SPIR-V 1.4+
 is a runtime that ingests SPIR-V natively. This document plans that swap.

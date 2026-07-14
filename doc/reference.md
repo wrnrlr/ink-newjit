@@ -503,7 +503,7 @@ Store + deflate, non-encrypted, non-zip64.
 
 ### Graphics Library
 Ink's GPU stack is three layers that load on demand:
-`lib/gpu.k` (the native `libgpu.dylib` bindings — WebGPU/Vulkan), `lib/dye.k`
+`lib/gpu.k` (the native `libgpu.dylib` bindings — raw Vulkan via MoltenVK), `lib/dye.k`
 (the **dye** shader compiler that turns ink lambdas into SPIR-V, backed by the
 pure instruction stencils in `lib/spirv.k`), and a set of higher-level helpers
 (`draw.k`, `camera.k`, `pbr.k`, `instancing.k`, `layout.k`, `font.k`, `color.k`).

@@ -313,7 +313,7 @@ fn bundleStatic(gpa: std.mem.Allocator, sp: []const u8, outname: []const u8, tar
   for (exts) |e| {
     const is_gpu = std.mem.eql(u8, e, "gpu");
     if (is_gpu) needs_frameworks = true;
-    // gpu links a merged archive (gpu+Dawn+GLFW) plus the macOS frameworks.
+    // gpu links a merged archive (gpu+MoltenVK+GLFW) plus the macOS frameworks.
     const libname = if (is_gpu) "gpu-bundle" else e;
     const a = findLib(gpa, libname, target) orelse {
       std.debug.print("error: lib{s}.a not found — `{s}` cannot be statically bundled{s}\n", .{ libname, e, if (is_gpu) " (gpu is macOS-only; run `zig build static` on macOS)" else "" });
@@ -321,11 +321,11 @@ fn bundleStatic(gpa: std.mem.Allocator, sp: []const u8, outname: []const u8, tar
     };
     try argv.append(gpa, a);
   }
-  // gpu (Dawn) is C++ — link libc++ — plus the macOS frameworks it needs
+  // gpu (MoltenVK) is C++ — link libc++ — plus the macOS frameworks it needs
   // (OS-provided, so they can't live inside a .a).
   if (needs_frameworks) {
     try argv.append(gpa, try gpa.dupe(u8, "-lc++"));
-    for ([_][]const u8{ "Metal", "QuartzCore", "Foundation", "IOKit", "IOSurface", "Cocoa" }) |fw| {
+    for ([_][]const u8{ "Metal", "QuartzCore", "Foundation", "IOKit", "IOSurface", "CoreGraphics", "Cocoa", "AppKit" }) |fw| {
       try argv.append(gpa, try gpa.dupe(u8, "-framework"));
       try argv.append(gpa, try gpa.dupe(u8, fw));
     }

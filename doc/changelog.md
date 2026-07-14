@@ -1,6 +1,18 @@
 # Changelog
 
 ## 2026-07-14
+- **Vulkan cutover** (kk increment 0 / migration Phase 5): Dawn/WebGPU backend
+  deleted (`lib/gpu/gpu.zig`, `render.zig`, `fill.wgsl`, `blit.wgsl`,
+  `patches/`, zon deps, `gpuWgsl`); raw Vulkan/MoltenVK (`gpu_vk.zig`) is the
+  only backend; `zig build static` merges gpu+MoltenVK+GLFW into
+  `libgpu-bundle.a` (11MB, was ~20MB). Run `make install` to refresh the stale
+  Dawn dylib under `~/.ink`.
+- **SPIR-V 1.4 native** (kk increment 2 / migration Phase 6): dye.k emits
+  version `0x00010400` with the full-interface `OpEntryPoint` rule in all four
+  assemblers (compute `kAsm`, fragment `buildMod`, `shader.vertexU`,
+  `lib/instancing.k`); the `INK_SPV14`/`maybeBump` live transform is removed.
+  12/12 kkgold modules pass `spirv-val --target-env vulkan1.2`; golden +
+  walk3/nn/sphere/circle/eyes/earth/clothgpu all verified.
 - **kk design** (`doc/design/kk.md`): plan for compiling idiomatic k to both
   SPIR-V and ink bytecode — io verbs `9:` (place on GPU) / `8:` (fetch), the
   k-primitive→compute rewrite table (each/gather/amend/fold/scan tiers), placed

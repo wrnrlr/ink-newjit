@@ -120,70 +120,9 @@ fn ok(r: c.VkResult) bool {
 pub const MAX_BIND = 8;
 pub const FRAMES = 2; // frames in flight for windowed rendering
 
-// When set (INK_SPV14=1), rewrite every module's version word to SPIR-V 1.4 before
-// vkCreateShaderModule — proves the migration's whole point (MoltenVK runs dye.k's
-// output at 1.4, which Dawn's Tint reader refuses). See doc/design/vulkan-migration.md.
-pub var force_spv14 = false;
-var spv_scratch: [65536]u32 = undefined;
-
-// Rewrite a SPIR-V module to version 1.4: bump the version word AND expand the
-// OpEntryPoint interface to list every global (non-Function) variable — the two
-// changes 1.4 requires. (Proven by spike/vkspike.zig + spirv-val; a bare version
-// bump is invalid and MoltenVK silently miscomputes.) This is the Phase-6 transform
-// applied live, so dye.k stays 1.3 (Dawn keeps working) while Vulkan runs 1.4.
-fn maybeBump(spirv: []const u32) []const u32 {
-  if (!force_spv14 or spirv.len < 6 or spirv.len + 64 > spv_scratch.len) return spirv;
-
-  // Collect global variable ids (module scope, storage class != Function=7) and
-  // locate the OpEntryPoint instruction.
-  var globals: [64]u32 = undefined;
-  var nglob: usize = 0;
-  var ep_pos: usize = 0;
-  var i: usize = 5;
-  while (i < spirv.len) {
-    const wc: usize = spirv[i] >> 16;
-    const op: u32 = spirv[i] & 0xffff;
-    if (wc == 0) break;
-    if (op == 15 and ep_pos == 0) ep_pos = i; // OpEntryPoint
-    if (op == 54) break; // OpFunction — end of the global section
-    if (op == 59 and i + 3 < spirv.len and spirv[i + 3] != 7 and nglob < 64) { globals[nglob] = spirv[i + 2]; nglob += 1; }
-    i += wc;
-  }
-  if (ep_pos == 0) return spirv;
-  const ep_wc: usize = spirv[ep_pos] >> 16;
-  const ep_end = ep_pos + ep_wc;
-
-  // The interface list starts after the entry-point name (a NUL-terminated string
-  // beginning at ep_pos+3): find the word containing the terminating NUL byte.
-  var name_end = ep_pos + 3;
-  while (name_end < ep_end) : (name_end += 1) {
-    const w = spirv[name_end];
-    if ((w & 0xff) == 0 or (w & 0xff00) == 0 or (w & 0xff0000) == 0 or (w & 0xff000000) == 0) { name_end += 1; break; }
-  }
-
-  // Which globals aren't already listed in the interface (ids name_end..ep_end)?
-  var add: [64]u32 = undefined;
-  var nadd: usize = 0;
-  for (globals[0..nglob]) |gid| {
-    var present = false;
-    var k = name_end;
-    while (k < ep_end) : (k += 1) if (spirv[k] == gid) { present = true; break; };
-    if (!present) { add[nadd] = gid; nadd += 1; }
-  }
-  if (nadd == 0) { // just the version bump
-    @memcpy(spv_scratch[0..spirv.len], spirv);
-    spv_scratch[1] = 0x00010400;
-    return spv_scratch[0..spirv.len];
-  }
-
-  // Rebuild: [0..ep_end) ++ add ++ [ep_end..len), version bumped, ep word count +nadd.
-  @memcpy(spv_scratch[0..ep_end], spirv[0..ep_end]);
-  @memcpy(spv_scratch[ep_end .. ep_end + nadd], add[0..nadd]);
-  @memcpy(spv_scratch[ep_end + nadd .. spirv.len + nadd], spirv[ep_end..spirv.len]);
-  spv_scratch[1] = 0x00010400;
-  spv_scratch[ep_pos] = (@as(u32, @intCast(ep_wc + nadd)) << 16) | 15;
-  return spv_scratch[0 .. spirv.len + nadd];
-}
+// dye.k emits SPIR-V 1.4 natively (version word 0x00010400 + full-interface
+// OpEntryPoint) since the Dawn cutover; the old INK_SPV14 maybeBump transform
+// that proved 1.4 on MoltenVK was folded into the compiler and removed.
 pub const MESH_UNI_FLOATS = 32; // 8 vec4 per-draw uniform block
 const UNI_SLOT = 256; // bytes per uniform slot (alignment-friendly)
 const MAX_MCALLS = 1024; // max uniform mesh draws per frame
@@ -1218,8 +1157,7 @@ pub const Vk = struct {
   pub fn createComputePipeline(self: *Vk, spirv: []const u32, nbind: u32, uni_idx: i32, wgx: u32) Error!Pipeline {
     var p: Pipeline = .{ .pipe = undefined, .layout = undefined, .dsl = undefined, .module = undefined, .nbind = nbind, .uni_idx = uni_idx, .wgx = if (wgx == 0) 64 else wgx };
 
-    const code = maybeBump(spirv);
-    const smi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = code.len * 4, .pCode = code.ptr };
+    const smi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = spirv.len * 4, .pCode = spirv.ptr };
     if (!ok(vkCreateShaderModule(self.dev, &smi, null, &p.module))) return Error.ShaderModule;
 
     var binds: [MAX_BIND]c.VkDescriptorSetLayoutBinding = undefined;

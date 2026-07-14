@@ -185,11 +185,12 @@ shader.vertexU: {[inTypes; varyTypes; uniNames; fn]
   rp3: $[nVary>3; compNode[outElems[4]; env2; varyTySyms[3]]; (0;`f32)]
   $[nVary>3; emitBuf opStore[varyVarIds[3]; rp3[0]]; 0]
 
-  / Assemble SPIR-V module
+  / Assemble SPIR-V module (SPIR-V 1.4: OpEntryPoint lists EVERY global
+  / variable, so the uniform block joins the I/O interface when present)
   bnd:   Nid+1
-  iface: inVarIds,(,perVtxVar),varyVarIds
+  iface: inVarIds,(,perVtxVar),varyVarIds,$[nUni>0; ,uniVar; !0]
 
-  hdr: (0x07230203; 0x00010300; 0; bnd; 0)
+  hdr: (0x07230203; 0x00010400; 0; bnd; 0)
   cap: (0x00020011; 1)
   ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
   mem: (0x0003000E; 0; 1)
@@ -826,9 +827,11 @@ varInOne: {[ptr;vid] (0x0004003B; ptr; vid; 1)}
 
 buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
   bnd:   Nid+1
-  iface: inVarIds, ,outId
+  / SPIR-V 1.4: OpEntryPoint lists EVERY global variable — the texture images
+  / and shared sampler (UniformConstant) join the Input/Output interface.
+  iface: inVarIds,(,outId),$[#TexVars; TexVars,,SampVar; !0]
 
-  hdr:  (0x07230203; 0x00010300; 0; bnd; 0)
+  hdr:  (0x07230203; 0x00010400; 0; bnd; 0)
   cap:  (0x00020011; 1)
   ext:  (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
   mem:  (0x0003000E; 0; 1)
@@ -923,8 +926,10 @@ akDecOne: {[k] (0x00040047;AKids[k];34;0),(0x00040047;AKids[k];33;k)}
 akVarOne: {[k] (0x0004003B; $[`i~AKknd k; AKpbufsI; AKpbufs]; AKids[k]; 12)}
 kAsm: {[]
   bnd: Nid+1
-  iface: ,AKgid
-  hdr: (0x07230203; 0x00010300; 0; bnd; 0)
+  / SPIR-V 1.4: OpEntryPoint lists EVERY global variable — gid + all storage
+  / bindings + the uniform block (not just the builtin Input).
+  iface: (,AKgid),AKids,$[AKuni; ,AKuniVar; !0]
+  hdr: (0x07230203; 0x00010400; 0; bnd; 0)
   cap: (0x00020011; 1)
   ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
   mem: (0x0003000E; 0; 1)

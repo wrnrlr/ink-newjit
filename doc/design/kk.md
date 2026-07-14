@@ -244,14 +244,18 @@ more kernel. Bindless textures ride behind the caps query.
 
 Each increment independently shippable; oracle in parentheses.
 
-0. **Vulkan cutover** — migration Phase 5: default `vulkan`, delete Dawn path,
-   `gpu.caps` query. (full demo suite, pixel/numeric parity — already verified
-   per migration doc; this is deletion + default-flip.)
-1. **`assembleCompute` consolidation** in `lib/dye.k` — one emitter, eight thin
-   wrappers, ~450 lines deleted. (byte-identical module words for every entry
-   point via checksum harness; `test/spirv.k`; headless `walk3`/`nn`/`clothgpu`.)
-2. **SPIR-V 1.4 native** — version word + interface rule in the one assembler;
-   retire `INK_SPV14`. (golden with bumped version; demo suite.)
+0. ✅ **Vulkan cutover** (2026-07-14) — Dawn/zgpu/zpool/`gpuWgsl`/WGSL files
+   deleted; vulkan is the only backend; static bundle = gpu+MoltenVK+GLFW.
+   Verified: walk3/nn numerics + sphere/circle/eyes/earth/clothgpu snapshots
+   identical (sphere 49.0%, brightest 158,173,188 = the Dawn-era values).
+   Still open from this step: the `gpu.caps` query.
+1. ✅ **`assembleCompute` consolidation** (2026-07-14) — see Status above.
+2. ✅ **SPIR-V 1.4 native** (2026-07-14) — version word `0x00010400` + the
+   full-interface `OpEntryPoint` rule in all four assemblers (`kAsm` lists
+   gid+bindings+uniform; `buildMod` adds textures+sampler; `vertexU` adds the
+   uniform block; `instancing.k` adds its SSBO). `maybeBump`/`INK_SPV14`
+   deleted from the backend. (golden at 1.4; 12/12 modules
+   `spirv-val --target-env vulkan1.2`; full demo suite re-verified.)
 3. **IR data ops + i32 + opaque loops**; compute path onto the IR; bindings
    derived from free variables (`gpu.kernel` infers its table; entry points
    become aliases). `:`-const folding into kernels. (record-then-replay

@@ -91,7 +91,7 @@ doc/               # changelog.md
 
 ## Native Extensions (FFI)
 
-Extensions are shared libraries loaded at runtime via `src/ffi.zig`. Available: `libgpu.dylib` (Metal/WebGPU rendering), `libfont.dylib`, `libjson.dylib`, `libcsv.dylib`, `libmd5.dylib`.
+Extensions are shared libraries loaded at runtime via `src/ffi.zig`. Available: `libgpu.dylib` (raw Vulkan via MoltenVK; dye.k SPIR-V 1.4 straight to `vkCreateShaderModule`), `libfont.dylib`, `libjson.dylib`, `libcsv.dylib`, `libmd5.dylib`.
 
 ## Useful References
 

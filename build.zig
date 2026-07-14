@@ -75,12 +75,6 @@ pub fn build(b: *std.Build) !void {
   const core_only = b.option(bool, "core-only", "Build only the ink binary, no extensions") orelse false;
   if (core_only) return;
 
-  // GPU backend selection (macOS/arm64 only). `dawn` = current WebGPU backend;
-  // `vulkan` = raw Vulkan via MoltenVK (SPIR-V-native; migration in progress, see
-  // doc/design/vulkan-migration.md). Default stays dawn so `main` is unaffected.
-  const GpuBackend = enum { dawn, vulkan };
-  const gpu_backend = b.option(GpuBackend, "gpu-backend", "GPU backend: dawn (default) or vulkan (MoltenVK)") orelse .dawn;
-
   // Canonical k-ABI definition shared by the host and extensions (src/kabi.zig),
   // so native extensions import the registry layout instead of mirroring it.
   const kabi_mod = b.createModule(.{
@@ -92,119 +86,56 @@ pub fn build(b: *std.Build) !void {
   // from here (gpu, below) and after the light extensions are defined.
   const static_step = b.step("static", "Build static .a libs (core + extensions) for bundling");
 
-  // The GPU extension links the prebuilt arm64 Dawn + macOS frameworks, so it
-  // only builds for aarch64-macos.  Gating it (rather than the whole extension
-  // graph) lets the light extensions and static .a libs cross-compile for the
-  // other targets.
+  // The GPU extension links MoltenVK + macOS frameworks, so it only builds for
+  // aarch64-macos.  Gating it (rather than the whole extension graph) lets the
+  // light extensions and static .a libs cross-compile for the other targets.
   if (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64) blk: {
-  // ── Vulkan/MoltenVK backend (migration Phase 2: compute) ────────────────────
-  // No zgpu/zglfw/Dawn; links libMoltenVK + Homebrew vulkan-headers. Produces the
-  // same libgpu.dylib, so lib/gpu.k loads it identically.
-  if (gpu_backend == .vulkan) {
-    const mvk = "/opt/homebrew/opt/molten-vk";
-    const vkh = "/opt/homebrew/opt/vulkan-headers/include";
-    const zglfw_dep = b.lazyDependency("zglfw", .{ .target = target, .optimize = optimize }) orelse break :blk;
-    const vk_tri_mod = b.createModule(.{
-      .root_source_file = b.path("lib/gpu/triangulate.zig"),
-      .target = target, .optimize = optimize,
-    });
-    const vk_ext_mod = b.createModule(.{
-      .root_source_file = b.path("lib/gpu/gpu_vk.zig"),
-      .target = target, .optimize = optimize, .link_libc = true, .link_libcpp = true,
-    });
-    vk_ext_mod.addImport("kabi", kabi_mod);
-    vk_ext_mod.addImport("zglfw", zglfw_dep.module("glfw"));
-    vk_ext_mod.addImport("triangulate", vk_tri_mod);
-    vk_ext_mod.addIncludePath(.{ .cwd_relative = vkh });
-    vk_ext_mod.addLibraryPath(.{ .cwd_relative = mvk ++ "/lib" });
-    vk_ext_mod.linkSystemLibrary("MoltenVK", .{ .preferred_link_mode = .static });
-    vk_ext_mod.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
-    vk_ext_mod.linkSystemLibrary("glfw3", .{ .preferred_link_mode = .static });
-    vk_ext_mod.linkFramework("Metal", .{});
-    vk_ext_mod.linkFramework("Foundation", .{});
-    vk_ext_mod.linkFramework("QuartzCore", .{});
-    vk_ext_mod.linkFramework("IOKit", .{});
-    vk_ext_mod.linkFramework("IOSurface", .{});
-    vk_ext_mod.linkFramework("CoreGraphics", .{});
-    vk_ext_mod.linkFramework("Cocoa", .{});
-    vk_ext_mod.linkFramework("AppKit", .{});
-    const vk_lib = b.addLibrary(.{ .name = "gpu", .root_module = vk_ext_mod, .linkage = .dynamic });
-    b.installArtifact(vk_lib);
-    const vk_step = b.step("gpu", "Build the GPU extension shared library (Vulkan/MoltenVK)");
-    vk_step.dependOn(&b.addInstallArtifact(vk_lib, .{}).step);
-    break :blk;
-  }
-
-  // --- GPU extension shared library (~20MB with Dawn) ---
-  // zglfw + Dawn are marked lazy in build.zig.zon, so `-Dcore-only` and non-macOS
-  // builds never fetch them (Zig resolves non-lazy URL deps eagerly, before this
-  // function runs).  When not yet cached, lazyDependency enqueues the fetch and
-  // returns null; break out of the gpu section (without aborting the rest of the
-  // build) and let Zig re-run build() once the fetch completes.
+  // ── GPU extension: raw Vulkan via MoltenVK (SPIR-V-native) ──────────────────
+  // Links libMoltenVK + Homebrew vulkan-headers + GLFW; dye.k's SPIR-V goes
+  // straight to vkCreateShaderModule (no Tint/WGSL toolchain). The old
+  // Dawn/WebGPU backend was removed at cutover — see doc/design/vulkan-migration.md.
+  // zglfw is lazy: when not yet cached, lazyDependency enqueues the fetch,
+  // returns null, and Zig re-runs build() once it completes.
+  const mvk = "/opt/homebrew/opt/molten-vk";
+  const vkh = "/opt/homebrew/opt/vulkan-headers/include";
   const zglfw_dep = b.lazyDependency("zglfw", .{ .target = target, .optimize = optimize }) orelse break :blk;
-  const dawn_dep  = b.lazyDependency("dawn_aarch64_macos", .{}) orelse break :blk;
-  const zgpu_dep  = b.dependency("zgpu",  .{ .target = target, .optimize = optimize });
-  const zpool_dep = b.dependency("zpool", .{ .target = target, .optimize = optimize });
-  // zgpu requires zpool but doesn't declare it in its module
-  zgpu_dep.module("root").addImport("zpool", zpool_dep.module("root"));
-
-  const gpu_render_mod = b.createModule(.{
-    .root_source_file = b.path("lib/gpu/render.zig"),
-    .target = target, .optimize = optimize,
-  });
-  gpu_render_mod.addImport("zgpu", zgpu_dep.module("root"));
-
-  const gpu_tri_mod = b.createModule(.{
+  const vk_tri_mod = b.createModule(.{
     .root_source_file = b.path("lib/gpu/triangulate.zig"),
     .target = target, .optimize = optimize,
   });
-
-  const gpu_ext_mod = b.createModule(.{
-    .root_source_file = b.path("lib/gpu/gpu.zig"),
-    .target = target, .optimize = optimize, .link_libc = true,
+  const vk_ext_mod = b.createModule(.{
+    .root_source_file = b.path("lib/gpu/gpu_vk.zig"),
+    .target = target, .optimize = optimize, .link_libc = true, .link_libcpp = true,
   });
-  gpu_ext_mod.addImport("zgpu",       zgpu_dep.module("root"));
-  gpu_ext_mod.addImport("zglfw",      zglfw_dep.module("glfw"));
-  gpu_ext_mod.addImport("render",     gpu_render_mod);
-  gpu_ext_mod.addImport("triangulate", gpu_tri_mod);
-  gpu_ext_mod.addImport("kabi",       kabi_mod);
-
-  // zdawn adapter: compiles dawn_proc.c + dawn.cpp (C API + proc-table dispatch)
-  const zdawn = zgpu_dep.artifact("zdawn");
-  gpu_ext_mod.linkLibrary(zdawn);
-
-  // libdawn.a (prebuilt Dawn WebGPU backend) — add its dir to the final dylib link
-  gpu_ext_mod.addLibraryPath(dawn_dep.path("."));
-  gpu_ext_mod.linkSystemLibrary("dawn", .{ .preferred_link_mode = .static });
-
-  // GLFW (Homebrew) and required macOS frameworks
-  gpu_ext_mod.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
-  gpu_ext_mod.linkSystemLibrary("glfw3", .{ .preferred_link_mode = .static });
-  gpu_ext_mod.linkFramework("Metal",       .{});
-  gpu_ext_mod.linkFramework("QuartzCore",  .{});
-  gpu_ext_mod.linkFramework("Foundation",  .{});
-  gpu_ext_mod.linkFramework("IOKit",       .{});
-  gpu_ext_mod.linkFramework("IOSurface",   .{});
-  gpu_ext_mod.linkFramework("Cocoa",       .{});
-
-  const gpu_lib = b.addLibrary(.{
-    .name     = "gpu",
-    .root_module = gpu_ext_mod,
-    .linkage  = .dynamic,
-  });
-  b.installArtifact(gpu_lib);
-  const gpu_step = b.step("gpu", "Build the GPU extension shared library");
-  gpu_step.dependOn(&b.addInstallArtifact(gpu_lib, .{}).step);
+  vk_ext_mod.addImport("kabi", kabi_mod);
+  vk_ext_mod.addImport("zglfw", zglfw_dep.module("glfw"));
+  vk_ext_mod.addImport("triangulate", vk_tri_mod);
+  vk_ext_mod.addIncludePath(.{ .cwd_relative = vkh });
+  vk_ext_mod.addLibraryPath(.{ .cwd_relative = mvk ++ "/lib" });
+  vk_ext_mod.linkSystemLibrary("MoltenVK", .{ .preferred_link_mode = .static });
+  vk_ext_mod.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
+  vk_ext_mod.linkSystemLibrary("glfw3", .{ .preferred_link_mode = .static });
+  vk_ext_mod.linkFramework("Metal", .{});
+  vk_ext_mod.linkFramework("Foundation", .{});
+  vk_ext_mod.linkFramework("QuartzCore", .{});
+  vk_ext_mod.linkFramework("IOKit", .{});
+  vk_ext_mod.linkFramework("IOSurface", .{});
+  vk_ext_mod.linkFramework("CoreGraphics", .{});
+  vk_ext_mod.linkFramework("Cocoa", .{});
+  vk_ext_mod.linkFramework("AppKit", .{});
+  const vk_lib = b.addLibrary(.{ .name = "gpu", .root_module = vk_ext_mod, .linkage = .dynamic });
+  b.installArtifact(vk_lib);
+  const vk_step = b.step("gpu", "Build the GPU extension shared library (Vulkan/MoltenVK)");
+  vk_step.dependOn(&b.addInstallArtifact(vk_lib, .{}).step);
 
   // Static gpu archive for bundling.  A static .a doesn't absorb its native
-  // dependencies, so merge gpu + zdawn + Dawn + GLFW into one archive with
-  // libtool; `ink bundle` then links just libgpu-bundle.a + the macOS frameworks.
-  const gpu_static = b.addLibrary(.{ .name = "gpu", .root_module = gpu_ext_mod, .linkage = .static });
+  // dependencies, so merge gpu + MoltenVK + GLFW into one archive with libtool;
+  // `ink bundle` then links just libgpu-bundle.a + -lc++ + the macOS frameworks.
+  const gpu_static = b.addLibrary(.{ .name = "gpu", .root_module = vk_ext_mod, .linkage = .static });
   const merge = b.addSystemCommand(&.{ "libtool", "-static", "-o" });
   const merged = merge.addOutputFileArg("libgpu-bundle.a");
   merge.addArtifactArg(gpu_static);
-  merge.addArtifactArg(zdawn);
-  merge.addFileArg(dawn_dep.path("libdawn.a"));
+  merge.addFileArg(.{ .cwd_relative = mvk ++ "/lib/libMoltenVK.a" });
   merge.addFileArg(.{ .cwd_relative = "/opt/homebrew/lib/libglfw3.a" });
   static_step.dependOn(&b.addInstallLibFile(merged, "libgpu-bundle.a").step);
   } // end macOS-only GPU section

@@ -100,11 +100,12 @@ shader.instancedVertex: {[inTypes; varyTypes; instNames; fn]
   rp2: $[nVary>2; compNode[outElems[3]; env2; varyTySyms[2]]; (0;`f32)]
   $[nVary>2; emitBuf opStore[varyVarIds[2]; rp2[0]]; 0]
 
-  / Assemble
+  / Assemble (SPIR-V 1.4: OpEntryPoint lists EVERY global variable, so the
+  / instance storage buffer joins the I/O interface)
   bnd:   Nid+1
-  iface: inVarIds,(,perVtxVar),varyVarIds,(,iidVar)
+  iface: inVarIds,(,perVtxVar),varyVarIds,(,iidVar),(,ssboVar)
 
-  hdr: (0x07230203; 0x00010300; 0; bnd; 0)
+  hdr: (0x07230203; 0x00010400; 0; bnd; 0)
   cap: (0x00020011; 1)
   ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
   mem: (0x0003000E; 0; 1)

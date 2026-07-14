@@ -175,7 +175,7 @@ wds: shader.fragment[[x:`f32; out:`f32]; fn1]
 
 / Structural headers
 chk[0x07230203; wds[0]; "SPIR-V magic number"]
-chk[0x00010300; wds[1]; "SPIR-V version 1.3"]
+chk[0x00010400; wds[1]; "SPIR-V version 1.4"]
 chk[0;          wds[2]; "generator = 0"]
 chk[1b; wds[3] > Nfixed; "bound > fixed-id range"]
 chk[116; #wds;           "passthrough module = 116 words (incl. v3 types)"]
@@ -271,7 +271,7 @@ chk[16; #locs;     "16 threads per tile at rank 1"]
 cwds: compCompute[{[x] x*2}]
 
 chk[0x07230203; cwds[0];   "compute magic number"]
-chk[0x00010300; cwds[1];   "compute SPIR-V version 1.3"]
+chk[0x00010400; cwds[1];   "compute SPIR-V version 1.4"]
 chk[1b; (#cwds) > 100;     "compute module > 100 words"]
 chk[1b; |/cwds=0x00060010; "OpExecutionMode present"]
 chk[1b; |/cwds=17;         "LocalSize mode id (17) present"]

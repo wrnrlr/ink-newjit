@@ -144,7 +144,6 @@ fn wordsOf(k: ?K) ?[]const u32 {
 // ── gpuComputeRun[fn] : create a headless device, run fn once, tear down ───────
 export fn gpuComputeRun(fn_k: ?K) callconv(.c) ?K {
   const cbk = fn_k orelse return ki(0);
-  vk.force_spv14 = getenv("INK_SPV14") != null; // run dye.k output at SPIR-V 1.4
   var v = vk.Vk.init() catch return ki(-1);
   g_vk = &v;
   g_bufs = .empty; g_pipes = .empty;
@@ -838,7 +837,8 @@ export fn gpuDrawInstanced(_: ?K, _: ?K, _: ?K) callconv(.c) ?K { return ki(0); 
 export fn gpuDrawGeomResident(_: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
 export fn gpuDrawInstancedT(_: ?K, _: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
 export fn gpuDrawMeshT(_: ?K, _: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
-export fn gpuWgsl(_: ?K) callconv(.c) ?K { return ki(0); }
+// gpuWgsl was dropped at the Dawn cutover — WGSL authoring contradicts the
+// SPIR-V-native direction; use dye.k → gpu.compileSpirv instead.
 
 // ── registry install ──────────────────────────────────────────────────────────
 fn inkInit(reg: *anyopaque) void {
@@ -877,7 +877,6 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuDrawMeshT", @ptrCast(&gpuDrawMeshT), 3);
   r.k_register("gpuDrawGeomT", @ptrCast(&gpuDrawGeomT), 3);
   r.k_register("gpuTexture", @ptrCast(&gpuTexture), 2);
-  r.k_register("gpuWgsl", @ptrCast(&gpuWgsl), 1);
 }
 
 export fn terse_init(reg: *anyopaque) callconv(.c) void { inkInit(reg); }
