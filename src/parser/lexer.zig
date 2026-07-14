@@ -290,8 +290,13 @@ pub const Lexer = struct {
         self.adv();
         while (self.i < self.src.len and self.CR() != '"') self.adv();
         if (self.i < self.src.len) self.adv();
+      } else if (self.i + 1 < self.src.len and isDigit(self.CR()) and self.src[self.i + 1] == ':') {
+        // `0:/`1:/`2:… — a blank symbol immediately followed by an IO verb, NOT a
+        // digit-named symbol. Consume nothing; the `<digit>:` lexes next as an io
+        // verb, so `` `0:"hi" `` is (blank) 0: "hi" (write "hi" to stdout), matching
+        // the spaced `` ` 0:"hi" `` and the `` `0 0:"hi" `` handle forms.
       } else {
-        // unquoted symbol: `abc, `123, `a.b — alphanumerics and dots only.
+        // unquoted symbol: `abc, `a1, `a.b — alphanumerics and dots only.
         // An operator glyph directly after the backtick does NOT join the symbol:
         // `~ is the null symbol ` followed by the Match verb ~ (so `~` is a Match of
         // two null symbols, and `~ is a match projection), matching ngn/k. To name a

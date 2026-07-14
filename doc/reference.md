@@ -29,6 +29,9 @@ half   = [ sign ] , ( "0" , ( "n" | "w" ) | mantissa ) , "h" ;
 bits   = ( "0" | "1" ) , ( "0" | "1" ) , { "0" | "1" } , "b" ;
 string = '"' , { stringchar } , '"' ;
 symbol = "`" , ( { letter | digit | "." }| '"' , { ? any char except '"' ? } , '"' ) ;
+(* exception: a backtick directly followed by `<digit> ":"` is the blank symbol
+   `` ` `` plus the io verb `<digit>:`, not a digit-named symbol — so `` `0:"hi" ``
+   is (blank) 0: "hi", i.e. write to stdout. *)
 name   = letter , { letter | digit } ,
          { "." , letter , { letter | digit } } ;
 ```
