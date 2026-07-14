@@ -865,569 +865,199 @@ buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
 }
 
 
-/ ── compCompute: compile element-wise compute shader ─────────────────────────
-compCompute: {[fn]
+/ ══ Consolidated compute-module emitter (doc/design/kk.md §3.1, increment 1) ══
+/ Every compute entry point (map / stencil / scatter / general kernel) is the SAME
+/ module: a binding table of storage buffers (+ optional uniform block), a gid
+/ prologue, a body compiled by compSeq, an optional auto-store, and one assembly.
+/ kAlloc + kGid*/kElem/kStore + kAsm factor that out; the shader.* entry points
+/ below are thin wrappers that differ only in their binding spec and env shape.
+/ The AK* globals mirror the old per-entry locals (ink lambdas can't close over
+/ enclosing locals, so the each-helpers and kAsm read globals).
+
+/ ── kAlloc[nAcc;nBuf;hasUni;hasLoop] — canonical prologue ─────────────────────
+/ Resets compiler state; allocates the shared type ids, the gid var, and one var
+/ per binding (i32 atomic accumulators first: bindings 0..nAcc-1, then f32
+/ buffers) in the one canonical id order; emits the constants (u32 0, [Device
+/ scope], [uniform member index 0], [loop consts]); publishes the AK*/C*/U*/RC*
+/ globals the body compilers and kAsm read. Returns the binding var ids.
+AKu32::0; AKv3::0                              / u32 / v3u32 type ids
+AKrta::0; AKtbuf::0; AKpbufs::0; AKpf32::0     / f32 runtime-array/struct/pointers
+AKrtaI::0; AKtbufI::0; AKpbufsI::0; AKpi32::0  / i32 counterparts (nAcc>0 only)
+AKpv3i::0; AKgid::0                            / Input v3u32 pointer + gid var
+AKids::(); AKknd::()                           / binding var ids + kinds (`i/`f)
+AKz::0; AKdev::0                               / u32 0 const; Device-scope const
+AKuniT::0; AKuniP::0; AKuniPv4::0; AKuniVar::0; AKuniKi::0
+AKnAcc::0; AKuni::0
+kAllocI:   {[] AKrtaI::newId[]; AKtbufI::newId[]; AKpbufsI::newId[]; AKpi32::newId[]}
+kAllocDev: {[] AKdev::newId[]; emitCon (0x0004002B; AKu32; AKdev; 1); CPi32::AKpi32; CScope::AKdev}
+kAllocUni: {[] AKuniT::newId[]; AKuniP::newId[]; AKuniPv4::newId[]; AKuniVar::newId[]; AKuniKi::newId[]; emitCon opConst[Ti32; AKuniKi; 0]; UTuni::AKuniT; UPv4::AKuniPv4; UVar::AKuniVar}
+/ rsum/rmax/N-do loop constants (i32 0/1, f32 0., f32 -1e30), one set per compile
+kAllocLoop:{[] RCi0::newId[]; emitCon opConst[Ti32;RCi0;0]; RCi1::newId[]; emitCon opConst[Ti32;RCi1;1]; RCf0::newId[]; emitCon opConst[Tf32;RCf0;0.]; RCfNeg::newId[]; emitCon opConst[Tf32;RCfNeg;-1e30]}
+kAlloc: {[nAcc;nBuf;hasUni;hasLoop]
   Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
+  AKu32::newId[]; AKv3::newId[]
+  AKrta::newId[]; AKtbuf::newId[]; AKpbufs::newId[]; AKpf32::newId[]
+  $[nAcc>0; kAllocI[]; 0]
+  AKpv3i::newId[]
+  AKgid::newId[]
+  AKids:: {[k] newId[]}' !nAcc+nBuf
+  AKknd:: (nAcc#`i),nBuf#`f
+  AKz::newId[]; emitCon (0x0004002B; AKu32; AKz; 0)
+  $[nAcc>0; kAllocDev[]; 0]
+  $[hasUni; kAllocUni[]; 0]
+  $[hasLoop; kAllocLoop[]; 0]
+  CKz::AKz; CPf32::AKpf32
+  AKnAcc::nAcc; AKuni::hasUni
+  AKids}
 
-  Tu32:    newId[]
-  Tv3u32:  newId[]
-  Trta:    newId[]
-  Tbuf:    newId[]
-  Pbufs:   newId[]
-  Pf32s:   newId[]
-  Pv3u32i: newId[]
+/ ── gid prologue + element access ─────────────────────────────────────────────
+kGidX: {[] g:newId[]; emitBuf opLoad[AKv3; g; AKgid]; x:newId[]; emitBuf opXtract[AKu32; x; g; 0]; x}
+kGidF: {[gx] f:newId[]; emitBuf opU2f[Tf32; f; gx]; f}                  / thread index as f32
+kElem: {[bid;gx] p:newId[]; emitBuf opAccChain[AKpf32; p; bid; AKz; gx]; v:newId[]; emitBuf opLoad[Tf32; v; p]; (v;`f32)}
+kStore:{[bid;gx;val] p:newId[]; emitBuf opAccChain[AKpf32; p; bid; AKz; gx]; emitBuf opStore[p; val]}
 
-  gidVar: newId[]
-  inBuf:  newId[]
-  outBuf: newId[]
-
-  Ku32z: newId[]
-  emitCon (0x0004002B; Tu32; Ku32z; 0)
-
-  lam: lamOf fn
-  argName: (lamArgs lam)0
-
-  gidId:    newId[]; emitBuf opLoad[Tv3u32; gidId; gidVar]
-  gidXId:   newId[]; emitBuf opXtract[Tu32; gidXId; gidId; 0]
-  inPtrId:  newId[]; emitBuf opAccChain[Pf32s; inPtrId; inBuf; Ku32z; gidXId]
-  xId:      newId[]; emitBuf opLoad[Tf32; xId; inPtrId]
-  env:      (,argName)!(,(xId; `f32))
-  stmts:   lamBody lam
-  rp:      compSeq[stmts; env; `f32]
-  outPtrId: newId[]; emitBuf opAccChain[Pf32s; outPtrId; outBuf; Ku32z; gidXId]
-  emitBuf opStore[outPtrId; rp[0]]
-
+/ ── kAsm[] — assemble the module from the AK* state ───────────────────────────
+/ Per-binding DescriptorSet/Binding decorations and OpVariables (each-helpers
+/ read the globals; binding k = position k in AKids).
+akDecOne: {[k] (0x00040047;AKids[k];34;0),(0x00040047;AKids[k];33;k)}
+akVarOne: {[k] (0x0004003B; $[`i~AKknd k; AKpbufsI; AKpbufs]; AKids[k]; 12)}
+kAsm: {[]
   bnd: Nid+1
-  iface: (,gidVar)
-
+  iface: ,AKgid
   hdr: (0x07230203; 0x00010300; 0; bnd; 0)
   cap: (0x00020011; 1)
   ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
   mem: (0x0003000E; 0; 1)
   ep:  (0x000F+(0x10000*(5+#iface)); 5; Fmain; 0x6E69616D; 0), iface
   exm: (0x00060010; Fmain; 17; wg; 1; 1)
-
-  decGid:    (0x00040047; gidVar; 11; 28)
-  decStride: (0x00040047; Trta; 6; 4)
-  decMem:    (0x00050048; Tbuf; 0; 35; 0)
-  decBlk:    (0x00030047; Tbuf; 2)
-  decInDs:   (0x00040047; inBuf; 34; 0)
-  decInBnd:  (0x00040047; inBuf; 33; 0)
-  decOutDs:  (0x00040047; outBuf; 34; 0)
-  decOutBnd: (0x00040047; outBuf; 33; 1)
-
-  / shared base types + Tv3 (one line — ink newline bug)
+  decGid: (0x00040047; AKgid; 11; 28)
+  decF: (0x00040047;AKrta;6;4),(0x00050048;AKtbuf;0;35;0),(0x00030047;AKtbuf;2)
+  decI: $[AKnAcc>0; (0x00040047;AKrtaI;6;4),(0x00050048;AKtbufI;0;35;0),(0x00030047;AKtbufI;2); !0]
+  decB: ,/akDecOne' !#AKids
+  decU: $[AKuni; (0x00030047;AKuniT;2),(0x00050048;AKuniT;0;35;0),(0x00040047;AKuniVar;34;0),(0x00040047;AKuniVar;33;#AKids); !0]
   sTypes: (0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid)
-  cTypes: (0x00040015;Tu32;32;0;0x00040017;Tv3u32;Tu32;3;0x0003001D;Trta;Tf32;0x0003001E;Tbuf;Trta;0x00040020;Pbufs;12;Tbuf;0x00040020;Pf32s;12;Tf32;0x00040020;Pv3u32i;1;Tv3u32)
-
-  varGid: (0x0004003B; Pv3u32i; gidVar; 1)
-  varIn:  (0x0004003B; Pbufs;   inBuf;  12)
-  varOut: (0x0004003B; Pbufs;   outBuf; 12)
-
+  cTf: (0x00040015;AKu32;32;0;0x00040017;AKv3;AKu32;3;0x0003001D;AKrta;Tf32;0x0003001E;AKtbuf;AKrta;0x00040020;AKpbufs;12;AKtbuf;0x00040020;AKpf32;12;Tf32)
+  cTi: $[AKnAcc>0; (0x0003001D;AKrtaI;Ti32;0x0003001E;AKtbufI;AKrtaI;0x00040020;AKpbufsI;12;AKtbufI;0x00040020;AKpi32;12;Ti32); !0]
+  cTv: (0x00040020;AKpv3i;1;AKv3)
+  uT:  $[AKuni; (0x0003001E;AKuniT;Tv4;0x00040020;AKuniP;2;AKuniT;0x00040020;AKuniPv4;2;Tv4); !0]
+  varGid: (0x0004003B;AKpv3i;AKgid;1)
+  varB: ,/akVarOne' !#AKids
+  varU: $[AKuni; (0x0004003B;AKuniP;AKuniVar;2); !0]
   label: newId[]
-  fnh: (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
-  ret: (0x000100FD; 0x00010038)
-
+  fnh: (0x00050036;Tvoid;Fmain;0;Tfunc;0x000200F8;label)
+  ret: (0x000100FD;0x00010038)
   conWds: $[#Con; ,/Con; !0]
   bodWds: $[#Buf; ,/Buf; !0]
+  ,/(hdr;cap;ext;mem;ep;exm;decGid;decF;decI;decB;decU;sTypes;cTf;cTi;cTv;uT;varGid;varB;varU;conWds;fnh;bodWds;ret)}
 
-  decs: decGid,decStride,decMem,decBlk,decInDs,decInBnd,decOutDs,decOutBnd
-  vars: varGid,varIn,varOut
-
-  ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
-
-/ Public name, consistent with shader.fragment / shader.vertex. Compiles an
-/ element-wise f32 kernel {[x] ...} to a SPIR-V compute shader (workgroup 64,
-/ reads binding 0, writes binding 1). Run it with gpu.runShader[shader.compute[fn]; inF].
-/ This is the lowering target for data-parallel ECS systems (a per-entity column
-/ map): compile once, then gpu.runShader the column each frame inside a gpuRun frame.
+/ ── Entry points (thin wrappers; see the old per-entry docs in git history) ───
+/ shader.compute — element-wise map {[x] …}: x = in[gid] (binding 0) → out[gid]
+/ (binding 1). Run with gpu.runShader / the resident path.
+compCompute: {[fn]
+  ids: kAlloc[0;2;0;0]
+  lam: lamOf fn; argNames: lamArgs lam
+  gx: kGidX[]
+  xp: kElem[ids 0; gx]
+  env: (,argNames 0)!(,xp)
+  rp: compSeq[lamBody lam; env; `f32]
+  kStore[ids 1; gx; rp 0]
+  kAsm[]}
 shader.compute: compCompute
 
-/ ── compComputeU: element-wise compute + a uniform vec4 ──────────────────────────
-/ Kernel {[x;u] ...}: x = element from the input buffer (binding 0), u = a uniform
-/ vec4 (a true UBO at binding 2 — pass constants like scale/bias/length without a
-/ storage buffer). Writes binding 1. Mirrors compCompute, adding the render path's
-/ uniform block (struct{vec4}, Uniform storage class, Block/Offset/DescriptorSet/
-/ Binding decorations) and loading the member via loadUniMember. Run on the resident
-/ path: p:gpu.compileComputeU[shader.computeU[fn]; 2]; u:gpu.uniform[…];
-/ gpu.dispatch[p; (in;out;u); n].
+/ shader.computeU — map + a uniform vec4 {[x;u] …}: true UBO at binding 2
+/ (constants like scale/bias without a storage buffer). gpu.dispatch (in;out;u).
 compComputeU: {[fn]
-  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
-
-  Tu32:    newId[]
-  Tv3u32:  newId[]
-  Trta:    newId[]
-  Tbuf:    newId[]
-  Pbufs:   newId[]
-  Pf32s:   newId[]
-  Pv3u32i: newId[]
-
-  gidVar: newId[]
-  inBuf:  newId[]
-  outBuf: newId[]
-
-  Ku32z: newId[]
-  emitCon (0x0004002B; Tu32; Ku32z; 0)
-
-  / uniform block scratch: struct{vec4} at set 0 binding 2
-  Tuni:   newId[]
-  Puni:   newId[]
-  PuniV4: newId[]
-  uniVar: newId[]
-  Ki0:    newId[]
-  emitCon opConst[Ti32; Ki0; 0]
-  UTuni::Tuni; UPv4::PuniV4; UVar::uniVar   / publish for loadUniMember (lambdas can't close)
-
-  lam: lamOf fn
-  argNames: lamArgs lam
-
-  gidId:    newId[]; emitBuf opLoad[Tv3u32; gidId; gidVar]
-  gidXId:   newId[]; emitBuf opXtract[Tu32; gidXId; gidId; 0]
-  inPtrId:  newId[]; emitBuf opAccChain[Pf32s; inPtrId; inBuf; Ku32z; gidXId]
-  xId:      newId[]; emitBuf opLoad[Tf32; xId; inPtrId]
-  uPair:    loadUniMember[Ki0]
-  env:      argNames!((xId; `f32); uPair)
-  stmts:   lamBody lam
-  rp:      compSeq[stmts; env; `f32]
-  outPtrId: newId[]; emitBuf opAccChain[Pf32s; outPtrId; outBuf; Ku32z; gidXId]
-  emitBuf opStore[outPtrId; rp[0]]
-
-  bnd: Nid+1
-  iface: (,gidVar)
-
-  hdr: (0x07230203; 0x00010300; 0; bnd; 0)
-  cap: (0x00020011; 1)
-  ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
-  mem: (0x0003000E; 0; 1)
-  ep:  (0x000F+(0x10000*(5+#iface)); 5; Fmain; 0x6E69616D; 0), iface
-  exm: (0x00060010; Fmain; 17; wg; 1; 1)
-
-  decGid:    (0x00040047; gidVar; 11; 28)
-  decStride: (0x00040047; Trta; 6; 4)
-  decMem:    (0x00050048; Tbuf; 0; 35; 0)
-  decBlk:    (0x00030047; Tbuf; 2)
-  decInDs:   (0x00040047; inBuf; 34; 0)
-  decInBnd:  (0x00040047; inBuf; 33; 0)
-  decOutDs:  (0x00040047; outBuf; 34; 0)
-  decOutBnd: (0x00040047; outBuf; 33; 1)
-  decUBlk:   (0x00030047; Tuni; 2)              / OpDecorate Tuni Block
-  decUMem:   (0x00050048; Tuni; 0; 35; 0)       / OpMemberDecorate Offset 0
-  decUDs:    (0x00040047; uniVar; 34; 0)        / DescriptorSet 0
-  decUBnd:   (0x00040047; uniVar; 33; 2)        / Binding 2
-
-  sTypes: (0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid)
-  cTypes: (0x00040015;Tu32;32;0;0x00040017;Tv3u32;Tu32;3;0x0003001D;Trta;Tf32;0x0003001E;Tbuf;Trta;0x00040020;Pbufs;12;Tbuf;0x00040020;Pf32s;12;Tf32;0x00040020;Pv3u32i;1;Tv3u32)
-  uTypes: (0x0003001E;Tuni;Tv4;0x00040020;Puni;2;Tuni;0x00040020;PuniV4;2;Tv4)
-
-  varGid: (0x0004003B; Pv3u32i; gidVar; 1)
-  varIn:  (0x0004003B; Pbufs;   inBuf;  12)
-  varOut: (0x0004003B; Pbufs;   outBuf; 12)
-  varUni: (0x0004003B; Puni;    uniVar; 2)
-
-  label: newId[]
-  fnh: (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
-  ret: (0x000100FD; 0x00010038)
-
-  conWds: $[#Con; ,/Con; !0]
-  bodWds: $[#Buf; ,/Buf; !0]
-
-  decs: decGid,decStride,decMem,decBlk,decInDs,decInBnd,decOutDs,decOutBnd,decUBlk,decUMem,decUDs,decUBnd
-  vars: varGid,varIn,varOut,varUni
-
-  ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;uTypes;vars;conWds;fnh;bodWds;ret)}
-
+  ids: kAlloc[0;2;1;0]
+  lam: lamOf fn; argNames: lamArgs lam
+  gx: kGidX[]
+  xp: kElem[ids 0; gx]
+  uPair: loadUniMember[AKuniKi]
+  env: argNames!(xp;uPair)
+  rp: compSeq[lamBody lam; env; `f32]
+  kStore[ids 1; gx; rp 0]
+  kAsm[]}
 shader.computeU: compComputeU
 
-/ ── compCompute2: two-input element-wise compute shader ──────────────────────────
-/ Kernel {[x;y] ...} reads input1 at binding 0 and input2 at binding 2, writes the
-/ result to output at binding 1. Run with gpu.runShader2[shader.compute2[fn]; in1; in2].
-/ Enables real systems that combine two columns, e.g. {[px;vx] px+vx*dt}.
+/ shader.compute2 — two-input map {[x;y] …}: x=in(0), y=in2(2) → out(1).
 compCompute2: {[fn]
-  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
-
-  Tu32:    newId[]
-  Tv3u32:  newId[]
-  Trta:    newId[]
-  Tbuf:    newId[]
-  Pbufs:   newId[]
-  Pf32s:   newId[]
-  Pv3u32i: newId[]
-
-  gidVar: newId[]
-  inBuf:  newId[]
-  outBuf: newId[]
-  in2Buf: newId[]
-
-  Ku32z: newId[]
-  emitCon (0x0004002B; Tu32; Ku32z; 0)
-
-  lam: lamOf fn
-  argNames: lamArgs lam
-
-  gidId:    newId[]; emitBuf opLoad[Tv3u32; gidId; gidVar]
-  gidXId:   newId[]; emitBuf opXtract[Tu32; gidXId; gidId; 0]
-  inPtrId:  newId[]; emitBuf opAccChain[Pf32s; inPtrId; inBuf; Ku32z; gidXId]
-  xId:      newId[]; emitBuf opLoad[Tf32; xId; inPtrId]
-  in2PtrId: newId[]; emitBuf opAccChain[Pf32s; in2PtrId; in2Buf; Ku32z; gidXId]
-  yId:      newId[]; emitBuf opLoad[Tf32; yId; in2PtrId]
-  env:      argNames!((xId; `f32); (yId; `f32))
-  stmts:    lamBody lam
-  rp:       compSeq[stmts; env; `f32]
-  outPtrId: newId[]; emitBuf opAccChain[Pf32s; outPtrId; outBuf; Ku32z; gidXId]
-  emitBuf opStore[outPtrId; rp[0]]
-
-  bnd: Nid+1
-  iface: (,gidVar)
-
-  hdr: (0x07230203; 0x00010300; 0; bnd; 0)
-  cap: (0x00020011; 1)
-  ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
-  mem: (0x0003000E; 0; 1)
-  ep:  (0x000F+(0x10000*(5+#iface)); 5; Fmain; 0x6E69616D; 0), iface
-  exm: (0x00060010; Fmain; 17; wg; 1; 1)
-
-  decGid:    (0x00040047; gidVar; 11; 28)
-  decStride: (0x00040047; Trta; 6; 4)
-  decMem:    (0x00050048; Tbuf; 0; 35; 0)
-  decBlk:    (0x00030047; Tbuf; 2)
-  decInDs:   (0x00040047; inBuf; 34; 0)
-  decInBnd:  (0x00040047; inBuf; 33; 0)
-  decOutDs:  (0x00040047; outBuf; 34; 0)
-  decOutBnd: (0x00040047; outBuf; 33; 1)
-  decIn2Ds:  (0x00040047; in2Buf; 34; 0)
-  decIn2Bnd: (0x00040047; in2Buf; 33; 2)
-
-  / shared base types + Tv3 (one line — ink newline bug)
-  sTypes: (0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid)
-  cTypes: (0x00040015;Tu32;32;0;0x00040017;Tv3u32;Tu32;3;0x0003001D;Trta;Tf32;0x0003001E;Tbuf;Trta;0x00040020;Pbufs;12;Tbuf;0x00040020;Pf32s;12;Tf32;0x00040020;Pv3u32i;1;Tv3u32)
-
-  varGid: (0x0004003B; Pv3u32i; gidVar; 1)
-  varIn:  (0x0004003B; Pbufs;   inBuf;  12)
-  varOut: (0x0004003B; Pbufs;   outBuf; 12)
-  varIn2: (0x0004003B; Pbufs;   in2Buf; 12)
-
-  label: newId[]
-  fnh: (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
-  ret: (0x000100FD; 0x00010038)
-
-  conWds: $[#Con; ,/Con; !0]
-  bodWds: $[#Buf; ,/Buf; !0]
-
-  decs: decGid,decStride,decMem,decBlk,decInDs,decInBnd,decOutDs,decOutBnd,decIn2Ds,decIn2Bnd
-  vars: varGid,varIn,varOut,varIn2
-
-  ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
-
+  ids: kAlloc[0;3;0;0]
+  lam: lamOf fn; argNames: lamArgs lam
+  gx: kGidX[]
+  xp: kElem[ids 0; gx]
+  yp: kElem[ids 2; gx]
+  env: argNames!(xp;yp)
+  rp: compSeq[lamBody lam; env; `f32]
+  kStore[ids 1; gx; rp 0]
+  kAsm[]}
 shader.compute2: compCompute2
 
-/ ── compStencil: gather-capable compute shader (the buffer-index intrinsic) ──────
-/ Kernel {[u; i] expr}: `u` is the input storage buffer (binding 0), indexable at
-/ ANY computed offset — u[i], u[i-1], u[i+W] — and `i` is this thread's flat index
-/ (gl_GlobalInvocationID.x) as an f32. The result is stored to output[i] (binding 1).
-/ This is the element-wise shader.compute generalised from a map to a gather: the
-/ single hard-wired input[gid] load becomes u[<expr>], so stencils (Jacobi/SOR/
-/ image filters) compile. Grid dims / boundaries are baked as literals in the kernel
-/ (it's compiled per problem); conditionals ($[…]) and floor/mod handle edges.
-/ Run on the resident path: p:gpu.compileCompute[shader.stencil[fn]; 2]; then gpu.dispatch.
+/ shader.stencil — gather kernel {[u;i] …}: u = the whole input buffer (binding
+/ 0), indexable at ANY computed offset (u[i-1], u[i+W]); i = thread index (f32);
+/ result → out[i] (binding 1). Jacobi/image filters; dims baked as literals.
 compStencil: {[fn]
-  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
-
-  Tu32:    newId[]
-  Tv3u32:  newId[]
-  Trta:    newId[]
-  Tbuf:    newId[]
-  Pbufs:   newId[]
-  Pf32s:   newId[]
-  Pv3u32i: newId[]
-
-  gidVar: newId[]
-  inBuf:  newId[]
-  outBuf: newId[]
-
-  Ku32z: newId[]
-  emitCon (0x0004002B; Tu32; Ku32z; 0)
-  CKz:: Ku32z; CPf32:: Pf32s            / hand the buffer-load scratch to compBufIdx
-
-  lam:      lamOf fn
-  argNames: lamArgs lam                  / (bufName; indexName)
-
-  gidId:  newId[]; emitBuf opLoad[Tv3u32; gidId; gidVar]
-  gidXId: newId[]; emitBuf opXtract[Tu32; gidXId; gidId; 0]
-  gidF:   newId[]; emitBuf opU2f[Tf32; gidF; gidXId]         / this thread's index as f32
-  env:    argNames!((inBuf; `buf); (gidF; `f32))
-  stmts:  lamBody lam
-  rp:     compSeq[stmts; env; `f32]
-  outPtrId: newId[]; emitBuf opAccChain[Pf32s; outPtrId; outBuf; Ku32z; gidXId]
-  emitBuf opStore[outPtrId; rp[0]]
-
-  bnd: Nid+1
-  iface: (,gidVar)
-
-  hdr: (0x07230203; 0x00010300; 0; bnd; 0)
-  cap: (0x00020011; 1)
-  ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
-  mem: (0x0003000E; 0; 1)
-  ep:  (0x000F+(0x10000*(5+#iface)); 5; Fmain; 0x6E69616D; 0), iface
-  exm: (0x00060010; Fmain; 17; wg; 1; 1)
-
-  decGid:    (0x00040047; gidVar; 11; 28)
-  decStride: (0x00040047; Trta; 6; 4)
-  decMem:    (0x00050048; Tbuf; 0; 35; 0)
-  decBlk:    (0x00030047; Tbuf; 2)
-  decInDs:   (0x00040047; inBuf; 34; 0)
-  decInBnd:  (0x00040047; inBuf; 33; 0)
-  decOutDs:  (0x00040047; outBuf; 34; 0)
-  decOutBnd: (0x00040047; outBuf; 33; 1)
-
-  sTypes: (0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid)
-  cTypes: (0x00040015;Tu32;32;0;0x00040017;Tv3u32;Tu32;3;0x0003001D;Trta;Tf32;0x0003001E;Tbuf;Trta;0x00040020;Pbufs;12;Tbuf;0x00040020;Pf32s;12;Tf32;0x00040020;Pv3u32i;1;Tv3u32)
-
-  varGid: (0x0004003B; Pv3u32i; gidVar; 1)
-  varIn:  (0x0004003B; Pbufs;   inBuf;  12)
-  varOut: (0x0004003B; Pbufs;   outBuf; 12)
-
-  label: newId[]
-  fnh: (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
-  ret: (0x000100FD; 0x00010038)
-
-  conWds: $[#Con; ,/Con; !0]
-  bodWds: $[#Buf; ,/Buf; !0]
-
-  decs: decGid,decStride,decMem,decBlk,decInDs,decInBnd,decOutDs,decOutBnd
-  vars: varGid,varIn,varOut
-
-  ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
-
+  ids: kAlloc[0;2;0;0]
+  lam: lamOf fn; argNames: lamArgs lam
+  gx: kGidX[]; gf: kGidF[gx]
+  env: argNames!((ids 0;`buf);(gf;`f32))
+  rp: compSeq[lamBody lam; env; `f32]
+  kStore[ids 1; gx; rp 0]
+  kAsm[]}
 shader.stencil: compStencil
 
-/ ── compStencilU: stencil + a params buffer (uniforms as an indexable buffer) ────
-/ Kernel {[u; g; i]}: `u`"="input (binding 0), `g`"="params (binding 2, indexable
-/ g[0],g[1],…), `i`"="thread index; result → output (binding 1). Lets ONE compiled
-/ pipeline serve any grid: pass N/ω/… in the params buffer instead of baking them.
-/ nbind=3; gpu.dispatch order is (in; out; params). g is just another storage buffer,
-/ so the buffer-index intrinsic reads it for free.
+/ shader.stencilU — stencil + params buffer {[u;g;i]}: g (binding 2) is an
+/ indexable params buffer (g[0]=N, …) so ONE pipeline serves any grid.
+/ gpu.dispatch order (in; out; params).
 compStencilU: {[fn]
-  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
-  Tu32:newId[]; Tv3u32:newId[]; Trta:newId[]; Tbuf:newId[]
-  Pbufs:newId[]; Pf32s:newId[]; Pv3u32i:newId[]
-  gidVar:newId[]; inBuf:newId[]; outBuf:newId[]; in2Buf:newId[]
-  Ku32z:newId[]; emitCon (0x0004002B; Tu32; Ku32z; 0)
-  CKz::Ku32z; CPf32::Pf32s
-  lam:lamOf fn; argNames:lamArgs lam
-  gidId:newId[]; emitBuf opLoad[Tv3u32; gidId; gidVar]
-  gidXId:newId[]; emitBuf opXtract[Tu32; gidXId; gidId; 0]
-  gidF:newId[]; emitBuf opU2f[Tf32; gidF; gidXId]
-  env: argNames!((inBuf;`buf);(in2Buf;`buf);(gidF;`f32))
-  stmts:lamBody lam
-  rp:compSeq[stmts; env; `f32]
-  outPtrId:newId[]; emitBuf opAccChain[Pf32s; outPtrId; outBuf; Ku32z; gidXId]
-  emitBuf opStore[outPtrId; rp[0]]
-  bnd:Nid+1; iface:(,gidVar)
-  hdr:(0x07230203;0x00010300;0;bnd;0)
-  cap:(0x00020011;1)
-  ext:(0x0006000B;Glsl;0x4C534C47;0x6474732E;0x3035342E;0)
-  mem:(0x0003000E;0;1)
-  ep:(0x000F+(0x10000*(5+#iface));5;Fmain;0x6E69616D;0),iface
-  exm:(0x00060010;Fmain;17;wg;1;1)
-  decGid:(0x00040047;gidVar;11;28)
-  decStride:(0x00040047;Trta;6;4)
-  decMem:(0x00050048;Tbuf;0;35;0)
-  decBlk:(0x00030047;Tbuf;2)
-  decInDs:(0x00040047;inBuf;34;0); decInBnd:(0x00040047;inBuf;33;0)
-  decOutDs:(0x00040047;outBuf;34;0); decOutBnd:(0x00040047;outBuf;33;1)
-  decIn2Ds:(0x00040047;in2Buf;34;0); decIn2Bnd:(0x00040047;in2Buf;33;2)
-  sTypes:(0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid)
-  cTypes:(0x00040015;Tu32;32;0;0x00040017;Tv3u32;Tu32;3;0x0003001D;Trta;Tf32;0x0003001E;Tbuf;Trta;0x00040020;Pbufs;12;Tbuf;0x00040020;Pf32s;12;Tf32;0x00040020;Pv3u32i;1;Tv3u32)
-  varGid:(0x0004003B;Pv3u32i;gidVar;1)
-  varIn:(0x0004003B;Pbufs;inBuf;12)
-  varOut:(0x0004003B;Pbufs;outBuf;12)
-  varIn2:(0x0004003B;Pbufs;in2Buf;12)
-  label:newId[]
-  fnh:(0x00050036;Tvoid;Fmain;0;Tfunc;0x000200F8;label)
-  ret:(0x000100FD;0x00010038)
-  conWds:$[#Con;,/Con;!0]; bodWds:$[#Buf;,/Buf;!0]
-  decs:decGid,decStride,decMem,decBlk,decInDs,decInBnd,decOutDs,decOutBnd,decIn2Ds,decIn2Bnd
-  vars:varGid,varIn,varOut,varIn2
-  ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
+  ids: kAlloc[0;3;0;0]
+  lam: lamOf fn; argNames: lamArgs lam
+  gx: kGidX[]; gf: kGidF[gx]
+  env: argNames!((ids 0;`buf);(ids 2;`buf);(gf;`f32))
+  rp: compSeq[lamBody lam; env; `f32]
+  kStore[ids 1; gx; rp 0]
+  kAsm[]}
 shader.stencilU: compStencilU
 
-/ ── compStencilIP: in-place stencil (single state buffer) + params ──────────────
-/ Kernel {[u; g; i]}: `u`"="state (binding 0, read AND written in place), `g`"="params
-/ (binding 1), `i`"="thread index; result → u[i] (binding 0, same buffer). This is
-/ what red-black Gauss-Seidel/SOR needs: reds read blacks and write reds in place,
-/ so the just-updated reds are visible to the black pass. Non-updated cells must
-/ store their own value (u[i]); the resulting same-value read/write "race" is
-/ benign on real hardware (and Dawn doesn't flag it). nbind=2; gpu.dispatch (state;params).
+/ shader.stencilIP — in-place stencil {[u;g;i]}: u (binding 0) is read AND
+/ written (red-black SOR: reds read just-written blacks). Non-updated cells must
+/ store their own value; the same-value read/write race is benign on real HW.
+/ gpu.dispatch (state; params).
 compStencilIP: {[fn]
-  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
-  Tu32:newId[]; Tv3u32:newId[]; Trta:newId[]; Tbuf:newId[]
-  Pbufs:newId[]; Pf32s:newId[]; Pv3u32i:newId[]
-  gidVar:newId[]; inBuf:newId[]; parBuf:newId[]
-  Ku32z:newId[]; emitCon (0x0004002B; Tu32; Ku32z; 0)
-  CKz::Ku32z; CPf32::Pf32s
-  lam:lamOf fn; argNames:lamArgs lam
-  gidId:newId[]; emitBuf opLoad[Tv3u32; gidId; gidVar]
-  gidXId:newId[]; emitBuf opXtract[Tu32; gidXId; gidId; 0]
-  gidF:newId[]; emitBuf opU2f[Tf32; gidF; gidXId]
-  env: argNames!((inBuf;`buf);(parBuf;`buf);(gidF;`f32))
-  stmts:lamBody lam
-  rp:compSeq[stmts; env; `f32]
-  outPtrId:newId[]; emitBuf opAccChain[Pf32s; outPtrId; inBuf; Ku32z; gidXId]  / write in place
-  emitBuf opStore[outPtrId; rp[0]]
-  bnd:Nid+1; iface:(,gidVar)
-  hdr:(0x07230203;0x00010300;0;bnd;0)
-  cap:(0x00020011;1)
-  ext:(0x0006000B;Glsl;0x4C534C47;0x6474732E;0x3035342E;0)
-  mem:(0x0003000E;0;1)
-  ep:(0x000F+(0x10000*(5+#iface));5;Fmain;0x6E69616D;0),iface
-  exm:(0x00060010;Fmain;17;wg;1;1)
-  decGid:(0x00040047;gidVar;11;28)
-  decStride:(0x00040047;Trta;6;4)
-  decMem:(0x00050048;Tbuf;0;35;0)
-  decBlk:(0x00030047;Tbuf;2)
-  decInDs:(0x00040047;inBuf;34;0); decInBnd:(0x00040047;inBuf;33;0)
-  decParDs:(0x00040047;parBuf;34;0); decParBnd:(0x00040047;parBuf;33;1)
-  sTypes:(0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid)
-  cTypes:(0x00040015;Tu32;32;0;0x00040017;Tv3u32;Tu32;3;0x0003001D;Trta;Tf32;0x0003001E;Tbuf;Trta;0x00040020;Pbufs;12;Tbuf;0x00040020;Pf32s;12;Tf32;0x00040020;Pv3u32i;1;Tv3u32)
-  varGid:(0x0004003B;Pv3u32i;gidVar;1)
-  varIn:(0x0004003B;Pbufs;inBuf;12)
-  varPar:(0x0004003B;Pbufs;parBuf;12)
-  label:newId[]
-  fnh:(0x00050036;Tvoid;Fmain;0;Tfunc;0x000200F8;label)
-  ret:(0x000100FD;0x00010038)
-  conWds:$[#Con;,/Con;!0]; bodWds:$[#Buf;,/Buf;!0]
-  decs:decGid,decStride,decMem,decBlk,decInDs,decInBnd,decParDs,decParBnd
-  vars:varGid,varIn,varPar
-  ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
+  ids: kAlloc[0;2;0;0]
+  lam: lamOf fn; argNames: lamArgs lam
+  gx: kGidX[]; gf: kGidF[gx]
+  env: argNames!((ids 0;`buf);(ids 1;`buf);(gf;`f32))
+  rp: compSeq[lamBody lam; env; `f32]
+  kStore[ids 0; gx; rp 0]                       / write in place (binding 0)
+  kAsm[]}
 shader.stencilIP: compStencilIP
 
-/ ── compScatter: edge-parallel atomic scatter (the cloth/graph intrinsic) ────────
-/ Kernel {[acc; a; b; g; i]}: one thread per EDGE (i = edge index). `a`","`b` are f32
-/ input buffers (endpoint indices / per-edge attributes), read with a[i]; `g` is a
-/ params buffer (e.g. g[0]=edge count). `acc` is an i32 accumulator scattered into
-/ with scatterAdd[acc; node; val] — OpAtomicIAdd, so many edges hitting the same
-/ node accumulate without a race. No per-thread output; the body is scatterAdd side
-/ effects. This is XPBD's scatter-add of constraint corrections onto shared
-/ particles (cloth.k's amend-with-+), on the GPU. IMPORTANT: dispatch rounds up to
-/ a multiple of 64, so guard the scatter VALUE to 0 for out-of-range threads
-/ ($[i<g[0];val;0.]) — atomic-add of 0 is a harmless no-op (OpSelect can't guard
-/ the side effect itself). Read back with gpu.readI. nbind=4; gpu.dispatch (acc;a;b;g).
+/ shader.scatter — edge-parallel atomic scatter {[acc;a;b;g;i]}: one thread per
+/ EDGE; acc (binding 0) is an i32 accumulator hit via scatterAdd (OpAtomicIAdd);
+/ a/b/g are f32 buffers. No auto-output — the body is its side effects. Guard the
+/ scatter VALUE to 0 for over-dispatched threads. Read back with gpu.readI.
 compScatter: {[fn]
-  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
-  Tu32:newId[]; Tv3u32:newId[]
-  Trta:newId[]; Tbuf:newId[]; Pbufs:newId[]; Pf32s:newId[]
-  TrtaI:newId[]; TbufI:newId[]; PbufsI:newId[]; Pi32s:newId[]
-  Pv3u32i:newId[]
-  gidVar:newId[]; accBuf:newId[]; aBuf:newId[]; bBuf:newId[]; gBuf:newId[]
-  Ku32z:newId[]; emitCon (0x0004002B; Tu32; Ku32z; 0)
-  KDev:newId[];  emitCon (0x0004002B; Tu32; KDev; 1)         / Device memory scope
-  CKz::Ku32z; CPf32::Pf32s; CPi32::Pi32s; CScope::KDev
-  lam:lamOf fn; argNames:lamArgs lam                          / (acc; a; b; g; i)
-  gidId:newId[]; emitBuf opLoad[Tv3u32; gidId; gidVar]
-  gidXId:newId[]; emitBuf opXtract[Tu32; gidXId; gidId; 0]
-  gidF:newId[]; emitBuf opU2f[Tf32; gidF; gidXId]
-  env: argNames!((accBuf;`scat);(aBuf;`buf);(bBuf;`buf);(gBuf;`buf);(gidF;`f32))
-  stmts:lamBody lam
-  rp:compSeq[stmts; env; `f32]                                / side effects only; result discarded
-  bnd:Nid+1; iface:(,gidVar)
-  hdr:(0x07230203;0x00010300;0;bnd;0)
-  cap:(0x00020011;1)
-  ext:(0x0006000B;Glsl;0x4C534C47;0x6474732E;0x3035342E;0)
-  mem:(0x0003000E;0;1)
-  ep:(0x000F+(0x10000*(5+#iface));5;Fmain;0x6E69616D;0),iface
-  exm:(0x00060010;Fmain;17;wg;1;1)
-  decGid:(0x00040047;gidVar;11;28)
-  decStr:(0x00040047;Trta;6;4);   decMem:(0x00050048;Tbuf;0;35;0);  decBlk:(0x00030047;Tbuf;2)
-  decStrI:(0x00040047;TrtaI;6;4); decMemI:(0x00050048;TbufI;0;35;0);decBlkI:(0x00030047;TbufI;2)
-  decAccDs:(0x00040047;accBuf;34;0); decAccBnd:(0x00040047;accBuf;33;0)
-  decADs:(0x00040047;aBuf;34;0);     decABnd:(0x00040047;aBuf;33;1)
-  decBDs:(0x00040047;bBuf;34;0);     decBBnd:(0x00040047;bBuf;33;2)
-  decGDs:(0x00040047;gBuf;34;0);     decGBnd:(0x00040047;gBuf;33;3)
-  sTypes:(0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid)
-  cTypes:(0x00040015;Tu32;32;0;0x00040017;Tv3u32;Tu32;3;0x0003001D;Trta;Tf32;0x0003001E;Tbuf;Trta;0x00040020;Pbufs;12;Tbuf;0x00040020;Pf32s;12;Tf32;0x0003001D;TrtaI;Ti32;0x0003001E;TbufI;TrtaI;0x00040020;PbufsI;12;TbufI;0x00040020;Pi32s;12;Ti32;0x00040020;Pv3u32i;1;Tv3u32)
-  varGid:(0x0004003B;Pv3u32i;gidVar;1)
-  varAcc:(0x0004003B;PbufsI;accBuf;12)
-  varA:(0x0004003B;Pbufs;aBuf;12)
-  varB:(0x0004003B;Pbufs;bBuf;12)
-  varG:(0x0004003B;Pbufs;gBuf;12)
-  label:newId[]
-  fnh:(0x00050036;Tvoid;Fmain;0;Tfunc;0x000200F8;label)
-  ret:(0x000100FD;0x00010038)
-  conWds:$[#Con;,/Con;!0]; bodWds:$[#Buf;,/Buf;!0]
-  decs:decGid,decStr,decMem,decBlk,decStrI,decMemI,decBlkI,decAccDs,decAccBnd,decADs,decABnd,decBDs,decBBnd,decGDs,decGBnd
-  vars:varGid,varAcc,varA,varB,varG
-  ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
+  ids: kAlloc[1;3;0;0]
+  lam: lamOf fn; argNames: lamArgs lam
+  gx: kGidX[]; gf: kGidF[gx]
+  env: argNames!((ids 0;`scat);(ids 1;`buf);(ids 2;`buf);(ids 3;`buf);(gf;`f32))
+  rp: compSeq[lamBody lam; env; `f32]           / side effects only
+  kAsm[]}
 shader.scatter: compScatter
 
-/ ── compGpN: general compute kernel — nAcc i32 accumulators + nBuf f32 buffers ────
-/ Kernel {[acc0..accM; buf0..bufN; i]}: bindings 0..nAcc-1 are i32 atomic
-/ accumulators (scatterAdd/iget/iset), nAcc..nAcc+nBuf-1 are f32 buffers (read with
-/ b[j], written with set[b;j;v]); i is the thread index. There is NO automatic output
-/ store — every write is an explicit set/scatterAdd/iset, so one kernel can update
-/ several buffers (e.g. XPBD integrate writes p, v AND prev). This is the general
-/ lowering the fixed shader.stencil* emitters specialise; it drives test/clothgpu.k.
-/ nbind = nAcc+nBuf; gpu.dispatch order is (accumulators…; buffers…).
-GAcc::   ()   / accumulator var ids (globals so the per-binding each-helpers see them)
-GBuf::   ()   / f32 buffer var ids
-GNAcc::  0    / accumulator count (f32 buffers start at binding GNAcc)
-GPbufs:: 0    / StorageBuffer→f32-struct pointer type
-GPbufsI::0    / StorageBuffer→i32-struct pointer type
-gpAccDec: {[k] (0x00040047;GAcc[k];34;0),(0x00040047;GAcc[k];33;k)}
-gpBufDec: {[k] (0x00040047;GBuf[k];34;0),(0x00040047;GBuf[k];33;GNAcc+k)}
-gpAccVar: {[k] (0x0004003B;GPbufsI;GAcc[k];12)}
-gpBufVar: {[k] (0x0004003B;GPbufs;GBuf[k];12)}
+/ gpu.kernel[fn;nAcc;nBuf] — the general kernel: nAcc i32 accumulators
+/ (bindings 0..nAcc-1: scatterAdd/iget/iset) + nBuf f32 buffers (read b[j],
+/ write set[b;j;v]) + i. No automatic output store — one kernel can update
+/ several buffers (XPBD integrate writes p, v AND prev). In-kernel loops
+/ (rsum/rmax, i f/ x, f g/ x) are available here (kAlloc emits the loop consts).
 compGpN: {[fn; nAcc; nBuf]
-  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
-  Tu32:newId[]; Tv3u32:newId[]
-  Trta:newId[]; Tbuf:newId[]; Pbufs:newId[]; Pf32s:newId[]
-  TrtaI:newId[]; TbufI:newId[]; PbufsI:newId[]; Pi32s:newId[]
-  Pv3u32i:newId[]
-  gidVar:newId[]
-  ka:!nAcc; kb:!nBuf
-  accIds:{[k]newId[]}'ka
-  bufIds:{[k]newId[]}'kb
-  Ku32z:newId[]; emitCon (0x0004002B;Tu32;Ku32z;0)
-  KDev:newId[];  emitCon (0x0004002B;Tu32;KDev;1)
-  CKz::Ku32z; CPf32::Pf32s; CPi32::Pi32s; CScope::KDev
-  / rsum loop constants (i32 0/1, f32 0.) — one set per compile, forward-refs by compRsum
-  RCi0::newId[];   emitCon opConst[Ti32;RCi0;0]
-  RCi1::newId[];   emitCon opConst[Ti32;RCi1;1]
-  RCf0::newId[];   emitCon opConst[Tf32;RCf0;0.]
-  RCfNeg::newId[]; emitCon opConst[Tf32;RCfNeg;-1e30]
-  GAcc::accIds; GBuf::bufIds; GNAcc::nAcc; GPbufs::Pbufs; GPbufsI::PbufsI
-  lam:lamOf fn; argNames:lamArgs lam
-  gidId:newId[]; emitBuf opLoad[Tv3u32;gidId;gidVar]
-  gidXId:newId[]; emitBuf opXtract[Tu32;gidXId;gidId;0]
-  gidF:newId[]; emitBuf opU2f[Tf32;gidF;gidXId]
-  accPairs:{[id](id;`scat)}'accIds
-  bufPairs:{[id](id;`buf)}'bufIds
-  env: argNames!(accPairs,bufPairs,(,(gidF;`f32)))
-  stmts:lamBody lam
-  rp:compSeq[stmts;env;`f32]
-  bnd:Nid+1; iface:(,gidVar)
-  hdr:(0x07230203;0x00010300;0;bnd;0)
-  cap:(0x00020011;1)
-  ext:(0x0006000B;Glsl;0x4C534C47;0x6474732E;0x3035342E;0)
-  mem:(0x0003000E;0;1)
-  ep:(0x000F+(0x10000*(5+#iface));5;Fmain;0x6E69616D;0),iface
-  exm:(0x00060010;Fmain;17;wg;1;1)
-  decGid:(0x00040047;gidVar;11;28)
-  decStr:(0x00040047;Trta;6;4);   decMem:(0x00050048;Tbuf;0;35;0);  decBlk:(0x00030047;Tbuf;2)
-  decStrI:(0x00040047;TrtaI;6;4); decMemI:(0x00050048;TbufI;0;35;0);decBlkI:(0x00030047;TbufI;2)
-  accDecs:$[nAcc; ,/gpAccDec'ka; !0]
-  bufDecs:$[nBuf; ,/gpBufDec'kb; !0]
-  sTypes:(0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid)
-  cTypes:(0x00040015;Tu32;32;0;0x00040017;Tv3u32;Tu32;3;0x0003001D;Trta;Tf32;0x0003001E;Tbuf;Trta;0x00040020;Pbufs;12;Tbuf;0x00040020;Pf32s;12;Tf32;0x0003001D;TrtaI;Ti32;0x0003001E;TbufI;TrtaI;0x00040020;PbufsI;12;TbufI;0x00040020;Pi32s;12;Ti32;0x00040020;Pv3u32i;1;Tv3u32)
-  accVars:$[nAcc; ,/gpAccVar'ka; !0]
-  bufVars:$[nBuf; ,/gpBufVar'kb; !0]
-  varGid:(0x0004003B;Pv3u32i;gidVar;1)
-  label:newId[]
-  fnh:(0x00050036;Tvoid;Fmain;0;Tfunc;0x000200F8;label)
-  ret:(0x000100FD;0x00010038)
-  conWds:$[#Con;,/Con;!0]; bodWds:$[#Buf;,/Buf;!0]
-  decs:decGid,decStr,decMem,decBlk,decStrI,decMemI,decBlkI,accDecs,bufDecs
-  vars:varGid,accVars,bufVars
-  ,/(hdr;cap;ext;mem;ep;exm;decs;sTypes;cTypes;vars;conWds;fnh;bodWds;ret)}
+  ids: kAlloc[nAcc;nBuf;0;1]
+  lam: lamOf fn; argNames: lamArgs lam
+  gx: kGidX[]; gf: kGidF[gx]
+  accPairs: {[id] (id;`scat)}' nAcc#ids
+  bufPairs: {[id] (id;`buf)}' nAcc _ ids
+  env: argNames!(accPairs,bufPairs,(,(gf;`f32)))
+  rp: compSeq[lamBody lam; env; `f32]
+  kAsm[]}
 gpu.kernel: compGpN
 
 varOutOne:   {[ptr;vid]    (0x0004003B;ptr;vid;3)}    / OpVariable Output storage class
