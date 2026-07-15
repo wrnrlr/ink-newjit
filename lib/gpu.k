@@ -77,21 +77,24 @@ texture.upload: {[img] w:img`width; h:img`height; c:img`comp; d:img`data; gpuTex
 / ── Placed arrays: the 9:/8: io-verb targets (doc/design/kk.md §1) ────────────
 / The GPU is an io channel: 9: places data on the device, 8: fetches it back;
 / dispatches recorded in between only submit at the 8: sync point (vk.zig's
-/ deferred submission). The descriptor is a dict [gpu:handle; t:type; n:count]
-/ so shape-aware verbs (and the kk compiler) can see what they hold.
-/   d: 9: x       upload (f32 for now), returns descriptor
+/ deferred submission). The descriptor is a dict [gpu:handle; t:type; n:count;
+/ s:shape] — s is %x (the shape verb), the host side of the data layer: it
+/ carries the row pitch 2-D stencils need and the dims kk.compile sizes
+/ dispatches with (doc/design/kk2.md §8). Nested (rectangular) x flattens for
+/ upload; 8: reshapes the readback to s.
+/   d: 9: (N;N)#x upload (f32 for now), returns descriptor
 /   d 9: x        overwrite d's buffer in place (no realloc), returns d
-/   8: d          sync + read all n elements back
-/   n 8: d        first n elements (trims the ×64 dispatch padding)
+/   8: d          sync + read back, reshaped to s
+/   n 8: d        first n elements flat (trims the ×64 dispatch padding)
 / Compile a kernel lambda straight to a cached compute pipeline: bindings are
 / inferred by shader.kernel (accumulator params first, LAST param = thread
 / index), nbind = (#params)-1 (published by dye as KKnb). Needs a live device:
 /   p: gpu.pipeline[{[c;a;b;g;d] ... set[c;d;v]}]   / == compileCompute+counts
 gpu.pipeline: {[fn] w: shader.kernel fn; gpu.compileCompute[w; KKnb]}
 
-gpu.hold:     {[x] [gpu: gpu.buffer[0.+x]; t: `f; n: #x]}
-gpu.holdInto: {[d;x] gpu.write[d`gpu; 0.+x]; d}
-gpu.fetch:    {[d] (d`n) # gpu.read[d`gpu]}
+gpu.hold:     {[x] f: {$[`L~@x; ,/x; x]}/ x; [gpu: gpu.buffer[0.+f]; t: `f; n: #f; s: %x]}
+gpu.holdInto: {[d;x] gpu.write[d`gpu; 0.+{$[`L~@x; ,/x; x]}/ x]; d}
+gpu.fetch:    {[d] r: (d`n) # gpu.read[d`gpu]; $[1 < #d`s; (d`s)#r; r]}
 gpu.fetchN:   {[n;d] n # gpu.read[d`gpu]}
 
 / Solid-color fragment uniforms (44 floats matching fill.wgsl FragUniforms).

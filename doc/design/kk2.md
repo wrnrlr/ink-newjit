@@ -242,12 +242,17 @@ plumbing first.
    not deprecated, but no new code uses them. Raises the priority of the
    §2.4-1 recognition, and lib/nn.k migrates to the full syntax once it
    lands.
-4. **Shapes in descriptors — add `s` now.** `s` is the array's SHAPE, e.g.
-   `(N;N)` for the walk.k grid or `(nP;3)` for cloth positions, alongside
-   the flat count `n`. Placed via `9: (N;N)#x` (or a reshape on the
-   descriptor). It's what lets 2-D stencils know their row pitch, `(k;n)`
-   index matrices know k vs n, and kk.compile size dispatches and check
-   conformance — the host side of the data layer.
+4. **Shapes — DONE (2026-07-15): monadic `%` is the Shape verb** (Werner's
+   call: the glyph was free — ink moved sqrt to the prelude, so the ngn/k
+   monadic-% meaning was vacated; the dyad stays divide). `%x` = rectangular
+   extent as an int vector, APL-rho semantics with the k twist that ragged
+   lists stop at the first non-uniform level: `%5`→`!0`, `%1 2 3`→`,3`,
+   `%(1 2;3 4;5 6)`→`3 2`, `%(1 2;3 4 5)`→`,2`; `(%m)#,/m ~ m`. Implemented
+   in `src/primitive/verb/shape.zig` + unit tests. Descriptors record
+   `s: %x` at `9:`/`gpu.hold` (nested rectangular input flattens for
+   upload) and `8:` reshapes the readback to `s` — so `8: 9: (N;N)#x`
+   round-trips the matrix. This is what gives 2-D stencils their row pitch,
+   `(k;n)` index matrices their k-vs-n, and kk.compile its dispatch sizes.
 5. **RNG** (walk.k's Monte-Carlo half; philox counter-based; `?` lowering) —
    still open: tier 2 or its own increment.
 

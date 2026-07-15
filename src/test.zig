@@ -1167,6 +1167,22 @@ test "grade ascending list" {
   try t.check("<(\"b\";\"a\";\"c\")", "1 0 2");
 }
 
+// Shape (monadic %; the dyad stays divide). Ragged lists stop at the first
+// non-uniform level; atoms are rank 0 (empty shape).
+test "shape (monadic %)" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("%5", "!0");
+  try t.check("%1 2 3", ",3");
+  try t.check("%\"abcd\"", ",4");
+  try t.check("%(1 2;3 4;5 6)", "3 2");
+  try t.check("%3 2#!6", "3 2");
+  try t.check("%(1 2;3 4 5)", ",2");
+  try t.check("%((1 2;3 4);(5 6;7 8))", "2 2 2");
+  try t.check("%()", ",0");
+  try t.check("(%(1 2;3 4))#1 2 3 4", "(1 2;3 4)");
+  try t.check("2%4", "0.5");
+}
+
 test "comment" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("\"Hi\" /comment ", "\"Hi\"");

@@ -327,8 +327,9 @@ while assigment of globals in a lambda happen with a double colon `::`
 - `.[x;y;F;z]` **Drill4** - `` .[("ab";"cd");1 0;:;"x"] `` → `("ab";"xd")`
 - `?[C;I;C]` **Splice** - `` ?["abcd";1 3;"xyz"] -> "axyzd" `` TODO: does this work for non-char arrays as well
 
-### Monadic Operators `:+-*!#@&|<>=?,^~$.`
+### Monadic Operators `:%+-*!#@&|<>=?,^~$.`
 - `:x` **Identity** - return right-hand side
+- `%x` **Shape** - rectangular extent as an int vector (APL rho): `%5`→`!0` (atom, rank 0), `%1 2 3`→`,3`, `%(1 2;3 4;5 6)`→`3 2`. Ragged lists stop at the first non-uniform level (`%(1 2;3 4 5)`→`,2`). Inverse of reshape: `(%m)#,/m ~ m`. Placed arrays carry it as the descriptor's `s` field.
 - `&I` **Where** - convert counts to repeated indices
 - `=X` **Group** - for each distinct value, the indices where it occurs
 - `=i` **Unit** - identity matrix
@@ -356,9 +357,9 @@ The IO system is organized around file descriptors (filename, port number, etc.)
 - `` `stdout 1: y `` / `` `stderr 1: y `` write raw bytes with **no** trailing newline and flush (unlike `` `0 0:y `` which appends `\n`).
 - Writing to a path that doesn't exist **creates** the file (`` "new.txt" 1: bytes ``); the same holds for `` x 0: y ``. (Reads still require the file to exist.)
 - `` 2: y `` **LoadCode** - used for importing other files
-- `` 9: x `` **Place** — upload x to the GPU; returns a placed-array descriptor dict `[gpu:handle;t;n]`. The device is an io channel: work recorded on placed arrays only submits at the `8:` sync point. Requires `lib/gpu.k` (else `!io`). See `doc/design/kk.md` §1.
+- `` 9: x `` **Place** — upload x to the GPU; returns a placed-array descriptor dict `[gpu:handle;t;n;s]` (`s` = `%x`, the shape; nested rectangular input flattens for upload). The device is an io channel: work recorded on placed arrays only submits at the `8:` sync point. Requires `lib/gpu.k` (else `!io`). See `doc/design/kk.md` §1.
 - `` d 9: x `` **PlaceInto** — overwrite placement `d`'s buffer in place (no realloc); returns `d`
-- `` 8: d `` **Fetch** — sync + read a placed array back to the host
+- `` 8: d `` **Fetch** — sync + read a placed array back to the host, reshaped to its `s`
 - `` n 8: d `` **FetchN** — first n elements (trims the ×64 dispatch padding)
 
 ## Adverbs `` ' / \ ': /: \: ``

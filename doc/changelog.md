@@ -1,6 +1,13 @@
 # Changelog
 
 ## 2026-07-15
+- **Monadic `%` = Shape** (the glyph was free since sqrt moved to the
+  prelude; dyad stays divide): rectangular extent as an int vector, ragged
+  lists stop at the first non-uniform level (`%(1 2;3 4;5 6)`→`3 2`,
+  `%(1 2;3 4 5)`→`,2`, atoms→`!0`); inverse of reshape. New
+  src/primitive/verb/shape.zig + unit tests. Placed-array descriptors gain
+  `s: %x` — `9:` flattens nested rectangular input for upload and `8:`
+  reshapes the readback, so `8: 9: (N;N)#x` round-trips (kk2.md §8-4).
 - **Compute bodies compile through the neutral IR** (kk incr 3, the seam
   migration): kSeqIr builds typed SSA for every compute entry point and
   lowers it in build order. New IR ops: bufidx/igetb loads, setb/sadd/isetb

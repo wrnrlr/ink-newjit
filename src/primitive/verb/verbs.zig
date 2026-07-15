@@ -311,6 +311,7 @@ const Monads = struct {
   pub const @"depth x" = @import("depth.zig").Depth;
   pub const @"epoch x" = @import("epoch.zig").Epoch;
   pub const @"@x"    = @import("type.zig").Type;
+  pub const @"%x"    = @import("shape.zig").Shape;
   pub const @":x"    = @import("right.zig").Identity;
   pub const @"=u"    = Unitary;
   pub const @"?X"    = @import("distinct.zig").Distinct;
