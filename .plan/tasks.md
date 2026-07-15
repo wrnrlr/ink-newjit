@@ -1,5 +1,24 @@
 # Tasks
 
+## Placed tables (colored arrays) — structured GPU buffers as k tables
+Use tables (k's native SoA: named equal-length columns, `` `px`py`vx`vy ``) as
+the kk-side representation of structured GPU buffers, so kernels read
+`` a`px + b`vy `` instead of stride arithmetic (`p[(3*i)+ax]`, clothgpu's
+7-float packed edge records). `9: table` places the columns; kernel column
+selects lower to buffer reads; binding inference binds ONLY the columns the
+kernel mentions (dead-column pruning, very kdb). Layout (planar buffer-per-
+column vs one interleaved buffer with stride = #cols — "we know how many
+columns, so indexing is linear") is a compiler choice per kernel access
+pattern; note vk.zig MAX_BIND=8 pressures wide tables toward interleaved.
+Companion: placed DICTS of differing-length arrays as named binding groups
+(CSR ragged data — `[data;off]` — matching lib/shp.k's CPU convention).
+Tensors stay shaped placed arrays (`s`/`%x`) — tables are for heterogeneous
+records, shapes for dense homogeneous dims; the two compose, they don't
+compete. On the CPU, `` t`px `` already works on real tables, so only the GPU
+lowering is new — same expression, both targets. Design: doc/design/kk2.md
+§2.5. Prereq: kk.compile elementwise (kk2 §2.4-2). CPU-side columnar layout
+optimizations explicitly deferred.
+
 ## Rework library and namespaces
 I want to change to way the module system works with auto-loading,
 namespaces, variable resolution and fully qualified names.

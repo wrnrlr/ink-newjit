@@ -1,6 +1,6 @@
 text:1:"./test/data/shakespear.txt"
 
-tokenize: {?x@<x}
+tokenize: {?x@<x} / this feel inefficient, we sort the text and then 
 chars:tokenize text
 N:#chars
 `0:"Unique chars: ",$N
@@ -22,7 +22,7 @@ next:td 1+cs
 
 {(ctx[!x+1];next[x])}'cs
 
-bs:4 / batch size
+bs:4 / batch size is the nr independent sequences we process in parallel
 batch:{[split]
   d:$[split;td;vd];l:#d
   ix: / 4 numbers

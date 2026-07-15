@@ -133,8 +133,50 @@ Out of scope for tier 1 (tier 2, needs scan/whole-buffer-reduce infra):
    2887.34 (Jacobi f32 fixpoint value), against the CPU run.**
 5. `@[x;I;+;v]` → `sadd` (spatial-hash histogram from `test/spacial.k` as the
    demo).
+6. Placed tables (§2.5): clothgpu's edge kernel on named columns.
 
-## 3. Finish the IR unification (rest of increment 3)
+### 2.5 Placed tables ("colored arrays") — structured buffers as k tables
+
+Werner's proposal (2026-07-16): a table — k's native SoA, named equal-length
+columns `` `px`py`vx`vy `` — is the kk representation of a *structured* GPU
+buffer. Kernels then read named fields:
+
+```k
+/ today (clothgpu.k): 7-float packed records, layout in a comment
+pi:e[base]; pj:e[base+1.]; l0:e[base+2.]; al:e[base+3.]; …
+/ placed table: self-documenting, no stride arithmetic
+E: 9: [[]i:ei; j:ej; l0:l0; al:al; w0:w0; w1:w1; wt:w0+w1]
+… (E`l0) + (E`al) % sdt*sdt …
+```
+
+- **Placement**: `9: table` → a descriptor whose `gpu` is a dict of column
+  handles (or one handle + layout tag, below); `t`/`n`/`s` per column.
+- **Kernel lowering**: a column select `` t`c `` is just a buffer reference —
+  the existing `bufp`/`bufidx` IR nodes; nothing new in the IR.
+- **Binding inference prunes columns**: only columns the kernel body mentions
+  are bound (and, for host tables, uploaded) — dead columns cost nothing.
+  This is the kdb splayed-column property carried onto the device.
+- **Layout is a schedule choice (Tiramisu L3), not semantics.** Planar
+  (buffer per column) is the default: simplest, and best coalescing for the
+  array-language access pattern (each thread touches few fields across many
+  rows). Interleaved (ONE buffer, stride = #cols, field k at `d*nc+k` — "we
+  know how many columns, so indexing is linear") wins when a thread touches
+  *every* field of one row (the cloth edge kernel), and keeps binding count
+  down — relevant because `vk.zig` `MAX_BIND = 8`, which a 7-column table
+  plus accumulator plus params already exceeds in planar form. v1: planar,
+  interleave when #bindings would exceed the cap; later a per-kernel knob.
+- **Placed dicts** (the companion idea): a dict of placed arrays of
+  *differing* lengths as one named binding group — CSR ragged data
+  (`[data: …; off: …]`, exactly lib/shp.k's CPU convention), state+params
+  pairs. Same name-resolution machinery, no equal-length constraint.
+- **Tensors are NOT tables.** Shapes (`%x`/`s`) and columns are orthogonal
+  axes that compose: dense homogeneous dims (NN weights, grids) stay shaped
+  placed arrays; heterogeneous per-row records are tables; ragged is a CSR
+  dict. A vector field is 3 scalar columns (`px`py`pz`), pure k style.
+- **CPU symmetry is free**: `` t`px `` on a real table already IS the column
+  vector, so `` a`px + b`vy `` runs on the CPU today unchanged — only the GPU
+  lowering is new work. (CPU columnar *layout* optimization: deferred, per
+  Werner.)
 
 - **Fragment**: add a `sample` IR node (4 ids: two loads, OpSampledImage,
   ImageSample — mirror `compSample`); `kSeqIr` grows an `oty` argument;

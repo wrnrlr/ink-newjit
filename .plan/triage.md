@@ -415,6 +415,27 @@ or the body stops returning it) — the workaround can then be dropped.
 
 ---
 
+## 21. Converge over a derived verb misapplies as a seeded fold (`,//x`)
+
+```k-repl
+ ,/,/((1 2;3 4);(5 6;7 8))       / 1 2 3 4 5 6 7 8      — two razes, correct
+ {,/x}/((1 2;3 4);(5 6;7 8))     / 1 2 3 4 5 6 7 8      — lambda converge, correct
+ ,//((1 2;3 4);(5 6;7 8))        / (1 2;3 4;5;6;7;8)    — WRONG
+ (,/)/((1 2;3 4);(5 6;7 8))      / (1 2;3 4;5;6;7;8)    — WRONG (same)
+```
+
+`f/x` where `f` is itself a *derived* verb (`,/`) does not run monadic converge.
+The wrong output is exactly `x[0] ,/ x[1]` — a **seeded fold** (`x f/ y` with
+`x[0]` as the seed and the remaining elements folded through dyadic `,/`) — so
+the valence resolution for a derived-verb operand under `/` picks the
+seeded-fold form instead of converge. A 1-param lambda operand (`{,/x}/`)
+resolves correctly, which is the workaround used by `gpu.hold`'s flatten
+(`{$[`L~@x;,/x;x]}/x`, lib/gpu.k). Likely home: `runtime/call.zig` /
+`primitive/derived.zig` valence choice when the base of a derived verb is
+itself derived. Found 2026-07-15 while adding shape recording to `9:`.
+
+---
+
 # GPU shader compiler
 
 Enhancement tracking for the SPIR-V shader compiler (`lib/dye.k`, `lib/spirv.k`,

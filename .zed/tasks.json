@@ -2,5 +2,5 @@
   { "label": "test", "command": "zig", "args": ["build", "test"]},
   { "label": "ink", "command": "rlwrap", "args": ["zig-out/bin/ink"]},
   { "label": "walk", "command": "zig-out/bin/ink", "args": ["test/walk.k"]},
-  { "label": "Run ink file", "command": "zig-out/bin/ink", "args": ["$ZED_FILE"], "tags": ["ink-file"]},
+  { "label": "ink", "command": "zig-out/bin/ink", "args": ["$ZED_FILE"], "tags": ["ink-file"], "show_summary": false, "show_command": false},
 ]

@@ -109,6 +109,7 @@ The parser, compiler, and runtime are all written in Zig 0.16.
 - Reshape array into 2 columns and infer size of rows `0N 2#x`
 - Connect to server `` h:<"127.0.0.1:5001" ``
 - Write text to stdout `` `0:"hello" ``
+- Tokenize `` {?x@<x} ``
 
 ## Home Directory
 The ink home directory is by default `~/.ink`. The `$INK_HOME` variable can overwrite the default.
