@@ -308,12 +308,19 @@ E: 9: [[]i:ei; j:ej; l0:l0; al:al; w0:w0; w1:w1; wt:w0+w1]
   keep its byte-diff oracle; correctness under the optimizer is guarded by the
   numeric-parity oracles (nn/kkc/walkgpu, all re-verified bit-identical / PASS)
   plus kkopt's safety asserts.
-- **i32 index type**: `f2s` results and loop counters already are i32; the
-  step is letting index *arithmetic* stay integer (OpIAdd/OpSDiv/OpSRem on
-  `i32-typed nodes) instead of round-tripping through f32, killing the 2^24
-  exactness cliff and the `floor[d%3.]` idiom (becomes `d div 3` / `d mod 3`).
-  User-visible kernel semantics keep f32 thread index for compatibility;
-  kk.compile-generated kernels use i32 indices from day one.
+- **i32 index type — DONE 2026-07-16.** kk.compile-generated kernels keep index
+  arithmetic in i32: the thread index `d` (GIrGid) is the gid bit-cast to i32
+  (`kGidI`, no `u2f`→`f2s` round-trip), `xElem` indexes `buf[d]` directly, and
+  the matrix gather-reduce address `(j*n)+d` is `OpIMul`/`OpIAdd` on i32 nodes
+  (`j` = the raw i32 loop-counter phi via the new `kparami` op; `k`,`n` are i32
+  consts). `dispBin` gained an `isi` (rty~`i32) guard emitting integer ops
+  (IAdd/ISub/IMul, SDiv for `%`); f32 kernels are untouched (byte-identical).
+  Only the *loaded* index value keeps its `f2s` (it's stored f32 in W). This
+  kills the 2^24 exactness cliff on address math. spirv.k added opSdiv/opSrem/
+  opBitcast. User-visible kernels (gpu.kernel/shader.*) keep the f32 thread
+  index for compatibility — verified via kkgold byte-identity + nn bit-identity;
+  kkc 22/22, walkgpu PASS. (The `floor[d%3.]`→`d div 3` idiom rewrite for 2-D
+  thread-index decomposition is future work — no generated kernel emits it yet.)
 
 ## 4. `bits` v1: the CPU backend (increment 6)
 

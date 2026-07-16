@@ -240,10 +240,15 @@ mathFns:  `abs`floor`fract`sign`sqrt`exp`log`tanh`sqr`sin`cos`asin`acos`atan`len
 dispBin: {[op;rty;r;aty;a;bty;b]
   rt: Tid[rty]
   at: Tid[aty]
-  $[op~`"+";   opFadd[rt;r;a;b]
-    op~`"-";   opFsub[rt;r;a;b]
-    op~`"%";   opFdiv[rt;r;a;b]
-    op~`"*";   $[isVecTy[aty] & ~isVecTy[bty]; opVTS[rt;r;a;b]
+  / i32-typed arith is integer index math (kk.compile-generated kernels keep
+  / indices in i32 — no f32 round-trip, no 2^24 exactness cliff). User kernels
+  / stay f32, so the `isi guard leaves their emission byte-identical.
+  isi: rty~`i32
+  $[op~`"+";   $[isi; opIadd[rt;r;a;b]; opFadd[rt;r;a;b]]
+    op~`"-";   $[isi; opIsub[rt;r;a;b]; opFsub[rt;r;a;b]]
+    op~`"%";   $[isi; opSdiv[rt;r;a;b]; opFdiv[rt;r;a;b]]
+    op~`"*";   $[isi; opImul[rt;r;a;b]
+               isVecTy[aty] & ~isVecTy[bty]; opVTS[rt;r;a;b]
                isVecTy[bty] & ~isVecTy[aty]; opVTS[rt;r;b;a]
                opFmul[rt;r;a;b]]
     op~`",";   (0x00050050;rt;r;a;b);   / OpCompositeConstruct, 2 constituents: v2+f32→v3, v3+f32→v4, etc.
@@ -500,6 +505,7 @@ kAlloc: {[nAcc;nBuf;hasUni;hasLoop]
 / ── gid prologue + element access ─────────────────────────────────────────────
 kGidX: {[] g:newId[]; emitBuf opLoad[AKv3; g; AKgid]; x:newId[]; emitBuf opXtract[AKu32; x; g; 0]; x}
 kGidF: {[gx] f:newId[]; emitBuf opU2f[Tf32; f; gx]; f}                  / thread index as f32
+kGidI: {[gx] i:newId[]; emitBuf opBitcast[Ti32; i; gx]; i}              / thread index as i32 (bit-reinterpret; gid < 2^31)
 kElem: {[bid;gx] p:newId[]; emitBuf opAccChain[AKpf32; p; bid; AKz; gx]; v:newId[]; emitBuf opLoad[Tf32; v; p]; (v;`f32)}
 kStore:{[bid;gx;val] p:newId[]; emitBuf opAccChain[AKpf32; p; bid; AKz; gx]; emitBuf opStore[p; val]}
 / Scatter store for @[x;I;:;v]: out[I[gid]] := val. Loads the write index from the
@@ -656,12 +662,12 @@ compGmap: {[fn; bufNames; elemNames]
   nbuf: #bufNames; nb: nbuf + #elemNames
   ids: kAlloc[0; nb+1; 0; 1]                / hasLoop=1: +/x@W needs the rsum consts
   lam: lamOf fn
-  gx: kGidX[]; gf: kGidF[gx]
+  gx: kGidX[]
   bufP:  {[id] (id;`buf)}'  nbuf # ids
   elemP: {[id] (id;`elem)}' nbuf _ nb # ids
   xReset[]
   e2: (bufNames,elemNames) ! kGmapEnvOne' bufP,elemP
-  GIrGid:: xEmit[`param; `f32; (); gf]
+  GIrGid:: xEmit[`param; `i32; (); kGidI gx]     / thread index d in i32 (index math stays integer)
   rp: xSeq[lamBody lam; e2; `f32]
   xLowerC[,rp 0]
   kStore[ids nb; gx; xId rp 0]
@@ -677,12 +683,12 @@ compTable: {[fn; tableName; colNames]
   nc: #colNames
   ids: kAlloc[0; nc+1; 0; 1]
   lam: lamOf fn
-  gx: kGidX[]; gf: kGidF[gx]
+  gx: kGidX[]
   xReset[]
   colNodes: {[id] xEmit[`bufp; `col; (); id]}' nc # ids
   colDict: colNames ! colNodes
   e2: (,tableName) ! ,(colDict; `table)
-  GIrGid:: xEmit[`param; `f32; (); gf]
+  GIrGid:: xEmit[`param; `i32; (); kGidI gx]     / thread index d in i32 (index math stays integer)
   rp: xSeq[lamBody lam; e2; `f32]
   xLowerC[,rp 0]
   kStore[ids nc; gx; xId rp 0]
@@ -704,11 +710,11 @@ kkTableColNames: {[] r: kkColRefs[]; $[0=#r; 0#`; ? {[i] kVal kF1[i;`a]}' r]}
 compAmend: {[fn; srcName; matName; idxName]
   ids: kAlloc[0; 4; 0; 1]                     / x, W, I, out
   lam: lamOf fn
-  gx: kGidX[]; gf: kGidF[gx]
+  gx: kGidX[]
   bufP: {[id] (id;`buf)}' 3 # ids
   xReset[]
   e2: (srcName;matName;idxName) ! kGmapEnvOne' bufP
-  GIrGid:: xEmit[`param; `f32; (); gf]
+  GIrGid:: xEmit[`param; `i32; (); kGidI gx]     / thread index d in i32 (index math stays integer)
   ap: *& `apply = Cst`kind                    / the @[…] apply
   vN: (kF[ap;`arg]) 3                          / arg 3 = the value expression
   rp: xNode[vN; e2; `f32]
@@ -733,11 +739,11 @@ compScatAdd: {[fn; valBufNames]
   nv: #valBufNames
   ids: kAlloc[1; 1+nv; 0; 1]                   / acc(i32) + I + value bufs
   lam: lamOf fn
-  gx: kGidX[]; gf: kGidF[gx]
+  gx: kGidX[]
   valP: {[id] (id;`elem)}' 2 _ (2+nv) # ids
   xReset[]
   e2: valBufNames ! kGmapEnvOne' valP
-  GIrGid:: xEmit[`param; `f32; (); gf]
+  GIrGid:: xEmit[`param; `i32; (); kGidI gx]     / thread index d in i32 (index math stays integer)
   ap: *& `apply = Cst`kind
   vN: (kF[ap;`arg]) 3
   rp: xNode[vN; e2; `f32]
@@ -882,7 +888,7 @@ varOutOne:   {[ptr;vid]    (0x0004003B;ptr;vid;3)}    / OpVariable Output storag
 / See doc/design/dye.md + doc/design/kk.md.  IR node = an index into these lists:
 xOp::  ()   / op sym: param const cons extract select arith math neg lnot, plus
             / bufp f2s bufidx sadd setb igetb isetb (loads/effects) and the
-            / opaque loop region ops rsum rmax ndo whileL kparam lparam
+            / opaque loop region ops rsum rmax ndo whileL kparam kparami lparam
 xTy::  ()   / result type sym
 xArg:: ()   / operand node indices (a list) per node
 xVal:: ()   / const value / extract index / verb glyph / math name / loop meta
@@ -987,17 +993,16 @@ xIsGather: {[aN] ((kKind aN)~`transit) & ((kVal kF1[aN;`v])~`"@")}
 xRedGather: {[aN; env; op]
   xN: (env kVal kF1[aN;`a]) 0
   wN: (env kVal kF1[aN;`b]) 0
-  kp: xEmit[`const; `f32; (); 0.+GRk]
-  kx: xEmit[`f2s; `i32; ,kp; 0n]
+  kx: xEmit[`const; `i32; (); `i$GRk]                / loop bound k (i32 const)
   L:  xEmit[op; `f32; ,kx; 0n]
   sav: XOwn; XOwn:: L
-  jpar: xEmit[`kparam; `f32; (); 0n]                 / loop counter j as f32
-  nC:  xEmit[`const; `f32; (); 0.+GRn]
-  jn:  xEmit[`arith; `f32; (jpar; nC); `"*"]         / j*n
-  jnd: xEmit[`arith; `f32; (jn; GIrGid); `"+"]       / j*n + d
-  wsi: xEmit[`f2s; `i32; ,jnd; 0n]
-  widx:xEmit[`bufidx; `f32; (wN; wsi); 0n]           / W[(j*n)+d]
-  xsi: xEmit[`f2s; `i32; ,widx; 0n]
+  / Address math (j*n)+d stays i32 — OpIMul/OpIAdd, exact past 2^24, no f2s.
+  jpar: xEmit[`kparami; `i32; (); 0n]                / loop counter j (raw i32 phi)
+  nC:  xEmit[`const; `i32; (); `i$GRn]               / n (i32 const)
+  jn:  xEmit[`arith; `i32; (jpar; nC); `"*"]         / j*n
+  jnd: xEmit[`arith; `i32; (jn; GIrGid); `"+"]       / j*n + d
+  widx:xEmit[`bufidx; `f32; (wN; jnd); 0n]           / W[(j*n)+d]  (i32 index)
+  xsi: xEmit[`f2s; `i32; ,widx; 0n]                  / the loaded index VALUE → i32
   gval:xEmit[`bufidx; `f32; (xN; xsi); 0n]           / x[W[(j*n)+d]]
   XOwn:: sav
   xVal[L]:: (jpar; gval; #xOp)
@@ -1151,12 +1156,13 @@ xCondS: {[ss;env;oty]
 xBakeBad: {[nm] xErr:: `$"dye: cannot bake ",($nm)," (not a param/local, and not a numeric scalar host global)"; (xEmit[`const;`f32;();0n]; `f32)}
 xBake: {[nm] v: . nm; $[(@v) in `b`i`f; (xEmit[`const;`f32;();0.+v]; `f32); xBakeBad nm]}
 / An `elem-role env entry is a whole buffer that stands for its element AT THE
-/ THREAD INDEX: a bare use of the name loads buf[d] (d = GIrGid, the gid-as-f32
-/ IR param the gather kernel binds). This is what lets kk.compile's gather mode
-/ write `x@w` (w a whole index vector) and mean x[w[d]]. Plain `buf entries (the
-/ gather sources) pass through unloaded — @/`u[i]` index them explicitly.
+/ THREAD INDEX: a bare use of the name loads buf[d] (d = GIrGid, the gid as an
+/ i32 IR param the gather kernel binds). This is what lets kk.compile's gather
+/ mode write `x@w` (w a whole index vector) and mean x[w[d]]. Plain `buf entries
+/ (the gather sources) pass through unloaded — @/`u[i]` index them explicitly.
+/ d is i32, so buf[d] indexes directly (no f32 round-trip).
 GIrGid:: 0
-xElem: {[bufN] si: xEmit[`f2s; `i32; ,GIrGid; 0n]; xEmit[`bufidx; `f32; (bufN; si); 0n]}
+xElem: {[bufN] xEmit[`bufidx; `f32; (bufN; GIrGid); 0n]}
 xVarE: {[p] $[(p 1)~`elem; (xElem[p 0]; `f32); p]}
 xVar:  {[i;env] nm: kVal i; $[nm in !env; xVarE[env nm]; xBake nm]}
 / x@w gather (kk2 §2.2): left = a `buf gather source, right = the index value
@@ -1305,6 +1311,8 @@ xLoVstore: {[k] $[(xVal k)~`pos; xLoVsPos[k]; xLoVsVar[k]]}
 / loop saves/restores them so nesting is safe. XLk is the region filter owner.
 RKiPhi:: 0; RKsPhi:: 0; XLk:: -1
 xLoKparam: {[k] r:newId[]; emitBuf opI2f[Tf32; r; RKiPhi]; xId[k]::r}
+/ i32 loop counter: the raw counter phi, no i2f (used by i32 index arithmetic).
+xLoKparami: {[k] xId[k]:: RKiPhi}
 xLoLparam: {[k] xId[k]:: RKsPhi}
 xLoRegion: {[k; lo; hi] sav: XLk; XLk:: k; {[j] $[((xRgn j)=XLk) & xRe j; xLowerOne j; 0]}' lo+!hi-lo; XLk:: sav; 0}
 xLoRsum: {[k]
@@ -1369,6 +1377,7 @@ xLowerOne: {[k]
     op~`igetb;   xLoIget[k]
     op~`isetb;   xLoIset[k]
     op~`kparam;  xLoKparam[k]
+    op~`kparami; xLoKparami[k]
     op~`lparam;  xLoLparam[k]
     op~`vstore;  xLoVstore[k]
     op~`rsum;    xLoRsum[k]

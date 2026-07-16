@@ -49,6 +49,9 @@ opFdiv: {[t;r;a;b] (0x00050088;t;r;a;b)}   / OpFDiv  136
 opIadd: {[t;r;a;b] (0x00050080;t;r;a;b)}   / OpIAdd  128
 opIsub: {[t;r;a;b] (0x00050082;t;r;a;b)}   / OpISub  130
 opImul: {[t;r;a;b] (0x00050084;t;r;a;b)}   / OpIMul  132
+opSdiv: {[t;r;a;b] (0x00050087;t;r;a;b)}   / OpSDiv  135 (signed integer divide, floor for >=0)
+opSrem: {[t;r;a;b] (0x0005008A;t;r;a;b)}   / OpSRem  138 (signed remainder; == mod for >=0 operands)
+opBitcast: {[t;r;a] (0x0004007C;t;r;a)}    / OpBitcast 124 (reinterpret bits, e.g. gid u32 -> i32)
 opFneg: {[t;r;a]   (0x0004007F;t;r;a)}     / OpFNegate 127
 opFmod: {[t;r;a;b] (0x0005008D;t;r;a;b)}   / OpFMod  141 (GLSL mod: result sign = divisor)
 / GLSL.std.450 extended instructions — 1-arg
