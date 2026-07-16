@@ -136,6 +136,7 @@ qa:
 	$(INK) test/circle.k
 	$(INK) test/walk.k
 	$(INK) test/eyes.k
+	INK=$(INK) sh test/oracles.sh
 
 info:
 	@echo "Ink lines /lib:" && find lib -name '*.k' | xargs wc -l | tail -n 1
