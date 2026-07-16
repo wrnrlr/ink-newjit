@@ -627,6 +627,45 @@ compMapN: {[fn; nIn]
   kAsm[]}
 shader.map: compMapN
 
+/ ── shader.reduce[op] — whole-buffer reduction (kk2 §6, tier-2 gateway) ───────
+/ A fixed two-binding kernel (in@0, out@1) + uniform vec4@2 = (n; T; Kmax; _) that
+/ folds a placement with a grid-strided serial loop: thread d combines
+/ in[d], in[d+T], in[d+2T], … (Kmax steps, guarded by idx<n) into out[d]. The host
+/ runs it twice (kk.reduce): stage 1 with T=P threads → P partials, stage 2 with
+/ T=1 on ONE thread → the scalar. `op` selects identity+combine: `sum`max`min`prod.
+/ Out-of-range steps clamp the index to 0 and select the identity, so no OOB load —
+/ correctness never leans on buffer padding. This is the two-dispatch FALLBACK path
+/ (no shared memory / subgroups); the subgroup fast path (OpGroupNonUniformFAdd,
+/ gpu.caps sgArith) layers on top later without changing this contract.
+redSeed:   {[op] $[op~`max; RCfNeg; op~`min; constId[Tf32;1e30]; op~`prod; constId[Tf32;1.]; RCf0]}
+redCombW:  {[op;t;r;a;b] $[op~`max; opFmax[t;r;a;b]; op~`min; opFmin[t;r;a;b]; op~`prod; opFmul[t;r;a;b]; opFadd[t;r;a;b]]}
+compReduce: {[op]
+  ids: kAlloc[0; 2; 1; 1]                       / in@0, out@1, uniform@2, loop consts
+  uv: (loadUniMember AKuniKi) 0                 / the uniform vec4 value id
+  nF:  newId[]; emitBuf opXtract[Tf32; nF;  uv; 0]
+  tF:  newId[]; emitBuf opXtract[Tf32; tF;  uv; 1]
+  kmF: newId[]; emitBuf opXtract[Tf32; kmF; uv; 2]
+  nI:  newId[]; emitBuf opF2s[Ti32; nI;  nF]
+  tI:  newId[]; emitBuf opF2s[Ti32; tI;  tF]
+  kmI: newId[]; emitBuf opF2s[Ti32; kmI; kmF]
+  gx:  kGidX[]
+  d:   kGidI[gx]                                / thread index (i32)
+  seed: redSeed op
+  L: loopOpen[kmI; seed; `f32]
+  iPhi:L 0; sPhi:L 1; iNext:L 2; sNext:L 3; conL:L 4; hdrL:L 5; mrgL:L 6
+  m:   newId[]; emitBuf opImul[Ti32; m; iPhi; tI]     / k*T
+  idx: newId[]; emitBuf opIadd[Ti32; idx; d; m]       / d + k*T
+  g:   newId[]; emitBuf opSLT[Tbool; g; idx; nI]      / idx < n
+  si:  newId[]; emitBuf opSel[Ti32; si; g; idx; RCi0] / clamp OOB index to 0
+  p:   newId[]; emitBuf opAccChain[AKpf32; p; ids 0; AKz; si]
+  vl:  newId[]; emitBuf opLoad[Tf32; vl; p]
+  v:   newId[]; emitBuf opSel[Tf32; v; g; vl; seed]   / identity when out of range
+  nv:  newId[]; emitBuf redCombW[op; Tf32; nv; sPhi; v]
+  loopClose[nv; `f32; sNext; iNext; iPhi; conL; hdrL; mrgL]
+  kStore[ids 1; gx; sPhi]                        / out[d] = accumulated
+  kAsm[]}
+shader.reduce: compReduce
+
 / ── Elementwise subset classifier (kk2 §2.1: "no silent fallback") ────────────
 / Walk the lambda body; return `nil if every node is in the elementwise subset
 / (arith/cmp/join, math builtins, unary -/~, literals, x/y/z, list/cond/group/

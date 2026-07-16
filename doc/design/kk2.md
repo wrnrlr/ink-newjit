@@ -375,6 +375,49 @@ Features` / atomic-float EXT chained into `VkDeviceCreateInfo.pNext` in
 same caps struct. This unlocks tolerance-based `g f/ d` (device-side `|/abs
 Δ` + periodic readback) replacing bit-fixpoint grinds.
 
+**DONE (2026-07-16) — device-enable + fallback reduce + device converge.**
+
+- **Device-feature enable (the prerequisite).** `vk.zig` now chains the queried
+  caps into `VkDeviceCreateInfo.pNext` at BOTH create sites (`init` headless +
+  `initWindowed`): a `Features` struct bundles `VkPhysicalDeviceFeatures2` →
+  `Vulkan12Features` (descriptorIndexing/runtimeDescriptorArray/bufferDeviceAddress/
+  shaderFloat16) → `ShaderAtomicFloatFeaturesEXT` (shaderBufferFloat32AtomicAdd),
+  each field gated on the matching `Caps` bool. `enabledFeatures(caps)` fills it;
+  `feat.link()` re-wires the pNext self-pointers after the by-value return (Zig
+  copies the struct, invalidating helper-local `&` pointers — the one trap here).
+  `VK_EXT_shader_atomic_float` joins the enabled-extension list only when present.
+  Subgroup arithmetic needs no enable (core 1.1). Verified: gpu.caps unchanged
+  (all green), nn/kkc/walkgpu bit-identical — enabling regresses nothing, and §7
+  float atomics + bindless can now actually be *used*, not just queried.
+- **`shader.reduce[op]` + `kk.reduce` — the two-dispatch FALLBACK.** One fixed
+  kernel (in@0, out@1, uniform vec4@2 = `(n; T; Kmax; _)`): thread `d` combines
+  `in[d], in[d+T], …` over `Kmax` guarded steps via the existing `loopOpen`/
+  `loopClose` scaffold (counter = k, state = accumulator), OOB steps clamp the
+  index to 0 and `select` the identity so correctness never leans on padding.
+  `op ∈ sum`max`min`prod` picks identity (`0`/`-1e30`/`1e30`/`1`) + combine
+  (FAdd/FMax/FMin/FMul). Host runs it twice (`kk.reduce`): stage 1 = P=256
+  grid-strided threads → P partials; stage 2 = T=1 on one thread → the scalar
+  read back at `8:`. `kk.sum`/`max`/`min`/`prod` wrap it. Cached per op. Oracle:
+  `test/kkred.k` (12 checks) vs CPU `+/`/`|/`/`&/`/`*/` — exact for integer/max/
+  min, relative-tol for reordered float sums; all four ops spirv-val-clean
+  (vulkan1.2). Limit: `n` travels as an f32 uniform → exact only to 2^24 elems.
+  NOT YET the subgroup fast path (that's `OpGroupNonUniformFAdd` + a Workgroup
+  shared-mem hop + `OpControlBarrier`, a real new-storage-class chunk) — it
+  layers on top behind `gpu.caps sgArith` WITHOUT changing this API/contract;
+  left as the one remaining §6 optimization (perf only, not correctness).
+- **`kk.converge[f; x0; tol; maxIter]` — device-side converge.** Ping-pongs the
+  amend sweep in batches of `CVstride`=100 (even → always lands back in buffer A);
+  every batch checkpoints A into `snap`, runs the batch on-device, then measures
+  `|/abs(A-snap)` with `kk.compile[{abs[x-y]};…]` + `kk.max` (the whole-buffer
+  reduce) and reads back ONE float; the while-adverb `cvCond cvBody/ (0; tol+1)`
+  stops once maxΔ < tol or `maxIter` sweeps elapse. Shared context in `CV*`
+  globals (no closures); terminal `(sweeps; maxΔ)` stashed in `CVlast`.
+  ACCEPTANCE: walk.k's `f` verbatim on the 100×100 grid converges to
+  E@center = **2887.3418** (bit-identical to the fixed-30k `kk.loop`) in **21300
+  sweeps, tolerance-driven** (< the 60k cap; maxΔ→0.0), i.e. the solver now finds
+  its own stopping point instead of a hard-coded sweep count. `test/kkred.k` adds
+  a 20×20 converge==fixpoint + stopped-early check (14/14 total).
+
 ## 7. Float atomics
 
 caps report `atomicFadd=1` on the M1 Pro: `@[x;I;+;v]` can lower to native
@@ -382,7 +425,9 @@ f32 `OpAtomicFAddEXT` (capability `AtomicFloat32AddEXT` + SPV_EXT_
 shader_atomic_float_add) instead of the i32 fixed-point dance — clothgpu
 loses `SC` entirely, and the velocity-jitter floor it causes. Keep the
 fixed-point lowering as the caps=0 fallback. Needs the §6 device-enable
-plumbing first.
+plumbing first — **now DONE (§6): `shaderBufferFloat32AtomicAdd` is enabled +
+the EXT is in the device extension list when `caps.atomicFadd`, so the lowering
+just needs the `OpAtomicFAddEXT` emitter + capability/extension words.**
 
 ## 8. Decisions (reviewed 2026-07-15) + remaining questions
 
@@ -432,7 +477,12 @@ plumbing first.
    (single-pipeline dye, −376 lines) + multi-root fold/DCE (xOpt flag). Only
    i32 index arithmetic remains from the §3 grab-bag (folds into incr 5)
 3. §2.4-2..4 kk.compile through the walk.k acceptance (the headline)
-4. §6 device-feature enabling + whole-buffer reduce (unlocks 7 and tier 2)
+4. §6 device-feature enabling + whole-buffer reduce **DONE 2026-07-16** —
+   feature-enable plumbing (both device-create sites), `shader.reduce`/`kk.reduce`
+   two-dispatch fallback, and `kk.converge` (device-side tolerance converge, walk.k
+   E@center=2887.3418 in 21300 tol-driven sweeps). Remaining §6 optimization: the
+   subgroup `OpGroupNonUniformFAdd` fast path behind `gpu.caps sgArith`.
 5. §5 vertex pulling (clothgpu readback deletion — the visible payoff)
 6. §4 bits v1 via generated nn references (cross-backend oracle forever)
-7. §7 float atomics, §3 i32 indices, tier 2 scans/compaction
+7. §7 float atomics (device-enable now landed), §6 subgroup fast path,
+   §3 i32 indices, tier 2 scans/compaction

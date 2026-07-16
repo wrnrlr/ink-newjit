@@ -193,6 +193,43 @@ pub const Caps = struct {
   atomic_fadd: bool,    // VK_EXT_shader_atomic_float shaderBufferFloat32AtomicAdd
 };
 
+// Feature-enable chain for VkDeviceCreateInfo.pNext. The three structs point at
+// each other, so they must live in one place that outlives vkCreateDevice AND be
+// re-linked after any by-value copy (Zig copies the return, invalidating the
+// helper-local self-pointers) — hence link(), called at the create site.
+pub const Features = struct {
+  f2: c.VkPhysicalDeviceFeatures2,
+  v12: c.VkPhysicalDeviceVulkan12Features,
+  af: c.VkPhysicalDeviceShaderAtomicFloatFeaturesEXT,
+  has_af: bool,
+  pub fn link(self: *Features) void {
+    self.f2.pNext = @ptrCast(&self.v12);
+    self.v12.pNext = if (self.has_af) @as(?*anyopaque, @ptrCast(&self.af)) else null;
+  }
+};
+
+// Enable exactly the queried caps (never assume). f2.pNext is left null here;
+// link() wires the chain at the call site. atomic-float is chained only when the
+// EXT is present — querying/enabling an unknown feature struct is UB per spec.
+fn enabledFeatures(caps: Caps) Features {
+  const T = c.VkBool32;
+  return .{
+    .has_af = caps.atomic_fadd,
+    .f2 = .{ .sType = c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 },
+    .v12 = .{
+      .sType = c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+      .descriptorIndexing = @as(T, if (caps.desc_index) c.VK_TRUE else c.VK_FALSE),
+      .runtimeDescriptorArray = @as(T, if (caps.runtime_array) c.VK_TRUE else c.VK_FALSE),
+      .bufferDeviceAddress = @as(T, if (caps.bda) c.VK_TRUE else c.VK_FALSE),
+      .shaderFloat16 = @as(T, if (caps.f16) c.VK_TRUE else c.VK_FALSE),
+    },
+    .af = .{
+      .sType = c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT,
+      .shaderBufferFloat32AtomicAdd = @as(T, if (caps.atomic_fadd) c.VK_TRUE else c.VK_FALSE),
+    },
+  };
+}
+
 pub const Vk = struct {
   instance: c.VkInstance,
   pdev: c.VkPhysicalDevice,
@@ -324,15 +361,26 @@ pub const Vk = struct {
     { var i: u32 = 0; while (i < mp.memoryTypeCount) : (i += 1) { if (mp.memoryTypes[i].propertyFlags & want == want) { self.memtype = i; mfound = true; break; } } }
     if (!mfound) return Error.VulkanInit;
 
-    // --- logical device (portability_subset only) ---
-    const dev_exts = [_][*c]const u8{"VK_KHR_portability_subset"};
+    // --- logical device (portability_subset + queried features) ---
+    // The kk backend needs the caps it schedules around actually ENABLED, not
+    // just queried: subgroup arithmetic is core 1.1, but float atomics
+    // (§7 scatter-add) and descriptor indexing (bindless) are opt-in features
+    // chained into pNext, and atomic-float also needs its EXT in the ext list.
+    const caps = self.queryCaps();
+    var feat = enabledFeatures(caps);
+    feat.link(); // fix pNext self-pointers after the by-value return
+    var dev_exts: [4][*c]const u8 = undefined;
+    var n_exts: u32 = 0;
+    dev_exts[n_exts] = "VK_KHR_portability_subset"; n_exts += 1;
+    if (caps.atomic_fadd) { dev_exts[n_exts] = "VK_EXT_shader_atomic_float"; n_exts += 1; }
     const prio: f32 = 1.0;
     const qci = c.VkDeviceQueueCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = self.qfam, .queueCount = 1, .pQueuePriorities = &prio };
     const dci = c.VkDeviceCreateInfo{
       .sType = c.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+      .pNext = &feat.f2,
       .queueCreateInfoCount = 1,
       .pQueueCreateInfos = &qci,
-      .enabledExtensionCount = dev_exts.len,
+      .enabledExtensionCount = n_exts,
       .ppEnabledExtensionNames = &dev_exts,
     };
     if (!ok(vkCreateDevice(self.pdev, &dci, null, &self.dev))) return Error.VulkanInit;
@@ -441,10 +489,17 @@ pub const Vk = struct {
     self.memtype = 0;
     { var i: u32 = 0; while (i < mp.memoryTypeCount) : (i += 1) { if (mp.memoryTypes[i].propertyFlags & want == want) { self.memtype = i; break; } } }
 
-    const dev_exts = [_][*c]const u8{ "VK_KHR_swapchain", "VK_KHR_portability_subset" };
+    const caps = self.queryCaps();
+    var feat = enabledFeatures(caps);
+    feat.link(); // fix pNext self-pointers after the by-value return
+    var dev_exts: [4][*c]const u8 = undefined;
+    var n_exts: u32 = 0;
+    dev_exts[n_exts] = "VK_KHR_swapchain"; n_exts += 1;
+    dev_exts[n_exts] = "VK_KHR_portability_subset"; n_exts += 1;
+    if (caps.atomic_fadd) { dev_exts[n_exts] = "VK_EXT_shader_atomic_float"; n_exts += 1; }
     const prio: f32 = 1.0;
     const qci = c.VkDeviceQueueCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = self.qfam, .queueCount = 1, .pQueuePriorities = &prio };
-    const dci = c.VkDeviceCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .queueCreateInfoCount = 1, .pQueueCreateInfos = &qci, .enabledExtensionCount = dev_exts.len, .ppEnabledExtensionNames = &dev_exts };
+    const dci = c.VkDeviceCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &feat.f2, .queueCreateInfoCount = 1, .pQueueCreateInfos = &qci, .enabledExtensionCount = n_exts, .ppEnabledExtensionNames = &dev_exts };
     if (!ok(vkCreateDevice(self.pdev, &dci, null, &self.dev))) return Error.VulkanInit;
     vkGetDeviceQueue(self.dev, self.qfam, 0, &self.queue);
 

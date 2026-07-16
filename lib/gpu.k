@@ -272,6 +272,45 @@ kk.loop: {[f; x0; niter]
   / B, even in A (verified against a single f-step).
   res: $[0 = niter mod 2; A; B]
   [gpu: res; t:`f; n: xn; s: x0`s]}
+
+/ kk.converge[f; x0; tol; maxIter] — device-side converge (kk2 §6): iterate the
+/ amend sweep `f` in batches on the GPU, and every CVstride sweeps measure the
+/ change `|/abs(new-old)` with the whole-buffer reduce; stop once it drops below
+/ `tol` (or `maxIter` sweeps elapse). This replaces walk.k's bit-fixpoint grind
+/ (`f/`, a fixed 30k `kk.loop`) with a tolerance the solver decides — the device
+/ does the sweeps AND the max-abs-diff reduce; the host only reads one float per
+/ batch (periodic readback). CVstride is even, so a batch always lands back in A.
+/ State carried through the while-adverb is (sweepsDone; lastMaxDiff); the shared
+/ context lives in CV* globals (ink lambdas don't close over kk.converge's locals).
+CVa:: 0; CVsnap:: 0; CVpipe:: 0; CVca:: (); CVcb:: (); CVn:: 0
+CVstride:: 100; CVtol:: 0.; CVmax:: 0; CVcur:: (); CVsnp:: (); CVxn:: 0; CVs:: ()
+cvCond: {[s] ((s 1) > CVtol) & (s 0) < CVmax}
+cvBody: {[s]
+  gpu.write[CVsnap; gpu.read CVa]                 / checkpoint current state
+  gpu.dispatchLoop[CVpipe; CVca; CVcb; CVn; CVstride]   / CVstride sweeps → back in A
+  dd: kk.compile[{abs[x-y]}; (CVcur; CVsnp)]      / elementwise |Δ| over the batch
+  ((s 0) + CVstride; kk.max dd)}                  / (sweepsDone; maxΔ)
+kk.converge: {[f; x0; tol; maxIter]
+  lamOf f
+  info: kkAmendInfo[]; srcName: info 0; idxName: info 1
+  matName: (kkMatOperands[]) 1
+  md0: kkUpload matName                      / W (k;n) host global
+  msh: md0`s; k: msh 0; n: msh 1
+  GRk:: k; GRn:: n
+  pipe: kkAmendPipe[f;srcName;matName;idxName;k;n]
+  xn: x0`n
+  x0v: (gpu.read x0`gpu) , 64 # 0.
+  A: gpu.buffer[x0v]; B: gpu.buffer[x0v]; snap: gpu.buffer[x0v]
+  iv: . idxName
+  idBuf: gpu.buffer[(`f$ iv) , (kkPad[n] - n) # `f$ xn]
+  CVa:: A; CVsnap:: snap; CVpipe:: pipe; CVn:: n
+  CVca:: (A; md0`gpu; idBuf; B); CVcb:: (B; md0`gpu; idBuf; A)
+  CVtol:: tol; CVmax:: maxIter; CVxn:: xn; CVs:: x0`s
+  CVcur:: [gpu: A; t: `f; n: xn; s: x0`s]
+  CVsnp:: [gpu: snap; t: `f; n: xn; s: x0`s]
+  fin: cvCond cvBody/ (0; tol + 1.)               / while maxΔ>tol & sweeps<maxIter
+  CVlast:: fin                                    / (sweepsDone; finalMaxΔ) — observability
+  [gpu: A; t: `f; n: xn; s: x0`s]}
 / Placed-table map: bind only the columns the body reads (kk2 §2.5). The referenced
 / column names come from the CST (kkTableColNames); their handles are looked up by
 / position in the table descriptor. Output is a plain f-array descriptor.
@@ -301,6 +340,36 @@ kk.compile: {[fn; args]
 kkMap: {[fn;args;nIn]
   bad: kkClassify fn
   $[(bad~`) & ~3<nIn; kkRun[fn;args;nIn]; kkWarn[bad;nIn]]}
+
+/ ── Whole-buffer reduce (kk2 §6): +/d over a placement → a host scalar ─────────
+/ Two-stage fallback (dye's shader.reduce): stage 1 dispatches P grid-strided
+/ threads → P partials; stage 2 folds the P partials on one thread → the scalar,
+/ read back at 8:. op ∈ `sum`max`min`prod (identity+combine baked into the kernel).
+/ P (partial count) is a multiple of the 64-wide workgroup. n is passed through the
+/ uniform as an f32, so this is exact only up to 2^24 elements (the usual f32 cliff).
+/ Float reduction reorders the sum, so the result matches CPU +/ to a relative
+/ tolerance, not bit-for-bit (integer/exact reductions do match).
+kkRedP:: 256
+kkRedMiss: {[op;key] p: gpu.compileComputeU[shader.reduce[op]; 2]; kkCache[key]:: p; p}
+kkRedPipe: {[op]
+  key: `$ "reduce|",$op
+  $[key in !kkCache; kkCache key; kkRedMiss[op;key]]}
+kk.reduce: {[op; d]
+  pipe: kkRedPipe op
+  n: d`n
+  P: kkRedP
+  km: 1 | `i$ (n + P - 1) div P
+  part: gpu.buffer[P # 0.]
+  u1: gpu.uniform[(`f$n; `f$P; `f$km; 0.)]
+  gpu.dispatch[pipe; (d`gpu; part; u1); P]
+  res: gpu.buffer[64 # 0.]
+  u2: gpu.uniform[(`f$P; 1.; `f$P; 0.)]
+  gpu.dispatch[pipe; (part; res; u2); 1]
+  *gpu.read res}
+kk.sum:  {[d] kk.reduce[`sum;  d]}
+kk.max:  {[d] kk.reduce[`max;  d]}
+kk.min:  {[d] kk.reduce[`min;  d]}
+kk.prod: {[d] kk.reduce[`prod; d]}
 
 / Solid-color fragment uniforms (44 floats matching fill.wgsl FragUniforms).
 / r,g,b,a in [0,1].  Returns a flat F vector.
