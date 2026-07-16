@@ -893,12 +893,13 @@ xRgn:: ()   / owning loop node per node (-1 = top level). A loop's body/cond
             / loop node's lowerer replays them inside its basic blocks.
 XOwn:: -1   / current region owner during build (set by the loop builders)
 / xOpt — const-fold + multi-root DCE on the effectful (compute/vertex) path.
-/ 0 (default) = lower every node (byte-identical to the pre-opt path; keeps the
-/ kkgold diff oracle meaningful). 1 = xFold then keep only nodes reachable from
-/ the value result(s) + every store + every loop; oracle then drops to numeric
-/ parity + spirv-val (byte-identity is intentionally broken by folding). See
-/ kk2 §3 + test/kkopt.k.
-xOpt:: 0
+/ 1 (default) = xFold then keep only nodes reachable from the value result(s) +
+/ every store + every loop. 0 = lower every node (byte-identical to the pre-opt
+/ path); test/kkgold.k pins it to 0 so its SPIR-V diff oracle stays meaningful.
+/ With the optimizer on, correctness is guarded by numeric-parity oracles
+/ (test/nn.k, test/kkc.k, test/walkgpu.k) + the safety asserts in test/kkopt.k.
+/ See kk2 §3.
+xOpt:: 1
 / Compile-error latch (`` ` `` = none): xFoldBad/xBakeBad set it to the message
 / symbol and emit a NaN placeholder so the emit walk finishes without crashing on
 / an indexed error; the module assemblers (kAsm / buildMod) return `!xErr` instead

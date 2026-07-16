@@ -8,6 +8,11 @@
 
 2: "lib/dye.k"
 
+/ This is a byte-identity oracle: pin the optimizer OFF so the dump lowers every
+/ node and stays byte-stable across dye refactors (xOpt is default-on now; the
+/ optimized path's correctness is covered by the numeric oracles instead).
+xOpt:: 0
+
 ck: {[nm;w] `0 0: nm,": ",(" "/$'w),"\n"}
 
 ck["compute";  shader.compute[{[x] x*2.}]]

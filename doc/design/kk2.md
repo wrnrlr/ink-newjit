@@ -302,8 +302,12 @@ E: 9: [[]i:ei; j:ej; l0:l0; al:al; w0:w0; w1:w1; wt:w0+w1]
   across GEMM/softmax/LN/attention/conv), all 19 kkgold modules spirv-val-clean
   under xOpt, and it's effective (a dead `g[1]` load + a `0.5*0.5` const both
   vanish) while stores/atomics/phis survive. New structural oracle test/kkopt.k
-  (9 checks). Default stays 0 so kkgold byte-identity still guards refactors;
-  flip xOpt when kk.compile starts generating IR with real dead code.
+  (9 checks). **Default flipped to 1 (on) 2026-07-16**: kk.compile now emits IR
+  with real dead code (e.g. pruned table columns, unused `g[]` slots), so the
+  optimizer earns its keep on every compile. kkgold pins `xOpt::0` in-file to
+  keep its byte-diff oracle; correctness under the optimizer is guarded by the
+  numeric-parity oracles (nn/kkc/walkgpu, all re-verified bit-identical / PASS)
+  plus kkopt's safety asserts.
 - **i32 index type**: `f2s` results and loop counters already are i32; the
   step is letting index *arithmetic* stay integer (OpIAdd/OpSDiv/OpSRem on
   `i32-typed nodes) instead of round-tripping through f32, killing the 2^24
