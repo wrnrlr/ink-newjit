@@ -192,8 +192,30 @@ Out of scope for tier 1 (tier 2, needs scan/whole-buffer-reduce infra):
    spelling is `f/` (converge-to-fixpoint); `kk.loop` is the fixed-count `n f/`
    form — true device-side converge (tolerance + periodic readback) is §6/tier-2.
 5. `@[x;I;+;v]` → `sadd` (spatial-hash histogram from `test/spacial.k` as the
-   demo).
+   demo). **DONE (2026-07-16).** `@[x;I;+;v]` → `shader.scatadd`: one thread per
+   index d, `acc[I[d]] += i32(v)` via `OpAtomicIAdd` (`kScatAdd`) so duplicate
+   buckets accumulate race-free. acc is an i32 accumulator (binding 0, expected
+   zero-inited); I (binding 1) is padded with a sentinel into acc's padding tail;
+   v is a constant (baked) or a single value vector (`elem`, binding 2). Detected
+   by `kkIsScatAdd[]` (an `@`-apply whose 3rd arg is `+`); the result descriptor
+   is tagged `t:`i` and `gpu.fetch` reads it via `gpu.readI`. Oracle: test/kkc.k
+   count + skewed + weighted histograms vs CPU `@[…;+;…]` (19/19). Deferred:
+   float fixed-point scaling (weighted float accum) and paired/multi-value
+   scatters (spacial.k's `@[px;k;+;(…),…]`).
 6. Placed tables (§2.5): clothgpu's edge kernel on named columns.
+   **DONE (2026-07-16), elementwise slice.** `gpu.holdT[t]` places a k table as a
+   structured buffer — one resident buffer per column (planar/splayed), the
+   descriptor carrying `cols`+`hand`. `kk.compile` detects a table arg
+   (`t:`tbl`) → `kkTable` → `shader.table`: a column read `(t`c)` (an apposit
+   var+symbol, bound to a `table env entry = a col→bufp dict) element-loads that
+   column at the thread index (`xTableCol`/`xIsTableCol` in xAppos). Binding
+   inference (`kkTableColNames`) passes only the columns the body mentions, so
+   dead columns cost nothing — the kdb splayed-column property on the device.
+   The CPU form `t`c` already IS the column, so the same lambda runs both sides.
+   Oracle: test/kkc.k column arithmetic `(x`px)+(x`vx)`, `((x`px)*(x`vy))+(x`py)`
+   vs CPU + a 3-of-4 pruning check (22/22). Deferred: interleaved layout (the
+   MAX_BIND=8 knob), placed dicts (ragged CSR), and tables composed with
+   gather/reduce/scatter (clothgpu's edge kernel).
 
 ### 2.5 Placed tables ("colored arrays") — structured buffers as k tables
 

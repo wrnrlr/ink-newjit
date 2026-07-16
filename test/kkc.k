@@ -22,6 +22,16 @@ GI: GC + GN*GR                    / interior flat indices (I)
 GW: ((-GN),GN,1,-1) +\: GI        / (4; #I) neighbour matrix (W, a host global)
 gjac: {@[x;GI;:;1.+.25*+/x@GW]}   / one Jacobi sweep (walk.k's f, verbatim)
 
+/ scatter-add histogram: @[x;I;+;v] atomic accumulate into an i32 bucket array
+HB: 8; HK: 40
+HI: (13 * !HK) mod HB             / skewed bucket indices (host global)
+HV: `f$ 1 + (!HK) mod 3           / per-item weights
+histc: {@[x;HI;+;1.]}             / count
+histw: {@[x;HI;+;HV]}             / weighted sum
+
+/ placed table (kk2 §2.5): named equal-length columns as a structured GPU buffer
+TT: [[]px:`f$!64; py:0.5*`f$!64; vx:(`f$!64)-8.; vy:`f$64-!64]
+
 / Helpers are TOP-LEVEL globals: an inner lambda can't see demo's locals (ink
 / lambdas don't close over parent scope), so chk must reach chkb as a global.
 ok:: 0; nok:: 0
@@ -66,6 +76,18 @@ demo: {[]
   chk["@[x;I;:;v] one sweep";   gpu.fetch kk.compile[gjac; ,gx0];  gjac (GN*GN)#0.]
   chk["ping-pong 5 iters (even A)"; gpu.fetch kk.loop[gjac; gx0; 6]; 6 gjac/ (GN*GN)#0.]
   chk["ping-pong 7 iters (odd B)";  gpu.fetch kk.loop[gjac; gx0; 7]; 7 gjac/ (GN*GN)#0.]
+
+  / scatter-add @[x;I;+;v]: atomic histogram (duplicate buckets accumulate), i32 out
+  gh0: gpu.hold HB#0.
+  chkb["scatter-add count";    (gpu.fetch kk.compile[histc; ,gh0]) ~ @[HB#0; HI; +; HK#1]]
+  chkb["scatter-add weighted"; (gpu.fetch kk.compile[histw; ,gh0]) ~ @[HB#0; HI; +; `i$HV]]
+
+  / placed-table column arithmetic — the CPU form `t`c` IS the column, so the same
+  / lambda runs on both sides. Only the referenced columns are bound (pruning).
+  pt: gpu.holdT TT
+  chk["table (px)+(vx)";       gpu.fetch kk.compile[{(x`px)+(x`vx)}; ,pt]; (TT`px)+(TT`vx)]
+  chk["table (px)*(vy)+(py)";  gpu.fetch kk.compile[{((x`px)*(x`vy))+(x`py)}; ,pt]; ((TT`px)*(TT`vy))+(TT`py)]
+  chkb["column pruning: reads 3 of 4"; 3 = #kkTableColNames[]]
 
   / rejection: a whole-buffer reduce is neither elementwise nor a gather → kk.compile
   / warns + returns !0 (empty). (+/ over the whole placement is a tier-2 form.)

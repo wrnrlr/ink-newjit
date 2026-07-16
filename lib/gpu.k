@@ -94,7 +94,12 @@ gpu.pipeline: {[fn] w: shader.kernel fn; gpu.compileCompute[w; KKnb]}
 
 gpu.hold:     {[x] f: {$[`L~@x; ,/x; x]}/ x; [gpu: gpu.buffer[0.+f]; t: `f; n: #f; s: %x]}
 gpu.holdInto: {[d;x] gpu.write[d`gpu; 0.+{$[`L~@x; ,/x; x]}/ x]; d}
-gpu.fetch:    {[d] r: (d`n) # gpu.read[d`gpu]; $[1 < #d`s; (d`s)#r; r]}
+gpu.fetch:    {[d] r: (d`n) # $[(d`t)~`i; gpu.readI d`gpu; gpu.read d`gpu]; $[1 < #d`s; (d`s)#r; r]}
+/ Place a k table as a STRUCTURED buffer (kk2 §2.5): one resident buffer per column
+/ (planar/splayed layout), the descriptor carrying the column names + handles so
+/ kk.compile can bind only the columns a kernel reads. `t`c` on the CPU already IS
+/ the column, so the same lambda runs host-side unchanged.
+gpu.holdT: {[t] cols: !t; nr: #t cols 0; [cols: cols; hand: gpu.buffer' {0.+x}' t[cols]; n: nr; t: `tbl; s: ,nr]}
 gpu.fetchN:   {[n;d] n # gpu.read[d`gpu]}
 
 / ── kk.compile — idiomatic whole-array lambda on placements (kk2 §2, incr 5) ──
@@ -211,6 +216,31 @@ kkAmend: {[fn;args;nIn]
   idBuf: bufs 0; out: bufs 1
   gpu.dispatch[pipe; (sd`gpu; md`gpu; idBuf; out); n]
   [gpu: out; t:`f; n: xn; s: sd`s]}
+
+/ Scatter-add @[x;I;+;v]: one thread per index; acc[I[d]] += v atomically into an
+/ i32 accumulator (histogram / gather-scatter). x is expected zero-initialised; I
+/ is padded with a sentinel into acc's padding tail so over-dispatched threads add
+/ harmlessly. v is a constant or a single value vector (bindings after acc,I).
+/ Returns an i32-tagged descriptor — gpu.fetch reads it via gpu.readI. n=#I threads.
+kkSMiss: {[fn;vbn;key] p: gpu.compileCompute[shader.scatadd[fn;vbn]; 2 + #vbn]; kkCache[key]:: p; p}
+kkIvals: {[idxName; idd; pn] $[idxName in pn; gpu.read idd`gpu; `f$ . idxName]}
+kkScatAdd: {[fn;args;nIn]
+  info: kkScatInfo[]; accName: info 0; idxName: info 1
+  vbn: kkScatVbufs[accName; idxName]        / value-vector operand names in v (0 or 1)
+  pn: nIn # `x`y`z
+  na: pn ! args
+  ad: kkResolve[accName; na; pn]            / accumulator placement (zero-inited)
+  idd: kkResolve[idxName; na; pn]           / I index
+  n: idd`n; an: ad`n
+  GRk:: 0; GRn:: n
+  key: `$ ($fn),"|s|",($#vbn)
+  pipe: $[key in !kkCache; kkCache key; kkSMiss[fn;vbn;key]]
+  ivals: kkIvals[idxName; idd; pn]
+  idBuf: gpu.buffer[ivals , (kkPad[n] - n) # `f$ an]     / sentinel = an → acc padding
+  acc: gpu.buffer[(an + 64) # 0.]           / i32 accumulator (zeros) + slack
+  vHnd: $[0=#vbn; !0; ,(kkResolve[vbn 0; na; pn])`gpu]
+  gpu.dispatch[pipe; (acc; idBuf), vHnd; n]
+  [gpu: acc; t:`i; n: an; s: ad`s]}
 / kk.loop[f; x0; niter] — iterate an amend `f:{@[x;I;:;v]}` niter times on the GPU
 / with a ping-pong: two full-size buffers, each pass reads one and writes the other
 / (Jacobi needs the previous sweep's values). Runs in ONE encoder (gpu.dispatchLoop,
@@ -234,10 +264,29 @@ kk.loop: {[f; x0; niter]
   / B, even in A (verified against a single f-step).
   res: $[0 = niter mod 2; A; B]
   [gpu: res; t:`f; n: xn; s: x0`s]}
+/ Placed-table map: bind only the columns the body reads (kk2 §2.5). The referenced
+/ column names come from the CST (kkTableColNames); their handles are looked up by
+/ position in the table descriptor. Output is a plain f-array descriptor.
+kkTMiss: {[fn;tn;cn;nc;key] p: gpu.compileCompute[shader.table[fn;tn;cn]; nc+1]; kkCache[key]:: p; p}
+kkTable: {[fn;args;nIn]
+  td: args 0
+  cn: kkTableColNames[]                      / distinct columns actually read
+  tn: kkTableName[]
+  nc: #cn
+  key: `$ ($fn),"|t|",(","/$'cn)
+  pipe: $[key in !kkCache; kkCache key; kkTMiss[fn;tn;cn;nc;key]]
+  n: td`n
+  colH: (td`hand) (td`cols) ? cn             / handles for the referenced columns
+  ob: gpu.buffer[(kkPad n)#0.]
+  gpu.dispatch[pipe; colH, ob; n]
+  [gpu: ob; t:`f; n: n; s: ,n]}
 kk.compile: {[fn; args]
   nIn: #args
   lamOf fn                                  / set Cst for the gather scan / classify
-  $[kkIsAmend[];     kkAmend[fn;args;nIn]
+  isTbl: $[0<nIn; `tbl ~ (args 0)`t; 0]
+  $[isTbl;           kkTable[fn;args;nIn]
+    kkIsScatAdd[];   kkScatAdd[fn;args;nIn]
+    kkIsAmend[];     kkAmend[fn;args;nIn]
     kkIsMatReduce[]; kkGathMat[fn;args;nIn]
     kkHasAt[];       kkGath[fn;args;nIn]
     kkMap[fn;args;nIn]]}

@@ -1,6 +1,26 @@
 # Changelog
 
 ## 2026-07-16
+- **`kk.compile` placed tables** (kk2 §2.5, the last §2 milestone): `gpu.holdT[t]`
+  places a k table as a structured buffer — one resident buffer per column
+  (planar/splayed) — and `kk.compile` binds only the columns a kernel actually
+  reads. A column access `(t`c)` (an apposit var+symbol) resolves to that column's
+  buffer, element-loaded at the thread index (`xTableCol`; `shader.table`). Binding
+  inference (`kkTableColNames`) prunes unreferenced columns — the kdb splayed
+  property on the device. Since `t`c` on the CPU already IS the column, the same
+  lambda runs both sides. Verified in test/kkc.k (22/22): column arithmetic vs CPU
+  + a pruning check. Deferred: interleaved layout, placed dicts (ragged CSR), and
+  tables composed with gather/reduce/scatter. **This completes the kk2 §2 roadmap
+  (gather, matrix-reduce, amend, scatter-add, tables) on top of the walk.k
+  headline.**
+- **`kk.compile` scatter-add `@[x;I;+;v]`** (kk2 §2.4-5): compiles to
+  `shader.scatadd` — one thread per index, `acc[I[d]] += i32(v)` via `OpAtomicIAdd`
+  (`kScatAdd`) so duplicate buckets accumulate race-free. acc is an i32 accumulator
+  (zero-inited); I is padded with a sentinel into acc's padding tail; v is a
+  constant (baked) or a single value vector. Result descriptor is tagged `t:`i` and
+  `gpu.fetch` reads it via `gpu.readI`. Verified in test/kkc.k with count, skewed,
+  and weighted histograms vs CPU `@[…;+;…]` (19/19). Deferred: float fixed-point
+  scaling and paired/multi-value scatters.
 - **`kk.compile` amend-scatter + ping-pong iterate — walk.k acceptance met**
   (kk2 §2.4-4): `@[x;I;:;v]` compiles to `shader.amend` — one thread per interior
   index, the value expr (`1.+.25*+/x@W`) computed through the gather-reduce IR and

@@ -509,6 +509,16 @@ kScatStore: {[outBid; idxBid; gx; val]
   si:newId[]; emitBuf opF2s[Ti32; si; iv]
   p2:newId[]; emitBuf opAccChain[AKpf32; p2; outBid; AKz; si]
   emitBuf opStore[p2; val]}
+/ Atomic scatter-add for @[x;I;+;v]: acc[I[gid]] += i32(v). acc is an i32
+/ accumulator (kAlloc nAcc>0 sets CPi32/CScope); idxBid is the f32 I buffer.
+/ Multiple threads hitting one bucket accumulate race-free (OpAtomicIAdd, Device).
+kScatAdd: {[accBid; idxBid; gx; val]
+  p1:newId[]; emitBuf opAccChain[AKpf32; p1; idxBid; AKz; gx]
+  iv:newId[]; emitBuf opLoad[Tf32; iv; p1]
+  si:newId[]; emitBuf opF2s[Ti32; si; iv]
+  vi:newId[]; emitBuf opF2s[Ti32; vi; val]
+  ptr:newId[]; emitBuf opAccChain[CPi32; ptr; accBid; AKz; si]
+  old:newId[]; emitBuf opAtomicIAdd[Ti32; old; ptr; CScope; CKz; vi]}
 
 / ── kAsm[] — assemble the module from the AK* state ───────────────────────────
 / Per-binding DescriptorSet/Binding decorations and OpVariables (each-helpers
@@ -654,6 +664,34 @@ compGmap: {[fn; bufNames; elemNames]
   kAsm[]}
 shader.gmap: compGmap
 
+/ ── Placed-table map kernel (kk2 §2.5): {(t`a)+(t`b)} over a placed table ──────
+/ Each referenced column is one storage binding (0..nc-1), loaded elementwise at
+/ the thread index; the table var resolves to a col-name→bufp dict (a `table env
+/ entry) that xTableCol reads. Output → binding nc. Binding inference (kk.compile)
+/ passes only the columns the body mentions, so dead columns cost nothing.
+compTable: {[fn; tableName; colNames]
+  nc: #colNames
+  ids: kAlloc[0; nc+1; 0; 1]
+  lam: lamOf fn
+  gx: kGidX[]; gf: kGidF[gx]
+  xReset[]
+  colNodes: {[id] xEmit[`bufp; `col; (); id]}' nc # ids
+  colDict: colNames ! colNodes
+  e2: (,tableName) ! ,(colDict; `table)
+  GIrGid:: xEmit[`param; `f32; (); gf]
+  rp: xSeq[lamBody lam; e2; `f32]
+  xLowerC[,rp 0]
+  kStore[ids nc; gx; xId rp 0]
+  kAsm[]}
+shader.table: compTable
+
+/ Column references `(t`c)`: apposit rows whose f is a var (the table) and whose
+/ arg is a symbol (the column). kkTableName = the table var; kkTableColNames =
+/ the DISTINCT columns actually read (drives binding pruning).
+kkColRefs: {[] ap: & `apposit = Cst`kind; $[0=#ap; !0; ap @ & {[i] ((kKind kF1[i;`f])~`var) & ((kKind kF1[i;`a])~`symbol)}' ap]}
+kkTableName: {[] r: kkColRefs[]; $[0=#r; `; kVal kF1[*r;`f]]}
+kkTableColNames: {[] r: kkColRefs[]; $[0=#r; 0#`; ? {[i] kVal kF1[i;`a]}' r]}
+
 / ── Amend-scatter kernel (kk2 §2.4-4): @[x;I;:;v] → out[I[d]] = v ─────────────
 / One thread per interior index d. The value expr v (arg 3 of the @-apply, e.g.
 / 1.+.25*+/x@W) is compiled through the gather-reduce IR reading x (source) and W
@@ -681,6 +719,39 @@ kkIsAmendR: {[i] a:kF[i;`arg]; ((kVal kF1[i;`f])~`"@") & (3<#a) & ((kVal a 2)~`"
 kkAmendRows: {[] ap: & `apply = Cst`kind; $[0=#ap; !0; ap @ & kkIsAmendR' ap]}
 kkIsAmend: {[] 0 < # kkAmendRows[]}
 kkAmendInfo: {[] r: *kkAmendRows[]; a: kF[r;`arg]; (kVal a 0; kVal a 1)}
+
+/ ── Scatter-add kernel (kk2 §2.4-5): @[x;I;+;v] → acc[I[d]] += v ──────────────
+/ One thread per index d. acc (binding 0) is an i32 fixed-point accumulator hit by
+/ kScatAdd; I (binding 1) is the scatter index; valBufNames are the vector value
+/ operands (bindings 2.., loaded elementwise as v[d]); host scalars in v bake.
+/ Duplicate indices accumulate race-free. Read back with gpu.readI (i32 counts).
+compScatAdd: {[fn; valBufNames]
+  nv: #valBufNames
+  ids: kAlloc[1; 1+nv; 0; 1]                   / acc(i32) + I + value bufs
+  lam: lamOf fn
+  gx: kGidX[]; gf: kGidF[gx]
+  valP: {[id] (id;`elem)}' 2 _ (2+nv) # ids
+  xReset[]
+  e2: valBufNames ! kGmapEnvOne' valP
+  GIrGid:: xEmit[`param; `f32; (); gf]
+  ap: *& `apply = Cst`kind
+  vN: (kF[ap;`arg]) 3
+  rp: xNode[vN; e2; `f32]
+  xLowerC[,rp 0]
+  kScatAdd[ids 0; ids 1; gx; xId rp 0]         / acc[I[gid]] += v
+  kAsm[]}
+shader.scatadd: compScatAdd
+
+/ Scatter-add detection: an @-apply whose 3rd arg is the `+` verb.
+kkIsScatR: {[i] a:kF[i;`arg]; ((kVal kF1[i;`f])~`"@") & (3<#a) & ((kVal a 2)~`"+")}
+kkScatRows: {[] ap: & `apply = Cst`kind; $[0=#ap; !0; ap @ & kkIsScatR' ap]}
+kkIsScatAdd: {[] 0 < # kkScatRows[]}
+kkScatInfo: {[] r: *kkScatRows[]; a: kF[r;`arg]; (kVal a 0; kVal a 1)}
+/ All var names referenced anywhere in the body (for value-operand discovery).
+kkAllVars: {[] ? (Cst`value) @ & `var = Cst`kind}
+/ Value-operand names of a scatter-add: every var except the accumulator and index
+/ (assumed value vectors; a host scalar in v bakes and needn't be listed here).
+kkScatVbufs: {[accName; idxName] vs: kkAllVars[]; vs @ & ~ vs in (accName; idxName)}
 
 / Body scans for kk.compile's gather orchestration (Cst must already be set by a
 / prior lamOf). kkHasAt: does the body contain an @-transit? kkGathSrc: the set of
@@ -857,9 +928,23 @@ xTransOp: {[i;env;oty]
     (op~`">")&isEq; xLeGe[i;env;`"<"]
     xTransNorm[i;env;oty]]}
 xTrans: {[i;env;oty] $[(kKind kF1[i;`v])~`term; xAdverb[i; kF1[i;`v]; env; oty]; xTransOp[i;env;oty]]}
+/ Placed-table column access `(t`c)` (kk2 §2.5): an apposit whose f is a var bound
+/ to a `table env entry (a col-name→bufp dict) and whose arg is a symbol → the
+/ column c's buffer, element-loaded at the thread index (like an `elem name).
+xIsTableCol: {[i;env]
+  fN: kF1[i;`f]
+  $[~(kKind fN)~`var; 0
+    ~(kVal fN) in !env; 0
+    ~`table ~ (env kVal fN) 1; 0
+    (kKind kF1[i;`a])~`symbol]}
+xTableCol: {[i;env]
+  cd: (env kVal kF1[i;`f]) 0                 / the column dict for this table
+  (xElem[cd kVal kF1[i;`a]]; `f32)}          / column's bufp node → buf[d]
 xAppos: {[i;env;oty]
   fN: kF1[i;`f]
-  $[(kKind fN)~`term; xApposAdv[i;fN;env;oty]; xApposOp[i;fN;env;oty]]}
+  $[(kKind fN)~`term;   xApposAdv[i;fN;env;oty]
+    xIsTableCol[i;env]; xTableCol[i;env]
+    xApposOp[i;fN;env;oty]]}
 xApposOp: {[i;fN;env;oty]
   op: kVal fN; ap: xNode[kF1[i;`a];env;oty]; aty: ap 1
   $[op in mathFns; (xEmit[`math; $[op~`length;`f32;aty]; ,ap 0; op]; $[op~`length;`f32;aty])
