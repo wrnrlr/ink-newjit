@@ -283,6 +283,7 @@ const Monads = struct {
   pub const @"*x" = selection.First;
   pub const @"*|x"  = selection.Last_Name;
   pub const @"⍳i" = @import("iota.zig").Iota;
+  pub const @"!s" = @import("iota.zig").Signal;  // monadic ! on symbol/string → user error
   pub const @"↕I" = @import("odometer.zig").Odometer;
   pub const @"!d" = Keys;
   pub const @"&x" = @import("where.zig").Where;

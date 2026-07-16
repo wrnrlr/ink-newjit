@@ -115,7 +115,9 @@ gpu.fetchN:   {[n;d] n # gpu.read[d`gpu]}
 kkPad: {[n] 64 * 1 | `i$ (n+63) div 64}
 kkCache:: ()!()
 kkMiss: {[fn;nIn;key] p: gpu.compileCompute[shader.map[fn;nIn]; nIn+1]; kkCache[key]:: p; p}
-kkWarn: {[bad;nIn] `0 0: "kk.compile: ",$[3<nIn; "more than 3 inputs unsupported"; "unsupported verb/kind ",$bad]," (elementwise subset: arith/math over x/y/z)\n"; !0}
+/ Reject: signal an error (monadic ! on the message string) instead of warning to
+/ stdout + returning !0 — kk.compile now fails loudly like any primitive.
+kkWarn: {[bad;nIn] !"kk.compile: ",$[3<nIn; "more than 3 inputs unsupported"; "unsupported verb/kind ",$bad]," (elementwise subset: arith/math over x/y/z)"}
 / Key is a SYMBOL, not a string: `str in !dict` runs char-wise (a string is a char
 / vector, not an atom) and `$[]` reads the resulting non-empty vector as true — so
 / a string key makes every cache probe a false hit. Symbols are atoms → scalar in.

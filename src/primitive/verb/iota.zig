@@ -2,6 +2,7 @@ const std = @import("std");
 const Alloc = @import("std").mem.Allocator;
 const Rc = @import("../../noun/rc.zig").Rc;
 const V = @import("../../noun/value.zig").V;
+const Err = @import("../../noun/value.zig").Err;
 const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
 
@@ -10,6 +11,20 @@ pub const Iota = struct {
   _i: VM.Monad = iota,
   _f: VM.Monad = iota,
 };
+
+// Monadic `!` on a symbol/string SIGNALS a user error carrying that name:
+// `` !`domain `` yields the builtin domain error, `` !`"cannot bake FOO" `` (or
+// the string `!"cannot bake FOO"`) an arbitrary message error. The payload is
+// just an interned symbol index, so builtins and user errors are the same kind.
+pub const Signal = struct {
+  pub const op = .@"!";
+  _s: VM.Monad = signalSym,
+  _C: VM.Monad = signalStr,
+};
+fn signalSym(_: *VM, x: V) V { return .{ .err = Err.from(x.s) }; }
+fn signalStr(vm: *VM, x: V) V {
+  return .{ .err = Err.from(vm.intern(x.C.slice()) catch return V{ .err = .memory }) };
+}
 
 pub fn iota(vm: *VM, x: V) V {
   if (x == .f) return iota(vm, .{ .i = @intFromFloat(@round(x.f)) });

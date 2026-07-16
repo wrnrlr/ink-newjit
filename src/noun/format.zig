@@ -7,6 +7,15 @@ const FnKind = @import("./operator.zig").FnKind;
 const Dict = @import("./dict.zig").Dict;
 const Alloc = std.mem.Allocator;
 
+// A symbol name is "identifier-shaped" if it reads back as a bare k name: a
+// leading letter followed by letters/digits/dots. Used to pick bare vs quoted
+// rendering for error names.
+fn isIdentSym(s: []const u8) bool {
+  if (s.len == 0 or !std.ascii.isAlphabetic(s[0])) return false;
+  for (s) |ch| if (!std.ascii.isAlphanumeric(ch) and ch != '.') return false;
+  return true;
+}
+
 fn adverbStr(adv: Adverb) []const u8 {
   return switch (adv) {
     .@"'" => "'", .@"/" => "/", .@"\\" => "\\",
@@ -208,7 +217,18 @@ pub const TerseFormatter = struct {
           try w.print("<{s}>", .{obj.vtable.name});
         }
       },
-      .err => |a| try w.print("!{s}", .{@tagName(a)}),
+      .err => |a| {
+        // Errors carry a symbol-pool index. Identifier-shaped names print bare
+        // (`!domain`); anything else (a message) is quoted (`!"cannot bake FOO"`)
+        // so it round-trips through monadic `!` on the string.
+        const idx = @intFromEnum(a);
+        if (idx >= self.vm.symbolCount()) {
+          try w.print("!`{d}", .{idx});
+        } else {
+          const nm = self.vm.getSymbol(idx);
+          if (isIdentSym(nm)) try w.print("!{s}", .{nm}) else try w.print("!\"{s}\"", .{nm});
+        }
+      },
       .blank => {},
     }
   }

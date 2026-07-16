@@ -407,7 +407,8 @@ loadOnePair: {[vid; tsym]
 decInOne: {[vid;loc] (0x00040047; vid; 30; loc)}
 varInOne: {[ptr;vid] (0x0004003B; ptr; vid; 1)}
 
-buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
+buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs] $[xErr~`; buildModW[outId; inVarIds; inTys; inPtrs; outPtr; locs]; !xErr]}
+buildModW: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
   bnd:   Nid+1
   / SPIR-V 1.4: OpEntryPoint lists EVERY global variable — the texture images
   / and shared sampler (UniformConstant) join the Input/Output interface.
@@ -479,6 +480,7 @@ kAllocUni: {[] AKuniT::newId[]; AKuniP::newId[]; AKuniPv4::newId[]; AKuniVar::ne
 / rsum/rmax/N-do loop constants (i32 0/1, f32 0., f32 -1e30), one set per compile
 kAllocLoop:{[] RCi0::newId[]; emitCon opConst[Ti32;RCi0;0]; RCi1::newId[]; emitCon opConst[Ti32;RCi1;1]; RCf0::newId[]; emitCon opConst[Tf32;RCf0;0.]; RCfNeg::newId[]; emitCon opConst[Tf32;RCfNeg;-1e30]}
 kAlloc: {[nAcc;nBuf;hasUni;hasLoop]
+  xErr::`
   Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
   AKu32::newId[]; AKv3::newId[]
   AKrta::newId[]; AKtbuf::newId[]; AKpbufs::newId[]; AKpf32::newId[]
@@ -525,7 +527,9 @@ kScatAdd: {[accBid; idxBid; gx; val]
 / read the globals; binding k = position k in AKids).
 akDecOne: {[k] (0x00040047;AKids[k];34;0),(0x00040047;AKids[k];33;k)}
 akVarOne: {[k] (0x0004003B; $[`i~AKknd k; AKpbufsI; AKpbufs]; AKids[k]; 12)}
-kAsm: {[]
+/ A latched compile error (xFoldBad/xBakeBad) aborts assembly with `!xErr`.
+kAsm: {[] $[xErr~`; kAsmWords[]; !xErr]}
+kAsmWords: {[]
   bnd: Nid+1
   / SPIR-V 1.4: OpEntryPoint lists EVERY global variable — gid + all storage
   / bindings + the uniform block (not just the builtin Input).
@@ -895,7 +899,12 @@ XOwn:: -1   / current region owner during build (set by the loop builders)
 / parity + spirv-val (byte-identity is intentionally broken by folding). See
 / kk2 §3 + test/kkopt.k.
 xOpt:: 0
-xReset: {[] xOp::(); xTy::(); xArg::(); xVal::(); xId::(); xRe::(); xRgn::(); XOwn::-1}
+/ Compile-error latch (`` ` `` = none): xFoldBad/xBakeBad set it to the message
+/ symbol and emit a NaN placeholder so the emit walk finishes without crashing on
+/ an indexed error; the module assemblers (kAsm / buildMod) return `!xErr` instead
+/ of a module when it is set. Reset at the start of every compile (xReset + kAlloc).
+xErr:: `
+xReset: {[] xErr::`; xOp::(); xTy::(); xArg::(); xVal::(); xId::(); xRe::(); xRgn::(); XOwn::-1}
 xEmit: {[op;ty;args;val] xOp,:: ,op; xTy,:: ,ty; xArg,:: ,args; xVal,:: ,val; xRgn,:: XOwn; -1+#xOp}
 xSplat: {[vty;snode] xEmit[`cons; vty; (ncVec[vty])#snode; 0n]}
 
@@ -963,7 +972,9 @@ xIsEachEnum: {[aN]
     ~(kKind kF1[kF1[aN;`f];`f])~`lambda; 0
     ~(kKind kF1[aN;`a])~`apposit; 0
     (kVal kF1[kF1[aN;`a];`f])~`"!"]}
-xFoldBad: {[g] `0 0: "dye: unsupported adverbed verb ",($g)," in kernel (only +/{[k] e}'!K, |/…, +/x@W)\n"; (xEmit[`const;`f32;();0n]; `f32)}
+/ Latch the error (assemblers turn it into `!xErr`) and emit a NaN placeholder so
+/ the rest of the emit walk completes without indexing a bare error into garbage.
+xFoldBad: {[g] xErr:: `$"dye: unsupported adverbed verb ",($g)," in kernel (only +/{[k] e}'!K, |/…, +/x@W)"; (xEmit[`const;`f32;();0n]; `f32)}
 / +/x@W matrix gather-reduce (kk2 §2.4-3): W is a (k;n) index matrix uploaded flat
 / (W[j*n+d] = the j-th neighbour index of output element d); the fold sums the k
 / gathers of x through those indices. GRk/GRn (k and n) are baked by kk.compile
@@ -1136,7 +1147,7 @@ xCondS: {[ss;env;oty]
   ep: $[n=3; xNode[ss 2;env;oty]; xCondS[2_ss;env;oty]]
   (xEmit[`select; tp 1; (cp 0;tp 0;ep 0); 0n]; tp 1)}
 / Host-global baking on the IR path (mirrors compVar/kBake).
-xBakeBad: {[nm] `0 0: "dye: cannot bake ",($nm)," (not a param/local, and not a numeric scalar host global)\n"; (xEmit[`const;`f32;();0n]; `f32)}
+xBakeBad: {[nm] xErr:: `$"dye: cannot bake ",($nm)," (not a param/local, and not a numeric scalar host global)"; (xEmit[`const;`f32;();0n]; `f32)}
 xBake: {[nm] v: . nm; $[(@v) in `b`i`f; (xEmit[`const;`f32;();0.+v]; `f32); xBakeBad nm]}
 / An `elem-role env entry is a whole buffer that stands for its element AT THE
 / THREAD INDEX: a bare use of the name loads buf[d] (d = GIrGid, the gid-as-f32

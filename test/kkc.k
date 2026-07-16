@@ -90,8 +90,9 @@ demo: {[]
   chkb["column pruning: reads 3 of 4"; 3 = #kkTableColNames[]]
 
   / rejection: a whole-buffer reduce is neither elementwise nor a gather → kk.compile
-  / warns + returns !0 (empty). (+/ over the whole placement is a tier-2 form.)
-  chkb["{+/x} rejected"; 0=#kk.compile[{+/x}; ,a]]
+  / SIGNALS an error (`@x ~ `! for an err value). (+/ over the whole placement is a
+  / tier-2 form.)
+  chkb["{+/x} rejected"; `"!"~@kk.compile[{+/x}; ,a]]
 
   `0 0: "kkc: ",($ok)," ok, ",($nok)," fail\n"
   0}

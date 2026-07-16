@@ -8,7 +8,28 @@ const N = @import("array.zig").N;
 const Dict = @import("dict.zig").Dict;
 const ExtObj = @import("plugin.zig").ExtObj;
 
-pub const Err = enum { domain, length, rank, nyi, memory, @"type", io };
+// Error values carry a symbol-pool index as their payload. The 7 builtins are
+// prefilled at fixed indices (see symbol.zig's builtin_symbols) so every
+// `.err = .domain` site keeps compiling unchanged; the enum is non-exhaustive
+// so a user error `` !`whatever `` is just any other interned symbol index. The
+// formatter and marshaler resolve the index back to text via the pool.
+pub const Err = enum(u32) {
+  domain = 16, length = 17, rank = 18, nyi = 19, memory = 20, @"type" = 21, io = 22,
+  _,
+  /// The interned symbol index backing this error (== the enum value).
+  pub inline fn sym(e: Err) u32 { return @intFromEnum(e); }
+  /// Wrap an interned symbol index as an error (used by monadic `!` on a symbol).
+  pub inline fn from(idx: u32) Err { return @enumFromInt(idx); }
+};
+
+comptime {
+  // Fixed builtin indices must match the pool: builtin_symbols[value] == name.
+  const builtins = @import("symbol.zig").builtin_symbols;
+  for (@typeInfo(Err).@"enum".fields) |fld| {
+    if (!std.mem.eql(u8, builtins[fld.value], fld.name))
+      @compileError("Err." ++ fld.name ++ " index must equal its builtin_symbols slot");
+  }
+}
 
 pub const V = union(K) {
   blank, err: Err,

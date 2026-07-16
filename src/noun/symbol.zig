@@ -23,6 +23,17 @@ pub const builtin_symbols = [_][]const u8{
   "p",
   "m",
   "M",
+  // Error names — prefilled at fixed indices so value.Err's enum(u32) values
+  // equal their pool index (comptime-asserted in value.zig). A user error is
+  // then just any other interned symbol; the 7 builtins are these. Keep this
+  // block last and in sync with value.zig's Err.
+  "domain", // 16
+  "length", // 17
+  "rank",   // 18
+  "nyi",    // 19
+  "memory", // 20
+  "type",   // 21
+  "io",     // 22
 };
 
 pub const Pool = struct {

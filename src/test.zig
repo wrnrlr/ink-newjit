@@ -583,6 +583,21 @@ test "unit verb gives identity matrix" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("=2", "(1 0;0 1)");
 }
+test "user errors via monadic !" {
+  var t = try Tester.init(); defer t.deinit();
+  // A symbol/string signalled with ! is an error value; a builtin name reproduces
+  // the same error the runtime raises, and a message prints quoted (round-trips).
+  try t.check("!`domain", "!domain");
+  try t.check("!`whatever", "!whatever");
+  try t.check("!\"cannot bake FOO\"", "!\"cannot bake FOO\"");
+  try t.check("(!`type)~(1+`a)", "1b");   // user `!`type` == the builtin type error
+  try t.check("(!`domain)~(&-1)", "1b");
+  try t.check("@!`domain", "`!");         // errors report type `!
+  // Errors serialize by text (name), so they survive a marshal round-trip.
+  try t.check("`bin@`bin?!`domain", "!domain");
+  try t.check("`bin@`bin?!\"cannot bake FOO\"", "!\"cannot bake FOO\"");
+  try t.check("`bin@`bin?!`whatever", "!whatever");
+}
 test "group verb" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("=1 2 1", "1 2!(0 2;,1)");

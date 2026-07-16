@@ -10,7 +10,7 @@
 //
 // Atoms:
 //   blank: (no payload)
-//   err:   1 byte (Err ordinal)
+//   err:   length-prefixed UTF-8 (the error's symbol name, re-interned on read)
 //   b:     1 byte (0=false, 1=true)
 //   i:     8 bytes LE i32
 //   f:     8 bytes (f32 bit pattern, LE u32)
@@ -56,7 +56,7 @@ fn serVal(buf: *std.ArrayList(u8), alloc: Alloc, pool: *const Pool, v: V) anyerr
   try buf.append(alloc, v.tag().serCode());
   switch (v) {
     .blank => {},
-    .err   => |e| try buf.append(alloc, @intFromEnum(e)),
+    .err   => |e| try writeStr(buf, alloc, pool.get(@intFromEnum(e))),
     .b     => |b| try buf.append(alloc, if (b) 1 else 0),
     .i     => |i| try writeI32(buf, alloc, i),
     .f     => |f| try writeU32(buf, alloc, @bitCast(f)),
@@ -137,10 +137,11 @@ fn desVal(alloc: Alloc, pool: *Pool, bytes: []const u8, pos: *usize) anyerror!V 
   return switch (k) {
     .blank => .blank,
     .err => blk: {
-      if (pos.* >= bytes.len) return error.UnexpectedEof;
-      const e: Err = @enumFromInt(bytes[pos.*]);
-      pos.* += 1;
-      break :blk .{ .err = e };
+      // Errors serialize by text (the error's symbol name), not pool index, so
+      // they survive a round-trip into a fresh pool. Re-intern on read.
+      const str = try rdStr(alloc, bytes, pos);
+      defer alloc.free(str);
+      break :blk .{ .err = Err.from(try pool.intern(str)) };
     },
     .b => blk: {
       if (pos.* >= bytes.len) return error.UnexpectedEof;

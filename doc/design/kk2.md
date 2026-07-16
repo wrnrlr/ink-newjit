@@ -375,14 +375,20 @@ plumbing first.
 
 ## 8. Decisions (reviewed 2026-07-15) + remaining questions
 
-1. **Error signaling — DECIDED: quoted-symbol errors, `` `"msg" ``.** User
-   errors carry a quoted symbol as their name — signaling `` `"cannot bake
-   FOO" `` produces an err-class value that prints `` !"cannot bake FOO" ``
-   and aborts evaluation like `!type` does, so dye/kk compile errors become
-   real errors instead of the current warn+bake-NaN. Micro-decision still
-   open: the raising *spelling* (a small `signal`-style prelude name backed
-   by an Op1 is the least grammar-invasive candidate). Replaces `kBakeBad`/
-   `xBakeBad` and every future kk.compile error path.
+1. **Error signaling — LANDED 2026-07-16: err-values-with-messages, raised by
+   monadic `!`.** `V.Err` is now a non-exhaustive `enum(u32)` whose value is a
+   symbol-pool index; the 7 builtins (`domain length rank nyi memory type io`)
+   are prefilled at fixed indices 16–22 (comptime-asserted against
+   `builtin_symbols`), so all ~590 `.err = .x` sites compile unchanged and a
+   user error is just any other interned symbol. Monadic `!` is the raising
+   spelling: `` !`domain `` reproduces the builtin, `` !`whatever `` / `!"cannot
+   bake FOO"` (symbol or string) an arbitrary one. The formatter resolves the
+   index via the pool — identifier-shaped names print bare (`!domain`), messages
+   quoted (`!"cannot bake FOO"`), both re-readable through monadic `!`. Marshal
+   serializes err by *text* (name), not index, so it survives a fresh pool.
+   `kkWarn` (kk.compile rejection), `xFoldBad`, and `xBakeBad` now signal errors
+   instead of warning to stdout + baking NaN; the dye emitters latch the message
+   in `xErr` and the module assemblers (`kAsm`/`buildMod`) return `!xErr`.
 2. **Placed-array v2 — DEFERRED indefinitely.** The only thing it buys is
    sugar: `d+e` on two placements silently compiling a kernel requires the
    runtime to dispatch verbs on a new placement class. Explicit compilation

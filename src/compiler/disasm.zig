@@ -208,7 +208,7 @@ fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, o
 fn fmtValue(v: V, symbols: *const Pool, out: *std.Io.Writer) anyerror!void {
   switch (v) {
     .blank   => try out.print("(blank)", .{}),
-    .err     => |e| try out.print("!{s}", .{@tagName(e)}),
+    .err     => |e| try out.print("!{s}", .{symbols.get(@intFromEnum(e))}),
     .b       => |b| try out.print("{s}", .{if (b) "1b" else "0b"}),
     .i       => |i| try out.print("{d}", .{i}),
     .n       => |nv| try out.print("{d}", .{nv}),

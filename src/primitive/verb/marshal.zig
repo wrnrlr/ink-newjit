@@ -22,6 +22,7 @@ pub const Marshal = struct {
   pub const op = .@"?";
   _s_C: VM.Dyad = marshal_s_C,
   _s_B: VM.Dyad = marshal_s_B,
+  _s_err: VM.Dyad = marshal_bin_only,
   _s_b: VM.Dyad = marshal_bin_only,
   _s_i: VM.Dyad = marshal_bin_only,
   _s_f: VM.Dyad = marshal_bin_only,
