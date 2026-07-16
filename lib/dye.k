@@ -479,13 +479,19 @@ AKids::(); AKknd::()                           / binding var ids + kinds (`i/`f)
 AKz::0; AKdev::0                               / u32 0 const; Device-scope const
 AKuniT::0; AKuniP::0; AKuniPv4::0; AKuniVar::0; AKuniKi::0
 AKnAcc::0; AKuni::0
+AKfa::0                                        / float-atomic module? → kAsm emits the AtomicFloat32AddEXT cap + extension
 kAllocI:   {[] AKrtaI::newId[]; AKtbufI::newId[]; AKpbufsI::newId[]; AKpi32::newId[]}
 kAllocDev: {[] AKdev::newId[]; emitCon (0x0004002B; AKu32; AKdev; 1); CPi32::AKpi32; CScope::AKdev}
+/ Device memory-scope const only (no i32 accumulator types) — for the f32-atomic
+/ scatter path, which stores through the normal f32 pointer (CPf32) but still needs
+/ a scope operand for OpAtomicFAddEXT.
+kAllocScope: {[] AKdev::newId[]; emitCon (0x0004002B; AKu32; AKdev; 1); CScope::AKdev}
 kAllocUni: {[] AKuniT::newId[]; AKuniP::newId[]; AKuniPv4::newId[]; AKuniVar::newId[]; AKuniKi::newId[]; emitCon opConst[Ti32; AKuniKi; 0]; UTuni::AKuniT; UPv4::AKuniPv4; UVar::AKuniVar}
 / rsum/rmax/N-do loop constants (i32 0/1, f32 0., f32 -1e30), one set per compile
 kAllocLoop:{[] RCi0::newId[]; emitCon opConst[Ti32;RCi0;0]; RCi1::newId[]; emitCon opConst[Ti32;RCi1;1]; RCf0::newId[]; emitCon opConst[Tf32;RCf0;0.]; RCfNeg::newId[]; emitCon opConst[Tf32;RCfNeg;-1e30]}
 kAlloc: {[nAcc;nBuf;hasUni;hasLoop]
   xErr::`
+  AKfa::0
   Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
   AKu32::newId[]; AKv3::newId[]
   AKrta::newId[]; AKtbuf::newId[]; AKpbufs::newId[]; AKpf32::newId[]
@@ -527,6 +533,15 @@ kScatAdd: {[accBid; idxBid; gx; val]
   vi:newId[]; emitBuf opF2s[Ti32; vi; val]
   ptr:newId[]; emitBuf opAccChain[CPi32; ptr; accBid; AKz; si]
   old:newId[]; emitBuf opAtomicIAdd[Ti32; old; ptr; CScope; CKz; vi]}
+/ Native f32 scatter-add for @[x;I;+;v] when caps.atomicFadd: acc[I[gid]] += v
+/ (an f32 value, no f2s truncation) via OpAtomicFAddEXT into an f32 accumulator —
+/ this retires the i32 fixed-point dance for float accumulation (clothgpu's SC).
+kScatAddF: {[accBid; idxBid; gx; val]
+  p1:newId[]; emitBuf opAccChain[AKpf32; p1; idxBid; AKz; gx]
+  iv:newId[]; emitBuf opLoad[Tf32; iv; p1]
+  si:newId[]; emitBuf opF2s[Ti32; si; iv]
+  ptr:newId[]; emitBuf opAccChain[CPf32; ptr; accBid; AKz; si]
+  old:newId[]; emitBuf opAtomicFAdd[Tf32; old; ptr; CScope; CKz; val]}
 
 / ── kAsm[] — assemble the module from the AK* state ───────────────────────────
 / Per-binding DescriptorSet/Binding decorations and OpVariables (each-helpers
@@ -542,6 +557,12 @@ kAsmWords: {[]
   iface: (,AKgid),AKids,$[AKuni; ,AKuniVar; !0]
   hdr: (0x07230203; 0x00010400; 0; bnd; 0)
   cap: (0x00020011; 1)
+  / f32 buffer atomics (§7): OpCapability AtomicFloat32AddEXT (6033) + OpExtension
+  / "SPV_EXT_shader_atomic_float_add" (the SPIR-V ext name authorising the cap — NOT
+  / the VK_EXT_shader_atomic_float device ext; 8 string words). Capability before
+  / extension, extension before the GLSL OpExtInstImport (SPIR-V logical layout).
+  capFA: $[AKfa; (0x00020011; 6033); !0]
+  extFA: $[AKfa; (0x0009000A;0x5F565053;0x5F545845;0x64616873;0x615F7265;0x696D6F74;0x6C665F63;0x5F74616F;0x00646461); !0]
   ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
   mem: (0x0003000E; 0; 1)
   ep:  (0x000F+(0x10000*(5+#iface)); 5; Fmain; 0x6E69616D; 0), iface
@@ -564,7 +585,7 @@ kAsmWords: {[]
   ret: (0x000100FD;0x00010038)
   conWds: $[#Con; ,/Con; !0]
   bodWds: $[#Buf; ,/Buf; !0]
-  ,/(hdr;cap;ext;mem;ep;exm;decGid;decF;decI;decB;decU;sTypes;cTf;cTi;cTv;uT;varGid;varB;varU;conWds;fnh;bodWds;ret)}
+  ,/(hdr;cap;capFA;extFA;ext;mem;ep;exm;decGid;decF;decI;decB;decU;sTypes;cTf;cTi;cTv;uT;varGid;varB;varU;conWds;fnh;bodWds;ret)}
 
 / ── Entry points (thin wrappers; see the old per-entry docs in git history) ───
 / shader.compute — element-wise map {[x] …}: x = in[gid] (binding 0) → out[gid]
@@ -790,6 +811,30 @@ compScatAdd: {[fn; valBufNames]
   kScatAdd[ids 0; ids 1; gx; xId rp 0]         / acc[I[gid]] += v
   kAsm[]}
 shader.scatadd: compScatAdd
+
+/ Float-atomic counterpart (§7): identical layout but acc (binding 0) is an f32
+/ buffer and the add is a native OpAtomicFAddEXT (no i32 fixed-point). kAlloc with
+/ nAcc=0 (all f32 bindings); kAllocScope adds the Device memory-scope const the
+/ atomic needs; AKfa flags kAsm to emit the capability + extension words. Selected
+/ by kkScatAdd when gpu.caps reports atomicFadd; caps=0 falls back to compScatAdd.
+compScatAddF: {[fn; valBufNames]
+  nv: #valBufNames
+  ids: kAlloc[0; 2+nv; 0; 1]                   / acc(f32) + I + value bufs, all f32
+  kAllocScope[]                                / Device-scope const for the atomic
+  AKfa:: 1
+  lam: lamOf fn
+  gx: kGidX[]
+  valP: {[id] (id;`elem)}' 2 _ (2+nv) # ids
+  xReset[]
+  e2: valBufNames ! kGmapEnvOne' valP
+  GIrGid:: xEmit[`param; `i32; (); kGidI gx]     / thread index d in i32
+  ap: *& `apply = Cst`kind
+  vN: (kF[ap;`arg]) 3
+  rp: xNode[vN; e2; `f32]
+  xLowerC[,rp 0]
+  kScatAddF[ids 0; ids 1; gx; xId rp 0]        / acc[I[gid]] += v (native f32)
+  kAsm[]}
+shader.scataddf: compScatAddF
 
 / Scatter-add detection: an @-apply whose 3rd arg is the `+` verb.
 kkIsScatR: {[i] a:kF[i;`arg]; ((kVal kF1[i;`f])~`"@") & (3<#a) & ((kVal a 2)~`"+")}

@@ -87,6 +87,7 @@ opF2i:  {[t;r;a]   (0x00040070;t;r;a)}     / OpConvertSToF 112
 opU2f:  {[t;r;a]   (0x00040070;t;r;a)}     / OpConvertUToF 112 (gid u32 → f32)
 opF2s:  {[t;r;a]   (0x0004006E;t;r;a)}     / OpConvertFToS 110 (index f32 → i32)
 opAtomicIAdd: {[t;r;ptr;sc;sem;v] (0x000700EA;t;r;ptr;sc;sem;v)}  / OpAtomicIAdd 234 (scatter-add)
+opAtomicFAdd: {[t;r;ptr;sc;sem;v] (0x00071793;t;r;ptr;sc;sem;v)}  / OpAtomicFAddEXT 6035 (native f32 scatter-add; caps AtomicFloat32AddEXT)
 opDot:  {[t;r;a;b] (0x00050094;t;r;a;b)}   / OpDot 148
 opLoad: {[t;r;ptr] (0x0004003D;t;r;ptr)}   / OpLoad 61
 opStore:{[ptr;val] (0x0003003E;ptr;val)}   / OpStore 62

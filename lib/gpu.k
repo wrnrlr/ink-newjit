@@ -225,12 +225,21 @@ kkAmend: {[fn;args;nIn]
   gpu.dispatch[pipe; (sd`gpu; md`gpu; idBuf; out); n]
   [gpu: out; t:`f; n: xn; s: sd`s]}
 
-/ Scatter-add @[x;I;+;v]: one thread per index; acc[I[d]] += v atomically into an
-/ i32 accumulator (histogram / gather-scatter). x is expected zero-initialised; I
-/ is padded with a sentinel into acc's padding tail so over-dispatched threads add
-/ harmlessly. v is a constant or a single value vector (bindings after acc,I).
-/ Returns an i32-tagged descriptor — gpu.fetch reads it via gpu.readI. n=#I threads.
-kkSMiss: {[fn;vbn;key] p: gpu.compileCompute[shader.scatadd[fn;vbn]; 2 + #vbn]; kkCache[key]:: p; p}
+/ Scatter-add @[x;I;+;v]: one thread per index; acc[I[d]] += v atomically. x is
+/ expected zero-initialised; I is padded with a sentinel into acc's padding tail so
+/ over-dispatched threads add harmlessly. v is a constant or a single value vector
+/ (bindings after acc,I). n=#I threads.
+/ TWO lowerings (§7): when gpu.caps reports atomicFadd (native f32 buffer atomics),
+/ acc is an f32 accumulator hit by OpAtomicFAddEXT → the value adds WITHOUT integer
+/ truncation (weighted float accumulation, no fixed-point scaling), result tagged
+/ `f (gpu.fetch reads floats). When caps=0 (or kkScatForceI is set), the i32
+/ fixed-point path is used and the result is tagged `i (gpu.readI). Set kkScatForceI
+/ to force the integer path (exact integer histograms / testing the fallback).
+kkScatForceI:: 0                          / 1 → always use the i32 path
+kkFA:: -1                                 / cached caps.atomicFadd (−1 = not yet queried)
+kkQFA:  {[] kkFA:: `i$ (gpu.caps[0])`atomicFadd; kkFA}
+kkUseFA: {[] $[kkScatForceI; 0; kkFA > -1; kkFA; kkQFA[]]}
+kkSMiss: {[fn;vbn;fa;key] p: gpu.compileCompute[$[fa; shader.scataddf[fn;vbn]; shader.scatadd[fn;vbn]]; 2 + #vbn]; kkCache[key]:: p; p}
 kkIvals: {[idxName; idd; pn] $[idxName in pn; gpu.read idd`gpu; `f$ . idxName]}
 kkScatAdd: {[fn;args;nIn]
   info: kkScatInfo[]; accName: info 0; idxName: info 1
@@ -241,14 +250,15 @@ kkScatAdd: {[fn;args;nIn]
   idd: kkResolve[idxName; na; pn]           / I index
   n: idd`n; an: ad`n
   GRk:: 0; GRn:: n
-  key: `$ ($fn),"|s|",($#vbn)
-  pipe: $[key in !kkCache; kkCache key; kkSMiss[fn;vbn;key]]
+  fa: kkUseFA[]                             / native f32 atomics available (and not forced off)?
+  key: `$ ($fn),"|s|",($#vbn),$[fa;"f";"i"]
+  pipe: $[key in !kkCache; kkCache key; kkSMiss[fn;vbn;fa;key]]
   ivals: kkIvals[idxName; idd; pn]
   idBuf: gpu.buffer[ivals , (kkPad[n] - n) # `f$ an]     / sentinel = an → acc padding
-  acc: gpu.buffer[(an + 64) # 0.]           / i32 accumulator (zeros) + slack
+  acc: gpu.buffer[(an + 64) # 0.]           / accumulator (zeros) + slack; f32 or i32 by fa
   vHnd: $[0=#vbn; !0; ,(kkResolve[vbn 0; na; pn])`gpu]
   gpu.dispatch[pipe; (acc; idBuf), vHnd; n]
-  [gpu: acc; t:`i; n: an; s: ad`s]}
+  [gpu: acc; t:$[fa;`f;`i]; n: an; s: ad`s]}
 / kk.loop[f; x0; niter] — iterate an amend `f:{@[x;I;:;v]}` niter times on the GPU
 / with a ping-pong: two full-size buffers, each pass reads one and writes the other
 / (Jacobi needs the previous sweep's values). Runs in ONE encoder (gpu.dispatchLoop,

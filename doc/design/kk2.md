@@ -425,9 +425,35 @@ f32 `OpAtomicFAddEXT` (capability `AtomicFloat32AddEXT` + SPV_EXT_
 shader_atomic_float_add) instead of the i32 fixed-point dance — clothgpu
 loses `SC` entirely, and the velocity-jitter floor it causes. Keep the
 fixed-point lowering as the caps=0 fallback. Needs the §6 device-enable
-plumbing first — **now DONE (§6): `shaderBufferFloat32AtomicAdd` is enabled +
-the EXT is in the device extension list when `caps.atomicFadd`, so the lowering
-just needs the `OpAtomicFAddEXT` emitter + capability/extension words.**
+plumbing first — **DONE (§6): `shaderBufferFloat32AtomicAdd` is enabled +
+the EXT is in the device extension list when `caps.atomicFadd`.**
+
+**DONE (2026-07-17) — the `@[x;I;+;v]` (kk.compile) surface.** `opAtomicFAdd`
+stencil (OpAtomicFAddEXT 6035, spirv.k) + `shader.scataddf`/`kScatAddF` (dye.k):
+an all-f32 kernel (no i32 accumulator machinery) that adds the f32 value with NO
+truncation, `kAllocScope` supplies the Device memory-scope const, and an `AKfa`
+flag makes `kAsm` emit `OpCapability AtomicFloat32AddEXT` + `OpExtension
+"SPV_EXT_shader_atomic_float_add"` (the SPIR-V ext name — distinct from the
+`VK_EXT_shader_atomic_float` *device* ext; both string encodings verified by
+spirv-dis). `kkScatAdd` (gpu.k) picks the path by caps: `kkUseFA` queries
+`gpu.caps` once (cached in `kkFA`), uses `shader.scataddf` → `t:`f` result when
+available, else the i32 `shader.scatadd` → `t:`i`; `kkScatForceI` forces the
+integer path (exact histograms / fallback testing). Cache key carries `f`/`i`.
+Oracle: `test/kkc.k` (23/23) — float-atomic counts vs `` `f$ `` CPU ref,
+**weighted FLOAT accumulation bit-exact** vs `@[HB#0.;HI;+;HV]` (the thing the
+i32 path could not do), and a forced-i32 fallback vs the int CPU ref;
+`shader.scataddf` spirv-val-clean (vulkan1.2 + spv1.4). kkgold byte-identical
+(the cap/ext words are gated on `AKfa`, zero-width when off).
+
+REMAINING (the visible clothgpu payoff): clothgpu uses the LOWER-LEVEL
+`scatterAdd` intrinsic in a `gpu.kernel` body (not `@[x;I;+;v]`), whose
+accumulators are i32-hardwired (`sadd`/`igetb`/`isetb` IR nodes → CPi32 +
+`OpAtomicIAdd` + i2f) and whose `iget…%SC`/`iset` semantics are tied to the
+fixed-point `SC` trick. Making clothgpu "lose SC" means a float-accumulator
+kind for the `gpu.kernel` path (new `saddf`/`igetf`/`isetf` lowerings reusing
+`kScatAddF`'s emitter + `AKfa`) AND rewriting/re-validating the cloth demo
+(drop `SC`, `dp`→f32, unscaled `iget`). Scoped as its own step — same
+mechanism, separate demo-migration risk (cf. §5 vertex-pull).
 
 ## 8. Decisions (reviewed 2026-07-15) + remaining questions
 

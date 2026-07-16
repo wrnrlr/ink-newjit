@@ -22,7 +22,9 @@ GI: GC + GN*GR                    / interior flat indices (I)
 GW: ((-GN),GN,1,-1) +\: GI        / (4; #I) neighbour matrix (W, a host global)
 gjac: {@[x;GI;:;1.+.25*+/x@GW]}   / one Jacobi sweep (walk.k's f, verbatim)
 
-/ scatter-add histogram: @[x;I;+;v] atomic accumulate into an i32 bucket array
+/ scatter-add histogram: @[x;I;+;v] atomic accumulate into a bucket array. On a
+/ device with caps.atomicFadd (§7) this is native f32 OpAtomicFAddEXT (float
+/ result); kkScatForceI forces the i32 fixed-point fallback.
 HB: 8; HK: 40
 HI: (13 * !HK) mod HB             / skewed bucket indices (host global)
 HV: `f$ 1 + (!HK) mod 3           / per-item weights
@@ -77,10 +79,16 @@ demo: {[]
   chk["ping-pong 5 iters (even A)"; gpu.fetch kk.loop[gjac; gx0; 6]; 6 gjac/ (GN*GN)#0.]
   chk["ping-pong 7 iters (odd B)";  gpu.fetch kk.loop[gjac; gx0; 7]; 7 gjac/ (GN*GN)#0.]
 
-  / scatter-add @[x;I;+;v]: atomic histogram (duplicate buckets accumulate), i32 out
+  / scatter-add @[x;I;+;v]: atomic histogram (duplicate buckets accumulate).
+  / Default path = native f32 atomics (§7): float result, and weighted FLOAT sums
+  / are exact (no i32 truncation the fixed-point path forced). CPU refs are float.
   gh0: gpu.hold HB#0.
-  chkb["scatter-add count";    (gpu.fetch kk.compile[histc; ,gh0]) ~ @[HB#0; HI; +; HK#1]]
-  chkb["scatter-add weighted"; (gpu.fetch kk.compile[histw; ,gh0]) ~ @[HB#0; HI; +; `i$HV]]
+  chkb["scatter-add count (f-atomic)";    (gpu.fetch kk.compile[histc; ,gh0]) ~ `f$ @[HB#0; HI; +; HK#1]]
+  chkb["scatter-add weighted float";      1e-5 > |/ abs (gpu.fetch kk.compile[histw; ,gh0]) - @[HB#0.; HI; +; HV]]
+  / i32 fixed-point fallback (kkScatForceI): integer buckets, exact vs int CPU ref.
+  kkScatForceI:: 1
+  chkb["scatter-add count (i32 fallback)"; (gpu.fetch kk.compile[histc; ,gpu.hold HB#0]) ~ @[HB#0; HI; +; HK#1]]
+  kkScatForceI:: 0
 
   / placed-table column arithmetic — the CPU form `t`c` IS the column, so the same
   / lambda runs on both sides. Only the referenced columns are bound (pruning).
