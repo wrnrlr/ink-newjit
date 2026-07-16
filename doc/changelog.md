@@ -1,5 +1,104 @@
 # Changelog
 
+## 2026-07-16
+- **`kk.compile` amend-scatter + ping-pong iterate — walk.k acceptance met**
+  (kk2 §2.4-4): `@[x;I;:;v]` compiles to `shader.amend` — one thread per interior
+  index, the value expr (`1.+.25*+/x@W`) computed through the gather-reduce IR and
+  scattered to `out[I[d]]` (`kScatStore`); I is padded with a sentinel index into
+  out's padding so over-dispatched threads can't clobber, and out starts as a copy
+  of x so boundary cells carry through. **`kk.loop[f; x0; niter]`** ping-pongs two
+  buffers via `gpu.dispatchLoop` (one encoder, barriers handled). walk.k's
+  `f:{@[x;I;:;1.+.25*+/x@W]}` compiles **verbatim** and 30k sweeps on the 100×100
+  grid converge to **E@center = 2887.3418** — the documented Jacobi f32 fixpoint
+  (test/walkgpu.k PASS; small-grid checks in test/kkc.k, 17/17). This is the
+  headline increment-5 acceptance. (walk.k's `f/` converge → fixed-count `n f/`
+  here; true device-side converge is tier-2.)
+- **`kk.compile` host-vector auto-upload** (kk2 §2.4-3, milestone 3 core
+  complete): a `+/x@W` gather operand that isn't a param (x/y/z) is treated as a
+  host global — `kkResolve`/`kkUpload` reads its value and `gpu.hold`s it
+  read-only, taking the `(k;n)` shape from the value. So **walk.k's
+  `1.+.25*+/x@W` with `W` a host global compiles and matches the CPU bit-for-bit**
+  (test/kkc.k 14/14). Gotcha: `gpu.hold . nm` parses `.` as dyadic (name on its
+  left) → applies to the symbol, not its value; take the value in its own
+  statement first. Minor remaining gap: single gather `x@w` still needs both
+  operands passed as placements (auto-upload is wired only through the matrix
+  path, which is what walk.k uses).
+- **`kk.compile` matrix gather-reduce: `+/x@W` → walk.k interior** (kk2 §2.4-3,
+  milestone 3's core done): `xApposAdv` now recognises a `/`-fold over an
+  `@`-transit and emits a real `rsum`/`rmax` region node whose body gathers
+  `x[W[(j*n)+d]]` (`xRedGather`); `k`,`n` come from W's `(k;n)` descriptor shape,
+  baked into the kernel (cache key carries them), output length = n. kk.compile
+  branches to the matrix path on `kkIsMatReduce[]`. **walk.k's interior update
+  `1.+.25*+/x@W` compiles and matches the CPU bit-for-bit** (test/kkc.k, 13/13);
+  `|/x@W` (max) works too. Two traps fixed: joining `` `x`y `` with an empty INT
+  vector `!0` upcasts to a boxed list and breaks the env dict (use `0#\``), and
+  the rsum path needs `kAlloc` with `hasLoop=1` for its loop constants. Remaining
+  in milestone 3: host-vector free-name auto-upload (W/I as host globals).
+- **`kk.compile` gather: `x@y` → index-buffer gather** (kk2 §2.4-3, milestone 3
+  starts): a param used as the LEFT of `@` is a gather SOURCE (a whole buffer,
+  indexed); every other param is an index that's auto-loaded at the thread index
+  d, so `kk.compile[{x@y}; (data;idx)]` computes `out[d] = data[idx[d]]` and
+  returns a descriptor. New dye machinery: an `elem` env role (a bare buffer name
+  means buf[d] — `xVarE`/`xElem`), `@` lowering to a nested buffer index
+  (`xGather`), and a gather kernel builder `shader.gmap[fn; bufNames; elemNames]`.
+  Verified in test/kkc.k against CPU `data@idx`. (Host-vector auto-upload of free
+  names + the `+/x@W` matrix reduce — the rest of milestone 3 — are next.) Fixed
+  an empty-typed-vector trap found here: `f'(!0)` yields a general-list `()`, and
+  `&()` then `v@…` spuriously returns one element, so a no-`@` body looked like a
+  gather — the has-`@` scan now guards the empty case.
+- **`kk.compile` — elementwise whole-array lambdas on placements** (kk2 §2.4-2,
+  increment 5 starts): `kk.compile[fn; descriptors]` takes a whole-array lambda
+  in implicit-param form (`{2.*x}`, `{x+y}`, `{(x+y)*z}`, `{sqrt x}`,
+  `{$[x<y;y;x]}`), compiles it to a per-thread map (dye's new
+  `shader.map[fn; nIn]`, generalising compCompute/compute2 to N inputs), runs
+  it over the placed arrays (one thread per element), and returns an OUTPUT
+  descriptor — so `8: kk.compile[{2.*x}; ,a]` reshapes like any placed array.
+  Pipeline cached by (lambda source; #inputs); output padded to the ×64 grid
+  (descriptor n/s stay real → 2-D shapes round-trip). A subset classifier
+  (`kkClassify`) rejects gather/amend/adverbs/non-math applies, NAMING the
+  offending verb (no silent fallback — those forms are later milestones).
+  Oracle test/kkc.k: GPU vs CPU bit-for-bit (sqrt at f32 tol), cache reuse, and
+  rejection (9/9). Fixed a latent trap this surfaced: `str in list` runs
+  char-wise (a string is a char vector), so string dict keys give false `$[]`
+  hits — kk uses symbol cache keys.
+- **Fragment/vertex compile through the neutral IR; direct `comp*` walker
+  deleted** (kk2 §3, the seam finished): `shader.fragment`/`fragmentTexN` now
+  go through `kSeqIr`, and `shader.vertex`/`vertexU` through `xSeqEnv` + a new
+  `vstore` effect node that pins each output store (gl_Position through the
+  gl_PerVertex block member, varyings direct) at its build position — so
+  lowering in build order reproduces the id sequence exactly. Added a `sample`
+  IR node (image+sampler loads → OpSampledImage → ImageSample) and a `consc`
+  node (vector-literal OpConstantComposite) so the fragment subset is fully
+  covered. With every entry point on the IR, the ~376-line direct expression/
+  loop/seq walker (`compNode`/`compSeq`/`compApply`/`compRsum`/… + `dispUn`/
+  `splat`/`compVar`/`compSeqEnv`) is removed — single-pipeline dye (1498→1122
+  lines). Oracle: 7 new fragment/vertex/texture cases added to test/kkgold.k
+  and captured BEFORE the migration; all byte-identical after, and each passes
+  spirv-val vulkan1.2. test/spirv.k 85/85, test/ir.k 7/7, test/nn.k GPU maxerr
+  unchanged, planes.k renders (30% non-black).
+- **Compute/vertex const-fold + multi-root DCE** (kk2 §3, finishes the seam):
+  new `xOpt` flag (default 0 = lower every node, byte-identical). `xOpt=1`
+  runs `xFold` then keeps only nodes reachable from a multi-root set — the
+  value result **plus every store** (setb/sadd/isetb/vstore) **plus every loop
+  and its result phi(s)** — so stores never get culled and loop bodies (reached
+  only via `xVal`, not `xArg`) keep the top-level values they read; `xLoRegion`
+  now gates owned nodes on `xRe` too, giving intra-loop DCE. Verified: with
+  xOpt on, the whole nn suite is **bit-identical** GPU output (semantics
+  preserved), all 19 kkgold modules stay spirv-val-clean, and it's genuinely
+  effective (a dead `g[1]` load and a `0.5*0.5` const both vanish) while the two
+  atomic scatters / loop phis survive. New oracle test/kkopt.k (9 checks).
+  Still TODO in §3: i32 index arithmetic.
+- **`+/{[k] e}'!K` is the canonical in-kernel reduction spelling** (kk2
+  §2.4-1/§8-3): dye recognizes fold-over-each-over-enumerate (`+/` → rsum
+  region node, `|/` → rmax) in xAppos→xFoldEach and lowers it through the
+  shared xRed builder — byte-identical to the intrinsic `rsum[K;{[k] e}]`/
+  `rmax[…]` spelling by construction (no range materialised). The intrinsic
+  names stay as documented equivalents; any other monadic adverbed verb in a
+  kernel now warns + bakes NaN instead of silently compiling as negate.
+  test/kkgold.k asserts the two spellings' byte-identity for gemm + softmax
+  (12 gold dumps unchanged); lib/nn.k migrated to the full syntax (15 sites,
+  all 12 kernels byte-identical; test/nn.k GPU maxerr unchanged).
+
 ## 2026-07-15
 - **Monadic `%` = Shape** (the glyph was free since sqrt moved to the
   prelude; dyad stays divide): rectangular extent as an int vector, ragged

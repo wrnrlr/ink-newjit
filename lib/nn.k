@@ -1,4 +1,6 @@
-/ lib/nn.k — GPU neural-net primitives on the resident-compute + rsum loop stack.
+/ lib/nn.k — GPU neural-net primitives on the resident-compute stack. In-kernel
+/ reductions use the canonical full syntax  +/{[k] e}'!K  (|/ → max), which dye
+/ lowers to the rsum/rmax region node (doc/design/kk2.md §2.4-1/§8-3).
 /
 / Build first:  zig build gpu
 / Load deps FIRST, then this (nested `2:` loads overflow), e.g.:
@@ -28,7 +30,7 @@ nnPad: {[n] 64 * 1 | `i$ (n+63) div 64}
 gemmK: gpu.kernel[{[c;a;b;g;d]
   n:g[1]; kk:g[2]
   i:floor[d%n]; j:mod[d;n]
-  set[c; d; rsum[kk; {[k] (a[(i*kk)+k]) * b[(k*n)+j]}]]}; 0; 4]
+  set[c; d; +/{[k] (a[(i*kk)+k]) * b[(k*n)+j]}'!kk]}; 0; 4]
 
 gPipe::  0    / cached gemm pipeline
 gParam:: 0    / cached 4-float params scratch buffer
@@ -51,8 +53,8 @@ Gemm: {[A;B;M;K;N]
 / Two passes: (1) per row i → m[i]=max, s[i]=Σexp(x-m);  (2) per element → exp/s.
 smStatK: gpu.kernel[{[mb;sb;x;g;i]
   n:g[0]
-  m: rmax[n; {[k] x[(i*n)+k]}]
-  s: rsum[n; {[k] exp[(x[(i*n)+k]) - m]}]
+  m: |/{[k] x[(i*n)+k]}'!n
+  s: +/{[k] exp[(x[(i*n)+k]) - m]}'!n
   set[mb; i; m]; set[sb; i; s]}; 0; 4]
 smApplyK: gpu.kernel[{[o;x;mb;sb;g;d]
   n:g[0]; i:floor[d%n]
@@ -80,8 +82,8 @@ Softmax: {[X;M;N]
 / ((x-mean)*rstd)*γ[j] + β[j].
 lnStatK: gpu.kernel[{[mb;rb;x;g;i]
   n:g[0]; eps:g[1]
-  mean: (rsum[n; {[k] x[(i*n)+k]}]) % n
-  var:  (rsum[n; {[k] sqr[(x[(i*n)+k]) - mean]}]) % n
+  mean: (+/{[k] x[(i*n)+k]}'!n) % n
+  var:  (+/{[k] sqr[(x[(i*n)+k]) - mean]}'!n) % n
   set[mb; i; mean]; set[rb; i; 1. % sqrt[var + eps]]}; 0; 4]
 lnApplyK: gpu.kernel[{[o;x;mb;rb;gm;bt;g;d]
   n:g[0]; i:floor[d%n]; j:mod[d;n]
@@ -114,7 +116,7 @@ LayerNorm: {[X;G;B;M;N;eps]
 linK: gpu.kernel[{[o;x;w;b;g;d]
   nn:g[1]; kk:g[2]
   i:floor[d%nn]; j:mod[d;nn]
-  set[o; d; (rsum[kk; {[k] (x[(i*kk)+k]) * w[(j*kk)+k]}]) + b[j]]}; 0; 5]
+  set[o; d; (+/{[k] (x[(i*kk)+k]) * w[(j*kk)+k]}'!kk) + b[j]]}; 0; 5]
 linPipe::0; linParam::0
 / Resident: bo (≥nnPad[M*N]) = bx[M,K] · bw[N,K]ᵀ + bb[N].
 LinearR: {[bo;bx;bw;bb;M;K;N]
@@ -183,7 +185,7 @@ attnScoresK: gpu.kernel[{[s;q;kb;g;e]
   h: floor[e%tt]; rem: mod[e;tt]
   i: floor[rem%T]; j: mod[rem;T]
   base: h*dh
-  set[s; e; sc * rsum[dh; {[k] (q[(i*D)+base+k]) * kb[(j*D)+base+k]}]]}; 0; 4]
+  set[s; e; sc * +/{[k] (q[(i*D)+base+k]) * kb[(j*D)+base+k]}'!dh]}; 0; 4]
 / context C[i,c] = Σ_j A[h,i,j]·V[j,c]  where h = c÷dh   (one thread per T*D elem)
 / writes straight into the concatenated [T,D] layout — no per-head regather.
 attnCtxK: gpu.kernel[{[o;a;v;g;e]
@@ -191,7 +193,7 @@ attnCtxK: gpu.kernel[{[o;a;v;g;e]
   i: floor[e%D]; c: mod[e;D]
   h: floor[c%dh]
   hb: h*T*T
-  set[o; e; rsum[T; {[j] (a[hb+(i*T)+j]) * v[(j*D)+c]}]]}; 0; 4]
+  set[o; e; +/{[j] (a[hb+(i*T)+j]) * v[(j*D)+c]}'!T]}; 0; 4]
 
 asPipe::0; asParam::0; acPipe::0; acParam::0
 / Resident attention scores: bs[H*T*T] = scaled QKᵀ per head.  H = D÷dh.
@@ -254,9 +256,9 @@ attnScoresRelK: gpu.kernel[{[s;q;kb;u;v;pe;g;e]
   i: floor[rem%T]; j: mod[rem;T]
   base: h*dh
   prow: (((i-j)+(T-1)) * D)
-  set[s; e; sc * rsum[dh; {[k]
+  set[s; e; sc * +/{[k]
     c: base+k; qc: q[(i*D)+c]
-    ((qc + u[c]) * kb[(j*D)+c]) + (qc + v[c]) * pe[prow+c]}]]}; 0; 7]
+    ((qc + u[c]) * kb[(j*D)+c]) + (qc + v[c]) * pe[prow+c]}'!dh]}; 0; 7]
 asrPipe::0; asrParam::0
 AttnScoresRelR: {[bs;bq;bk;bu;bv;bpe;cfg]
   $[asrPipe=0;  asrPipe::  gpu.compileCompute[attnScoresRelK;7]; 0]
@@ -299,10 +301,10 @@ gluK: gpu.kernel[{[o;x;g;e]
 dwK: gpu.kernel[{[o;x;w;b;g;e]
   T:g[0]; D:g[1]; ks:g[2]; pad:g[3]
   i:floor[e%D]; c:mod[e;D]
-  acc: rsum[ks; {[k]
+  acc: +/{[k]
     tp: (i+k)-pad
     ok: (~(tp<0.)) & (tp<T)
-    ($[ok; x[(tp*D)+c]; 0.]) * w[(c*ks)+k]}]
+    ($[ok; x[(tp*D)+c]; 0.]) * w[(c*ks)+k]}'!ks
   set[o; e; acc + b[c]]}; 0; 5]
 / Per-channel affine (BatchNorm inference folded to scale/shift): out[t,c]=x·A[c]+B[c]
 caK: gpu.kernel[{[o;x;a;b;g;e]
@@ -428,8 +430,8 @@ stftPowerK: gpu.kernel[{[pw;sig;cr;ci;g;e]
   hop:g[0]; win:g[1]; nf:g[2]
   f:floor[e%nf]; k:mod[e;nf]
   base: f*hop; kb: k*win
-  re: rsum[win; {[t] (sig[base+t]) * cr[kb+t]}]
-  im: rsum[win; {[t] (sig[base+t]) * ci[kb+t]}]
+  re: +/{[t] (sig[base+t]) * cr[kb+t]}'!win
+  im: +/{[t] (sig[base+t]) * ci[kb+t]}'!win
   set[pw; e; (re*re) + im*im]}; 0; 5]
 / log with a floor:  o = log(x + eps)
 logK: gpu.kernel[{[o;x;g;e] set[o; e; log[(x[e]) + g[0]]]}; 0; 3]
@@ -473,11 +475,11 @@ conv2dK: gpu.kernel[{[o;x;w;b;g;e]
   tf: Tout*Fout
   oc: floor[e%tf]; rem: mod[e;tf]
   tp: floor[rem%Fout]; fp: mod[rem;Fout]
-  set[o; e; (b[oc]) + rsum[9; {[kk]
+  set[o; e; (b[oc]) + +/{[kk]
     kt: floor[kk%3.]; kf: mod[kk;3.]
     ti: ((2.*tp)+kt)-1.; fi: ((2.*fp)+kf)-1.
     ok: (~(ti<0.)) & (ti<Tin) & (~(fi<0.)) & (fi<Fin)
-    ($[ok; x[(ti*Fin)+fi]; 0.]) * w[(oc*9.)+kk]}]]}; 0; 5]
+    ($[ok; x[(ti*Fin)+fi]; 0.]) * w[(oc*9.)+kk]}'!9]}; 0; 5]
 / depthwise conv2d C→C (per channel):  reads input channel c only.
 dwConv2dK: gpu.kernel[{[o;x;w;b;g;e]
   C:g[0]; Tout:g[1]; Fout:g[2]; Tin:g[3]; Fin:g[4]
@@ -485,17 +487,17 @@ dwConv2dK: gpu.kernel[{[o;x;w;b;g;e]
   c: floor[e%tf]; rem: mod[e;tf]
   tp: floor[rem%Fout]; fp: mod[rem;Fout]
   cin: c*Tin*Fin
-  set[o; e; (b[c]) + rsum[9; {[kk]
+  set[o; e; (b[c]) + +/{[kk]
     kt: floor[kk%3.]; kf: mod[kk;3.]
     ti: ((2.*tp)+kt)-1.; fi: ((2.*fp)+kf)-1.
     ok: (~(ti<0.)) & (ti<Tin) & (~(fi<0.)) & (fi<Fin)
-    ($[ok; x[cin+(ti*Fin)+fi]; 0.]) * w[(c*9.)+kk]}]]}; 0; 5]
+    ($[ok; x[cin+(ti*Fin)+fi]; 0.]) * w[(c*9.)+kk]}'!9]}; 0; 5]
 / pointwise conv2d C→C (1×1) = per-position channel linear.
 pwConv2dK: gpu.kernel[{[o;x;w;b;g;e]
   C:g[0]; T:g[1]; F:g[2]
   tf: T*F
   oc: floor[e%tf]; pos: mod[e;tf]
-  set[o; e; (b[oc]) + rsum[C; {[ic] (x[(ic*tf)+pos]) * w[(oc*C)+ic]}]]}; 0; 5]
+  set[o; e; (b[oc]) + +/{[ic] (x[(ic*tf)+pos]) * w[(oc*C)+ic]}'!C]}; 0; 5]
 / ReLU  (shader `|` is logical-or, not max — use the max builtin)
 reluK: gpu.kernel[{[o;x;e] set[o; e; max[0.; x[e]]]}; 0; 2]
 / flatten [C,Tp,Fp] → [Tp, C·Fp]  (out[t',c·Fp+f'] = in[c,t',f'])

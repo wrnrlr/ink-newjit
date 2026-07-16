@@ -51,3 +51,85 @@ ck["kernelRmax"; gpu.kernel[{[mb;sb;x;g;i]
   m: rmax[n; {[k] x[(i*n)+k]}]
   s: rsum[n; {[k] exp[(x[(i*n)+k]) - m]}]
   set[mb; i; m]; set[sb; i; s]}; 0; 4]]
+
+/ kk2 §2.4-1: the canonical full syntax  +/{[k] e}'!K  (and |/… → rmax) must
+/ lower to the SAME words as the intrinsic rsum/rmax spelling above — assert
+/ byte-identity of the two spellings for the gemm and softmax kernels.
+fr: gpu.kernel[{[c;a;b;g;d]
+  n:g[1]; kk:g[2]
+  i:floor[d%n]; j:mod[d;n]
+  set[c; d; +/{[k] (a[(i*kk)+k]) * b[(k*n)+j]}'!kk]}; 0; 4]
+gr: gpu.kernel[{[c;a;b;g;d]
+  n:g[1]; kk:g[2]
+  i:floor[d%n]; j:mod[d;n]
+  set[c; d; rsum[kk; {[k] (a[(i*kk)+k]) * b[(k*n)+j]}]]}; 0; 4]
+fm: gpu.kernel[{[mb;sb;x;g;i]
+  n:g[0]
+  m: |/{[k] x[(i*n)+k]}'!n
+  s: +/{[k] exp[(x[(i*n)+k]) - m]}'!n
+  set[mb; i; m]; set[sb; i; s]}; 0; 4]
+gm: gpu.kernel[{[mb;sb;x;g;i]
+  n:g[0]
+  m: rmax[n; {[k] x[(i*n)+k]}]
+  s: rsum[n; {[k] exp[(x[(i*n)+k]) - m]}]
+  set[mb; i; m]; set[sb; i; s]}; 0; 4]
+`0 0: "foldSum: ",($[fr~gr; "identical"; "MISMATCH"]),"\n"
+`0 0: "foldMax: ",($[fm~gm; "identical"; "MISMATCH"]),"\n"
+
+/ ── Fragment / vertex gold (kk2 §3: captured BEFORE the IR migration) ─────────
+/ Bodies lifted from test/planes.k, test/pbr.k, test/sword.k and test/earth.k so
+/ the dump covers: math built-ins, vector literals + OpConstantComposite, splat
+/ broadcasting, composite extract, chained $[] with the <=/>= peepholes, bool
+/ ops, texture sampling, varyings, uniform blocks, and the no-varying vertex.
+ck["fragPlanes"; shader.fragment[[nor:`v3; out:`v4]; {[nor]
+  amb: 0.15
+  ld: normalize 0.6 0.8 0.4
+  br: amb+smoothstep[0.0;0.1;dot[nor;ld]]
+  (nor[0]*br; nor[1]*br; nor[2]*br; 1.0)}]]
+ck["fragSky"; shader.fragment[[uv:`v2; out:`v4]; {[uv]
+  t: uv[1]
+  sr: mix[0.22; 0.88; t]; sg: mix[0.45; 0.68; t]; sb: mix[0.92; 0.35; t]
+  px: uv[0]*10.0; py: uv[1]*5.0
+  pi0: floor px; pi1: floor py; pf0: fract px; pf1: fract py
+  p00: (pi0; pi1)
+  h00: fract[sin[dot[p00; 127.1 311.7]]*43758.5]
+  h10: fract[sin[dot[p00+1. 0.; 127.1 311.7]]*43758.5]
+  h01: fract[sin[dot[p00+0. 1.; 127.1 311.7]]*43758.5]
+  h11: fract[sin[dot[p00+1. 1.; 127.1 311.7]]*43758.5]
+  ux: pf0*pf0*(3.0-(2.0*pf0)); uy: pf1*pf1*(3.0-(2.0*pf1))
+  noise: mix[mix[h00;h10;ux]; mix[h01;h11;ux]; uy]
+  cloudThr: 0.52+(t*0.25)
+  cloudAmt: max[0.0; noise-cloudThr]*(1.0%(1.0-cloudThr))
+  cld: cloudAmt*cloudAmt
+  r: pow[clamp[mix[sr; 1.0; cld]; 0.; 1.];0.4545]
+  g: pow[clamp[mix[sg; 1.0; cld]; 0.; 1.];0.4545]
+  b: pow[clamp[mix[sb; 1.0; cld]; 0.; 1.];0.4545]
+  (r; g; b; 1.0)}]]
+ck["fragCond"; shader.fragment[[uv:`v2; out:`f32]; {[uv]
+  a: uv+0.5
+  ok: (uv[0]<0.9) & ~(uv[1]>0.8)
+  $[uv[0]<=uv[1]; a[0]; uv[0]>=0.75; fract[sin[dot[uv; 127.1 311.7]]*43758.5]; ok; 0.5; 0.0]}]]
+ck["fragTex"; shader.fragmentTexN[[uv:`v2; out:`v4]; 2; {[uv]
+  c0: sample[0; uv]
+  c1: sample[1; uv]
+  (mix[c0[0];c1[0];0.5]; c0[1]; c1[2]; 1.0)}]]
+ck["vtxPlanes"; shader.vertex[[pos:`v3;nor:`v3]; [vNor:`v3]; {[pos;nor]
+  c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.5
+  py0: (c45*pos[0])+(s45*pos[2])
+  py2: (c45*pos[2])-(s45*pos[0])
+  px1: (c30*pos[1])-(s30*py2)
+  px2: (s30*pos[1])+(c30*py2)
+  ((sc*py0; sc*px1; 0.5-px2*sc*0.5; 1.0); nor)}]]
+ck["vtxBare"; shader.vertex[[pos:`v3]; ()!(); {[pos] (pos[0];pos[1];pos[2];1.0)}]]
+ck["vtxSword"; shader.vertexU[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; `uCam`uPan; {[pos;nor;mat;lit]
+  ca:uCam[0]; sa:uCam[1]; xca:uCam[2]; xsa:uCam[3]
+  zoom:uPan[0]; cx:uPan[1]; cz:uPan[2]
+  c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.3
+  x1:(ca*pos[0])-(sa*pos[2]); z1:(sa*pos[0])+(ca*pos[2])
+  y2:(xca*pos[1])-(xsa*z1); z2:(xsa*pos[1])+(xca*z1)
+  X:(zoom*x1)-cx; Y:zoom*y2; Z:(zoom*z2)-cz
+  py0:(c45*X)+(s45*Z); py2:(c45*Z)-(s45*X)
+  px1:(c30*Y)-(s30*py2); px2:(s30*Y)+(c30*py2)
+  nx1:(ca*nor[0])-(sa*nor[2]); nz1:(sa*nor[0])+(ca*nor[2])
+  ny2:(xca*nor[1])-(xsa*nz1); nz2:(xsa*nor[1])+(xca*nz1)
+  ((sc*py0; sc*px1; 0.5-px2*0.001; 1.0); (nx1;ny2;nz2); mat; lit)}]]

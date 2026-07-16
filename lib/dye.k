@@ -41,12 +41,10 @@ shader.fragment: {[ioTypes; fn]
   loadedPairs: inVarIds loadOnePair' inTySyms
   env: argNames!loadedPairs
 
-  / Compile body: statement rows, process bind nodes for locals
-  stmts: lamBody lam
-  rp: compSeq[stmts; env; outTySym]
-  result: rp[0]
+  / Body through the neutral IR (kk2 §3) — byte-identical to the retired direct walk
+  rp: kSeqIr[lamBody lam; env; outTySym]
 
-  emitBuf opStore[outId; result]
+  emitBuf opStore[outId; rp 0]
 
   locs: !#argNames
   buildMod[outId; inVarIds; inTys; inPtrs; outPtr; locs]
@@ -55,7 +53,7 @@ shader.fragment: {[ioTypes; fn]
 / ── shader.fragmentTexN[ioTypes; nTex; fn] → SPIR-V word list ────────────────
 / Like shader.fragment, plus nTex sampled 2-D textures at @group(1): image k is at
 / binding k, and one shared sampler at binding nTex.  The body samples texture k
-/ with  sample[k; uv]  → v4 (sample[uv] is texture 0).  See compSample.  The host
+/ with  sample[k; uv]  → v4 (sample[uv] is texture 0).  See xSample.  The host
 / wires the textures with gpuTexture + mesh.drawT/mesh.drawGeomT/mesh.drawInstancedT, passing
 / a list of texture handles.  Interpolate the UV(s) as v2 vertex varyings.
 shader.fragmentTexN: {[ioTypes; nTex; fn]
@@ -74,7 +72,7 @@ shader.fragmentTexN: {[ioTypes; nTex; fn]
   inVarIds: {[x] newId[]}' argNames
   outId: newId[]
 
-  / Allocate the texture ids and publish them so compSample can emit the loads.
+  / Allocate the texture ids and publish them so xSample can emit the loads.
   / One image type / sampler type shared by all nTex images; one var per image
   / plus one shared sampler var.
   Timg2::   newId[]; Tsamp2::  newId[]; TsImg::   newId[]
@@ -85,11 +83,9 @@ shader.fragmentTexN: {[ioTypes; nTex; fn]
   loadedPairs: inVarIds loadOnePair' inTySyms
   env: argNames!loadedPairs
 
-  stmts: lamBody lam
-  rp: compSeq[stmts; env; outTySym]
-  result: rp[0]
+  rp: kSeqIr[lamBody lam; env; outTySym]
 
-  emitBuf opStore[outId; result]
+  emitBuf opStore[outId; rp 0]
 
   locs: !#argNames
   buildMod[outId; inVarIds; inTys; inPtrs; outPtr; locs]
@@ -161,29 +157,28 @@ shader.vertexU: {[inTypes; varyTypes; uniNames; fn]
   / so leave env untouched in the no-uniform case (keeps output byte-identical).
   env:     $[nUni>0; (argNames,uniNames)!(loadedPairs,uniPairs); argNames!loadedPairs]
 
-  / Compile body stmts (all but last) to build env, then handle return tuple
+  / Body through the neutral IR (kk2 §3): bind nodes first (xSeqEnv, mirror of the
+  / retired compSeqEnv), then gl_Position + each varying, every store pinned by a
+  / `vstore effect node at the position the direct path emitted it, so lowering
+  / in build order reproduces the id sequence exactly (record-then-replay).
   stmts:    lamBody lam
-  env2:     compSeqEnv[-1_stmts; env]
   lastStmt: last stmts
 
   / If varyings exist the last stmt is a list node; else it's the glPos expression
   outElems: $[(nVary>0) & ((kKind lastStmt)~`list); kF[lastStmt;`elem]; ,lastStmt]
 
-  / Compile and store gl_Position through the Block struct member pointer
-  glPosVal:       compNode[outElems[0]; env2; `v4]
-  glPosMemberPtr: newId[]
-  emitBuf opAccChain1[PoutV4; glPosMemberPtr; perVtxVar; Kzero]
-  emitBuf opStore[glPosMemberPtr; glPosVal[0]]
+  VXpvtx:: perVtxVar; VXkz:: Kzero
+  xReset[]
+  e0:   (!env) ! kIrEnvOne' env[!env]
+  env2: xSeqEnv[-1_stmts; e0]
 
-  / Compile and store varyings (up to 3)
-  rp0: $[nVary>0; compNode[outElems[1]; env2; varyTySyms[0]]; (0;`f32)]
-  $[nVary>0; emitBuf opStore[varyVarIds[0]; rp0[0]]; 0]
-  rp1: $[nVary>1; compNode[outElems[2]; env2; varyTySyms[1]]; (0;`f32)]
-  $[nVary>1; emitBuf opStore[varyVarIds[1]; rp1[0]]; 0]
-  rp2: $[nVary>2; compNode[outElems[3]; env2; varyTySyms[2]]; (0;`f32)]
-  $[nVary>2; emitBuf opStore[varyVarIds[2]; rp2[0]]; 0]
-  rp3: $[nVary>3; compNode[outElems[4]; env2; varyTySyms[3]]; (0;`f32)]
-  $[nVary>3; emitBuf opStore[varyVarIds[3]; rp3[0]]; 0]
+  gp: xNode[outElems[0]; env2; `v4]
+  xEmit[`vstore; `v4; ,gp 0; `pos]
+  $[nVary>0; xVary1[outElems[1]; varyTySyms[0]; varyVarIds[0]; env2]; 0]
+  $[nVary>1; xVary1[outElems[2]; varyTySyms[1]; varyVarIds[1]; env2]; 0]
+  $[nVary>2; xVary1[outElems[3]; varyTySyms[2]; varyVarIds[2]; env2]; 0]
+  $[nVary>3; xVary1[outElems[4]; varyTySyms[3]; varyVarIds[3]; env2]; 0]
+  xLowerC[!0]                        / no value root — the vstore effects are the roots
 
   / Assemble SPIR-V module (SPIR-V 1.4: OpEntryPoint lists EVERY global
   / variable, so the uniform block joins the I/O interface when present)
@@ -239,7 +234,6 @@ cmpOps: `"<"`">"`"="`"~"`"&"`"|"
 binRty: {[op;aty;bty;oty] $[op in cmpOps; `bool; op~`","; jnRty[aty;bty]; isVecTy[aty]; aty; isVecTy[bty]; bty; aty]}
 
 / ── Known 1-arg and multi-arg math function names ────────────────────────────
-mathFns1: `abs`floor`fract`sign`sqrt`exp`log`tanh`sqr`sin`cos`asin`acos`atan`length`normalize
 mathFns:  `abs`floor`fract`sign`sqrt`exp`log`tanh`sqr`sin`cos`asin`acos`atan`length`normalize`pow`min`max`atan2`dot`cross`step`mod`clamp`mix`smoothstep
 
 / ── Verb dispatch ────────────────────────────────────────────────────────────
@@ -260,22 +254,6 @@ dispBin: {[op;rty;r;aty;a;bty;b]
     op~`"&";   opLAnd[at;r;a;b]
     op~`"|";   opLOr[at;r;a;b]
     opFadd[rt;r;a;b]]}
-
-dispUn: {[op;ty;r;a]
-  t: Tid[ty]
-  $[op~`sin;       opSin[t;r;a]
-    op~`cos;       opCos[t;r;a]
-    op~`sqrt;      opSqrt[t;r;a]
-    op~`"-";         opFneg[t;r;a]
-    op~`"~";         opLNot[Tbool;r;a]
-    op~`abs;       opAbs[t;r;a]
-    op~`floor;     opFloor[t;r;a]
-    op~`fract;     opFract[t;r;a]
-    op~`sign;      opSign[t;r;a]
-    op~`sqr;       opFmul[t;r;a;a]
-    op~`length;    opLen[Tf32;r;a]
-    op~`normalize; opNrm[t;r;a]
-    opFneg[t;r;a]]}
 
 / ── Compiler state (reset per compShader call) ───────────────────────────────
 Nid:: Nfixed
@@ -303,7 +281,7 @@ UVar::  0
 / shader.fragmentTexN texture scratch: SPIR-V ids for the shared image / sampler
 / types, their UniformConstant pointer types, one variable per image, and the one
 / shared sampler variable.  #TexVars>0 signals buildMod to emit the texture
-/ section; set per shader, read by compSample (ink lambdas can't see enclosing
+/ section; set per shader, read by xLoSample (ink lambdas can't see enclosing
 / locals, so these live as globals).
 Timg2::   0   / OpTypeImage (f32, 2D, sampled)
 Tsamp2::  0   / OpTypeSampler
@@ -313,11 +291,11 @@ PUCsamp:: 0   / OpTypePointer UniformConstant → sampler
 TexVars:: ()  / OpVariable UniformConstant image ids (image k at set 1 binding k)
 SampVar:: 0   / OpVariable UniformConstant sampler (set 1, binding nTex)
 / Stencil-compute scratch: the u32-zero constant id (struct member index) and the
-/ StorageBuffer→f32 pointer type id, needed by compBufIdx for a dynamic-index load
-/ (ink lambdas can't close over compStencil's locals, so these live as globals).
+/ StorageBuffer→f32 pointer type id, needed by xLoBufIdx for a dynamic-index load
+/ (ink lambdas can't close over the entry's locals, so these live as globals).
 CKz::   0     / OpConstant u32 0 — access-chain member index into the buffer struct
 CPf32:: 0     / OpTypePointer StorageBuffer → f32
-/ Atomic-scatter scratch (compScatter/compScatterAdd): the StorageBuffer→i32
+/ Atomic-scatter scratch (xLoSadd): the StorageBuffer→i32
 / pointer type and the Device memory-scope constant id for OpAtomicIAdd.
 CPi32::  0    / OpTypePointer StorageBuffer → i32 (atomic accumulator element)
 CScope:: 0    / OpConstant u32 1 = Device memory scope
@@ -349,17 +327,6 @@ memberDecOne: {[i] (0x00050048; UTuni; i; 35; i*16)}
 / Load uniform member at constant id `kidx`: OpAccessChain (Uniform vec4*) + OpLoad.
 loadUniMember: {[kidx] p:newId[]; emitBuf opAccChain1[UPv4;p;UVar;kidx]; v:newId[]; emitBuf opLoad[Tv4;v;p]; (v;`v4)}
 
-/ Bug fix: splat a scalar id `sid` to vector type `vty` via OpCompositeConstruct.
-/ SPIR-V OpFAdd/Sub/Div require both operands to share the exact type, so a
-/ vector ⊕ scalar arithmetic op (e.g. `uv + 0.5`) must widen the scalar first —
-/ otherwise the emitted module is invalid SPIR-V.
-splat: {[vty; sid]
-  n: ncVec[vty]; rt: Tid[vty]; r: newId[]
-  $[n=2; emitBuf opCons2[rt;r;sid;sid]
-    n=3; emitBuf opCons3[rt;r;sid;sid;sid]
-    emitBuf opCons4[rt;r;sid;sid;sid;sid]]
-  r}
-
 / ── CST table access ────────────────────────────────────────────────────────
 / `parse` now returns an apter-tree table (dict of columns) instead of a nested
 / list. Cst holds the current shader's tree; a node is a row index. Children of
@@ -375,228 +342,16 @@ lamOf:   {[fn] Cst:: parse[$fn]; *|kF[0;`stmt]}   / last stmt of root terse = la
 lamArgs: {[lam] (Cst`value)@kF[lam;`param]}
 lamBody: {[lam] kF[lam;`stmt]}
 
-/ ── Layer 3: math function call compiler ───────────────────────────────────
-/ Compile f[a; b; c] where f is a known GLSL built-in. args are the `arg rows.
-compFnCall: {[name; i; env; oty]
-  args: kF[i;`arg]
-  n:    #args
-  a0:   compNode[args[0];env;`f32]
-  a1:   $[n>1; compNode[args[1];env;`f32]; (0;`f32)]
-  a2:   $[n>2; compNode[args[2];env;`f32]; (0;`f32)]
-  at:   Tid[a0[1]]
-  rty:  $[(name~`length)|(name~`dot); `f32; (name~`cross); `v3; a0[1]]
-  r:    newId[]
-  $[name~`abs;        emitBuf opAbs[at;r;a0[0]]
-    name~`floor;      emitBuf opFloor[at;r;a0[0]]
-    name~`fract;      emitBuf opFract[at;r;a0[0]]
-    name~`sign;       emitBuf opSign[at;r;a0[0]]
-    name~`sqrt;       emitBuf opSqrt[at;r;a0[0]]
-    name~`exp;        emitBuf opExp[at;r;a0[0]]
-    name~`log;        emitBuf opLog[at;r;a0[0]]
-    name~`tanh;       emitBuf opTanh[at;r;a0[0]]
-    name~`sqr;        emitBuf opFmul[at;r;a0[0];a0[0]]
-    name~`sin;        emitBuf opSin[at;r;a0[0]]
-    name~`cos;        emitBuf opCos[at;r;a0[0]]
-    name~`asin;       emitBuf opAsin[at;r;a0[0]]
-    name~`acos;       emitBuf opAcos[at;r;a0[0]]
-    name~`atan;       emitBuf opAtan[at;r;a0[0]]
-    name~`atan2;      emitBuf opAtan2[at;r;a0[0];a1[0]]
-    name~`length;     emitBuf opLen[Tf32;r;a0[0]]
-    name~`normalize;  emitBuf opNrm[at;r;a0[0]]
-    name~`pow;        emitBuf opPow[at;r;a0[0];a1[0]]
-    name~`min;        emitBuf opFmin[at;r;a0[0];a1[0]]
-    name~`max;        emitBuf opFmax[at;r;a0[0];a1[0]]
-    name~`dot;        emitBuf opDot[Tf32;r;a0[0];a1[0]]
-    name~`cross;      emitBuf opCrs[Tv3;r;a0[0];a1[0]]
-    name~`step;       emitBuf opStep[at;r;a0[0];a1[0]]
-    name~`mod;        emitBuf opFmod[at;r;a0[0];a1[0]]
-    name~`clamp;      emitBuf opClamp[at;r;a0[0];a1[0];a2[0]]
-    name~`mix;        emitBuf opMix[at;r;a0[0];a1[0];a2[0]]
-    name~`smoothstep; emitBuf opSS[at;r;a0[0];a1[0];a2[0]]
-    0]
-  (r; rty)}
-
-/ ── Layer 3: expression compilers ─────────────────────────────────────────
-
-/ Vector literal `127.1 311.7` → OpConstantComposite (v2/v3/v4 of f32).
-/ Each component is emitted as its own f32 OpConstant first, then referenced.
-/ This lets shaders write `dot[p; 127.1 311.7]` instead of `dot[p; (127.1;311.7)]`.
-compVecLit: {[i]
-  vals: 0.+kVal i
-  n:    #vals
-  ids:  {[v] constId[Tf32;v]}' vals
-  rty:  $[n=2;`v2; n=3;`v3; `v4]
-  r:    newId[]
-  emitCon (0x2C+(0x10000*(3+n)); Tid[rty]; r),ids   / OpConstantComposite 44
-  (r; rty)
-}
-
-compScalarLit: {[i; oty]
-  litTy: kKind i
-  useTy: $[(litTy~`int) & (oty~`f32); `float; litTy]
-  t:   LitTid[useTy]
-  val: $[(litTy~`int) & (useTy~`float); 0.+kVal i; kVal i]
-  r: constId[t;val]
-  (r; LitSym[useTy])
-}
-
-compLit: {[i; oty]
-  $[(kKind i) in `floats`ints; compVecLit[i]; compScalarLit[i;oty]]
-}
-
-/ Name resolution: the kernel env first (params, locals, loop vars); any other
-/ name is a HOST global whose CURRENT VALUE is baked in as an f32 constant
-/ (doc/design/kk.md §2 — kills the "keep host and kernel literals in sync"
-/ comment-contract; recompile the kernel to pick up a new value). Numeric
-/ scalar globals only; an undefined or non-scalar name warns on stderr-ish
-/ stdout and bakes NaN (ink has no signal verb), so results scream instead of
-/ silently using garbage.
-kBakeBad: {[nm] `0 0: "dye: cannot bake ",($nm)," (not a param/local, and not a numeric scalar host global)\n"; (constId[Tf32; 0n]; `f32)}
-kBake:    {[nm] v: . nm; $[(@v) in `b`i`f; (constId[Tf32; 0.+v]; `f32); kBakeBad nm]}
-compVar:  {[i; env] nm: kVal i; $[nm in !env; env nm; kBake nm]}
-
-/ x<=y → ~(x>y),  x>=y → ~(x<y).  `flip` is the strict comparison to negate;
-/ the b operand is an apposit(`"=" …) wrapper, so its `a child is the real operand.
-compLeGe: {[i; env; flip]
-  ap: compNode[kF1[i;`a];          env; `f32]
-  bp: compNode[kF1[kF1[i;`b];`a];  env; `f32]
-  rc: newId[]
-  emitBuf dispBin[flip; `bool; rc; ap[1]; ap[0]; bp[1]; bp[0]]
-  r:  newId[]
-  emitBuf opLNot[Tbool; r; rc]
-  (r; `bool)
-}
-
-compTransNorm: {[i; env; oty]
-  op: kVal kF1[i;`v]
-  / Feed the right hint to operands: numeric comparisons want f32, bool ops want bool
-  opTy: $[op in `"<"`">"`"="`"~"; `f32; op in (`"&";`"|"); `bool; oty]
-  ap: compNode[kF1[i;`a]; env; opTy]
-  bp: compNode[kF1[i;`b]; env; opTy]
-  aty: ap[1]; bty: bp[1]
-  rty: binRty[op; aty; bty; oty]
-  / Bug fix: for +,-,% on vector ⊕ scalar, splat the scalar up to the vector type
-  / so OpFAdd/Sub/Div see matching operands (* uses OpVectorTimesScalar already).
-  bcast: (op in `"+"`"-"`"%") & isVecTy[rty] & ~(isVecTy[aty] & isVecTy[bty])
-  aId: $[bcast & ~isVecTy[aty]; splat[rty; ap[0]]; ap[0]]
-  bId: $[bcast & ~isVecTy[bty]; splat[rty; bp[0]]; bp[0]]
-  da:  $[bcast & ~isVecTy[aty]; rty; aty]
-  db:  $[bcast & ~isVecTy[bty]; rty; bty]
-  r: newId[]
-  emitBuf dispBin[op; rty; r; da; aId; db; bId]
-  (r; rty)
-}
-
-/ Peephole for the missing <= / >= operators.  ink has no such tokens: `x<=y`
-/ lexes as `x < (=y)` and `x>=y` as `x > (=y)` (monadic `"="` on the right).
-/ Detect that shape and emit the De Morgan equivalent so shaders can write
-/ `a<=b` / `a>=b` directly instead of `"~"(a>b)` / `"~"(a<b)`.
-compTrans: {[i; env; oty]
-  vN: kF1[i;`v]
-  $[(kKind vN)~`term; compAdverb[i; vN; env; oty]   / adverbed verb: `i f/ x`"," `f g/ x`
-    compTransOp[i; env; oty]]
-}
-compTransOp: {[i; env; oty]
-  op: kVal kF1[i;`v]; b: kF1[i;`b]
-  isEq: ((kKind b)~`apposit) & ((kVal kF1[b;`f])~`"=")
-  $[(op~`"<") & isEq; compLeGe[i; env; `">"]
-    (op~`">") & isEq; compLeGe[i; env; `"<"]
-    compTransNorm[i; env; oty]]
-}
-
-/ Monadic application written as juxtaposition: `floor px`"," `sin px`"," `"-"x`.
-/ The op slot is a bare symbol for built-in verbs (`sin`"-"x) but a var node
-/ (`literal;`var;`floor) for math names that aren't ink keywords — normalise
-/ both to the bare symbol so dispUn matches (else floor/fract/sign/length/
-/ normalize silently fall through to negate).
-/ Monadic application `floor px`"," `"-"x`. The f slot is a var row (math name) or an
-/ op row (builtin verb); either way its `value holds the glyph/name for dispUn.
-compAppos: {[i; env; oty]
-  op: kVal kF1[i;`f]
-  ap: compNode[kF1[i;`a]; env; oty]
-  r: newId[]
-  emitBuf dispUn[op; ap[1]; r; ap[0]]
-  rty: $[op~`length; `f32; op~`"~"; `bool; ap[1]]
-  (r; rty)
-}
-
-/ Composite indexing fallback: v[i] → OpCompositeExtract. `fr` is the f row.
-compApplyIdx: {[fr; i; env; oty]
-  ap:  compNode[fr; env; oty]
-  idx: kVal kF1[i;`arg]
-  r:   newId[]
-  emitBuf opXtract[Tf32; r; ap[0]; idx]
-  (r; `f32)
-}
-
-/ Buffer indexing (stencil intrinsic): u[j] where u is a storage buffer and j is
-/ ANY expression → dynamic load. The index is computed in f32 (so all existing
-/ arithmetic/conditionals just work — exact for integers ≤ 2^24), truncated to i32,
-/ then OpAccessChain(member 0, j) + OpLoad. `bufId` is the buffer's OpVariable.
-compBufIdx: {[bufId; i; env]
-  ip: compNode[kF1[i;`arg]; env; `f32]          / index expression as f32
-  si: newId[]; emitBuf opF2s[Ti32; si; ip[0]]   / f32 → i32 (truncate)
-  p:  newId[]; emitBuf opAccChain[CPf32; p; bufId; CKz; si]
-  r:  newId[]; emitBuf opLoad[Tf32; r; p]
-  (r; `f32)
-}
-
 / Is `nm` a storage-buffer binding in the current env? (short-circuits the lookup)
 isBuf: {[nm; env] $[nm in !env; `buf~(env nm)1; 0]}
 
-/ Atomic scatter-add (edge-list / cloth intrinsic): scatterAdd[acc; idx; val] does
-/ acc[idx] += val atomically (OpAtomicIAdd, Device scope). `acc` is an i32 storage
-/ buffer (a `scat` env entry), idx/val are computed in f32 then truncated to i32 —
-/ so callers scale floats to fixed point (e.g. scatterAdd[acc; i; 65536.*dx]). This
-/ is how many edges accumulate a correction onto the SAME particle without a race.
-compScatterAdd: {[i; env]
-  args: kF[i;`arg]                              / (accName; idxExpr; valExpr)
-  accId: (env kVal args[0])0
-  ip: compNode[args[1]; env; `f32]; si:newId[]; emitBuf opF2s[Ti32; si; ip[0]]
-  vp: compNode[args[2]; env; `f32]; vi:newId[]; emitBuf opF2s[Ti32; vi; vp[0]]
-  ptr: newId[]; emitBuf opAccChain[CPi32; ptr; accId; CKz; si]
-  old: newId[]; emitBuf opAtomicIAdd[Ti32; old; ptr; CScope; CKz; vi]  / old value discarded
-  (old; `i32)
-}
-
-/ set[buf; idx; val] — plain (non-atomic) store buf[idx]:=val into an f32 buffer.
-/ Lets a kernel write several buffers as side effects (gpu.kernel has no auto-output).
-compSet: {[i; env]
-  args: kF[i;`arg]                              / (bufName; idxExpr; valExpr)
-  bid: (env kVal args[0])0
-  ip: compNode[args[1]; env; `f32]; si:newId[]; emitBuf opF2s[Ti32; si; ip[0]]
-  vp: compNode[args[2]; env; `f32]
-  p:  newId[]; emitBuf opAccChain[CPf32; p; bid; CKz; si]
-  emitBuf opStore[p; vp[0]]
-  vp
-}
-/ iget[acc; idx] — load i32 acc[idx] and convert to f32 (read a fixed-point accumulator).
-compIget: {[i; env]
-  args: kF[i;`arg]
-  aid: (env kVal args[0])0
-  ip: compNode[args[1]; env; `f32]; si:newId[]; emitBuf opF2s[Ti32; si; ip[0]]
-  p:  newId[]; emitBuf opAccChain[CPi32; p; aid; CKz; si]
-  iv: newId[]; emitBuf opLoad[Ti32; iv; p]
-  fv: newId[]; emitBuf opI2f[Tf32; fv; iv]      / SToF
-  (fv; `f32)
-}
-/ iset[acc; idx; val] — store val (truncated to i32) into an i32 accumulator. Used to
-/ clear the fixed-point accumulator (iset[acc;i;0.]) between constraint passes.
-compIset: {[i; env]
-  args: kF[i;`arg]
-  aid: (env kVal args[0])0
-  ip: compNode[args[1]; env; `f32]; si:newId[]; emitBuf opF2s[Ti32; si; ip[0]]
-  vp: compNode[args[2]; env; `f32]; vi:newId[]; emitBuf opF2s[Ti32; vi; vp[0]]
-  p:  newId[]; emitBuf opAccChain[CPi32; p; aid; CKz; si]
-  emitBuf opStore[p; vi]
-  (vi; `i32)
-}
-
 / ── In-kernel bounded loops (control flow for the compute dialect) ───────────
 / The dialect grows ONE loop CFG idiom, shared by three surfaces:
-/   rsum[K; {[k] e}]  — fused index map-reduce (Σ e over k=0..K-1). k has no single
-/                       adverb for this (`"+/"e'!K` needs a materialised range, which
-/                       a per-thread kernel can't build) so it stays a primitive.
+/   +/{[k] e}'!K      — fused index map-reduce (Σ e over k=0..K-1), the CANONICAL
+/                       spelling (kk2 §8-3); |/ → max. No range is materialised:
+/                       xFoldEach recognizes the shape and lowers it to the same
+/                       region node as rsum[K;{[k] e}]/rmax[…], the documented
+/                       intrinsic equivalents (kept compiling, byte-identical).
 /   i f/ x  (N-do)    — apply verb `f` to state `x`"," `i` times.   ← real k adverb
 /   f g/ x  (While)   — apply body `g` to state `x` while cond `f x` holds. ← adverb
 / The verb/cond `{[s] …}` is NOT a runtime closure — its body is INLINED with the
@@ -641,188 +396,6 @@ loopClose: {[nv; sty; sNext; iNext; iPhi; conL; hdrL; mrgL]
   emitBuf opBranch[hdrL]
   emitBuf opLabel[mrgL]
 }
-
-/ rsum[K; {[k] expr}] — reduction. State = the f32 accumulator; counter = the index.
-compRsum: {[i; env]
-  args: kF[i;`arg]                             / (Kexpr ; lambdaNode)
-  lamN: args 1
-  pn:   *(Cst`value)@kF[lamN;`param]            / loop-index name
-  bst:  kF[lamN;`stmt]                          / lambda body rows
-  kp:   compNode[args 0; env; `f32]
-  Kmax: newId[]; emitBuf opF2s[Ti32; Kmax; kp 0]
-  h:    loopOpen[Kmax; RCf0; `f32]              / seed acc = 0.
-  iPhi:h 0; accPhi:h 1; iNext:h 2; accNext:h 3; conL:h 4; hdrL:h 5; mrgL:h 6
-  kf:   newId[]; emitBuf opI2f[Tf32; kf; iPhi]  / expose counter to the body as f32 k
-  benv: ((!env),pn)!(env[!env],(,(kf;`f32)))
-  bp:   compSeq[bst; benv; `f32]
-  nv:   newId[]; emitBuf opFadd[Tf32; nv; accPhi; bp 0]   / acc' = acc + expr
-  loopClose[nv; `f32; accNext; iNext; iPhi; conL; hdrL; mrgL]
-  (accPhi; `f32)
-}
-
-/ rmax[K; {[k] expr}] — max reduction (stable-softmax numerator).  Same loop as rsum
-/ but seeded at -1e30 and combined with FMax.
-compRmax: {[i; env]
-  args: kF[i;`arg]; lamN: args 1
-  pn:   *(Cst`value)@kF[lamN;`param]; bst: kF[lamN;`stmt]
-  kp:   compNode[args 0; env; `f32]
-  Kmax: newId[]; emitBuf opF2s[Ti32; Kmax; kp 0]
-  h:    loopOpen[Kmax; RCfNeg; `f32]
-  iPhi:h 0; accPhi:h 1; iNext:h 2; accNext:h 3; conL:h 4; hdrL:h 5; mrgL:h 6
-  kf:   newId[]; emitBuf opI2f[Tf32; kf; iPhi]
-  benv: ((!env),pn)!(env[!env],(,(kf;`f32)))
-  bp:   compSeq[bst; benv; `f32]
-  nv:   newId[]; emitBuf opFmax[Tf32; nv; accPhi; bp 0]   / acc' = max(acc, expr)
-  loopClose[nv; `f32; accNext; iNext; iPhi; conL; hdrL; mrgL]
-  (accPhi; `f32)
-}
-
-/ N-do:  i f/ x  — verb `f` (=`vN`"," a 1-param lambda) applied to state x, i times.
-/ The counter drives trip count only; the verb sees the state, not the counter
-/ (pure k n-do). State type follows the seed (f32 / vec2 / …).
-compNdo: {[aN; vN; bN; env; oty]
-  cp:   compNode[aN; env; `f32]
-  Kmax: newId[]; emitBuf opF2s[Ti32; Kmax; cp 0]
-  sp:   compNode[bN; env; oty]; sty: sp 1
-  h:    loopOpen[Kmax; sp 0; sty]
-  sPhi:h 1; iNext:h 2; sNext:h 3; conL:h 4; hdrL:h 5; mrgL:h 6; iPhi:h 0
-  vpn:  *(Cst`value)@kF[vN;`param]
-  venv: ((!env),vpn)!(env[!env],(,(sPhi;sty)))
-  bp:   compSeq[kF[vN;`stmt]; venv; sty]         / state' = f(state)
-  loopClose[bp 0; sty; sNext; iNext; iPhi; conL; hdrL; mrgL]
-  (sPhi; sty)
-}
-
-/ While:  f g/ x  — body `g` (=`vN`) applied to state x while cond `f` (=`cN`"," a
-/ 1-param lambda returning bool) holds. No counter: cond is re-tested in the header.
-compWhile: {[cN; vN; bN; env; oty]
-  sp:   compNode[bN; env; oty]; sty: sp 1
-  preL:newId[]; hdrL:newId[]; bodL:newId[]; conL:newId[]; mrgL:newId[]
-  sPhi:newId[]; sNext:newId[]
-  emitBuf opBranch[preL]; emitBuf opLabel[preL]; emitBuf opBranch[hdrL]; emitBuf opLabel[hdrL]
-  emitBuf opPhi2[Tid[sty]; sPhi; sp 0; preL; sNext; conL]
-  cpn:  *(Cst`value)@kF[cN;`param]               / cond in the header, after the phi
-  cenv: ((!env),cpn)!(env[!env],(,(sPhi;sty)))
-  cc:   compSeq[kF[cN;`stmt]; cenv; `bool]
-  emitBuf opLoopMrg[mrgL; conL]; emitBuf opBrCond[cc 0; bodL; mrgL]; emitBuf opLabel[bodL]
-  vpn:  *(Cst`value)@kF[vN;`param]
-  venv: ((!env),vpn)!(env[!env],(,(sPhi;sty)))
-  bp:   compSeq[kF[vN;`stmt]; venv; sty]          / state' = g(state)
-  emitBuf opCopy[Tid[sty]; sNext; bp 0]
-  emitBuf opBranch[conL]; emitBuf opLabel[conL]; emitBuf opBranch[hdrL]; emitBuf opLabel[mrgL]
-  (sPhi; sty)
-}
-
-/ Adverbed-verb transit: `x adverb-verb y`. The operator node is a `term` whose
-/ value is the adverb glyph and whose `f` child is the verb. `"/"` splits N-do vs
-/ While by the left arg's kind (a lambda ⇒ While cond; else ⇒ N-do count).
-compAdverb: {[i; vN; env; oty]
-  glyph: kVal vN
-  verb:  kF1[vN;`f]
-  aN:    kF1[i;`a]; bN: kF1[i;`b]
-  $[glyph~`"/"; $[(kKind aN)~`lambda; compWhile[aN; verb; bN; env; oty]
-                compNdo[aN; verb; bN; env; oty]]
-    (0; oty)]                                     / other adverbs: not in kernels yet
-}
-
-/ sample[uv] (texture 0) or sample[k; uv] (texture k, k a literal) → texture
-/ lookup: OpSampledImage(image_k, shared sampler) then OpImageSampleImplicitLod at
-/ the interpolated uv. Only valid inside a shader.fragmentTexN. Returns v4.
-compSample: {[i; env]
-  args: kF[i;`arg]
-  two:  1<#args
-  ti:   $[two; kVal args[0]; 0]                   / texture index (literal) or 0
-  uv:   compNode[$[two; args[1]; args[0]]; env; `v2]
-  li: newId[]; emitBuf opLoad[Timg2; li; TexVars[ti]]
-  ls: newId[]; emitBuf opLoad[Tsamp2; ls; SampVar]
-  ci: newId[]; emitBuf (0x00050056; TsImg; ci; li; ls)      / OpSampledImage 86
-  r:  newId[]; emitBuf (0x00050057; Tv4; r; ci; uv[0])       / OpImageSampleImplicitLod 87
-  (r; `v4)
-}
-
-/ Explicit apply: f[a;b;c]
-/ Handles: texture sampling, math function calls AND composite indexing (v[0])
-compApply: {[i; env; oty]
-  fr:     kF1[i;`f]
-  fnName: kVal fr
-  $[fnName~`sample;      compSample[i; env]
-    fnName~`scatterAdd;  compScatterAdd[i; env]
-    fnName~`set;         compSet[i; env]
-    fnName~`iget;        compIget[i; env]
-    fnName~`iset;        compIset[i; env]
-    fnName~`rsum;        compRsum[i; env]
-    fnName~`rmax;        compRmax[i; env]
-    fnName in mathFns;   compFnCall[fnName; i; env; oty]
-    isBuf[fnName; env];  compBufIdx[(env fnName)0; i; env]
-    compApplyIdx[fr; i; env; oty]]
-}
-
-/ Tuple → vec2/vec3/vec4 via OpCompositeConstruct
-/ gpu.dispatch on element count.
-compList: {[i; env; oty]
-  elems: kF[i;`elem]
-  n:  #elems
-  p0: compNode[elems[0];env;`f32]
-  p1: compNode[elems[1];env;`f32]
-  p2: $[n>2; compNode[elems[2];env;`f32]; (0;`f32)]
-  p3: $[n>3; compNode[elems[3];env;`f32]; (0;`f32)]
-  r:   newId[]
-  rty: $[n=2; `v2; n=3; `v3; `v4]
-  rt:  $[n=2; Tv2; n=3; Tv3;  Tv4]
-  $[n=2; emitBuf opCons2[rt;r;p0[0];p1[0]]
-    n=3; emitBuf opCons3[rt;r;p0[0];p1[0];p2[0]]
-    emitBuf opCons4[rt;r;p0[0];p1[0];p2[0];p3[0]]]
-  (r; rty)
-}
-
-/ $[c; then; else] and chained $[c1;t1;c2;t2;...;default] → OpSelect (eager both branches)
-/ Handles scalar bool condition selecting scalar or vector values. The cond's
-/ operands are its `stmt child rows, in source order.
-compCond: {[i; env; oty] compCondS[kF[i;`stmt]; env; oty]}
-compCondS: {[ss; env; oty]
-  n:   #ss
-  cp:  compNode[ss 0; env; `bool]
-  tp:  compNode[ss 1; env; oty]
-  ep:  $[n=3; compNode[ss 2; env; oty]; compCondS[2_ss; env; oty]]
-  r:   newId[]
-  rty: tp[1]
-  emitBuf opSel[Tid[rty]; r; cp[0]; tp[0]; ep[0]]
-  (r; rty)
-}
-
-/ CST node dispatcher — dispatch on the row's kind, recurse into child rows.
-compNode: {[i; env; oty]
-  tag: kKind i
-  $[tag~`var;     compVar[i;env]
-    tag in `int`float`ints`floats`bool`string`symbol; compLit[i;oty]
-    tag~`transit;  compTrans[i;env;oty]
-    tag~`apposit;  compAppos[i;env;oty]
-    tag~`apply;    compApply[i;env;oty]
-    tag~`list;     compList[i;env;oty]
-    tag~`cond;     compCond[i;env;oty]
-    tag~`right;    compNode[kF1[i;`clause];env;oty]   / parenthesised expression
-    tag~`group;    compNode[kF1[i;`stmt];env;oty]
-    (0; oty)]
-}
-
-/ ── Layer 3: sequential body with local bindings ──────────────────────────
-/ stmts: list of statement nodes (seq/div markers already stripped)
-/ For bind nodes (y: expr), compile rhs and extend env with name→result. A bare
-/ (non-bind) non-final statement is compiled for its SIDE EFFECTS (set/scatterAdd/
-/ iset stores) — `sfx` forces that; without it such statements were silently dropped.
-/ Returns (id; ty_sym) of the last expression.
-compSeqTail: {[stmts; env; oty]
-  s:   stmts 0
-  isb: ((kKind s)~`bind) & (0<#kF[s;`a])
-  sfx: $[isb; 0; compNode[s;env;oty]]
-  e2:  $[isb; ((!env),kVal kF1[s;`v])!(env[!env],(,compNode[kF1[s;`a];env;oty])); env]
-  compSeq[1_stmts;e2;oty]}
-
-compSeq: {[stmts; env; oty]
-  n: #stmts
-  $[n=0; (0;oty)
-    n=1; compNode[stmts[0];env;oty]
-    compSeqTail[stmts;env;oty]]}
 
 / ── Layer III helper ──────────────────────────────────────────────────────────
 loadOnePair: {[vid; tsym]
@@ -880,7 +453,7 @@ buildMod: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
 / ══ Consolidated compute-module emitter (doc/design/kk.md §3.1, increment 1) ══
 / Every compute entry point (map / stencil / scatter / general kernel) is the SAME
 / module: a binding table of storage buffers (+ optional uniform block), a gid
-/ prologue, a body compiled by compSeq, an optional auto-store, and one assembly.
+/ prologue, a body compiled by kSeqIr, an optional auto-store, and one assembly.
 / kAlloc + kGid*/kElem/kStore + kAsm factor that out; the shader.* entry points
 / below are thin wrappers that differ only in their binding spec and env shape.
 / The AK* globals mirror the old per-entry locals (ink lambdas can't close over
@@ -927,6 +500,15 @@ kGidX: {[] g:newId[]; emitBuf opLoad[AKv3; g; AKgid]; x:newId[]; emitBuf opXtrac
 kGidF: {[gx] f:newId[]; emitBuf opU2f[Tf32; f; gx]; f}                  / thread index as f32
 kElem: {[bid;gx] p:newId[]; emitBuf opAccChain[AKpf32; p; bid; AKz; gx]; v:newId[]; emitBuf opLoad[Tf32; v; p]; (v;`f32)}
 kStore:{[bid;gx;val] p:newId[]; emitBuf opAccChain[AKpf32; p; bid; AKz; gx]; emitBuf opStore[p; val]}
+/ Scatter store for @[x;I;:;v]: out[I[gid]] := val. Loads the write index from the
+/ I buffer at gid (f32→i32), then stores. I is padded to the dispatch grid with a
+/ sentinel that lands in out's padding, so over-dispatched threads don't clobber.
+kScatStore: {[outBid; idxBid; gx; val]
+  p1:newId[]; emitBuf opAccChain[AKpf32; p1; idxBid; AKz; gx]
+  iv:newId[]; emitBuf opLoad[Tf32; iv; p1]
+  si:newId[]; emitBuf opF2s[Ti32; si; iv]
+  p2:newId[]; emitBuf opAccChain[AKpf32; p2; outBid; AKz; si]
+  emitBuf opStore[p2; val]}
 
 / ── kAsm[] — assemble the module from the AK* state ───────────────────────────
 / Per-binding DescriptorSet/Binding decorations and OpVariables (each-helpers
@@ -973,7 +555,7 @@ compCompute: {[fn]
   gx: kGidX[]
   xp: kElem[ids 0; gx]
   env: (,argNames 0)!(,xp)
-  rp: kSeqIr[lamBody lam; env]
+  rp: kSeqIr[lamBody lam; env; `f32]
   kStore[ids 1; gx; rp 0]
   kAsm[]}
 shader.compute: compCompute
@@ -987,7 +569,7 @@ compComputeU: {[fn]
   xp: kElem[ids 0; gx]
   uPair: loadUniMember[AKuniKi]
   env: argNames!(xp;uPair)
-  rp: kSeqIr[lamBody lam; env]
+  rp: kSeqIr[lamBody lam; env; `f32]
   kStore[ids 1; gx; rp 0]
   kAsm[]}
 shader.computeU: compComputeU
@@ -1000,10 +582,122 @@ compCompute2: {[fn]
   xp: kElem[ids 0; gx]
   yp: kElem[ids 2; gx]
   env: argNames!(xp;yp)
-  rp: kSeqIr[lamBody lam; env]
+  rp: kSeqIr[lamBody lam; env; `f32]
   kStore[ids 1; gx; rp 0]
   kAsm[]}
 shader.compute2: compCompute2
+
+/ ── shader.map[fn; nIn] — N-input elementwise map (kk2 §2.4-2) ────────────────
+/ A whole-array lambda in implicit-param form ({2.*x}, {x+y}, {sqrt x}) lowered to
+/ a per-thread map: input k = binding k, loaded at gid into the implicit param
+/ (x=arg0, y=arg1, z=arg2); the body → out[gid] at binding nIn. This is what
+/ kk.compile lowers an elementwise placement map to; generalises compCompute/
+/ compute2 to N inputs and the implicit-param spelling. nIn ≤ 3. GXe publishes gid
+/ so the per-input load each can read it (ink lambdas can't close over locals).
+GXe:: 0
+kMapLoad: {[b] kElem[b; GXe]}
+compMapN: {[fn; nIn]
+  ids: kAlloc[0; nIn+1; 0; 0]
+  lam: lamOf fn
+  GXe:: kGidX[]
+  loads: kMapLoad' nIn # ids
+  env: (nIn # `x`y`z) ! loads
+  rp: kSeqIr[lamBody lam; env; `f32]
+  kStore[ids nIn; GXe; rp 0]
+  kAsm[]}
+shader.map: compMapN
+
+/ ── Elementwise subset classifier (kk2 §2.1: "no silent fallback") ────────────
+/ Walk the lambda body; return `nil if every node is in the elementwise subset
+/ (arith/cmp/join, math builtins, unary -/~, literals, x/y/z, list/cond/group/
+/ local bind), else the FIRST offending verb glyph or node kind so kk.compile can
+/ name it. Rejects gather (@), amend, adverbs and any non-math apply — those forms
+/ belong to the later kk.compile milestones (index-buffer gather, scatter, stencil).
+kkEwOps:: `"+"`"-"`"*"`"%"`"<"`">"`"="`"~"`"&"`"|"`","
+kkAny: {[rows] cs: $[0=#rows; ,`; kkChk' rows]; b: &~cs~\:`; $[#b; *(cs@b); `]}
+kkT: {[i] v:kF1[i;`v]; $[(kKind v)~`term; `adverb; ~(kVal v) in kkEwOps; kVal v; kkAny (kF1[i;`a];kF1[i;`b])]}
+kkA: {[i] f:kF1[i;`f]; $[(kKind f)~`term; `adverb; ~((kVal f) in mathFns)|((kVal f) in `"-"`"~"); kVal f; kkChk kF1[i;`a]]}
+kkP: {[i] f:kF1[i;`f]; $[~(kVal f) in mathFns; kVal f; kkAny kF[i;`arg]]}
+kkChk: {[i]
+  k: kKind i
+  $[k in `int`float`ints`floats`bool`var; `
+    k~`list;    kkAny kF[i;`elem]
+    k~`cond;    kkAny kF[i;`stmt]
+    k~`right;   kkChk kF1[i;`clause]
+    k~`group;   kkChk kF1[i;`stmt]
+    k~`bind;    kkChk kF1[i;`a]
+    k~`transit; kkT i
+    k~`apposit; kkA i
+    k~`apply;   kkP i
+    k]}
+kkClassify: {[fn] lam: lamOf fn; kkAny lamBody lam}
+
+/ ── Gather map kernel (kk2 §2.4-3): x@w → out[d] = src[idx[d]] ─────────────────
+/ Some args are `buf gather SOURCES (indexed by @), others are `elem indices/values
+/ (auto-loaded at the thread index d). bufNames get bindings 0..#bufNames-1, then
+/ elemNames, then the output. The body is compiled through the neutral IR with @
+/ lowering to a nested buffer index (xGather) and elem names to buf[d] (xVarE).
+kGmapEnvOne: {[p] (xEmit[`bufp; p 1; (); p 0]; p 1)}
+compGmap: {[fn; bufNames; elemNames]
+  nbuf: #bufNames; nb: nbuf + #elemNames
+  ids: kAlloc[0; nb+1; 0; 1]                / hasLoop=1: +/x@W needs the rsum consts
+  lam: lamOf fn
+  gx: kGidX[]; gf: kGidF[gx]
+  bufP:  {[id] (id;`buf)}'  nbuf # ids
+  elemP: {[id] (id;`elem)}' nbuf _ nb # ids
+  xReset[]
+  e2: (bufNames,elemNames) ! kGmapEnvOne' bufP,elemP
+  GIrGid:: xEmit[`param; `f32; (); gf]
+  rp: xSeq[lamBody lam; e2; `f32]
+  xLowerC[,rp 0]
+  kStore[ids nb; gx; xId rp 0]
+  kAsm[]}
+shader.gmap: compGmap
+
+/ ── Amend-scatter kernel (kk2 §2.4-4): @[x;I;:;v] → out[I[d]] = v ─────────────
+/ One thread per interior index d. The value expr v (arg 3 of the @-apply, e.g.
+/ 1.+.25*+/x@W) is compiled through the gather-reduce IR reading x (source) and W
+/ (neighbour matrix) as buffers; the result scatters to out[I[d]] (kScatStore).
+/ x,W,I are bindings 0,1,2 and out is 3; GRk/GRn (W's k,n) are baked by the caller.
+compAmend: {[fn; srcName; matName; idxName]
+  ids: kAlloc[0; 4; 0; 1]                     / x, W, I, out
+  lam: lamOf fn
+  gx: kGidX[]; gf: kGidF[gx]
+  bufP: {[id] (id;`buf)}' 3 # ids
+  xReset[]
+  e2: (srcName;matName;idxName) ! kGmapEnvOne' bufP
+  GIrGid:: xEmit[`param; `f32; (); gf]
+  ap: *& `apply = Cst`kind                    / the @[…] apply
+  vN: (kF[ap;`arg]) 3                          / arg 3 = the value expression
+  rp: xNode[vN; e2; `f32]
+  xLowerC[,rp 0]
+  kScatStore[ids 3; ids 2; gx; xId rp 0]      / out[I[gid]] := v
+  kAsm[]}
+shader.amend: compAmend
+
+/ Amend detection: an apply of @ with 4 args whose 3rd is the `:` assign verb.
+/ kkAmendInfo returns (srcName; idxName) — the amended buffer and its index set.
+kkIsAmendR: {[i] a:kF[i;`arg]; ((kVal kF1[i;`f])~`"@") & (3<#a) & ((kVal a 2)~`":")}
+kkAmendRows: {[] ap: & `apply = Cst`kind; $[0=#ap; !0; ap @ & kkIsAmendR' ap]}
+kkIsAmend: {[] 0 < # kkAmendRows[]}
+kkAmendInfo: {[] r: *kkAmendRows[]; a: kF[r;`arg]; (kVal a 0; kVal a 1)}
+
+/ Body scans for kk.compile's gather orchestration (Cst must already be set by a
+/ prior lamOf). kkHasAt: does the body contain an @-transit? kkGathSrc: the set of
+/ names that appear as the LEFT operand of @ (the gather sources → `buf role).
+/ Guard the empty case: `f' (!0)` over an EMPTY typed vector yields a general-list
+/ () (not an empty bool vector), and `&()` then `tr@…` spuriously returns one
+/ element — so a body with no transits would look like it has an @. Return !0.
+kkAtRows: {[] tr: & `transit = Cst`kind; $[0=#tr; !0; tr @ & {[i] (kVal kF1[i;`v])~`"@"}' tr]}
+kkHasAt:  {[] 0 < # kkAtRows[]}
+kkGathSrc:{[] r: kkAtRows[]; $[0=#r; !0; ? {[i] kVal kF1[i;`a]}' r]}
+/ Matrix gather-reduce +/(x@W): an apposit whose f is a /-term (over + or |) and
+/ whose argument is an @-transit. kkMatOperands returns (srcName; matName) of the
+/ first such form (both are `buf; matName's descriptor shape gives k,n).
+kkIsMatR: {[i] fN: kF1[i;`f]; $[~(kKind fN)~`term; 0; ~(kVal fN)~`"/"; 0; xIsGather kF1[i;`a]]}
+kkMatRows: {[] ap: & `apposit = Cst`kind; $[0=#ap; !0; ap @ & kkIsMatR' ap]}
+kkIsMatReduce: {[] 0 < # kkMatRows[]}
+kkMatOperands: {[] r: *kkMatRows[]; aN: kF1[r;`a]; (kVal kF1[aN;`a]; kVal kF1[aN;`b])}
 
 / shader.stencil — gather kernel {[u;i] …}: u = the whole input buffer (binding
 / 0), indexable at ANY computed offset (u[i-1], u[i+W]); i = thread index (f32);
@@ -1013,7 +707,7 @@ compStencil: {[fn]
   lam: lamOf fn; argNames: lamArgs lam
   gx: kGidX[]; gf: kGidF[gx]
   env: argNames!((ids 0;`buf);(gf;`f32))
-  rp: kSeqIr[lamBody lam; env]
+  rp: kSeqIr[lamBody lam; env; `f32]
   kStore[ids 1; gx; rp 0]
   kAsm[]}
 shader.stencil: compStencil
@@ -1026,7 +720,7 @@ compStencilU: {[fn]
   lam: lamOf fn; argNames: lamArgs lam
   gx: kGidX[]; gf: kGidF[gx]
   env: argNames!((ids 0;`buf);(ids 2;`buf);(gf;`f32))
-  rp: kSeqIr[lamBody lam; env]
+  rp: kSeqIr[lamBody lam; env; `f32]
   kStore[ids 1; gx; rp 0]
   kAsm[]}
 shader.stencilU: compStencilU
@@ -1040,7 +734,7 @@ compStencilIP: {[fn]
   lam: lamOf fn; argNames: lamArgs lam
   gx: kGidX[]; gf: kGidF[gx]
   env: argNames!((ids 0;`buf);(ids 1;`buf);(gf;`f32))
-  rp: kSeqIr[lamBody lam; env]
+  rp: kSeqIr[lamBody lam; env; `f32]
   kStore[ids 0; gx; rp 0]                       / write in place (binding 0)
   kAsm[]}
 shader.stencilIP: compStencilIP
@@ -1054,7 +748,7 @@ compScatter: {[fn]
   lam: lamOf fn; argNames: lamArgs lam
   gx: kGidX[]; gf: kGidF[gx]
   env: argNames!((ids 0;`scat);(ids 1;`buf);(ids 2;`buf);(ids 3;`buf);(gf;`f32))
-  rp: kSeqIr[lamBody lam; env]           / side effects only
+  rp: kSeqIr[lamBody lam; env; `f32]           / side effects only
   kAsm[]}
 shader.scatter: compScatter
 
@@ -1070,7 +764,7 @@ compGpN: {[fn; nAcc; nBuf]
   accPairs: {[id] (id;`scat)}' nAcc#ids
   bufPairs: {[id] (id;`buf)}' nAcc _ ids
   env: argNames!(accPairs,bufPairs,(,(gf;`f32)))
-  rp: kSeqIr[lamBody lam; env]
+  rp: kSeqIr[lamBody lam; env; `f32]
   kAsm[]}
 gpu.kernel: compGpN
 
@@ -1098,28 +792,18 @@ shader.kernel: {[fn]
 
 varOutOne:   {[ptr;vid]    (0x0004003B;ptr;vid;3)}    / OpVariable Output storage class
 
-/ Helper: run stmts as binds building up env; return extended env (not last value).
-/ Mirrors compSeqTail but returns env instead of the last compiled result.
-compSeqEnvTail: {[stmts; env]
-  s:   stmts 0
-  isb: ((kKind s)~`bind) & (0<#kF[s;`a])
-  e2:  $[isb; ((!env),kVal kF1[s;`v])!(env[!env],(,compNode[kF1[s;`a];env;`v4])); env]
-  compSeqEnv[1_stmts; e2]}
-
-compSeqEnv: {[stmts; env]
-  $[0=#stmts; env; compSeqEnvTail[stmts; env]]}
-
 / ════════════════════════════════════════════════════════════════════════════
 / Neutral IR seam (the Tiramisu "Layer 1/2"). Instead of emitting SPIR-V inline,
 / the walker below builds a target-neutral, typed SSA op list; a lowering pass then
 / turns it into a target — SPIR-V words (reusing the op* stencils) or a textual
-/ dump (xDump). EVERY COMPUTE BODY compiles through this IR (kSeqIr: build →
-/ lower-all in build order; loops are opaque region nodes replayed by their
-/ lowerer — byte-identical to the retired direct path by 1:1 id-order
-/ construction). shader.fragmentIr additionally drives the fragment subset with
-/ xFold const-folding + xReach DCE; the compute path keeps those OFF until its
-/ oracle moves from byte-identity to numeric parity. The fragment/vertex entry
-/ points still walk compNode directly (their migration is next).
+/ dump (xDump). EVERY entry point now compiles through this IR (kk2 §3): compute
+/ via kSeqIr, fragment/fragmentTexN via kSeqIr, vertex/vertexU via xSeqEnv +
+/ per-output `vstore nodes. The direct comp* walker is retired (deleted); build
+/ → lower-all in build order, loops are opaque region nodes replayed by their
+/ lowerer — byte-identical to the old direct path by 1:1 id-order construction.
+/ shader.fragmentIr additionally drives the fragment subset with xFold const-
+/ folding + xReach DCE; every other path keeps those OFF until its oracle moves
+/ from byte-identity to numeric parity (see §3 multi-root fold/DCE, still TODO).
 / See doc/design/dye.md + doc/design/kk.md.  IR node = an index into these lists:
 xOp::  ()   / op sym: param const cons extract select arith math neg lnot, plus
             / bufp f2s bufidx sadd setb igetb isetb (loads/effects) and the
@@ -1133,13 +817,22 @@ xRgn:: ()   / owning loop node per node (-1 = top level). A loop's body/cond
             / nodes are "owned": the main lowering pass skips them and the
             / loop node's lowerer replays them inside its basic blocks.
 XOwn:: -1   / current region owner during build (set by the loop builders)
+/ xOpt — const-fold + multi-root DCE on the effectful (compute/vertex) path.
+/ 0 (default) = lower every node (byte-identical to the pre-opt path; keeps the
+/ kkgold diff oracle meaningful). 1 = xFold then keep only nodes reachable from
+/ the value result(s) + every store + every loop; oracle then drops to numeric
+/ parity + spirv-val (byte-identity is intentionally broken by folding). See
+/ kk2 §3 + test/kkopt.k.
+xOpt:: 0
 xReset: {[] xOp::(); xTy::(); xArg::(); xVal::(); xId::(); xRe::(); xRgn::(); XOwn::-1}
 xEmit: {[op;ty;args;val] xOp,:: ,op; xTy,:: ,ty; xArg,:: ,args; xVal,:: ,val; xRgn,:: XOwn; -1+#xOp}
 xSplat: {[vty;snode] xEmit[`cons; vty; (ncVec[vty])#snode; 0n]}
 
 / ── IR builder: mirrors compNode, but returns (nodeIdx; ty) and records IR ──
 xLit: {[i;oty] $[(kKind i) in `floats`ints; xVecLit[i]; xScalarLit[i;oty]]}
-xVecLit: {[i] vals:0.+kVal i; n:#vals; cs:{[v] xEmit[`const;`f32;();v]}'vals; rty:$[n=2;`v2;n=3;`v3;`v4]; (xEmit[`cons;rty;cs;0n]; rty)}
+/ Vector literals lower to OpConstantComposite in the constants section (`consc),
+/ NOT an in-body OpCompositeConstruct (`cons) — mirrors compVecLit exactly.
+xVecLit: {[i] vals:0.+kVal i; n:#vals; cs:{[v] xEmit[`const;`f32;();v]}'vals; rty:$[n=2;`v2;n=3;`v3;`v4]; (xEmit[`consc;rty;cs;0n]; rty)}
 xScalarLit: {[i;oty] litTy:kKind i; useTy:$[(litTy~`int)&(oty~`f32);`float;litTy]; v:$[(litTy~`int)&(useTy~`float);0.+kVal i;kVal i]; (xEmit[`const;LitSym[useTy];();v]; LitSym[useTy])}
 
 xTransNorm: {[i;env;oty]
@@ -1159,15 +852,67 @@ xLeGe: {[i;env;flip]
 xTransOp: {[i;env;oty]
   op: kVal kF1[i;`v]; b: kF1[i;`b]
   isEq: ((kKind b)~`apposit) & ((kVal kF1[b;`f])~`"=")
-  $[(op~`"<")&isEq; xLeGe[i;env;`">"]
+  $[op~`"@";       xGather[i;env]
+    (op~`"<")&isEq; xLeGe[i;env;`">"]
     (op~`">")&isEq; xLeGe[i;env;`"<"]
     xTransNorm[i;env;oty]]}
 xTrans: {[i;env;oty] $[(kKind kF1[i;`v])~`term; xAdverb[i; kF1[i;`v]; env; oty]; xTransOp[i;env;oty]]}
 xAppos: {[i;env;oty]
-  op: kVal kF1[i;`f]; ap: xNode[kF1[i;`a];env;oty]; aty: ap 1
+  fN: kF1[i;`f]
+  $[(kKind fN)~`term; xApposAdv[i;fN;env;oty]; xApposOp[i;fN;env;oty]]}
+xApposOp: {[i;fN;env;oty]
+  op: kVal fN; ap: xNode[kF1[i;`a];env;oty]; aty: ap 1
   $[op in mathFns; (xEmit[`math; $[op~`length;`f32;aty]; ,ap 0; op]; $[op~`length;`f32;aty])
     op~`"~"; (xEmit[`lnot;`bool;,ap 0;`]; `bool)
     (xEmit[`neg;aty;,ap 0;`]; aty)]}
+/ Monadic adverbed verb: `+/{[k] e}'!K` (and `|/…`) — the CANONICAL spelling of
+/ the fused index map-reduce (doc/design/kk2.md §2.4-1/§8-3). The fold-over-each-
+/ over-enumerate shape lowers through xRed to the same rsum/rmax region node as
+/ the intrinsic spelling, in the same emission order (K expr; f2s; loop node;
+/ kparam; body) — byte-identical by construction. Any other monadic adverb
+/ application warns and bakes NaN (screaming beats a silent fallthrough to neg).
+xIsEachEnum: {[aN]
+  $[~(kKind aN)~`apposit; 0
+    ~(kKind kF1[aN;`f])~`term; 0
+    ~(kVal kF1[aN;`f])~`"'"; 0
+    ~(kKind kF1[kF1[aN;`f];`f])~`lambda; 0
+    ~(kKind kF1[aN;`a])~`apposit; 0
+    (kVal kF1[kF1[aN;`a];`f])~`"!"]}
+xFoldBad: {[g] `0 0: "dye: unsupported adverbed verb ",($g)," in kernel (only +/{[k] e}'!K, |/…, +/x@W)\n"; (xEmit[`const;`f32;();0n]; `f32)}
+/ +/x@W matrix gather-reduce (kk2 §2.4-3): W is a (k;n) index matrix uploaded flat
+/ (W[j*n+d] = the j-th neighbour index of output element d); the fold sums the k
+/ gathers of x through those indices. GRk/GRn (k and n) are baked by kk.compile
+/ from W's descriptor shape; GIrGid = the thread index d. Emits a real rsum/rmax
+/ region node whose body is x[W[(j*n)+d]] (j = the loop counter). Both operands are
+/ `buf here (indexed) — unlike the single gather x@w where the right side is `elem.
+GRk:: 0; GRn:: 0
+xIsGather: {[aN] ((kKind aN)~`transit) & ((kVal kF1[aN;`v])~`"@")}
+xRedGather: {[aN; env; op]
+  xN: (env kVal kF1[aN;`a]) 0
+  wN: (env kVal kF1[aN;`b]) 0
+  kp: xEmit[`const; `f32; (); 0.+GRk]
+  kx: xEmit[`f2s; `i32; ,kp; 0n]
+  L:  xEmit[op; `f32; ,kx; 0n]
+  sav: XOwn; XOwn:: L
+  jpar: xEmit[`kparam; `f32; (); 0n]                 / loop counter j as f32
+  nC:  xEmit[`const; `f32; (); 0.+GRn]
+  jn:  xEmit[`arith; `f32; (jpar; nC); `"*"]         / j*n
+  jnd: xEmit[`arith; `f32; (jn; GIrGid); `"+"]       / j*n + d
+  wsi: xEmit[`f2s; `i32; ,jnd; 0n]
+  widx:xEmit[`bufidx; `f32; (wN; wsi); 0n]           / W[(j*n)+d]
+  xsi: xEmit[`f2s; `i32; ,widx; 0n]
+  gval:xEmit[`bufidx; `f32; (xN; xsi); 0n]           / x[W[(j*n)+d]]
+  XOwn:: sav
+  xVal[L]:: (jpar; gval; #xOp)
+  (L; `f32)}
+xApposAdv: {[i;fN;env;oty]
+  vg: kVal kF1[fN;`f]; aN: kF1[i;`a]
+  op: $[vg~`"+"; `rsum; vg~`"|"; `rmax; `]
+  ok: ((kVal fN)~`"/") & ~op~`               / a /-fold over + or | ?
+  $[~ok;            xFoldBad[vg]
+    xIsEachEnum[aN]; xRed[kF1[kF1[aN;`a];`a]; kF1[kF1[aN;`f];`f]; env; op]
+    xIsGather[aN];   xRedGather[aN; env; op]
+    xFoldBad[vg]]}
 xFnCall: {[name;i;env;oty]
   args: kF[i;`arg]; n:#args
   a0: xNode[args 0;env;`f32]
@@ -1179,7 +924,8 @@ xFnCall: {[name;i;env;oty]
 xApplyIdx: {[fr;i;env;oty] ap:xNode[fr;env;oty]; (xEmit[`extract;`f32;,ap 0; kVal kF1[i;`arg]]; `f32)}
 xApply: {[i;env;oty]
   fr: kF1[i;`f]; nm: kVal fr
-  $[nm~`scatterAdd;  xSadd[i;env]
+  $[nm~`sample;      xSample[i;env]
+    nm~`scatterAdd;  xSadd[i;env]
     nm~`set;         xSet[i;env]
     nm~`iget;        xIget[i;env]
     nm~`iset;        xIset[i;env]
@@ -1222,18 +968,29 @@ xIset: {[i; env]
   vp: xNode[args 2; env; `f32]; vi: xEmit[`f2s;`i32;,vp 0;0n]
   z: xEmit[`isetb; `i32; (accN; si; vi); 0n]
   (vi; `i32)}
+/ sample[uv] / sample[k;uv] — texture lookup (fragmentTexN only). xVal carries
+/ the literal texture index; the lowerer reads the Timg2/TexVars/SampVar globals.
+xSample: {[i; env]
+  args: kF[i;`arg]
+  two: 1<#args
+  ti: $[two; kVal args 0; 0]
+  uv: xNode[$[two; args 1; args 0]; env; `v2]
+  (xEmit[`sample; `v4; ,uv 0; ti]; `v4)}
 
 / ── Loops as opaque region nodes ─────────────────────────────────────────────
 / The loop node is emitted BEFORE its body so it lowers at the position the
 / direct path called loopOpen; body nodes built after it are owned (xRgn) and
 / replayed inside the loop's basic blocks by the loop lowerer. xVal carries
 / (param-node; result-root; owned-end[; …]) patched after the body is built.
-xRsum: {[i; env]
-  args: kF[i;`arg]; lamN: args 1
+/ Shared rsum/rmax region-node builder: kN = the trip-count expression node,
+/ lamN = the 1-param body lambda node, op = `rsum or `rmax. Both the intrinsic
+/ spelling (rsum[K;{[k] e}]) and the canonical full syntax (+/{[k] e}'!K, see
+/ xFoldEach) land here, so the two are byte-identical by construction.
+xRed: {[kN; lamN; env; op]
   pn: *(Cst`value)@kF[lamN;`param]
-  kp: xNode[args 0; env; `f32]
+  kp: xNode[kN; env; `f32]
   kx: xEmit[`f2s; `i32; ,kp 0; 0n]
-  L: xEmit[`rsum; `f32; ,kx; 0n]
+  L: xEmit[op; `f32; ,kx; 0n]
   sav: XOwn; XOwn:: L
   kpar: xEmit[`kparam; `f32; (); 0n]
   benv: ((!env),pn)!(env[!env],(,(kpar;`f32)))
@@ -1241,19 +998,8 @@ xRsum: {[i; env]
   XOwn:: sav
   xVal[L]:: (kpar; bp 0; #xOp)
   (L; `f32)}
-xRmax: {[i; env]
-  args: kF[i;`arg]; lamN: args 1
-  pn: *(Cst`value)@kF[lamN;`param]
-  kp: xNode[args 0; env; `f32]
-  kx: xEmit[`f2s; `i32; ,kp 0; 0n]
-  L: xEmit[`rmax; `f32; ,kx; 0n]
-  sav: XOwn; XOwn:: L
-  kpar: xEmit[`kparam; `f32; (); 0n]
-  benv: ((!env),pn)!(env[!env],(,(kpar;`f32)))
-  bp: xSeq[kF[lamN;`stmt]; benv; `f32]
-  XOwn:: sav
-  xVal[L]:: (kpar; bp 0; #xOp)
-  (L; `f32)}
+xRsum: {[i; env] args: kF[i;`arg]; xRed[args 0; args 1; env; `rsum]}
+xRmax: {[i; env] args: kF[i;`arg]; xRed[args 0; args 1; env; `rmax]}
 xNdo: {[aN; vN; bN; env; oty]
   cp: xNode[aN; env; `f32]
   cx: xEmit[`f2s; `i32; ,cp 0; 0n]
@@ -1307,7 +1053,22 @@ xCondS: {[ss;env;oty]
 / Host-global baking on the IR path (mirrors compVar/kBake).
 xBakeBad: {[nm] `0 0: "dye: cannot bake ",($nm)," (not a param/local, and not a numeric scalar host global)\n"; (xEmit[`const;`f32;();0n]; `f32)}
 xBake: {[nm] v: . nm; $[(@v) in `b`i`f; (xEmit[`const;`f32;();0.+v]; `f32); xBakeBad nm]}
-xVar:  {[i;env] nm: kVal i; $[nm in !env; env nm; xBake nm]}
+/ An `elem-role env entry is a whole buffer that stands for its element AT THE
+/ THREAD INDEX: a bare use of the name loads buf[d] (d = GIrGid, the gid-as-f32
+/ IR param the gather kernel binds). This is what lets kk.compile's gather mode
+/ write `x@w` (w a whole index vector) and mean x[w[d]]. Plain `buf entries (the
+/ gather sources) pass through unloaded — @/`u[i]` index them explicitly.
+GIrGid:: 0
+xElem: {[bufN] si: xEmit[`f2s; `i32; ,GIrGid; 0n]; xEmit[`bufidx; `f32; (bufN; si); 0n]}
+xVarE: {[p] $[(p 1)~`elem; (xElem[p 0]; `f32); p]}
+xVar:  {[i;env] nm: kVal i; $[nm in !env; xVarE[env nm]; xBake nm]}
+/ x@w gather (kk2 §2.2): left = a `buf gather source, right = the index value
+/ (an `elem name loads w[d]); result = src[f2s(index)].
+xGather: {[i;env]
+  srcp: xNode[kF1[i;`a]; env; `f32]
+  ip:   xNode[kF1[i;`b]; env; `f32]
+  si:   xEmit[`f2s; `i32; ,ip 0; 0n]
+  (xEmit[`bufidx; `f32; (srcp 0; si); 0n]; `f32)}
 xNode: {[i;env;oty]
   tag: kKind i
   $[tag~`var;     xVar[i;env]
@@ -1327,6 +1088,18 @@ xSeqTail: {[stmts;env;oty]
   e2: $[isb; ((!env),kVal kF1[s;`v])!(env[!env],(,xNode[kF1[s;`a];env;oty])); env]
   xSeq[1_stmts;e2;oty]}
 xSeq: {[stmts;env;oty] n:#stmts; $[n=0;(0;oty); n=1;xNode[stmts 0;env;oty]; xSeqTail[stmts;env;oty]]}
+/ Binds-only prefix walk for the vertex body: build bind nodes, return the extended
+/ env (mirror of the retired compSeqEnv — bare non-final statements are dropped,
+/ binds compile with the `v4 hint).
+xSeqEnvTail: {[stmts; env]
+  s:   stmts 0
+  isb: ((kKind s)~`bind) & (0<#kF[s;`a])
+  e2:  $[isb; ((!env),kVal kF1[s;`v])!(env[!env],(,xNode[kF1[s;`a];env;`v4])); env]
+  xSeqEnv[1_stmts; e2]}
+xSeqEnv: {[stmts; env] $[0=#stmts; env; xSeqEnvTail[stmts; env]]}
+/ One varying output: compile its expression with the varying's type hint, then
+/ pin the store with a `vstore node (xVal = the varying's output var id).
+xVary1: {[el; ty; vid; env] rp: xNode[el; env; ty]; xEmit[`vstore; ty; ,rp 0; vid]}
 
 / ── IR optimizations ─────────────────────────────────────────────────────────
 / Const-fold f32 scalar arith / a few unary math whose operands are all const.
@@ -1351,6 +1124,34 @@ xFold: {[] {[k] xFoldOne k}' !#xOp; 0}
 / skip leaf nodes). Args have lower indices than users, so one high→low pass suffices.
 xReach: {[root] {[m;k] $[(m k) & 0<#xArg k; @[m; xArg k; :; 1b]; m]}/[@[(#xOp)#0b; root; :; 1b]; |!#xOp]}
 
+/ ── Multi-root DCE for the effectful (compute/vertex) path ────────────────────
+/ Value-only DCE (xReach) has ONE root and no effects — wrong for compute/vertex,
+/ where stores have no consumer yet must survive, and a loop's body (reached only
+/ via xVal, not xArg) carries the values a store reads. Roots therefore = the
+/ value result(s) in `extra` + every effect node (setb/sadd/isetb/vstore) + every
+/ loop node AND its result phi(s) (rsum/rmax/ndo → the accumulator/state result;
+/ whileL → cond + body results). Seeding the loop results makes the one high→low
+/ xArg sweep descend into owned loop bodies and mark the top-level values they use
+/ (e.g. a `base` computed before the loop) — without which those would be culled.
+/ Un-reached owned nodes are then skipped by xLoRegion, giving intra-loop DCE too.
+xEffOps::  `setb`sadd`isetb`vstore
+xLoopOps:: `rsum`rmax`ndo`whileL
+xLoopRes: {[L] v:xVal L; $[(xOp L)~`whileL; (v 1;v 3); ,v 1]}
+xReachC: {[extra]
+  lps:   &xOp in xLoopOps
+  seeds: extra, (&(xOp in xEffOps)|(xOp in xLoopOps)), $[#lps; ,/xLoopRes'lps; !0]
+  {[m;k] $[(m k) & 0<#xArg k; @[m; xArg k; :; 1b]; m]}/[@[(#xOp)#0b; seeds; :; 1b]; |!#xOp]}
+
+/ Lowering driver for the effectful path: optional fold + DCE, then lower every
+/ reachable top-level node in build order (owned nodes replayed by their loop's
+/ lowerer, also gated on xRe). xOpt=0 marks all nodes reachable → byte-identical.
+xLowerC: {[extra]
+  xId:: (#xOp)#-1
+  $[xOpt; xFold[]; 0]
+  xRe:: $[xOpt; xReachC[extra]; (#xOp)#1b]
+  {[j] $[(0 > xRgn j) & xRe j; xLowerOne j; 0]}' !#xOp
+  0}
+
 / ── Back-end 1: lower IR → SPIR-V words (reuse the op* stencils) ──────────────
 xConsW: {[ty;r;ids] n:#ids; $[n=2;opCons2[Tid[ty];r;ids 0;ids 1]; n=3;opCons3[Tid[ty];r;ids 0;ids 1;ids 2]; opCons4[Tid[ty];r;ids 0;ids 1;ids 2;ids 3]]}
 xMathW: {[name;ty;r;ids;at]
@@ -1368,6 +1169,16 @@ xMathW: {[name;ty;r;ids;at]
 / an id, emits its op* words (into Con for constants, else Buf), and records xId[k].
 xLoConst:   {[k] xId[k]:: constId[Tid[xTy k]; xVal k]}
 xLoCons:    {[k] r:newId[]; emitBuf xConsW[xTy k;r;xId@xArg k]; xId[k]::r}
+/ Vector literal: OpConstantComposite 44 into the constants section (like compVecLit;
+/ the composite itself is NOT deduplicated — each literal gets a fresh id).
+xLoConsC:   {[k] r:newId[]; ids:xId@xArg k; emitCon (0x2C+(0x10000*(3+#ids)); Tid[xTy k]; r),ids; xId[k]::r}
+/ Texture sample: image+sampler loads, OpSampledImage 86, ImageSampleImplicitLod 87.
+xLoSample:  {[k]
+  li:newId[]; emitBuf opLoad[Timg2; li; TexVars[xVal k]]
+  ls:newId[]; emitBuf opLoad[Tsamp2; ls; SampVar]
+  ci:newId[]; emitBuf (0x00050056; TsImg; ci; li; ls)
+  r:newId[];  emitBuf (0x00050057; Tv4; r; ci; (xId@xArg k)0)
+  xId[k]::r}
 xLoExtract: {[k] r:newId[]; emitBuf opXtract[Tf32;r;(xId@xArg k)0;xVal k]; xId[k]::r}
 xLoSelect:  {[k] r:newId[]; ids:xId@xArg k; emitBuf opSel[Tid[xTy k];r;ids 0;ids 1;ids 2]; xId[k]::r}
 xLoNeg:     {[k] r:newId[]; emitBuf opFneg[Tid[xTy k];r;(xId@xArg k)0]; xId[k]::r}
@@ -1382,13 +1193,23 @@ xLoSet:    {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPf32; p; xId a 0; CKz; 
 xLoIget:   {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPi32; p; xId a 0; CKz; xId a 1]; iv:newId[]; emitBuf opLoad[Ti32; iv; p]; fv:newId[]; emitBuf opI2f[Tf32; fv; iv]; xId[k]::fv}
 xLoIset:   {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPi32; p; xId a 0; CKz; xId a 1]; emitBuf opStore[p; xId a 2]; xId[k]:: xId a 2}
 
+/ Vertex output stores (`vstore effect node): xVal=`pos stores gl_Position through
+/ the gl_PerVertex block member (access chain via the VXpvtx/VXkz per-shader
+/ globals — allocates the pointer id AT ITS BUILD POSITION, keeping id order
+/ byte-identical to the retired direct path); any other xVal is a varying output
+/ var id, stored directly (no id allocated).
+VXpvtx:: 0; VXkz:: 0
+xLoVsPos:  {[k] p:newId[]; emitBuf opAccChain1[PoutV4; p; VXpvtx; VXkz]; emitBuf opStore[p; (xId@xArg k)0]; xId[k]::0}
+xLoVsVar:  {[k] emitBuf opStore[xVal k; (xId@xArg k)0]; xId[k]::0}
+xLoVstore: {[k] $[(xVal k)~`pos; xLoVsPos[k]; xLoVsVar[k]]}
+
 / Loop lowerers: replay the owned nodes inside the loop's basic blocks. The
 / phi ids travel through RKiPhi/RKsPhi globals (lambdas can't close); each
 / loop saves/restores them so nesting is safe. XLk is the region filter owner.
 RKiPhi:: 0; RKsPhi:: 0; XLk:: -1
 xLoKparam: {[k] r:newId[]; emitBuf opI2f[Tf32; r; RKiPhi]; xId[k]::r}
 xLoLparam: {[k] xId[k]:: RKsPhi}
-xLoRegion: {[k; lo; hi] sav: XLk; XLk:: k; {[j] $[(xRgn j)=XLk; xLowerOne j; 0]}' lo+!hi-lo; XLk:: sav; 0}
+xLoRegion: {[k; lo; hi] sav: XLk; XLk:: k; {[j] $[((xRgn j)=XLk) & xRe j; xLowerOne j; 0]}' lo+!hi-lo; XLk:: sav; 0}
 xLoRsum: {[k]
   a: xArg k; v: xVal k
   h: loopOpen[xId a 0; RCf0; `f32]
@@ -1436,6 +1257,8 @@ xLowerOne: {[k]
     op~`bufp;    xId[k]:: xVal k
     op~`const;   xLoConst[k]
     op~`cons;    xLoCons[k]
+    op~`consc;   xLoConsC[k]
+    op~`sample;  xLoSample[k]
     op~`extract; xLoExtract[k]
     op~`select;  xLoSelect[k]
     op~`neg;     xLoNeg[k]
@@ -1450,6 +1273,7 @@ xLowerOne: {[k]
     op~`isetb;   xLoIset[k]
     op~`kparam;  xLoKparam[k]
     op~`lparam;  xLoLparam[k]
+    op~`vstore;  xLoVstore[k]
     op~`rsum;    xLoRsum[k]
     op~`rmax;    xLoRmax[k]
     op~`ndo;     xLoNdo[k]
@@ -1459,19 +1283,18 @@ xLowerOne: {[k]
 xLowerSpirv: {[root] xId::(#xOp)#-1; xRe:: xReach[root]; {[k] $[xRe k; xLowerOne k; 0]}' !#xOp; 0}
 
 / ── Compute bodies through the IR (kk.md incr 3: the seam migration) ─────────
-/ Build the whole body as IR, then lower every top-level node in build order —
-/ loop-owned nodes are replayed by their loop's lowerer. No DCE/fold yet: the
-/ migration oracle is BYTE-IDENTITY with the old direct path (test/kkgold.k);
-/ optimizations turn on once oracles move to numeric parity. Env pairs from
-/ the prologue become param (loaded value) / bufp (binding var) nodes; the
-/ prologue/epilogue stay direct — the IR owns only the body.
+/ Build the whole body as IR, then lower via xLowerC (the value result is the DCE
+/ root; stores + loops are auto-rooted). loop-owned nodes are replayed by their
+/ loop's lowerer. With xOpt=0 the oracle is BYTE-IDENTITY with the old direct path
+/ (test/kkgold.k); xOpt=1 turns on fold+DCE (numeric parity, test/kkopt.k). Env
+/ pairs from the prologue become param (loaded value) / bufp (binding var) nodes;
+/ the prologue/epilogue stay direct — the IR owns only the body.
 kIrEnvOne: {[p] $[(p 1) in `buf`scat; (xEmit[`bufp; p 1; (); p 0]; p 1); (xEmit[`param; p 1; (); p 0]; p 1)]}
-xLowerAll: {[] xId:: (#xOp)#-1; {[j] $[0 > xRgn j; xLowerOne j; 0]}' !#xOp; 0}
-kSeqIr: {[stmts; env]
+kSeqIr: {[stmts; env; oty]
   xReset[]
   e2: (!env) ! kIrEnvOne' env[!env]
-  rp: xSeq[stmts; e2; `f32]
-  xLowerAll[]
+  rp: xSeq[stmts; e2; oty]
+  xLowerC[,rp 0]
   ((xId rp 0); rp 1)}
 
 / ── Back-end 2: textual IR dump (proves the same IR retargets) ────────────────
