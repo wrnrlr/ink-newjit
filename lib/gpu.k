@@ -92,8 +92,14 @@ texture.upload: {[img] w:img`width; h:img`height; c:img`comp; d:img`data; gpuTex
 /   p: gpu.pipeline[{[c;a;b;g;d] ... set[c;d;v]}]   / == compileCompute+counts
 gpu.pipeline: {[fn] w: shader.kernel fn; gpu.compileCompute[w; KKnb]}
 
-gpu.hold:     {[x] f: {$[`L~@x; ,/x; x]}/ x; [gpu: gpu.buffer[0.+f]; t: `f; n: #f; s: %x]}
-gpu.holdInto: {[d;x] gpu.write[d`gpu; 0.+{$[`L~@x; ,/x; x]}/ x]; d}
+/ Flatten a (possibly nested, rectangular) value to a flat vector for upload:
+/ converge-raze it if it's a general list, else leave it (a flat vector/atom is
+/ already upload-ready). `,//` is monadic converge over raze — it fully flattens
+/ any nesting depth (needs the triage #21 fix; before that only the 1-param
+/ lambda spelling `{,/x}/` worked, forcing the per-step guard).
+gpu.flat: {[x] $[`L~@x; ,//x; x]}
+gpu.hold:     {[x] f: gpu.flat x; [gpu: gpu.buffer[0.+f]; t: `f; n: #f; s: %x]}
+gpu.holdInto: {[d;x] gpu.write[d`gpu; 0.+gpu.flat x]; d}
 gpu.fetch:    {[d] r: (d`n) # $[(d`t)~`i; gpu.readI d`gpu; gpu.read d`gpu]; $[1 < #d`s; (d`s)#r; r]}
 / Place a k table as a STRUCTURED buffer (kk2 §2.5): one resident buffer per column
 / (planar/splayed layout), the descriptor carrying the column names + handles so

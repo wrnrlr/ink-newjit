@@ -22,6 +22,20 @@ pub fn derived(vm: *VM, base: V, adv: Adverb, args: []const V, f: util.ApplyFn) 
   return f(vm, base, args);
 }
 
+// Does the operand of a monadic `/`/`\` read as a monadic function → converge,
+// rather than a dyadic one → seeded fold? A derived over/scan verb (`,/`, `f\`)
+// carries its base's arity (2 for `,/`) but is itself monadically applicable —
+// `,/x` razes one argument — so `,//x` is monadic converge, not a seeded fold
+// through dyadic `,/`. (triage #21)
+fn foldsAsMonad(x: V) bool {
+  if (x.arity() == 1) return true;
+  if (x.tag() == .o and x.o.kind == .derived) {
+    const a = x.o.getAdverb();
+    return a == .@"/" or a == .@"\\";
+  }
+  return false;
+}
+
 fn derived2(vm: *VM, adv: Adverb, x: V, y: V, f: util.ApplyFn) V {
   const xt = x.tag();
   const base_is_radix = xt == .I or xt == .i or xt == .b;
@@ -31,13 +45,13 @@ fn derived2(vm: *VM, adv: Adverb, x: V, y: V, f: util.ApplyFn) V {
     .@"/" => blk: {
       if (base_is_radix) break :blk adverbs.decode(vm, x, y);
       if (base_is_char)  break :blk adverbs.join(vm, x, y);
-      if (x.arity() == 1) break :blk adverbs.converge(vm, x, y, f);
+      if (foldsAsMonad(x)) break :blk adverbs.converge(vm, x, y, f);
       break :blk adverbs.fold(vm, x, null, y, f);
     },
     .@"\\" => blk: {
       if (base_is_radix) break :blk adverbs.encode(vm, x, y);
       if (base_is_char)  break :blk adverbs.split(vm, x, y);
-      if (x.arity() == 1) break :blk adverbs.converges(vm, x, y, f);
+      if (foldsAsMonad(x)) break :blk adverbs.converges(vm, x, y, f);
       break :blk adverbs.scan(vm, x, null, y, f);
     },
     .@"':" => if (xt == .i) adverbs.window(vm, x, y) else adverbs.eachprior(vm, x, null, y, f),

@@ -415,7 +415,7 @@ or the body stops returning it) — the workaround can then be dropped.
 
 ---
 
-## 21. Converge over a derived verb misapplies as a seeded fold (`,//x`)
+## 21. Converge over a derived verb misapplies as a seeded fold (`,//x`) — FIXED
 
 ```k-repl
  ,/,/((1 2;3 4);(5 6;7 8))       / 1 2 3 4 5 6 7 8      — two razes, correct
@@ -433,6 +433,17 @@ resolves correctly, which is the workaround used by `gpu.hold`'s flatten
 (`{$[`L~@x;,/x;x]}/x`, lib/gpu.k). Likely home: `runtime/call.zig` /
 `primitive/derived.zig` valence choice when the base of a derived verb is
 itself derived. Found 2026-07-15 while adding shape recording to `9:`.
+
+**Fixed 2026-07-16** in `primitive/derived.zig`: the monadic `/`/`\` valence
+check (`derived2`) used `x.arity()==1`, but a derived over/scan verb (`,/`)
+reports its dyadic *base* arity (2) while being monadically applicable. Added
+`foldsAsMonad` — a `/`- or `\`-derived operand now reads as monadic converge,
+not a seeded fold. Unit tests in `test.zig` ("converge over a derived verb").
+`gpu.hold`'s flatten workaround simplified to `gpu.flat: {[x] $[`L~@x;,//x;x]}`
+(the guard is now just the top-level list check; the per-step guard the lambda
+needed is gone). The only behavioural delta from the old spelling is on inputs
+that raze down to an *empty* vector (`(!0;!0)`→blank vs `!0`) — not a real GPU
+upload, and gpu.hold's top-level `` `L~@x `` guard keeps `gpu.hold !0` safe.
 
 ---
 

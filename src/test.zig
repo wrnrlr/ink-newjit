@@ -447,6 +447,25 @@ test "derived verb" {
   try t.check("sum: +/; sum 2 3", "5");
 }
 
+// triage #21: `f/x`/`f\x` with a derived over/scan operand (`,//`, `(,/)/`) must
+// run monadic converge/converges, not a seeded fold through the dyadic base.
+test "converge over a derived verb" {
+  var t = try Tester.init(); defer t.deinit();
+  // `,//x` fully flattens (raze to fixpoint) — same as the two-raze and the
+  // explicit 1-param-lambda spellings, not the seeded fold `(1 2;3 4;5;6;7;8)`.
+  try t.check(",/,/((1 2;3 4);(5 6;7 8))", "1 2 3 4 5 6 7 8");
+  try t.check("{,/x}/((1 2;3 4);(5 6;7 8))", "1 2 3 4 5 6 7 8");
+  try t.check(",//((1 2;3 4);(5 6;7 8))", "1 2 3 4 5 6 7 8");
+  try t.check("(,/)/((1 2;3 4);(5 6;7 8))", "1 2 3 4 5 6 7 8");
+  // `\` analog: converges collects each raze step up to the fixpoint.
+  try t.check("(,/)\\((1 2;3 4);(5 6;7 8))", "(((1 2;3 4);(5 6;7 8));(1 2;3 4;5 6;7 8);1 2 3 4 5 6 7 8)");
+  try t.check("{,/x}\\((1 2;3 4);(5 6;7 8))", "(((1 2;3 4);(5 6;7 8));(1 2;3 4;5 6;7 8);1 2 3 4 5 6 7 8)");
+  // Seeded fold / n-do with a dyadic operand still resolve correctly (not converge).
+  try t.check("+/1 2 3 4", "10");
+  try t.check("10+/1 2 3", "16");
+  try t.check("3{x*2}/1", "8");
+}
+
 // try t.check("Decode: 2/; Decode 1 1 0 1", "13"); // Decode and encode adverb not implemented yet
 
 test "idioms" {
