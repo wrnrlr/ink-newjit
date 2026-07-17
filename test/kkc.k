@@ -32,6 +32,9 @@ histw: {@[x;HI;+;HV]}             / weighted sum
 
 / placed table (kk2 §2.5): named equal-length columns as a structured GPU buffer
 TT: [[]px:`f$!64; py:0.5*`f$!64; vx:(`f$!64)-8.; vy:`f$64-!64]
+/ wide table (9 columns) — under `auto layout it can't fit MAX_BIND planar (9+1>8),
+/ so gpu.holdT interleaves it into one buffer automatically.
+TW: [[]c0:`f$!32; c1:1.+`f$!32; c2:2.+`f$!32; c3:3.+`f$!32; c4:4.+`f$!32; c5:5.+`f$!32; c6:6.+`f$!32; c7:7.+`f$!32; c8:8.+`f$!32]
 
 / Helpers are TOP-LEVEL globals: an inner lambda can't see demo's locals (ink
 / lambdas don't close over parent scope), so chk must reach chkb as a global.
@@ -102,6 +105,24 @@ demo: {[]
   chkb["n 8: trimmed";     (5 8: 9: X)~5#X]
   chkb["d 9: overwrite";   (8: (9: X) 9: Y)~Y]
   chkb["8: table reassembles"; (8: pt)~TT]
+
+  / interleaved table layout (kk2 §2.5): the SAME lambda compiles under a one-buffer,
+  / stride-nc placement — identical results, but an n-column table costs 2 bindings
+  / (data+output) not n+1, so it fits MAX_BIND when a thread reads many columns.
+  gpu.tblLay:: `il
+  pti: 9: TT
+  chkb["interleaved layout tag";           (`il)~pti`lay]
+  chk["interleaved == planar (px)+(vx)";   8: kk.compile[{(x`px)+(x`vx)}; ,pti]; (TT`px)+(TT`vx)]
+  chk["interleaved 3-of-4-col map";        8: kk.compile[{((x`px)*(x`vy))+(x`py)}; ,pti]; ((TT`px)*(TT`vy))+(TT`py)]
+  chkb["interleaved 8: reassembles";       (8: pti)~TT]
+  / a wide (>7-col) table auto-interleaves; non-adjacent columns c0,c8 exercise
+  / position baking (each column's slot in the interleaved row is a baked i32 const).
+  gpu.tblLay:: `auto
+  ptw: 9: TW
+  chkb["wide table auto-interleaves";      (`il)~ptw`lay]
+  chk["wide interleaved map (c0)+(c8)";    8: kk.compile[{(x`c0)+(x`c8)}; ,ptw]; (TW`c0)+(TW`c8)]
+  chkb["wide interleaved 8: reassembles";  (8: ptw)~TW]
+  gpu.tblLay:: `auto
 
   / rejection: a whole-buffer reduce is neither elementwise nor a gather → kk.compile
   / SIGNALS an error (`@x ~ `! for an err value). (+/ over the whole placement is a

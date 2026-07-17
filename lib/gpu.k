@@ -108,14 +108,29 @@ gpu.holdA:    {[x] f: gpu.flat x; [gpu: gpu.buffer[0.+f]; t: `f; n: #f; s: %x]}
 gpu.holdInto: {[d;x] gpu.write[d`gpu; 0.+gpu.flat x]; d}
 / 8: d — a `tbl descriptor reads every column back and reassembles the table
 / (flip of the column dict); plain placements reshape to the recorded shape.
-gpu.fetchT:   {[d] + (d`cols) ! (d`n) #' gpu.read' d`hand}
+gpu.fetchT:   {[d] $[(d`lay)~`il; gpu.fetchTI d; gpu.fetchTP d]}
+gpu.fetchTP:  {[d] + (d`cols) ! (d`n) #' gpu.read' d`hand}
+/ interleaved: one buffer, stride nc. De-interleave = reshape to nr×nc (row-major,
+/ so each row is one record) then flip → nc columns. (No inner-lambda gather — it
+/ couldn't close over flat/nc/nr; the reshape does the same address math.)
+gpu.fetchTI:  {[d] + (d`cols) ! + (d`n; d`nc) # gpu.read[d`hand]}
 gpu.fetchA:   {[d] r: (d`n) # $[(d`t)~`i; gpu.readI d`gpu; gpu.read d`gpu]; $[1 < #d`s; (d`s)#r; r]}
 gpu.fetch:    {[d] $[(d`t)~`tbl; gpu.fetchT d; gpu.fetchA d]}
-/ Place a k table as a STRUCTURED buffer (kk2 §2.5): one resident buffer per column
-/ (planar/splayed layout), the descriptor carrying the column names + handles so
-/ kk.compile can bind only the columns a kernel reads. `t`c` on the CPU already IS
-/ the column, so the same lambda runs host-side unchanged.
-gpu.holdT: {[t] cols: !t; nr: #t cols 0; [cols: cols; hand: gpu.buffer' {0.+x}' t[cols]; n: nr; t: `tbl; s: ,nr]}
+/ Place a k table as a STRUCTURED buffer (kk2 §2.5). Layout is a SCHEDULE choice
+/ (Tiramisu L3), not semantics — the kernel source is identical either way:
+/   planar (default):    one resident buffer per column, coalesced per-column reads.
+/   interleaved (`il):   ONE buffer, row-major stride nc — an n-column table costs
+/                        2 bindings (data+output) not n+1, so it fits MAX_BIND when
+/                        a thread reads EVERY field of one row (the cloth edge kernel).
+/ gpu.tblLay picks: `auto (interleave when #cols+1 > gpu.tblBudget=MAX_BIND), or a
+/ forced `planar / `il. The descriptor carries `lay so kk.compile + 8: dispatch right.
+gpu.tblLay::    `auto
+gpu.tblBudget:: 8
+gpu.holdT: {[t] cols: !t; nr: #t cols 0; nc: #cols
+  il: $[gpu.tblLay~`il; 1; gpu.tblLay~`planar; 0; (nc + 1) > gpu.tblBudget]
+  $[il; gpu.holdTI[t; cols; nr; nc]; gpu.holdTP[t; cols; nr; nc]]}
+gpu.holdTP: {[t; cols; nr; nc] [cols: cols; hand: gpu.buffer' {0.+x}' t[cols]; n: nr; t: `tbl; s: ,nr; lay: `planar]}
+gpu.holdTI: {[t; cols; nr; nc] flat: 0. + ,/ + {0. + x}' t[cols]; [cols: cols; hand: gpu.buffer flat; n: nr; t: `tbl; s: ,nr; lay: `il; nc: nc]}
 gpu.fetchN:   {[n;d] n # gpu.read[d`gpu]}
 
 / Solid-color fragment uniforms (44 floats matching the built-in fill shader FragUniforms).

@@ -1009,6 +1009,28 @@ compTable: {[fn; tableName; colNames]
   kAsm[]}
 shader.table: compTable
 
+/ Interleaved placed-table map (kk2 §2.5): the whole table is ONE storage buffer
+/ (row-major, stride nc = #allCols), so an n-column table costs just 2 bindings
+/ (data + output) instead of n+1 — the layout kk.compile picks when the column
+/ count would blow the MAX_BIND budget (the cloth edge kernel). allCols is the FULL
+/ column ordering (positions), so a body reading only some columns still resolves
+/ each to its interleaved slot; unread columns cost nothing (no separate binding).
+compTableI: {[fn; tableName; allCols]
+  nc: #allCols
+  ids: kAlloc[0; 2; 0; 1]                        / binding 0 = interleaved data, 1 = output
+  lam: lamOf fn
+  gx: kGidX[]
+  xReset[]
+  bufNode: xEmit[`bufp; `col; (); ids 0]
+  colPos: allCols ! !nc
+  e2: (,tableName) ! ,((bufNode; nc; colPos); `tablei)
+  GIrGid:: xEmit[`param; `i32; (); kGidI gx]
+  rp: xSeq[lamBody lam; e2; `f32]
+  xLowerC[,rp 0]
+  kStore[ids 1; gx; xId rp 0]
+  kAsm[]}
+shader.tableI: compTableI
+
 / Column references `(t`c)`: apposit rows whose f is a var (the table) and whose
 / arg is a symbol (the column). kkTableName = the table var; kkTableColNames =
 / the DISTINCT columns actually read (drives binding pruning).
@@ -1314,17 +1336,31 @@ xTransOp: {[i;env;oty]
     xTransNorm[i;env;oty]]}
 xTrans: {[i;env;oty] $[(kKind kF1[i;`v])~`term; xAdverb[i; kF1[i;`v]; env; oty]; xTransOp[i;env;oty]]}
 / Placed-table column access `(t`c)` (kk2 §2.5): an apposit whose f is a var bound
-/ to a `table env entry (a col-name→bufp dict) and whose arg is a symbol → the
-/ column c's buffer, element-loaded at the thread index (like an `elem name).
+/ to a `table (planar) or `tablei (interleaved) env entry and whose arg is a symbol
+/ → the column c's value at the thread index. Layout is a schedule choice, not
+/ semantics: the SAME lambda source lowers under either.
+/   planar:      one buffer per column; (t`c) = col_c[d]           (xTableColP)
+/   interleaved: one buffer, stride nc; (t`c) = buf[d*nc + pos(c)] (xTableColI)
 xIsTableCol: {[i;env]
   fN: kF1[i;`f]
   $[~(kKind fN)~`var; 0
     ~(kVal fN) in !env; 0
-    ~`table ~ (env kVal fN) 1; 0
+    ~((env kVal fN) 1) in `table`tablei; 0
     (kKind kF1[i;`a])~`symbol]}
 xTableCol: {[i;env]
-  cd: (env kVal kF1[i;`f]) 0                 / the column dict for this table
-  (xElem[cd kVal kF1[i;`a]]; `f32)}          / column's bufp node → buf[d]
+  ev: env kVal kF1[i;`f]
+  $[(ev 1)~`tablei; xTableColI[i; ev 0]; xTableColP[i; ev 0]]}
+/ planar: the env carries a col-name→bufp dict; a bare use loads buf[d].
+xTableColP: {[i; cd] (xElem[cd kVal kF1[i;`a]]; `f32)}
+/ interleaved: the env carries (bufNode; nc; colName→position). Address (d*nc)+pos
+/ stays i32 (integer dialect) — OpIMul/OpIAdd, exact, no f2s.
+xTableColI: {[i; info]
+  bufN: info 0; nc: info 1; k: (info 2) kVal kF1[i;`a]
+  ncC: xEmit[`const; `i32; (); nc]
+  dnc: xEmit[`arith; `i32; (GIrGid; ncC); `"*"]
+  kC:  xEmit[`const; `i32; (); k]
+  adr: xEmit[`arith; `i32; (dnc; kC); `"+"]
+  (xEmit[`bufidx; `f32; (bufN; adr); 0n]; `f32)}
 xAppos: {[i;env;oty]
   fN: kF1[i;`f]
   $[(kKind fN)~`term;   xApposAdv[i;fN;env;oty]

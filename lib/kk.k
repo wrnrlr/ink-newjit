@@ -225,14 +225,20 @@ kk.converge: {[f; x0; tol; maxIter]
   fin: cvCond cvBody/ (0; tol + 1.)               / while maxΔ>tol & sweeps<maxIter
   CVlast:: fin                                    / (sweepsDone; finalMaxΔ) — observability
   [gpu: A; t: `f; n: xn; s: x0`s]}
-/ Placed-table map: bind only the columns the body reads (kk2 §2.5). The referenced
-/ column names come from the CST (kkTableColNames); their handles are looked up by
-/ position in the table descriptor. Output is a plain f-array descriptor.
-kkTMiss: {[fn;tn;cn;nc;key] p: gpu.compileCompute[shader.table[fn;tn;cn]; nc+1]; kkCache[key]:: p; p}
+/ Placed-table map (kk2 §2.5): the referenced column names come from the CST
+/ (kkTableColNames). Layout is chosen at placement (gpu.holdT) and recorded on the
+/ descriptor's `lay key; the SAME lambda compiles under either:
+/   planar:      bind only the columns the body reads (nc+1 bindings).
+/   interleaved: bind the one data buffer + output (2 bindings), positions baked.
+/ The cache key carries the layout tag so the two never collide.
+kkTMiss:  {[fn;tn;cn;nc;key] p: gpu.compileCompute[shader.table[fn;tn;cn]; nc+1]; kkCache[key]:: p; p}
+kkTIMiss: {[fn;tn;allCols;key] p: gpu.compileCompute[shader.tableI[fn;tn;allCols]; 2]; kkCache[key]:: p; p}
 kkTable: {[fn;args;nIn]
   td: args 0
   cn: kkTableColNames[]                      / distinct columns actually read
   tn: kkTableName[]
+  $[(td`lay)~`il; kkTableI[fn;td;cn;tn]; kkTableP[fn;td;cn;tn]]}
+kkTableP: {[fn;td;cn;tn]
   nc: #cn
   key: `$ ($fn),"|t|",(","/$'cn)
   pipe: $[key in !kkCache; kkCache key; kkTMiss[fn;tn;cn;nc;key]]
@@ -240,6 +246,14 @@ kkTable: {[fn;args;nIn]
   colH: (td`hand) (td`cols) ? cn             / handles for the referenced columns
   ob: gpu.buffer[(kkPad n)#0.]
   gpu.dispatch[pipe; colH, ob; n]
+  [gpu: ob; t:`f; n: n; s: ,n]}
+kkTableI: {[fn;td;cn;tn]
+  allCols: td`cols                           / full ordering — positions in the row
+  key: `$ ($fn),"|ti|",(","/$'allCols)
+  pipe: $[key in !kkCache; kkCache key; kkTIMiss[fn;tn;allCols;key]]
+  n: td`n
+  ob: gpu.buffer[(kkPad n)#0.]
+  gpu.dispatch[pipe; (td`hand; ob); n]
   [gpu: ob; t:`f; n: n; s: ,n]}
 kk.compile: {[fn; args]
   nIn: #args
