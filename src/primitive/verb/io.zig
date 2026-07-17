@@ -367,6 +367,7 @@ pub const Place = struct {
   _B: VM.Monad = placeAny,
   _L: VM.Monad = placeAny,
   _M: VM.Monad = placeAny, // table → gpu.hold routes to gpu.holdT (structured buffer, kk2 §2.5)
+  _m: VM.Monad = placeAny, // dict → gpu.hold routes to gpu.holdD (ragged named buffers, e.g. CSR)
 };
 pub const PlaceInto = struct {
   pub const op = .@"9:";

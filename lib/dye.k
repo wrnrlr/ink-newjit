@@ -1038,6 +1038,45 @@ kkColRefs: {[] ap: & `apposit = Cst`kind; $[0=#ap; !0; ap @ & {[i] ((kKind kF1[i
 kkTableName: {[] r: kkColRefs[]; $[0=#r; `; kVal kF1[*r;`f]]}
 kkTableColNames: {[] r: kkColRefs[]; $[0=#r; 0#`; ? {[i] kVal kF1[i;`a]}' r]}
 
+/ ── Placed-dict gather kernel (kk2 §2.5): {(D`data)@(D`off)} over a placed dict ──
+/ A dict places as a named binding group of DIFFERING-length buffers. Each key is a
+/ gather SOURCE (used left of @ → the raw buffer, indexed) or an index/value (used
+/ elsewhere → loaded at the thread index d). Sources get bindings 0..nsrc-1, then the
+/ index/value keys, then the output — mirroring compGmap, so the two share xGather.
+compDict: {[fn; dictName; srcKeys; elemKeys]
+  nsrc: #srcKeys; nk: nsrc + #elemKeys
+  ids: kAlloc[0; nk+1; 0; 1]                  / hasLoop=1 so a +/ segment reduce can bake its consts
+  lam: lamOf fn
+  gx: kGidX[]
+  xReset[]
+  srcNodes:  {[id] xEmit[`bufp; `buf;  (); id]}'  nsrc # ids
+  elemNodes: {[id] xEmit[`bufp; `elem; (); id]}' nsrc _ nk # ids
+  keyEnv: (srcKeys, elemKeys) ! ({[n] (n; `buf)}' srcNodes), {[n] (n; `elem)}' elemNodes
+  e2: (,dictName) ! ,(keyEnv; `dictg)
+  GIrGid:: xEmit[`param; `i32; (); kGidI gx]
+  rp: xSeq[lamBody lam; e2; `f32]
+  xLowerC[,rp 0]
+  kStore[ids nk; gx; xId rp 0]
+  kAsm[]}
+shader.dict: compDict
+/ Unwrap group/right wrappers ((…) parens) to the inner node — the left of @ is a
+/ parenthesized `(dn`k)`, so it arrives as a `group whose stmt is the apposit.
+kkUnwrap: {[l] $[(kKind l)~`group; kkUnwrap kF1[l;`stmt]; (kKind l)~`right; kkUnwrap kF1[l;`clause]; l]}
+/ Dict keys used as a gather SOURCE: `(dn`k)` appearing as the LEFT (a) of an @-transit.
+/ The filter-by-dn happens OUTSIDE the each — an inner {[l] …dn…} can't see dn (no
+/ closures), which silently errored the whole classifier before.
+kkDictSrcKeys: {[dn]
+  tr: & `transit = Cst`kind
+  ga: tr @ & {[i] (kVal kF1[i;`v])~`"@"}' tr
+  la: {[i] kkUnwrap kF1[i;`a]}' ga
+  $[0=#la; :0#`; 0]
+  isA: {[l] ((kKind l)~`apposit) & ((kKind kF1[l;`f])~`var) & ((kKind kF1[l;`a])~`symbol)}' la
+  cand: la @ & isA
+  $[0=#cand; :0#`; 0]
+  vns: {[l] kVal kF1[l;`f]}' cand                / var names of the (var`sym) apposits
+  cns: {[l] kVal kF1[l;`a]}' cand                / their column symbols
+  ? cns @ & vns = dn}
+
 / ── Amend-scatter kernel (kk2 §2.4-4): @[x;I;:;v] → out[I[d]] = v ─────────────
 / One thread per interior index d. The value expr v (arg 3 of the @-apply, e.g.
 / 1.+.25*+/x@W) is compiled through the gather-reduce IR reading x (source) and W
@@ -1345,11 +1384,18 @@ xIsTableCol: {[i;env]
   fN: kF1[i;`f]
   $[~(kKind fN)~`var; 0
     ~(kVal fN) in !env; 0
-    ~((env kVal fN) 1) in `table`tablei; 0
+    ~((env kVal fN) 1) in `table`tablei`dictg; 0
     (kKind kF1[i;`a])~`symbol]}
 xTableCol: {[i;env]
   ev: env kVal kF1[i;`f]
-  $[(ev 1)~`tablei; xTableColI[i; ev 0]; xTableColP[i; ev 0]]}
+  $[(ev 1)~`tablei; xTableColI[i; ev 0]; (ev 1)~`dictg; xTableColD[i; ev 0]; xTableColP[i; ev 0]]}
+/ placed-dict column `(D`k)`: the key's buffer is either a gather SOURCE (used left
+/ of @ — return the raw bufp so xGather indexes it) or an index/value (used elsewhere
+/ — load it at the thread index like a planar column). Role baked at compile by the
+/ dict emitter from the body's @-usage; ragged (differing-length) columns are fine.
+xTableColD: {[i; keyEnv]
+  ev: keyEnv kVal kF1[i;`a]                   / (bufpNode; `buf source | `elem)
+  $[(ev 1)~`buf; (ev 0; `f32); (xElem[ev 0]; `f32)]}
 / planar: the env carries a col-name→bufp dict; a bare use loads buf[d].
 xTableColP: {[i; cd] (xElem[cd kVal kF1[i;`a]]; `f32)}
 / interleaved: the env carries (bufNode; nc; colName→position). Address (d*nc)+pos

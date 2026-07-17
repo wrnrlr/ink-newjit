@@ -35,6 +35,10 @@ TT: [[]px:`f$!64; py:0.5*`f$!64; vx:(`f$!64)-8.; vy:`f$64-!64]
 / wide table (9 columns) — under `auto layout it can't fit MAX_BIND planar (9+1>8),
 / so gpu.holdT interleaves it into one buffer automatically.
 TW: [[]c0:`f$!32; c1:1.+`f$!32; c2:2.+`f$!32; c3:3.+`f$!32; c4:4.+`f$!32; c5:5.+`f$!32; c6:6.+`f$!32; c7:7.+`f$!32; c8:8.+`f$!32]
+/ placed dict (CSR-style ragged bundle): data (8) + off (4), differing lengths.
+DDdata: `f$ 10 20 30 40 50 60 70 80
+DDoff:  `f$ 0 3 5 7
+DD: [data: DDdata; off: DDoff]
 
 / Helpers are TOP-LEVEL globals: an inner lambda can't see demo's locals (ink
 / lambdas don't close over parent scope), so chk must reach chkb as a global.
@@ -123,6 +127,14 @@ demo: {[]
   chk["wide interleaved map (c0)+(c8)";    8: kk.compile[{(x`c0)+(x`c8)}; ,ptw]; (TW`c0)+(TW`c8)]
   chkb["wide interleaved 8: reassembles";  (8: ptw)~TW]
   gpu.tblLay:: `auto
+
+  / placed DICT (kk2 §2.5): a named binding group of DIFFERING-length buffers (CSR).
+  / 9: dict places each value as its own buffer; a kernel gathers a source column
+  / through an index column ((D`data)@(D`off)). Ragged: data has 8, off has 4.
+  pd: 9: DD                          / DD = [data:…8…; off:…4…]
+  chkb["placed dict layout tag";      (`dict)~pd`t]
+  chkb["placed dict 8: roundtrips";   (8: pd)~DD]
+  chk["dict CSR gather (data@off)";   8: kk.compile[{(x`data)@(x`off)}; ,pd]; DDdata @ `i$ DDoff]
 
   / rejection: a whole-buffer reduce is neither elementwise nor a gather → kk.compile
   / SIGNALS an error (`@x ~ `! for an err value). (+/ over the whole placement is a

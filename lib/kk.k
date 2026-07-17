@@ -258,13 +258,33 @@ kkTableI: {[fn;td;cn;tn]
 kk.compile: {[fn; args]
   nIn: #args
   lamOf fn                                  / set Cst for the gather scan / classify
-  isTbl: $[0<nIn; `tbl ~ (args 0)`t; 0]
+  isTbl:  $[0<nIn; `tbl  ~ (args 0)`t; 0]
+  isDict: $[0<nIn; `dict ~ (args 0)`t; 0]   / a placed dict — check BEFORE kkHasAt (dict gathers use @)
   $[isTbl;           kkTable[fn;args;nIn]
+    isDict;          kkDict[fn;args;nIn]
     kkIsScatAdd[];   kkScatAdd[fn;args;nIn]
     kkIsAmend[];     kkAmend[fn;args;nIn]
     kkIsMatReduce[]; kkGathMat[fn;args;nIn]
     kkHasAt[];       kkGath[fn;args;nIn]
     kkMap[fn;args;nIn]]}
+/ Placed-dict gather (kk2 §2.5): bind each referenced key as a gather source (used
+/ left of @) or index/value; output extent = the primary index key's length. The
+/ same keyed buffers a dict placed (gpu.holdD) drop in by name.
+kkDMiss: {[fn;dn;srcKeys;elemKeys;key] p: gpu.compileCompute[shader.dict[fn;dn;srcKeys;elemKeys]; (#srcKeys)+(#elemKeys)+1]; kkCache[key]:: p; p}
+kkDict: {[fn;args;nIn]
+  dd: args 0
+  dn: kkTableName[]                          / the dict var (same (D`k) apposit shape)
+  refKeys: kkTableColNames[]                 / distinct keys read
+  srcKeys: kkDictSrcKeys[dn]
+  elemKeys: refKeys @ & ~ refKeys in srcKeys
+  keys: srcKeys, elemKeys                    / binding order: sources then indices
+  key: `$ ($fn),"|dg|",(","/$'keys)
+  pipe: $[key in !kkCache; kkCache key; kkDMiss[fn;dn;srcKeys;elemKeys;key]]
+  n: (dd`lens) (dd`keys) ? *elemKeys         / output length = primary index length
+  handles: (dd`hand) (dd`keys) ? keys
+  ob: gpu.buffer[(kkPad n)#0.]
+  gpu.dispatch[pipe; handles, ob; n]
+  [gpu: ob; t:`f; n: n; s: ,n]}
 kkMap: {[fn;args;nIn]
   bad: kkClassify fn
   $[(bad~`) & ~3<nIn; kkRun[fn;args;nIn]; kkWarn[bad;nIn]]}

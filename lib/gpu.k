@@ -101,9 +101,16 @@ gpu.pipeline: {[fn] w: shader.kernel fn; gpu.compileCompute[w; KKnb]}
 / any nesting depth (needs the triage #21 fix; before that only the 1-param
 / lambda spelling `{,/x}/` worked, forcing the per-step guard).
 gpu.flat: {[x] $[`L~@x; ,//x; x]}
-/ 9: x — a table places as a structured buffer (one resident buffer per column,
-/ gpu.holdT); anything else flattens and uploads as a plain f32 placement.
-gpu.hold:     {[x] $[`M~@x; gpu.holdT x; gpu.holdA x]}
+/ 9: x — a table (M) places as a structured buffer (gpu.holdT); a DICT (m) places
+/ as a named binding group of DIFFERING-length buffers (gpu.holdD — no equal-length
+/ constraint, e.g. a CSR pair [data:…; off:…]); anything else flattens to a plain
+/ f32 placement.
+gpu.hold:     {[x] $[`M~@x; gpu.holdT x; `m~@x; gpu.holdD x; gpu.holdA x]}
+/ Placed dict (kk2 §2.5): each value is its own resident buffer, resolved by KEY.
+/ Values may be ragged (CSR data/off) — no length constraint. The kernel indexes a
+/ dict column as a gather source ((D`data)@i), never elementwise at the thread index.
+gpu.holdD:    {[d] ks: !d; vs: d[ks]; ln: {#x}' vs; [keys: ks; hand: gpu.buffer' {0. + gpu.flat x}' vs; lens: ln; t: `dict; s: ln]}
+gpu.fetchD:   {[dd] (dd`keys) ! {[h;n] n # gpu.read h}'[dd`hand; dd`lens]}
 gpu.holdA:    {[x] f: gpu.flat x; [gpu: gpu.buffer[0.+f]; t: `f; n: #f; s: %x]}
 gpu.holdInto: {[d;x] gpu.write[d`gpu; 0.+gpu.flat x]; d}
 / 8: d — a `tbl descriptor reads every column back and reassembles the table
@@ -115,7 +122,7 @@ gpu.fetchTP:  {[d] + (d`cols) ! (d`n) #' gpu.read' d`hand}
 / couldn't close over flat/nc/nr; the reshape does the same address math.)
 gpu.fetchTI:  {[d] + (d`cols) ! + (d`n; d`nc) # gpu.read[d`hand]}
 gpu.fetchA:   {[d] r: (d`n) # $[(d`t)~`i; gpu.readI d`gpu; gpu.read d`gpu]; $[1 < #d`s; (d`s)#r; r]}
-gpu.fetch:    {[d] $[(d`t)~`tbl; gpu.fetchT d; gpu.fetchA d]}
+gpu.fetch:    {[d] $[(d`t)~`tbl; gpu.fetchT d; (d`t)~`dict; gpu.fetchD d; gpu.fetchA d]}
 / Place a k table as a STRUCTURED buffer (kk2 §2.5). Layout is a SCHEDULE choice
 / (Tiramisu L3), not semantics — the kernel source is identical either way:
 /   planar (default):    one resident buffer per column, coalesced per-column reads.
