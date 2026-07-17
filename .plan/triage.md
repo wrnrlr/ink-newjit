@@ -598,7 +598,27 @@ Dawn validation errors; 85/85 golden still pass. Scope: one uniform `vec4` on th
 element-wise path; multi-member structs or uniforms on stencil/scatter kernels
 would extend the same pattern (loop `memberDecOne`/`loadUniMember` over N members).
 
-## snap.sh glob mismatch (pre-existing, found 2026-07-17)
-`public/snap.sh` collects `"$name"-snap-*.png` but `ink -snap t` writes `$name-snap.png`
-(no index suffix) for a single capture time — every demo is "skipped (no frame captured)".
-Either glob `"$name"-snap*.png` or make the encoder always suffix.
+## snap.sh glob mismatch (pre-existing, found 2026-07-17) — FIXED
+`public/snap.sh` collected `"$name"-snap-*.png` but `ink -snap t` writes `$name-snap.png`
+(no index suffix) for a single capture time — every demo was "skipped (no frame captured)".
+Fixed 2026-07-17: widened the glob to `"$name"-snap*.png` (all three spots); `make
+docs-snap` now captures all 8 demos.
+
+## indexed-assign aliasing corruption `L[k]::expr` (found 2026-07-17, bits backend)
+Two related COW/refcount bugs surfaced writing lib/bits.k (a pure-k interpreter that
+mutates a global value array while reading it):
+1. **`L[k]:: expr` where `expr` reads global `L`** corrupts/shrinks `L` (e.g. a length-11
+   list collapses to length 1). Root cause looks like an in-place amend of `L`'s buffer
+   while the outstanding read of `L` (inside `expr`) still aliases it. Full
+   amend-and-reassign `L:: @[L; k; :; expr]` copies first and is SAFE — but only
+   outside a `'` each.
+2. **The same `L:: @[L;k;:;expr]` inside a `'` each still corrupts `L`** (the each
+   appears to hold `L` live across iterations). The identical work driven by explicit
+   tail recursion over the index list is correct. Minimal repro:
+   `L::11#0n; h:{[k]$[k<2;1.+k;L[k-1]]}; {[k]L::@[L;k;:;h k]}'!10` → `#L` becomes 1;
+   the recursive form gives the right 11-element result.
+3. **Amending a typed/null vector slot with an INTEGER value** (`@[11#0n;0;:;0]` or
+   `@[11#0.;0;:;3]`) collapses the list; a FLOAT value works. bits sidesteps all three
+   by using an F-vector value array, coercing every store to float, and sweeping via
+   recursion (bSweep) rather than an each. These are almost certainly one underlying
+   amend/refcount defect in src/primitive/amend.zig worth a proper fix.

@@ -581,6 +581,12 @@ pipeline builders above. Types are symbols like `` `f32`v3`v4 ``.
   `shader.stencilIP` and `shader.scatter` — buffer-gather + in-kernel bounded
   loops for GPU-resident numerics (the basis of `lib/nn.k`).
 
+- **CPU backend (`lib/bits.k`):** `bits.run[fn; nAcc; nBuf; bufs; count]` runs the
+  SAME kernel lambda on the CPU by interpreting dye's neutral IR node-for-node
+  (returns the mutated buffer list). One source, two lowerings — the basis of the
+  `test/kkbits.k` cross-backend oracle (bits CPU vs `gpu.kernel` GPU). v1 covers the
+  scalar compute subset (elementwise/select/gather + `rsum`/`rmax`/`ndo`/`whileL`).
+
 The shader dialect adds vector literals, monadic math names, and `<=`/`>=`
 peephole support on top of ink; extra GPU builtins include `pow min max dot
 cross step mod clamp mix smoothstep floor fract sign tanh length normalize`.
