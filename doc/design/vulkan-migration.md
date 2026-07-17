@@ -264,7 +264,7 @@ one shared vertex buffer (per-call byte offset, so mixed strides coexist) +
 records draws into the frame render pass. **Snapshot path also landed** (part of
 Phase 4): `INK_SNAP` copies the swapchain image → host buffer → PNG
 (`vkCmdCopyImageToBuffer` + layout barriers, `png.zig`). **Verified pixel-identical
-to Dawn**: `test/sphere.k` renders a shaded sphere at 50.0% frame coverage,
+to Dawn**: `demo/sphere.k` renders a shaded sphere at 50.0% frame coverage,
 brightest `(158,173,188)` on both backends. Not yet: uniform/texture/instanced mesh
 variants (`gpuDrawMeshU/T`, `gpuDrawInstanced*`, `gpuDrawGeom*` still stubs).
 
@@ -274,7 +274,7 @@ uniform DSL + one descriptor pool & host-visible uniform buffer *per frame in
 flight* (reset in `beginFrame` after the fence, so in-flight sets aren't freed);
 `meshUniformSet` reserves a 256-byte slot, uploads ≤32 floats, returns a set.
 `gpuMesh` detects the uniform block (OpVariable storage-class 2) and includes the
-DSL in the pipeline layout. **Verified pixel-identical to Dawn**: `test/sword.k`
+DSL in the pipeline layout. **Verified pixel-identical to Dawn**: `demo/sword.k`
 (`shader.vertexU`+`mesh.drawU`, FBX model) renders at 0.7% coverage, brightest
 `(159,162,167)` on both. (Bug fixed en route: an `mapped[off .. off+n*4]` slice
 tripped a checked-overflow panic; use `mapped[off..][0..len]`.)
@@ -301,7 +301,7 @@ per-channel): `eyes`, `circle` (SDF frag), `planes`, `drawing`, `typeset`, `demo
 (UniformConstant vars − 1 sampler) and builds the 2-set layout (uniform @group0 +
 n images + shared sampler @group1); `texSet` per-draw; `gpuUploadMesh` (retained
 vertex buffers) + `gpuDrawGeomT` (retained geom + uniform + textures).
-**Verified pixel-identical to Dawn**: `test/earth.k` (5 textures, equirectangular,
+**Verified pixel-identical to Dawn**: `demo/earth.k` (5 textures, equirectangular,
 retained mesh, uniform camera) at 96.9% coverage, per-channel identical.
 **Still stubbed:** instancing (`gpuDrawInstanced`/`gpuDrawGeomResident`/
 `gpuDrawInstancedT`, instance storage buffer @group0). Its test targets `scene`/
@@ -326,7 +326,7 @@ cutover (Vulkan default, delete Dawn/zgpu/`gpuWgsl`, make 1.4 unconditional);
 Phase 7 self-host `fill` in dye.k; multi-time `-snap` scheduling.
 
 Consider **dynamic rendering** later to drop explicit `VkFramebuffer` objects.
-**Validated by:** `test/sphere.k`, `pbr.k`, `scene.k`, `eyes.k`, `circle.k`,
+**Validated by:** `demo/sphere.k`, `pbr.k`, `scene.k`, `eyes.k`, `circle.k`,
 `planes.k`, `earth.k` (textures), `drawing.k`, `typeset.k`, `edit.k`,
 `cloth*.k` (rendered).
 

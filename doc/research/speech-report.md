@@ -2,7 +2,7 @@
 
 Goal: transcribe speech locally in ink using **NVIDIA Parakeet‑TDT 0.6B v2**
 (FastConformer encoder + Token‑and‑Duration Transducer decoder), driven from the
-audio module (`lib/audio.k`, `test/replay.k`).
+audio module (`lib/audio.k`, `demo/replay.k`).
 
 This report covers what was built and why, the validated state, the problems hit,
 the one remaining blocker, what's left for a working demo, and how to make it
@@ -102,7 +102,7 @@ near the floor) · `test/subsample.k` (convs 1e‑6, flatten exact) · `test/tdt
 
 ### 2.5 Integration + model
 
-* `test/asr.k` — combines the mic/waveform (from `replay.k`) with font text
+* `demo/asr.k` — combines the mic/waveform (from `replay.k`) with font text
   rendering (from `edit.k`) and the full pipeline; gated behind `LOADMODEL` so it
   runs and renders with or without weights. `audio.rec.speech[]` records at 16 kHz.
 * `doc/parakeet-export.py` — offline `.nemo`→f32‑safetensors converter (torch+numpy
@@ -217,7 +217,7 @@ Ordered; none is architectural:
 4. **Featurizer exactness** — use the exported `feat.window`/`feat.fb`; match
    NeMo's STFT centering and log‑guard (`log(x + 2⁻²⁴)`), and per‑feature
    normalization (already have `featNorm`). These affect accuracy, not structure.
-5. **Wire loading in `test/asr.k`**, flip `LOADMODEL:1`, run.
+5. **Wire loading in `demo/asr.k`**, flip `LOADMODEL:1`, run.
 6. **Validate** one encoder layer's output against a NeMo forward dump (via the
    venv) before trusting the full stack — the most likely subtle bug is the
    rel‑pos term's relative‑shift convention.
@@ -314,7 +314,7 @@ To be fully standalone:
 * `lib/spirv.k` — compute dialect (loops, adverbs, transcendentals, ~25 kernels).
 * `lib/nn.k` — NN primitives + ASR pipeline + loaders + detokenize.
 * `lib/audio.k` — mic/playback (`audio.rec.speech[]` = 16 kHz).
-* `test/asr.k` — record → transcribe → display demo (gated on `LOADMODEL`).
+* `demo/asr.k` — record → transcribe → display demo (gated on `LOADMODEL`).
 * `test/{nn,conformer,frontend,subsample,tdt,weights,relpos,detok}.k` — validation.
 * `doc/parakeet-export.py` — offline `.nemo` → f32 safetensors + vocab.
 * `lib/safetensors/src/{main,reader}.zig` — **needs the large‑file fix (§4.1)**.

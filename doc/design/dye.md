@@ -67,8 +67,8 @@ was required because a `2:` inside a `2:`-loaded file underflowed the stack.
 
 **Verification.** The split is behavior-preserving: `test/spirv.k` (the whitebox
 golden) produces byte-identical output before and after, and the compute /
-fragment / mesh shader paths render on-device (`test/compute.k`, `test/circle.k`,
-`test/pbr.k`).
+fragment / mesh shader paths render on-device (`demo/compute.k`, `demo/circle.k`,
+`demo/pbr.k`).
 
 ## The intrinsic registry (single source of truth)
 

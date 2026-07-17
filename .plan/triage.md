@@ -287,7 +287,7 @@ collapses (adding a lambda to a matrix yields a 1-element/garbage value), so a
 downstream table/`#` looks fine structurally but has 1 row. Any `f <op>x` where
 `<op>` is meant monadically (`+`transpose, `-`negate, `|`…) next to an applied
 function hits this; parenthesise the operand (`f (+x)`) or bind it to a temp
-first. Cost time in `test/clothbench.k`'s CPU cloth setup (areas → inverse masses
+first. Cost time in `demo/clothbench.k`'s CPU cloth setup (areas → inverse masses
 collapsed → empty constraint tables → the whole solver silently did nothing).
 
 ---
@@ -306,7 +306,7 @@ function the single-colon form creates a broken local (`#gIm`→1, subsequent re
 error), and even the `::` deep-indexed-assign collapses when `idx` is a
 multi-element index list. The reliable form inside a function is the explicit
 amend `x::@[x;idx;:;v]`. Surfaced pinning corner masses (`gIm[0,nCols-1]:0.` /
-`im0[0,W-1]:0.`) in `test/clothbench.k`'s size-parameterised setup functions —
+`im0[0,W-1]:0.`) in `demo/clothbench.k`'s size-parameterised setup functions —
 the pins silently corrupted the mass array. Same family as the "`::` for globals
 in lambdas" note, but specific to the *indexed* amend with a list index.
 
@@ -597,3 +597,8 @@ re-dispatching gives `10x-2`→`8 18 28 38 48` without touching the data buffer;
 Dawn validation errors; 85/85 golden still pass. Scope: one uniform `vec4` on the
 element-wise path; multi-member structs or uniforms on stencil/scatter kernels
 would extend the same pattern (loop `memberDecOne`/`loadUniMember` over N members).
+
+## snap.sh glob mismatch (pre-existing, found 2026-07-17)
+`public/snap.sh` collects `"$name"-snap-*.png` but `ink -snap t` writes `$name-snap.png`
+(no index suffix) for a single capture time — every demo is "skipped (no frame captured)".
+Either glob `"$name"-snap*.png` or make the encoder always suffix.

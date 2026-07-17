@@ -60,13 +60,13 @@ icoTris: sphSubAll[icoTris]                     / 1280 → 5120
 icoTris: sphSubAll[icoTris]                     / 5120 → 20480 (smooth limb; raze is O(n) now)
 
 / ── Textures: day, night, clouds, specular mask, normal map ───────────────────
-pfx:       "test/data/",TEXRES,"_earth_"
+pfx:       "demo/data/",TEXRES,"_earth_"
 imgDay:    image.read pfx,"daymap.jpg"
 imgNight:  image.read pfx,"nightmap.jpg"
 imgClouds: image.read pfx,"clouds.jpg"
 imgSpec:   image.read pfx,"specular_map.tif"   / ocean=white, land=black
 imgNorm:   image.read pfx,"normal_map.tif"     / tangent-space bumps
-imgStars:  image.read "test/data/",TEXRES,"_stars_milky_way.jpg"   / celestial sky
+imgStars:  image.read "demo/data/",TEXRES,"_stars_milky_way.jpg"   / celestial sky
 
 / ── Per-vertex UV (equirectangular), one vectorised pass ──────────────────────
 P: +,/icoTris

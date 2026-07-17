@@ -1,5 +1,5 @@
 #!/bin/sh
-# Capture headless PNG screenshots of the GPU demos in test/ using `ink -snap`,
+# Capture headless PNG screenshots of the GPU demos in demo/ using `ink -snap`,
 # collecting each into out/demo/<name>.png alongside its k source.
 #
 # Runs from the repo root so demos that load fonts / data by relative path work.
@@ -33,7 +33,7 @@ captured=0
 for spec in $DEMOS; do
   name=${spec%%:*}
   t=${spec##*:}
-  src="test/$name.k"
+  src="demo/$name.k"
   [ -f "$src" ] || { echo "snap: skip $name (no $src)"; continue; }
 
   echo "snap: $name (t=$t)"

@@ -191,7 +191,7 @@ Out of scope for tier 1 (tier 2, needs scan/whole-buffer-reduce infra):
    single-sweep + ping-pong checks in test/kkc.k (17/17). NOTE: walk.k's literal
    spelling is `f/` (converge-to-fixpoint); `kk.loop` is the fixed-count `n f/`
    form — true device-side converge (tolerance + periodic readback) is §6/tier-2.
-5. `@[x;I;+;v]` → `sadd` (spatial-hash histogram from `test/spacial.k` as the
+5. `@[x;I;+;v]` → `sadd` (spatial-hash histogram from `demo/spacial.k` as the
    demo). **DONE (2026-07-16).** `@[x;I;+;v]` → `shader.scatadd`: one thread per
    index d, `acc[I[d]] += i32(v)` via `OpAtomicIAdd` (`kScatAdd`) so duplicate
    buckets accumulate race-free. acc is an i32 accumulator (binding 0, expected
@@ -399,7 +399,7 @@ returning `(pos_v4; varyings…)` — storage-buffer reads indexed by
   beginFrame). The draw is `vkCmdDraw(count,1,0,0)` — no vertex buffer. Pull draws
   record after meshes/geoms in the frame; `gpuRun` already `v.sync()`s the
   callback's compute before the frame, so the vertex shader reads the FINAL P.
-  Smoke test: `test/vpulltri.k` (a gradient triangle pulled from a resident buffer
+  Smoke test: `demo/vpulltri.k` (a gradient triangle pulled from a resident buffer
   by gl_VertexIndex — renders, varyings interpolate).
 - **clothgpu.k ported.** `clothVtxPull` reads the resident position buffer `P`
   and a resident triangle-index buffer, gathers its triangle's 3 particle

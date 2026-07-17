@@ -131,7 +131,7 @@ matches the CPU result; `walk3.k` reduces to placements + the CPU functions.
 | `+/ d` (whole placed buffer) | two-stage reduce: workgroup partials → second dispatch (subgroup ops when caps allow, §4) | loss functions, dot products, convergence tests without readback |
 | `+\ d`, `*\`, `\|\`, `&\` | workgroup scan + block-offset pass (Blelloch / decoupled lookback) | prefix sums — the workhorse below |
 | `& m` / `d @ & m` | scan + scatter (stream compaction) | filtering, particle culling |
-| `= d` (group) / `#'= d` | histogram via atomic add (the CPU `freq` peephole, on device) | binning, spatial hashing (`test/spacial.k` on GPU) |
+| `= d` (group) / `#'= d` | histogram via atomic add (the CPU `freq` peephole, on device) | binning, spatial hashing (`demo/spacial.k` on GPU) |
 | `f g/ d` (buffer state) | host loop, device-side `\|/abs Δ` reduction, readback test every k iters | tolerance-based solvers instead of walk.k's 21k-iteration bit-fixpoint |
 | `n f\ d` | n dispatches, each writing row i of an (n;#d) buffer | trajectories, animation baking |
 | `? n` (deal/rand) | counter-based RNG (philox) intrinsic | walk.k's Monte-Carlo half on device |

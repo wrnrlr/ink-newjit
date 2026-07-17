@@ -33,7 +33,7 @@ Functional programming with APL2
 
 ## Dev Enviroment
 ```sh
-watchexec -r -e k -- ./zig-out/bin/ink test/planes.k
+watchexec -r -e k -- ./zig-out/bin/ink demo/planes.k
 ```
 
 build docs
@@ -50,7 +50,7 @@ builds are identical.
 ```sh
 nix develop            # dev shell: zig 0.16.0 + make, gh, watchexec
 nix build              # ReleaseFast core binary -> ./result/bin/ink
-nix run . -- test/planes.k
+nix run . -- demo/planes.k
 nix build .#ink-cross  # core binaries for all six distributed platforms
 ```
 
@@ -95,7 +95,7 @@ d: []
 
 # Auto reload
 ```sh
-watchexec -r -w test/cloth.k -- ./zig-out/bin/ink -unfocus -top -monitor 1 test/cloth.k
+watchexec -r -w demo/cloth.k -- ./zig-out/bin/ink -unfocus -top -monitor 1 demo/cloth.k
 ```
 
 ```k

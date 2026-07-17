@@ -46,7 +46,7 @@ frag: FragmentShader[[nor:`v3; out:`v4]; {[nor]
 }]
 ```
 
-This is the same shader pattern used in `test/sphere.k` and `test/planes.k` in the ink test suite.
+This is the same shader pattern used in `demo/sphere.k` and `demo/planes.k` in the ink test suite.
 
 ---
 
@@ -103,7 +103,7 @@ All $n$ balls are updated in one pass through array broadcasting.
 
 ## Building the Mesh for Rendering
 
-Each ball is a sphere mesh. For rendering, we represent each sphere as a small icosphere (subdivided icosahedron) scaled by the ball's radius and translated to its position. The `test/sphere.k` example shows how to build a sphere mesh. For multiple balls, the mesh is simply the concatenation of per-ball sphere meshes, rebuilt each frame.
+Each ball is a sphere mesh. For rendering, we represent each sphere as a small icosphere (subdivided icosahedron) scaled by the ball's radius and translated to its position. The `demo/sphere.k` example shows how to build a sphere mesh. For multiple balls, the mesh is simply the concatenation of per-ball sphere meshes, rebuilt each frame.
 
 A simpler alternative for many balls is to render each as a single billboard (two triangles facing the camera), using a fragment shader with a circle SDF to draw the circular silhouette. This avoids rebuilding mesh data each frame.
 

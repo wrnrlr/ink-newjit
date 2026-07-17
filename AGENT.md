@@ -126,7 +126,7 @@ This directory contains the ink executable for all platforms, shared libraries a
 - Unit tests: `time zig build test`
 - REPL test: `` echo "1+2" | ./zig-out/bin/ink ``
 - Walk example: `./zig-out/bin/ink test/walk.k`
-- Eyes example: `./zig-out/bin/ink test/eyes.k`
+- Eyes example: `./zig-out/bin/ink demo/eyes.k`
 - Artifact sizes: `du -h zig-out/*/*`
 - Download Huggingface Model `` hf download nvidia/parakeet-tdt-0.6b-v2 --local-dir ./data/parakeet-tdt-0.6b-v2 ``
 
@@ -171,4 +171,4 @@ Available auto-loaded libraries:
 
 ## GPU drawing gotchas (`lib/gpu.k`)
 - **Adverbs don't run draw side effects:** a `FillFrame[…]` issued from inside an each/over (`'` `/`) draws nothing — adverb results are treated as pure and the draw is eliminated. The same call works fine as an explicit statement. Use adverbs only to *compute* vertices (Tessellate/FontOutline via `'` return correct values), build all triangles into one `F` buffer with `,/{…}'idx`, then issue ONE explicit `FillFrame[buffer; col]` per color layer (also faster than per-shape draws).
-- **`Tessellate` resolves glyph counters via NaN separators:** pack multiple contours into one flat array separated by a NaN x/y pair (`,/{x,0n,0n}'cs`) and `Tessellate` subtracts holes (the counters in `0 8 @ a b e …`). A single contour with no NaN behaves exactly as before. See `test/typeset.k` for the full ASCII-glyph example.
+- **`Tessellate` resolves glyph counters via NaN separators:** pack multiple contours into one flat array separated by a NaN x/y pair (`,/{x,0n,0n}'cs`) and `Tessellate` subtracts holes (the counters in `0 8 @ a b e …`). A single contour with no NaN behaves exactly as before. See `demo/typeset.k` for the full ASCII-glyph example.

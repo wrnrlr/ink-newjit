@@ -420,7 +420,7 @@ step mod clamp mix smoothstep floor fract sign tanh length normalize`.
 - `` `env[] `` **Environment variables** - dict of env variables
 - `` `dir p `` **Directory walk** - recursively list file paths under directory `p` (a char vector), skipping hidden/build dirs; returns a list of path strings. Apply by **juxtaposition** (`` `dir p ``), not `@`.
 - `` `prng[] `` **Random number**
-- Inverse trig `` `asin@x ``, `` `acos@x ``, `` `atan@x `` (element-wise over F vectors), `` `atan2@(y;x) `` (broadcasts scalar⊕vector) — no verb glyph, added for equirectangular UV mapping (see `test/earth.k`)
+- Inverse trig `` `asin@x ``, `` `acos@x ``, `` `atan@x `` (element-wise over F vectors), `` `atan2@(y;x) `` (broadcasts scalar⊕vector) — no verb glyph, added for equirectangular UV mapping (see `demo/earth.k`)
 - Exit `` `exit@i ``
 
 ## Commands

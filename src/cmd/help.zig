@@ -32,8 +32,8 @@ const HELP =
   \\
   \\Examples:
   \\  echo "1+2" | ink
-  \\  ink test/planes.k
-  \\  ink -snap 0.5,2 test/eyes.k
+  \\  ink demo/planes.k
+  \\  ink -snap 0.5,2 demo/eyes.k
   \\
 ;
 
