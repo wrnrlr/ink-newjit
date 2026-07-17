@@ -372,7 +372,8 @@ kkRedMiss: {[op;key] p: gpu.compileComputeU[shader.reduce[op]; 2]; kkCache[key]:
 kkRedPipe: {[op]
   key: `$ "reduce|",$op
   $[key in !kkCache; kkCache key; kkRedMiss[op;key]]}
-kk.reduce: {[op; d]
+/ Two-dispatch FALLBACK reduce (grid-strided serial per thread).
+kkReduceFb: {[op; d]
   pipe: kkRedPipe op
   n: d`n
   P: kkRedP
@@ -384,6 +385,33 @@ kk.reduce: {[op; d]
   u2: gpu.uniform[(`f$P; 1.; `f$P; 0.)]
   gpu.dispatch[pipe; (part; res; u2); 1]
   *gpu.read res}
+/ Subgroup fast path (§6): stage 1 dispatches G workgroups × S (subgroup) lanes and
+/ folds each workgroup with one OpGroupNonUniformFAdd → G partials; stage 2 folds the
+/ G partials with a single workgroup. Same numeric contract as the fallback (reordered
+/ float sums → CPU parity to a tolerance). Selected when gpu.caps sgArith is set.
+kkRedSgMiss: {[op;S;key] p: gpu.compileComputeU[shader.reduceSg[op;S]; 2]; kkCache[key]:: p; p}
+kkRedSgPipe: {[op;S] key: `$ "reduceSg|",($op),"|",($S); $[key in !kkCache; kkCache key; kkRedSgMiss[op;S;key]]}
+kkReduceSg: {[op; d; S]
+  pipe: kkRedSgPipe[op; S]
+  n: d`n
+  G: kkRedP                                / workgroups (partials)
+  T1: G*S                                  / stage-1 total threads (grid-stride span)
+  km1: 1 | `i$ (n + T1 - 1) div T1
+  part: gpu.buffer[G # 0.]
+  u1: gpu.uniform[(`f$n; `f$T1; `f$km1; 0.)]
+  gpu.dispatch[pipe; (d`gpu; part; u1); T1]     / T1 threads, LocalSize S → G workgroups
+  res: gpu.buffer[64 # 0.]
+  km2: 1 | `i$ (G + S - 1) div S
+  u2: gpu.uniform[(`f$G; `f$S; `f$km2; 0.)]
+  gpu.dispatch[pipe; (part; res; u2); S]        / S threads → one workgroup → scalar
+  *gpu.read res}
+/ Cache the device caps once (needs a live device — queried on first reduce).
+kkCaps:: ()
+kkGetCaps: {[] $[0=#kkCaps; kkCaps:: gpu.caps[0]; 0]; kkCaps}
+kkRedForceFb:: 0                            / force the fallback (test both paths)
+kk.reduce: {[op; d]
+  c: kkGetCaps[]
+  $[(~kkRedForceFb) & c`sgArith; kkReduceSg[op; d; c`subgroup]; kkReduceFb[op; d]]}
 kk.sum:  {[d] kk.reduce[`sum;  d]}
 kk.max:  {[d] kk.reduce[`max;  d]}
 kk.min:  {[d] kk.reduce[`min;  d]}

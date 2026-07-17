@@ -54,6 +54,16 @@ demo: {[]
   junk: kk.sum dA
   chkb["reduce pipeline cached"; nkeys = # !kkCache]
 
+  / subgroup fast path (§6) vs the two-dispatch fallback: identical exact results
+  / (integer sums), and the default picks subgroup when gpu.caps sgArith is set.
+  sgv: kk.sum dA
+  kkRedForceFb:: 1
+  fbv: kk.sum dA
+  kkRedForceFb:: 0
+  chke["subgroup reduce == fallback"; sgv; fbv]
+  chke["subgroup reduce == CPU";      sgv; +/A]
+  chkb["subgroup path used by default"; (kkGetCaps[])`sgArith]
+
   / prefix scan +\d (kk2 tier-2): inclusive running combine, chunked across P=256.
   chke["sum-scan 1..10 exact";   gpu.fetch kk.sums gpu.hold `f$ 1+!10;  +\ `f$ 1+!10]
   chke["sum-scan n=256";         gpu.fetch kk.sums gpu.hold E;          +\E]

@@ -434,10 +434,24 @@ same caps struct. This unlocks tolerance-based `g f/ d` (device-side `|/abs
   `test/kkred.k` (12 checks) vs CPU `+/`/`|/`/`&/`/`*/` — exact for integer/max/
   min, relative-tol for reordered float sums; all four ops spirv-val-clean
   (vulkan1.2). Limit: `n` travels as an f32 uniform → exact only to 2^24 elems.
-  NOT YET the subgroup fast path (that's `OpGroupNonUniformFAdd` + a Workgroup
-  shared-mem hop + `OpControlBarrier`, a real new-storage-class chunk) — it
-  layers on top behind `gpu.caps sgArith` WITHOUT changing this API/contract;
-  left as the one remaining §6 optimization (perf only, not correctness).
+- **Subgroup fast path — DONE (2026-07-17).** `shader.reduceSg[op; S]`: same
+  grid-strided per-lane accumulate, but LocalSize = the subgroup size `S`, so ONE
+  workgroup == ONE subgroup and a single `OpGroupNonUniformFAdd`/`FMax`/`FMin`/
+  `FMul` (Reduce over the Subgroup(3) scope) folds the whole workgroup with NO
+  shared memory and NO barriers — simpler than the Workgroup-storage-class +
+  `OpControlBarrier` design the sketch assumed. `lane = gid mod S`, `wgId = gid
+  div S` are EXACT (a 1-D workgroup's invocations are contiguous in gid), and lane
+  0 stores `out[wgId]` under an `OpSelectionMerge`. New machinery: an `AKsg` flag
+  (kAsm emits `OpCapability GroupNonUniformArithmetic` 63) and an `AKlsz` per-kernel
+  LocalSize override (the exm LocalSize is `S`, not the sticky `wg=64`), plus the
+  four group-op stencils + `opSelMrg` in spirv.k. Host `kkReduceSg` dispatches G·S
+  threads → G partials, then folds G with one workgroup; `kk.reduce` picks it when
+  `gpu.caps sgArith` (cached via `kkGetCaps`), `kkRedForceFb` forces the fallback.
+  Oracle: kkred asserts `subgroup == fallback == CPU` (exact) + default-uses-sg;
+  all four ops spirv-val-clean; kkgold byte-identical (capSG/AKlsz gated off for
+  every existing kernel). Perf is the point but the reduce isn't a current
+  bottleneck (per-call `8:` sync dominates a micro-bench); numeric contract is
+  identical to the fallback either way.
 - **`kk.converge[f; x0; tol; maxIter]` — device-side converge.** Ping-pongs the
   amend sweep in batches of `CVstride`=100 (even → always lands back in buffer A);
   every batch checkpoints A into `snap`, runs the batch on-device, then measures

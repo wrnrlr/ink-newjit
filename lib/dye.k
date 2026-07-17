@@ -570,6 +570,8 @@ AKz::0; AKdev::0                               / u32 0 const; Device-scope const
 AKuniT::0; AKuniP::0; AKuniPv4::0; AKuniVar::0; AKuniKi::0
 AKnAcc::0; AKuni::0
 AKfa::0                                        / float-atomic module? → kAsm emits the AtomicFloat32AddEXT cap + extension
+AKsg::0                                         / subgroup-arithmetic module? → kAsm emits the GroupNonUniformArithmetic cap
+AKlsz::0                                        / per-kernel LocalSize x override (0 = use the sticky `wg`)
 kAllocI:   {[] AKrtaI::newId[]; AKtbufI::newId[]; AKpbufsI::newId[]; AKpi32::newId[]}
 kAllocDev: {[] AKdev::newId[]; emitCon (0x0004002B; AKu32; AKdev; 1); CPi32::AKpi32; CScope::AKdev}
 / Device memory-scope const only (no i32 accumulator types) — for the f32-atomic
@@ -581,7 +583,7 @@ kAllocUni: {[] AKuniT::newId[]; AKuniP::newId[]; AKuniPv4::newId[]; AKuniVar::ne
 kAllocLoop:{[] RCi0::newId[]; emitCon opConst[Ti32;RCi0;0]; RCi1::newId[]; emitCon opConst[Ti32;RCi1;1]; RCf0::newId[]; emitCon opConst[Tf32;RCf0;0.]; RCfNeg::newId[]; emitCon opConst[Tf32;RCfNeg;-1e30]}
 kAlloc: {[nAcc;nBuf;hasUni;hasLoop]
   xErr::`
-  AKfa::0
+  AKfa::0; AKsg::0; AKlsz::0
   Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
   AKu32::newId[]; AKv3::newId[]
   AKrta::newId[]; AKtbuf::newId[]; AKpbufs::newId[]; AKpf32::newId[]
@@ -652,11 +654,13 @@ kAsmWords: {[]
   / the VK_EXT_shader_atomic_float device ext; 8 string words). Capability before
   / extension, extension before the GLSL OpExtInstImport (SPIR-V logical layout).
   capFA: $[AKfa; (0x00020011; 6033); !0]
+  / Subgroup arithmetic reduce (§6): OpCapability GroupNonUniformArithmetic (63).
+  capSG: $[AKsg; (0x00020011; 63); !0]
   extFA: $[AKfa; (0x0009000A;0x5F565053;0x5F545845;0x64616873;0x615F7265;0x696D6F74;0x6C665F63;0x5F74616F;0x00646461); !0]
   ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
   mem: (0x0003000E; 0; 1)
   ep:  (0x000F+(0x10000*(5+#iface)); 5; Fmain; 0x6E69616D; 0), iface
-  exm: (0x00060010; Fmain; 17; wg; 1; 1)
+  exm: (0x00060010; Fmain; 17; $[AKlsz; AKlsz; wg]; 1; 1)
   decGid: (0x00040047; AKgid; 11; 28)
   decF: (0x00040047;AKrta;6;4),(0x00050048;AKtbuf;0;35;0),(0x00030047;AKtbuf;2)
   decI: $[AKnAcc>0; (0x00040047;AKrtaI;6;4),(0x00050048;AKtbufI;0;35;0),(0x00030047;AKtbufI;2); !0]
@@ -675,7 +679,7 @@ kAsmWords: {[]
   ret: (0x000100FD;0x00010038)
   conWds: $[#Con; ,/Con; !0]
   bodWds: $[#Buf; ,/Buf; !0]
-  ,/(hdr;cap;capFA;extFA;ext;mem;ep;exm;decGid;decF;decI;decB;decU;sTypes;cTf;cTi;cTv;uT;varGid;varB;varU;conWds;fnh;bodWds;ret)}
+  ,/(hdr;cap;capFA;capSG;extFA;ext;mem;ep;exm;decGid;decF;decI;decB;decU;sTypes;cTf;cTi;cTv;uT;varGid;varB;varU;conWds;fnh;bodWds;ret)}
 
 / ── Entry points (thin wrappers; see the old per-entry docs in git history) ───
 / shader.compute — element-wise map {[x] …}: x = in[gid] (binding 0) → out[gid]
@@ -776,6 +780,55 @@ compReduce: {[op]
   kStore[ids 1; gx; sPhi]                        / out[d] = accumulated
   kAsm[]}
 shader.reduce: compReduce
+
+/ ── shader.reduceSg[op; S] — subgroup fast path (kk2 §6, caps sgArith) ────────
+/ Same grid-strided per-lane accumulate as shader.reduce, but LocalSize = the
+/ subgroup size S (one workgroup = one subgroup), so a single OpGroupNonUniformFAdd
+/ (Reduce over the Subgroup scope) folds the whole workgroup with NO shared memory /
+/ barriers. lane = gid mod S, wgId = gid div S are exact (a 1-D workgroup's
+/ invocations are contiguous in gid), and lane 0 writes out[wgId] under a selection
+/ merge. Host dispatches G·S threads → G partials, then folds G with one workgroup.
+sgCombW: {[op;t;r;sc;v] $[op~`max; opGrpFMax[t;r;sc;v]; op~`min; opGrpFMin[t;r;sc;v]; op~`prod; opGrpFMul[t;r;sc;v]; opGrpFAdd[t;r;sc;v]]}
+compReduceSg: {[op; S]
+  ids: kAlloc[0; 2; 1; 1]                        / in@0, out@1, uniform@2
+  AKsg:: 1; AKlsz:: S                            / GroupNonUniformArithmetic cap + LocalSize S
+  uv: (loadUniMember AKuniKi) 0
+  nF:  newId[]; emitBuf opXtract[Tf32; nF;  uv; 0]
+  tF:  newId[]; emitBuf opXtract[Tf32; tF;  uv; 1]
+  kmF: newId[]; emitBuf opXtract[Tf32; kmF; uv; 2]
+  nI:  newId[]; emitBuf opF2s[Ti32; nI;  nF]
+  tI:  newId[]; emitBuf opF2s[Ti32; tI;  tF]
+  kmI: newId[]; emitBuf opF2s[Ti32; kmI; kmF]
+  gx:  kGidX[]; d: kGidI[gx]
+  seed: redSeed op
+  L: loopOpen[kmI; seed; `f32]
+  iPhi:L 0; sPhi:L 1; iNext:L 2; sNext:L 3; conL:L 4; hdrL:L 5; mrgL:L 6
+  m:   newId[]; emitBuf opImul[Ti32; m; iPhi; tI]
+  idx: newId[]; emitBuf opIadd[Ti32; idx; d; m]
+  g:   newId[]; emitBuf opSLT[Tbool; g; idx; nI]
+  si:  newId[]; emitBuf opSel[Ti32; si; g; idx; RCi0]
+  p:   newId[]; emitBuf opAccChain[AKpf32; p; ids 0; AKz; si]
+  vl:  newId[]; emitBuf opLoad[Tf32; vl; p]
+  v:   newId[]; emitBuf opSel[Tf32; v; g; vl; seed]
+  nv:  newId[]; emitBuf redCombW[op; Tf32; nv; sPhi; v]
+  loopClose[nv; `f32; sNext; iNext; iPhi; conL; hdrL; mrgL]
+  / subgroup reduce of the per-lane accumulator (broadcast to every lane)
+  scope: newId[]; emitCon (0x0004002B; AKu32; scope; 3)   / Subgroup(3) scope const
+  sgT: newId[]; emitBuf sgCombW[op; Tf32; sgT; scope; sPhi]
+  Sc:  constId[Ti32; S]
+  lane: newId[]; emitBuf opSrem[Ti32; lane; d; Sc]
+  wgId: newId[]; emitBuf opSdiv[Ti32; wgId; d; Sc]
+  cond: newId[]; emitBuf opSLT[Tbool; cond; lane; RCi1]    / lane == 0
+  storeL: newId[]; mergeL: newId[]
+  emitBuf opSelMrg[mergeL]
+  emitBuf opBrCond[cond; storeL; mergeL]
+  emitBuf opLabel[storeL]
+  po: newId[]; emitBuf opAccChain[AKpf32; po; ids 1; AKz; wgId]
+  emitBuf opStore[po; sgT]
+  emitBuf opBranch[mergeL]
+  emitBuf opLabel[mergeL]
+  kAsm[]}
+shader.reduceSg: compReduceSg
 
 / ── Prefix scan +\d (kk2 tier-2) — three fixed kernels, chunked ───────────────
 / A work-partitioned inclusive scan over CONTIGUOUS chunks (P threads, chunk =

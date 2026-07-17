@@ -88,6 +88,13 @@ opU2f:  {[t;r;a]   (0x00040070;t;r;a)}     / OpConvertUToF 112 (gid u32 → f32)
 opF2s:  {[t;r;a]   (0x0004006E;t;r;a)}     / OpConvertFToS 110 (index f32 → i32)
 opAtomicIAdd: {[t;r;ptr;sc;sem;v] (0x000700EA;t;r;ptr;sc;sem;v)}  / OpAtomicIAdd 234 (scatter-add)
 opAtomicFAdd: {[t;r;ptr;sc;sem;v] (0x00071793;t;r;ptr;sc;sem;v)}  / OpAtomicFAddEXT 6035 (native f32 scatter-add; caps AtomicFloat32AddEXT)
+/ Subgroup arithmetic reductions (caps GroupNonUniformArithmetic): Operation literal
+/ 0=Reduce; sc = an <id> for the Subgroup(3) execution scope. (opcodes 350/352/355/358)
+opGrpFAdd: {[t;r;sc;v] (0x0006015E;t;r;sc;0;v)}   / OpGroupNonUniformFAdd 350
+opGrpFMul: {[t;r;sc;v] (0x00060160;t;r;sc;0;v)}   / OpGroupNonUniformFMul 352
+opGrpFMin: {[t;r;sc;v] (0x00060163;t;r;sc;0;v)}   / OpGroupNonUniformFMin 355
+opGrpFMax: {[t;r;sc;v] (0x00060166;t;r;sc;0;v)}   / OpGroupNonUniformFMax 358
+opSelMrg:  {[m]        (0x000300F7;m;0)}          / OpSelectionMerge 247 (merge; None)
 opDot:  {[t;r;a;b] (0x00050094;t;r;a;b)}   / OpDot 148
 opLoad: {[t;r;ptr] (0x0004003D;t;r;ptr)}   / OpLoad 61
 opStore:{[ptr;val] (0x0003003E;ptr;val)}   / OpStore 62
