@@ -32,26 +32,26 @@ DAMP::0.995
 / ── kernels ──────────────────────────────────────────────────────────────────
 / integrate: gravity on free particles (y axis), snapshot prev, advance p, floor.
 kInt::gpu.kernel[{[p;v;prev;im;g;d]
-  sdt:g[0]; ax:mod[d;3.]; part:floor[d%3.]
-  isY:$[ax=1.;1.;0.]; free:$[(im[part])>0.;1.;0.]
+  sdt:g[0]; ax:d mod 3; part:d div 3
+  isY:$[ax=1;1.;0.]; free:$[(im[part])>0.;1.;0.]
   nv:(v[d])+isY*free*(-9.81*sdt)
   set[v; d; nv]
   set[prev; d; p[d]]
   np:(p[d])+sdt*nv
-  set[p; d; $[ax=1.; $[np<(-2.); -2.; np]; np]]}; 0; 5]
+  set[p; d; $[ax=1; $[np<(-2.); -2.; np]; np]]}; 0; 5]
 
 / constraint scatter: one thread per edge; XPBD correction scattered (± w0/w1) into
 / DP for both endpoints, all three axes. guard value 0 for over-dispatched threads.
 / Native f32 atomics (gpu.kernelF): corrections accumulate directly — no SC scale.
 kCon::gpu.kernelF[{[dp;p;e;g;ee]
-  ne:g[0]; sdt:g[1]; ok:$[ee<ne;1.;0.]
+  ne:`i$g[0]; sdt:g[1]; ok:$[ee<ne;1.;0.]
   / clamp OOB threads onto edge 0 so every read is valid: with native f32 atomics a
   / garbage edge makes ds/lam inf and the ok=0 guard would form 0*inf = NaN (the i32
   / path hid this via f2s(NaN)→0). Reading a real edge keeps the math finite; ok=0
   / then zeroes the correction cleanly.
-  eeC:$[ee<ne;ee;0.]
-  base:7.*eeC
-  pi:e[base]; pj:e[base+1.]; l0:e[base+2.]; al:e[base+3.]; w0:e[base+4.]; w1:e[base+5.]; wt:e[base+6.]
+  eeC:$[ee<ne;ee;0]
+  base:7*eeC
+  pi:e[base]; pj:e[base+1]; l0:e[base+2]; al:e[base+3]; w0:e[base+4]; w1:e[base+5]; wt:e[base+6]
   bi:3.*pi; bj:3.*pj
   dx:(p[bj])-p[bi]; dy:(p[bj+1.])-p[bi+1.]; dz:(p[bj+2.])-p[bi+2.]
   ds:sqrt[(dx*dx)+(dy*dy)+dz*dz]
@@ -67,7 +67,7 @@ kApp::gpu.kernelF[{[dp;p;g;d] set[p; d; (p[d])+iget[dp;d]]; iset[dp;d;0.]}; 1; 2
 
 / velocity recovery with damping: v = damp*free*(p-prev)/dt.  g[1] = damping factor.
 kVel::gpu.kernel[{[v;p;prev;im;g;d]
-  sdt:g[0]; damp:g[1]; part:floor[d%3.]; free:$[(im[part])>0.;1.;0.]
+  sdt:g[0]; damp:g[1]; part:d div 3; free:$[(im[part])>0.;1.;0.]
   set[v; d; damp*free*((p[d])-prev[d])%sdt]}; 0; 5]
 
 / ── grid + edges (host side) ─────────────────────────────────────────────────

@@ -38,10 +38,10 @@ cpuSetup:{[side]
   hCons::buildCons hR; vCons::buildCons vR; dCons::buildCons dR; bCons::buildCons bR; 0}
 
 / ── GPU solver (clothgpu.k kernels — compiled once, size lives in the buffers) ─
-kInt::gpu.kernel[{[p;v;prev;im;g;d] sdt:g[0];ax:mod[d;3.];part:floor[d%3.];isY:$[ax=1.;1.;0.];free:$[(im[part])>0.;1.;0.];nv:(v[d])+isY*free*(-9.81*sdt);set[v;d;nv];set[prev;d;p[d]];np:(p[d])+sdt*nv;set[p;d;$[ax=1.;$[np<(-2.);-2.;np];np]]};0;5]
-kCon::gpu.kernel[{[dp;p;e;g;ee] sc:1048576.;ne:g[0];sdt:g[1];ok:$[ee<ne;1.;0.];base:7.*ee;pi:e[base];pj:e[base+1.];l0:e[base+2.];al:e[base+3.];w0:e[base+4.];w1:e[base+5.];wt:e[base+6.];bi:3.*pi;bj:3.*pj;dx:(p[bj])-p[bi];dy:(p[bj+1.])-p[bi+1.];dz:(p[bj+2.])-p[bi+2.];ds:sqrt[(dx*dx)+(dy*dy)+dz*dz];safe:$[ds>0.0001;1.;0.];dsc:$[ds>0.0001;ds;0.0001];cc:ds-l0;lam:0.5*((cc*safe)%(wt+al%(sdt*sdt)));cx:ok*sc*(dx%dsc)*lam;cy:ok*sc*(dy%dsc)*lam;cz:ok*sc*(dz%dsc)*lam;a0:scatterAdd[dp;bi;cx*w0];a1:scatterAdd[dp;bi+1.;cy*w0];a2:scatterAdd[dp;bi+2.;cz*w0];b0:scatterAdd[dp;bj;(0.-cx)*w1];b1:scatterAdd[dp;bj+1.;(0.-cy)*w1];scatterAdd[dp;bj+2.;(0.-cz)*w1]};1;3]
+kInt::gpu.kernel[{[p;v;prev;im;g;d] sdt:g[0];ax:d mod 3;part:d div 3;isY:$[ax=1;1.;0.];free:$[(im[part])>0.;1.;0.];nv:(v[d])+isY*free*(-9.81*sdt);set[v;d;nv];set[prev;d;p[d]];np:(p[d])+sdt*nv;set[p;d;$[ax=1;$[np<(-2.);-2.;np];np]]};0;5]
+kCon::gpu.kernel[{[dp;p;e;g;ee] sc:1048576.;ne:`i$g[0];sdt:g[1];ok:$[ee<ne;1.;0.];base:7*ee;pi:e[base];pj:e[base+1];l0:e[base+2];al:e[base+3];w0:e[base+4];w1:e[base+5];wt:e[base+6];bi:3.*pi;bj:3.*pj;dx:(p[bj])-p[bi];dy:(p[bj+1.])-p[bi+1.];dz:(p[bj+2.])-p[bi+2.];ds:sqrt[(dx*dx)+(dy*dy)+dz*dz];safe:$[ds>0.0001;1.;0.];dsc:$[ds>0.0001;ds;0.0001];cc:ds-l0;lam:0.5*((cc*safe)%(wt+al%(sdt*sdt)));cx:ok*sc*(dx%dsc)*lam;cy:ok*sc*(dy%dsc)*lam;cz:ok*sc*(dz%dsc)*lam;a0:scatterAdd[dp;bi;cx*w0];a1:scatterAdd[dp;bi+1.;cy*w0];a2:scatterAdd[dp;bi+2.;cz*w0];b0:scatterAdd[dp;bj;(0.-cx)*w1];b1:scatterAdd[dp;bj+1.;(0.-cy)*w1];scatterAdd[dp;bj+2.;(0.-cz)*w1]};1;3]
 kApp::gpu.kernel[{[dp;p;g;d] set[p;d;(p[d])+(iget[dp;d])%1048576.];iset[dp;d;0.]};1;2]
-kVel::gpu.kernel[{[v;p;prev;im;g;d] sdt:g[0];damp:g[1];part:floor[d%3.];free:$[(im[part])>0.;1.;0.];set[v;d;damp*free*((p[d])-prev[d])%sdt]};0;5]
+kVel::gpu.kernel[{[v;p;prev;im;g;d] sdt:g[0];damp:g[1];part:d div 3;free:$[(im[part])>0.;1.;0.];set[v;d;damp*free*((p[d])-prev[d])%sdt]};0;5]
 distp::{[a;b] sqrt[+/(a-b)*a-b]}
 gpuSetup:{[side]
   W::side; H::side; nP::W*H; nDof::3*nP

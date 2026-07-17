@@ -1,6 +1,7 @@
-/ test/kkint.k — integer-index gpu.kernel dialect (explicit casts) vs the f32 dialect
-/ and a CPU reference. The SAME kernel math written two ways: floor[d%n]/mod (f32
-/ indices) vs d%n/mod on an i32 thread index with `i$ bounds. Both must match the CPU
+/ test/kkint.k — integer-index gpu.kernel dialect (the DEFAULT since the flip) vs
+/ the legacy f32-index dialect and a CPU reference. The SAME kernel math written two
+/ ways: floor[d%n]/mod (f32 indices, via kernelInfer[fn;0;0] — no public wrapper any
+/ more) vs d%n/mod on an i32 thread index with `i$ bounds. Both must match the CPU
 / GEMM bit-for-bit (integer inputs → exact). Run headless: INK_SNAP=0 ink test/kkint.k
 
 2: "lib/dye.k"
@@ -38,8 +39,8 @@ GA:: 1.+`f$!GM*GK
 GB:: (`f$ (!GK*GN) mod 7) - 3.
 grefI: {[d] i:d div GN; j:d mod GN; +/ (GA@((i*GK)+!GK)) * (GB@(((!GK)*GN)+j))}
 demo: {[]
-  pf: gpu.compileCompute[shader.kernel  gemmF; 4]
-  pii: gpu.compileCompute[shader.kernelI gemmI; 4]
+  pf: gpu.compileCompute[kernelInfer[gemmF; 0; 0]; 4]   / legacy f32-index dialect
+  pii: gpu.compileCompute[shader.kernel gemmI; 4]
   rf: runGemm[pf;  GA;GB;GM;GK;GN]
   ri: runGemm[pii; GA;GB;GM;GK;GN]
   cpu: grefI' !GM*GN

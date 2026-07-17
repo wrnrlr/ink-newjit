@@ -113,8 +113,11 @@ opLOr:  {[t;r;a;b] (0x000500A6;Tbool;r;a;b)}  / OpLogicalOr 166
 opLNot: {[t;r;a]   (0x000400A8;Tbool;r;a)}    / OpLogicalNot 168
 / Ternary select: cond ? a : b (condition must be bool, a/b same type as result)
 opSel:  {[t;r;c;a;b] (0x000600A9;t;r;c;a;b)}  / OpSelect 169
-/ Integer compare (loop condition) → bool
+/ Integer compare (loop condition + the integer-index dialect's < > = ~) → bool
 opSLT:  {[t;r;a;b] (0x000500B1;t;r;a;b)}      / OpSLessThan 177
+opSGT:  {[t;r;a;b] (0x000500AD;Tbool;r;a;b)}  / OpSGreaterThan 173
+opIEq:  {[t;r;a;b] (0x000500AA;Tbool;r;a;b)}  / OpIEqual 170
+opINe:  {[t;r;a;b] (0x000500AB;Tbool;r;a;b)}  / OpINotEqual 171
 / Structured control flow (in-kernel bounded loops — see compRsum)
 opLabel:  {[r]        (0x000200F8;r)}                  / OpLabel 248
 opBranch: {[t]        (0x000200F9;t)}                  / OpBranch 249

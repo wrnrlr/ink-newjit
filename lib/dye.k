@@ -22,7 +22,7 @@
 / fn:      ink lambda whose args become shader inputs, return value → output
 / Lambdas can have local bindings: {[uv] d: sqrt[...]; (d;d;d;1.0)}
 shader.fragment: {[ioTypes; fn]
-  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::(); Xidx::0
   TexVars:: ()                      / no texture section (see shader.fragmentTexN)
 
   lam: lamOf fn
@@ -57,7 +57,7 @@ shader.fragment: {[ioTypes; fn]
 / wires the textures with gpuTexture + mesh.drawGeomT, passing
 / a list of texture handles.  Interpolate the UV(s) as v2 vertex varyings.
 shader.fragmentTexN: {[ioTypes; nTex; fn]
-  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::(); Xidx::0
 
   lam: lamOf fn
   argNames: lamArgs lam
@@ -111,7 +111,7 @@ shader.vertex: {[inTypes; varyTypes; fn] shader.vertexU[inTypes; varyTypes; (); 
 / via mesh.drawU (slot k = uniform floats 4k..4k+3).  uniNames:() ⇒ no block, and
 / the emitted module is byte-identical to the old shader.vertex.
 shader.vertexU: {[inTypes; varyTypes; uniNames; fn]
-  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::(); Xidx::0
 
   lam:      lamOf fn
   argNames: lamArgs lam
@@ -229,7 +229,7 @@ shader.vertexU: {[inTypes; varyTypes; uniNames; fn]
 vpBufDec: {[p] (0x00040047; p 0; 34; 0),(0x00040047; p 0; 33; p 1)}   / DescriptorSet 0 + Binding k
 vpBufVar: {[id] (0x0004003B; VPpbufs; id; 12)}                         / OpVariable StorageBuffer
 shader.vertexPull: {[varyTypes; fn]
-  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::(); Xidx::0
   lam: lamOf fn; argNames: lamArgs lam
   nBuf:    (#argNames)-1
   bufNames: -1 _ argNames
@@ -344,10 +344,12 @@ dispBin: {[op;rty;r;aty;a;bty;b]
                isVecTy[bty] & ~isVecTy[aty]; opVTS[rt;r;b;a]
                opFmul[rt;r;a;b]]
     op~`",";   (0x00050050;rt;r;a;b);   / OpCompositeConstruct, 2 constituents: v2+f32→v3, v3+f32→v4, etc.
-    op~`"<";   opFOlt[at;r;a;b];   / <= / >= are handled by the compTrans peephole
-    op~`">";   opFOgt[at;r;a;b]
-    op~`"=";   opFOeq[at;r;a;b]
-    op~`"~";   opFOne[at;r;a;b]
+    / comparisons: integer variants when the LEFT operand is i32 (the integer-index
+    / dialect compares indices against i32 bounds/literals; float compares unchanged)
+    op~`"<";   $[aty~`i32; opSLT[Tbool;r;a;b]; opFOlt[at;r;a;b]];   / <= / >= are handled by the compTrans peephole
+    op~`">";   $[aty~`i32; opSGT[Tbool;r;a;b]; opFOgt[at;r;a;b]]
+    op~`"=";   $[aty~`i32; opIEq[Tbool;r;a;b]; opFOeq[at;r;a;b]]
+    op~`"~";   $[aty~`i32; opINe[Tbool;r;a;b]; opFOne[at;r;a;b]]
     op~`"&";   opLAnd[at;r;a;b]
     op~`"|";   opLOr[at;r;a;b]
     opFadd[rt;r;a;b]]}
@@ -1193,9 +1195,14 @@ compGpN: {[fn; nAcc; nBuf; fa; iidx]
   env: argNames!(accPairs,bufPairs,(,gp))
   rp: kSeqIr[lamBody lam; env; `f32]
   kAsm[]}
-gpu.kernel:  {[fn; nAcc; nBuf] compGpN[fn; nAcc; nBuf; 0; 0]}
-gpu.kernelF: {[fn; nAcc; nBuf] compGpN[fn; nAcc; nBuf; 1; 0]}   / native f32-atomic accumulators
-gpu.kernelI: {[fn; nAcc; nBuf] compGpN[fn; nAcc; nBuf; 0; 1]}   / i32 thread index (explicit int dialect)
+/ DEFAULT IS THE INTEGER-INDEX DIALECT (flipped 2026-07-17, kk2 §3): the thread
+/ index is i32, `d div n`/`d mod n` are integer ops, int literals are i32 and
+/ float literals f32 (write what you mean), `i$/`f$ cast explicitly. Loaded
+/ buffer VALUES are still f32 (an f32 index value gets one f2s at its use).
+/ The legacy f32-index dialect remains reachable via compGpN[fn;nAcc;nBuf;fa;0].
+gpu.kernel:  {[fn; nAcc; nBuf] compGpN[fn; nAcc; nBuf; 0; 1]}
+gpu.kernelF: {[fn; nAcc; nBuf] compGpN[fn; nAcc; nBuf; 1; 1]}   / native f32-atomic accumulators
+gpu.kernelI: gpu.kernel                                          / alias: the default IS integer-index now
 
 / ── shader.kernel[fn] — gpu.kernel with the binding table INFERRED ───────────
 / Roles come from the lambda itself (kk.md incr 3, bindings-from-free-vars):
@@ -1218,9 +1225,9 @@ kernelInfer: {[fn; fa; iidx]
   $[nAcc; $[&/ nAcc # am; 0; `0 0: "dye: accumulator params must come FIRST in a shader.kernel lambda\n"]; 0]
   KKnb:: (#ps)-1
   compGpN[fn; nAcc; ((#ps)-1)-nAcc; fa; iidx]}
-shader.kernel:  {[fn] kernelInfer[fn; 0; 0]}
-shader.kernelF: {[fn] kernelInfer[fn; 1; 0]}     / native f32-atomic accumulators (§7)
-shader.kernelI: {[fn] kernelInfer[fn; 0; 1]}     / i32 thread index (explicit integer dialect)
+shader.kernel:  {[fn] kernelInfer[fn; 0; 1]}     / integer-index dialect (the default since the flip)
+shader.kernelF: {[fn] kernelInfer[fn; 1; 1]}     / native f32-atomic accumulators (§7)
+shader.kernelI: shader.kernel                    / alias: the default IS integer-index now
 
 varOutOne:   {[ptr;vid]    (0x0004003B;ptr;vid;3)}    / OpVariable Output storage class
 
@@ -1271,7 +1278,11 @@ xLit: {[i;oty] $[(kKind i) in `floats`ints; xVecLit[i]; xScalarLit[i;oty]]}
 / Vector literals lower to OpConstantComposite in the constants section (`consc),
 / NOT an in-body OpCompositeConstruct (`cons) — mirrors compVecLit exactly.
 xVecLit: {[i] vals:0.+kVal i; n:#vals; cs:{[v] xEmit[`const;`f32;();v]}'vals; rty:$[n=2;`v2;n=3;`v3;`v4]; (xEmit[`consc;rty;cs;0n]; rty)}
-xScalarLit: {[i;oty] litTy:kKind i; useTy:$[(litTy~`int)&(oty~`f32);`float;litTy]; v:$[(litTy~`int)&(useTy~`float);0.+kVal i;kVal i]; (xEmit[`const;LitSym[useTy];();v]; LitSym[useTy])}
+/ Int literals: promoted to float under an f32 hint in the default dialect, but in
+/ integer-index mode (Xidx) they STAY i32 — the dialect is "write what you mean":
+/ 3 is an i32 (index math), 3. is an f32. This is what lets `d mod 3`, `(2*tp)+kt-1`
+/ and `$[ax=1;…]` stay integer end-to-end with no casts.
+xScalarLit: {[i;oty] litTy:kKind i; useTy:$[(litTy~`int)&(oty~`f32)&~Xidx;`float;litTy]; v:$[(litTy~`int)&(useTy~`float);0.+kVal i;kVal i]; (xEmit[`const;LitSym[useTy];();v]; LitSym[useTy])}
 
 xTransNorm: {[i;env;oty]
   op: kVal kF1[i;`v]
@@ -1786,7 +1797,7 @@ xDump: {[] {[k] `0 0: ($k),": ",($xOp k)," :",($xTy k)," (",xArgStr[k],") ",$xVa
 
 / ── Entry point: fragment shader compiled through the neutral IR ──────────────
 shader.fragmentIr: {[ioTypes; fn]
-  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::(); Xidx::0
   TexVars:: ()
   xReset[]
   lam: lamOf fn; argNames: lamArgs lam

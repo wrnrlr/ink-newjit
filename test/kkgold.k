@@ -30,29 +30,29 @@ ck["stencilIP"; shader.stencilIP[{[u;g;i] w:g[0]; om:g[1]; par:g[2]; b:w-1.5;
 ck["scatter"; shader.scatter[{[acc; a; b; g; i] ok:$[i<g[0];1.;0.];
   x:scatterAdd[acc; a[i]; ok]; scatterAdd[acc; b[i]; ok]}]]
 ck["kernel05"; gpu.kernel[{[p;v;prev;im;g;d]
-  sdt:g[0]; ax:mod[d;3.]; part:floor[d%3.]
-  isY:$[ax=1.;1.;0.]; free:$[(im[part])>0.;1.;0.]
+  sdt:g[0]; ax:d mod 3; part:d div 3
+  isY:$[ax=1;1.;0.]; free:$[(im[part])>0.;1.;0.]
   nv:(v[d])+isY*free*(-9.81*sdt)
   set[v; d; nv]
   set[prev; d; p[d]]
   np:(p[d])+sdt*nv
-  set[p; d; $[ax=1.; $[np<(-2.); -2.; np]; np]]}; 0; 5]]
+  set[p; d; $[ax=1; $[np<(-2.); -2.; np]; np]]}; 0; 5]]
 ck["kernel12"; gpu.kernel[{[dp;p;g;d] set[p; d; (p[d])+(iget[dp;d])%1048576.]; iset[dp;d;0.]}; 1; 2]]
 ck["kernel13"; gpu.kernel[{[dp;p;e;g;ee]
   sc:1048576.
-  ne:g[0]; sdt:g[1]; ok:$[ee<ne;1.;0.]
-  base:7.*ee
-  pi:e[base]; pj:e[base+1.]; l0:e[base+2.]
+  ne:`i$g[0]; sdt:g[1]; ok:$[ee<ne;1.;0.]
+  base:7*ee
+  pi:e[base]; pj:e[base+1]; l0:e[base+2]
   bi:3.*pi; bj:3.*pj
   dx:(p[bj])-p[bi]
   cx:ok*sc*dx*l0
   a0:scatterAdd[dp;bi;cx]; scatterAdd[dp;bj;0.-cx]}; 1; 3]]
 ck["kernelRsum"; gpu.kernel[{[c;a;b;g;d]
-  n:g[1]; kk:g[2]
-  i:floor[d%n]; j:mod[d;n]
+  n:`i$g[1]; kk:`i$g[2]
+  i:d div n; j:d mod n
   set[c; d; rsum[kk; {[k] (a[(i*kk)+k]) * b[(k*n)+j]}]]}; 0; 4]]
 ck["kernelRmax"; gpu.kernel[{[mb;sb;x;g;i]
-  n:g[0]
+  n:`i$g[0]
   m: rmax[n; {[k] x[(i*n)+k]}]
   s: rsum[n; {[k] exp[(x[(i*n)+k]) - m]}]
   set[mb; i; m]; set[sb; i; s]}; 0; 4]]
@@ -61,20 +61,20 @@ ck["kernelRmax"; gpu.kernel[{[mb;sb;x;g;i]
 / lower to the SAME words as the intrinsic rsum/rmax spelling above — assert
 / byte-identity of the two spellings for the gemm and softmax kernels.
 fr: gpu.kernel[{[c;a;b;g;d]
-  n:g[1]; kk:g[2]
-  i:floor[d%n]; j:mod[d;n]
+  n:`i$g[1]; kk:`i$g[2]
+  i:d div n; j:d mod n
   set[c; d; +/{[k] (a[(i*kk)+k]) * b[(k*n)+j]}'!kk]}; 0; 4]
 gr: gpu.kernel[{[c;a;b;g;d]
-  n:g[1]; kk:g[2]
-  i:floor[d%n]; j:mod[d;n]
+  n:`i$g[1]; kk:`i$g[2]
+  i:d div n; j:d mod n
   set[c; d; rsum[kk; {[k] (a[(i*kk)+k]) * b[(k*n)+j]}]]}; 0; 4]
 fm: gpu.kernel[{[mb;sb;x;g;i]
-  n:g[0]
+  n:`i$g[0]
   m: |/{[k] x[(i*n)+k]}'!n
   s: +/{[k] exp[(x[(i*n)+k]) - m]}'!n
   set[mb; i; m]; set[sb; i; s]}; 0; 4]
 gm: gpu.kernel[{[mb;sb;x;g;i]
-  n:g[0]
+  n:`i$g[0]
   m: rmax[n; {[k] x[(i*n)+k]}]
   s: rsum[n; {[k] exp[(x[(i*n)+k]) - m]}]
   set[mb; i; m]; set[sb; i; s]}; 0; 4]

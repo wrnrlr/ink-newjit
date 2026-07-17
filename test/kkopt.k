@@ -20,9 +20,9 @@ both: {[fn;na;nb] xOpt::0; a: gpu.kernel[fn;na;nb]; xOpt::1; b: gpu.kernel[fn;na
 /    while BOTH atomic scatters survive (effects are DCE roots).
 deadK: {[dp;p;e;g;ee]
   sc:1048576.
-  ne:g[0]; sdt:g[1]; ok:$[ee<ne;1.;0.]     / sdt is dead
-  base:7.*ee
-  pi:e[base]; pj:e[base+1.]; l0:e[base+2.]
+  ne:`i$g[0]; sdt:g[1]; ok:$[ee<ne;1.;0.]     / sdt is dead
+  base:7*ee
+  pi:e[base]; pj:e[base+1]; l0:e[base+2]
   bi:3.*pi; bj:3.*pj
   dx:(p[bj])-p[bi]
   cx:ok*sc*dx*l0
@@ -33,7 +33,7 @@ foldK: {[o;x;g;d] set[o; d; (x[d]) * 0.5 * 0.5]}
 
 / 3. Loop survives DCE: a reduction kernel's phi nodes (loop counter + accumulator)
 /    must be preserved, and its store kept.
-redK: {[o;x;g;d] n:g[0]; set[o; d; +/{[k] x[(d*n)+k]}'!n]}
+redK: {[o;x;g;d] n:`i$g[0]; set[o; d; +/{[k] x[(d*n)+k]}'!n]}
 
 / 4. Fully-live kernel: nothing to fold or cull → xOpt=1 is byte-identical to
 /    xOpt=0 (the optimizer is conservative, never gratuitously reorders ids).

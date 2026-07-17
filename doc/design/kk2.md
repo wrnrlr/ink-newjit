@@ -336,10 +336,28 @@ E: 9: [[]i:ei; j:ej; l0:l0; al:al; w0:w0; w1:w1; wt:w0+w1]
   f32-index GEMM and the CPU bit-for-bit. All of this is gated on the `Xidx` flag
   (default 0), so the f32 dialect is **byte-identical** (kkgold) and all existing
   demos are untouched. Oracle: `test/kkint.k` (4/4: f32==CPU, i32==CPU, i32==f32,
-  i32 transpose-scatter to a computed index). REMAINING: migrate the demos
-  (nn.k/clothgpu `floor[d%n]`→`d div n`) and flip the default (re-baselines kkgold),
-  once the dialect has soaked. Also unblocks §4 CPU-runnability (integer indices run
-  on the CPU interpreter; f32 indices don't).
+  i32 transpose-scatter to a computed index). Also unblocks §4 CPU-runnability
+  (integer indices run on the CPU interpreter; f32 indices don't).
+
+- **DEFAULT FLIPPED (2026-07-17).** `gpu.kernel`/`shader.kernel` (and the `F`
+  variants) now compile the integer-index dialect; `kernelI` remains as an alias
+  and the legacy f32 dialect is reachable via `compGpN[fn;nAcc;nBuf;fa;0]` /
+  `kernelInfer[fn;fa;0]` (test/kkint.k pins legacy==default==CPU on the GEMM).
+  The dialect grew what migration actually needed: (i) **int literals stay i32**
+  under Xidx (`d mod 3`, `(2*tp)+kt-1`, `$[ax=1;…]` — "write what you mean":
+  3 is an index, 3. is a float); (ii) **integer comparisons** — `< > = ~` emit
+  OpSLessThan/SGreaterThan/IEqual/INotEqual when the left operand is i32
+  (spirv.k opSGT/opIEq/opINe); (iii) Xidx::0 resets in the fragment/vertex
+  preludes so a kernel compile can't leak the dialect into the next shader.
+  Migrated: lib/nn.k (14 kernels — div/mod decompositions, `` `i$g[k] `` bounds,
+  lnStat keeps a float `nf` for the mean/var divides), test/clothgpu.k,
+  demo/clothbench.k, test/kkgold.k + test/kkopt.k bodies (kkgold re-baselined).
+  Oracles: all 7 + the full nn stack (nn/frontend/subsample/relpos/conformer/
+  weights) pass; cloth drape and walkgpu E@center bit-identical to pre-flip.
+  **New oracle rung: `spirv-val` over every kkgold dump** (wired into
+  test/oracles.sh, skipped if not installed) — it immediately caught an
+  `$[ax=1.;…]` float-vs-i32 compare that MoltenVK silently tolerated, exactly
+  the class of bug numeric oracles can miss.
 
 ## 4. `bits` v1: the CPU backend (increment 6)
 

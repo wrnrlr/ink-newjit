@@ -35,6 +35,31 @@ check walkgpu test/walkgpu.k 'walkgpu: FAIL'  'walkgpu: PASS'
 # drape invariant instead of opening a window; asserts no NaN + physical drape.
 INK_CLOTH_CHECK=1 check clothgpu test/clothgpu.k 'FAIL|lacks atomicFadd' 'clothgpu: .*PASS'
 
+# spirv-val every kkgold module dump (optional — skipped when the validator or
+# python3 is missing). This catches type errors MoltenVK silently tolerates
+# (e.g. an OpIEqual fed a float const), which numeric oracles can miss.
+if command -v spirv-val >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+  echo "==> oracle: spirv-val (kkgold module dumps)"
+  "$INK" test/kkgold.k 2>/dev/null | python3 -c '
+import sys, struct, subprocess
+ok = bad = 0
+for line in sys.stdin:
+    if ":" not in line: continue
+    name, rest = line.split(":", 1)
+    words = rest.split()
+    if len(words) < 10 or not words[0].isdigit(): continue
+    buf = b"".join(struct.pack("<I", int(w) & 0xFFFFFFFF) for w in words)
+    r = subprocess.run(["spirv-val", "--target-env", "vulkan1.2", "-"], input=buf, capture_output=True)
+    if r.returncode == 0: ok += 1
+    else:
+        bad += 1
+        print("INVALID:", name.strip(), r.stderr.decode().splitlines()[0] if r.stderr else "")
+print(f"spirv-val: {ok} valid, {bad} invalid")
+sys.exit(1 if bad else 0)
+' || { echo "ORACLE FAIL: spirv-val"; fail=1; }
+  [ "$fail" -eq 0 ] && echo "ORACLE OK: spirv-val"
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "oracles: FAILED"
   exit 1

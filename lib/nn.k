@@ -26,10 +26,11 @@ nnPad: {[n] 64 * 1 | `i$ (n+63) div 64}
 
 / ── GEMM  C[M,N] = A[M,K] · B[K,N] ───────────────────────────────────────────
 / One pipeline serves every shape: dims travel in the params buffer g=(M;N;K).
-/ thread d → C[d]; i=d/N, j=d%N; C[d] = Σ_k A[i*K+k]·B[k*N+j].
+/ thread d → C[d]; i=d div N, j=d mod N; C[d] = Σ_k A[i*K+k]·B[k*N+j].
+/ (integer-index dialect: d is i32, dims cast once with `i$, all address math exact)
 gemmK: gpu.kernel[{[c;a;b;g;d]
-  n:g[1]; kk:g[2]
-  i:floor[d%n]; j:mod[d;n]
+  n:`i$g[1]; kk:`i$g[2]
+  i:d div n; j:d mod n
   set[c; d; +/{[k] (a[(i*kk)+k]) * b[(k*n)+j]}'!kk]}; 0; 4]
 
 gPipe::  0    / cached gemm pipeline
@@ -52,12 +53,12 @@ Gemm: {[A;B;M;K;N]
 / ── Row softmax  (numerically stable: subtract the row max) ───────────────────
 / Two passes: (1) per row i → m[i]=max, s[i]=Σexp(x-m);  (2) per element → exp/s.
 smStatK: gpu.kernel[{[mb;sb;x;g;i]
-  n:g[0]
+  n:`i$g[0]
   m: |/{[k] x[(i*n)+k]}'!n
   s: +/{[k] exp[(x[(i*n)+k]) - m]}'!n
   set[mb; i; m]; set[sb; i; s]}; 0; 4]
 smApplyK: gpu.kernel[{[o;x;mb;sb;g;d]
-  n:g[0]; i:floor[d%n]
+  n:`i$g[0]; i:d div n
   set[o; d; (exp[(x[d]) - mb[i]]) % sb[i]]}; 0; 5]
 
 smSP::0; smAP::0; smParam::0
@@ -81,12 +82,12 @@ Softmax: {[X;M;N]
 / Two passes: (1) per row i → mean[i], rstd[i]=1/√(var+eps);  (2) per element →
 / ((x-mean)*rstd)*γ[j] + β[j].
 lnStatK: gpu.kernel[{[mb;rb;x;g;i]
-  n:g[0]; eps:g[1]
-  mean: (+/{[k] x[(i*n)+k]}'!n) % n
-  var:  (+/{[k] sqr[(x[(i*n)+k]) - mean]}'!n) % n
+  nf:g[0]; eps:g[1]; n:`i$nf              / n indexes (i32); nf divides (f32)
+  mean: (+/{[k] x[(i*n)+k]}'!n) % nf
+  var:  (+/{[k] sqr[(x[(i*n)+k]) - mean]}'!n) % nf
   set[mb; i; mean]; set[rb; i; 1. % sqrt[var + eps]]}; 0; 4]
 lnApplyK: gpu.kernel[{[o;x;mb;rb;gm;bt;g;d]
-  n:g[0]; i:floor[d%n]; j:mod[d;n]
+  n:`i$g[0]; i:d div n; j:d mod n
   nrm: ((x[d]) - mb[i]) * rb[i]
   set[o; d; (nrm * gm[j]) + bt[j]]}; 0; 7]
 
@@ -114,8 +115,8 @@ LayerNorm: {[X;G;B;M;N;eps]
 / Fuses GEMM-with-transposed-B and bias: no host weight transpose, and reading
 / row j of W (w[j*K+k]) is the j-th output's weights.
 linK: gpu.kernel[{[o;x;w;b;g;d]
-  nn:g[1]; kk:g[2]
-  i:floor[d%nn]; j:mod[d;nn]
+  nn:`i$g[1]; kk:`i$g[2]
+  i:d div nn; j:d mod nn
   set[o; d; (+/{[k] (x[(i*kk)+k]) * w[(j*kk)+k]}'!kk) + b[j]]}; 0; 5]
 linPipe::0; linParam::0
 / Resident: bo (≥nnPad[M*N]) = bx[M,K] · bw[N,K]ᵀ + bb[N].
@@ -175,23 +176,22 @@ FfnBlock: {[X;W1;B1;W2;B2;GAM;BET;cfg]
 / ── Multi-head self-attention ────────────────────────────────────────────────
 / Two head-structured batched-matmul kernels (Q/K/V projections and the output
 / projection are plain Linear); softmax over the [H*T,T] score rows reuses SoftmaxR.
-/ NB indices are computed in f32 (exact ≤ 2^24) — fine for the T we validate; a
-/ large-T model needs i32 indices / tiling here (H*T*T can exceed 16M).
+/ Indices are i32 (integer-index dialect) — exact for any H*T*T, no 2^24 cliff.
 /
 / scores S[h,i,j] = scale · Σ_k Q[i,h·dh+k]·K[j,h·dh+k]   (one thread per H*T*T elem)
 attnScoresK: gpu.kernel[{[s;q;kb;g;e]
-  T:g[0]; D:g[1]; dh:g[2]; sc:g[3]
+  T:`i$g[0]; D:`i$g[1]; dh:`i$g[2]; sc:g[3]
   tt: T*T
-  h: floor[e%tt]; rem: mod[e;tt]
-  i: floor[rem%T]; j: mod[rem;T]
+  h: e div tt; rem: e mod tt
+  i: rem div T; j: rem mod T
   base: h*dh
   set[s; e; sc * +/{[k] (q[(i*D)+base+k]) * kb[(j*D)+base+k]}'!dh]}; 0; 4]
 / context C[i,c] = Σ_j A[h,i,j]·V[j,c]  where h = c÷dh   (one thread per T*D elem)
 / writes straight into the concatenated [T,D] layout — no per-head regather.
 attnCtxK: gpu.kernel[{[o;a;v;g;e]
-  T:g[0]; D:g[1]; dh:g[2]
-  i: floor[e%D]; c: mod[e;D]
-  h: floor[c%dh]
+  T:`i$g[0]; D:`i$g[1]; dh:`i$g[2]
+  i: e div D; c: e mod D
+  h: c div dh
   hb: h*T*T
   set[o; e; +/{[j] (a[hb+(i*T)+j]) * v[(j*D)+c]}'!T]}; 0; 4]
 
@@ -250,10 +250,10 @@ nnPosEmb: {[T;D] nnPosT::T; nnPosD::D; ,/ nnPosRow' !(2*T)-1}
 
 / rel-pos scores: buffers s,q,k,u,v,P + params (T;D;dh;scale).  One thread per H·T·T.
 attnScoresRelK: gpu.kernel[{[s;q;kb;u;v;pe;g;e]
-  T:g[0]; D:g[1]; dh:g[2]; sc:g[3]
+  T:`i$g[0]; D:`i$g[1]; dh:`i$g[2]; sc:g[3]
   tt: T*T
-  h: floor[e%tt]; rem: mod[e;tt]
-  i: floor[rem%T]; j: mod[rem;T]
+  h: e div tt; rem: e mod tt
+  i: rem div T; j: rem mod T
   base: h*dh
   prow: (((i-j)+(T-1)) * D)
   set[s; e; sc * +/{[k]
@@ -293,22 +293,22 @@ MhsaRel: {[X;W;cfg]
 / ── Conformer convolution module ─────────────────────────────────────────────
 / GLU gate: X is [T,2D]; out[t,c] = X[t,c]·σ(X[t,D+c])  (split channels a|b → a·σ(b))
 gluK: gpu.kernel[{[o;x;g;e]
-  D:g[0]; w2:2.*D
-  i:floor[e%D]; c:mod[e;D]
+  D:`i$g[0]; w2:2*D
+  i:e div D; c:e mod D
   a: x[(i*w2)+c]; b: x[(i*w2)+D+c]
   set[o; e; a * 1. % 1. + exp[0. - b]]}; 0; 3]
 / Depthwise 1-D conv (per-channel, zero-padded): out[t,c]=Σ_k x[t+k-pad,c]·W[c,k]+B[c]
 dwK: gpu.kernel[{[o;x;w;b;g;e]
-  T:g[0]; D:g[1]; ks:g[2]; pad:g[3]
-  i:floor[e%D]; c:mod[e;D]
+  T:`i$g[0]; D:`i$g[1]; ks:`i$g[2]; pad:`i$g[3]
+  i:e div D; c:e mod D
   acc: +/{[k]
     tp: (i+k)-pad
-    ok: (~(tp<0.)) & (tp<T)
+    ok: (~(tp<0)) & (tp<T)
     ($[ok; x[(tp*D)+c]; 0.]) * w[(c*ks)+k]}'!ks
   set[o; e; acc + b[c]]}; 0; 5]
 / Per-channel affine (BatchNorm inference folded to scale/shift): out[t,c]=x·A[c]+B[c]
 caK: gpu.kernel[{[o;x;a;b;g;e]
-  D:g[0]; c:mod[e;D]
+  D:`i$g[0]; c:e mod D
   set[o; e; (x[e]*a[c]) + b[c]]}; 0; 5]
 
 gluPipe::0; gluParam::0; dwPipe::0; dwParam::0; caPipe::0; caParam::0
@@ -427,8 +427,8 @@ nnMelFb: {[sr; nfft; nmels; fmin; fmax]
 
 / STFT power: pw[f,k] = re²+im², re=Σ_t sig[f·hop+t]·Cr[k,t]  (one thread per frame×freq)
 stftPowerK: gpu.kernel[{[pw;sig;cr;ci;g;e]
-  hop:g[0]; win:g[1]; nf:g[2]
-  f:floor[e%nf]; k:mod[e;nf]
+  hop:`i$g[0]; win:`i$g[1]; nf:`i$g[2]
+  f:e div nf; k:e mod nf
   base: f*hop; kb: k*win
   re: +/{[t] (sig[base+t]) * cr[kb+t]}'!win
   im: +/{[t] (sig[base+t]) * ci[kb+t]}'!win
@@ -471,41 +471,41 @@ nnSub2: {[n] 1 + (n-1) div 2}
 
 / regular conv2d 1→C:  out[oc,t',f'] = b[oc] + Σ_{kt,kf} in[2t'+kt−1, 2f'+kf−1]·W[oc,kt,kf]
 conv2dK: gpu.kernel[{[o;x;w;b;g;e]
-  C:g[0]; Tout:g[1]; Fout:g[2]; Tin:g[3]; Fin:g[4]
+  C:`i$g[0]; Tout:`i$g[1]; Fout:`i$g[2]; Tin:`i$g[3]; Fin:`i$g[4]
   tf: Tout*Fout
-  oc: floor[e%tf]; rem: mod[e;tf]
-  tp: floor[rem%Fout]; fp: mod[rem;Fout]
+  oc: e div tf; rem: e mod tf
+  tp: rem div Fout; fp: rem mod Fout
   set[o; e; (b[oc]) + +/{[kk]
-    kt: floor[kk%3.]; kf: mod[kk;3.]
-    ti: ((2.*tp)+kt)-1.; fi: ((2.*fp)+kf)-1.
-    ok: (~(ti<0.)) & (ti<Tin) & (~(fi<0.)) & (fi<Fin)
-    ($[ok; x[(ti*Fin)+fi]; 0.]) * w[(oc*9.)+kk]}'!9]}; 0; 5]
+    kt: kk div 3; kf: kk mod 3
+    ti: ((2*tp)+kt)-1; fi: ((2*fp)+kf)-1
+    ok: (~(ti<0)) & (ti<Tin) & (~(fi<0)) & (fi<Fin)
+    ($[ok; x[(ti*Fin)+fi]; 0.]) * w[(oc*9)+kk]}'!9]}; 0; 5]
 / depthwise conv2d C→C (per channel):  reads input channel c only.
 dwConv2dK: gpu.kernel[{[o;x;w;b;g;e]
-  C:g[0]; Tout:g[1]; Fout:g[2]; Tin:g[3]; Fin:g[4]
+  C:`i$g[0]; Tout:`i$g[1]; Fout:`i$g[2]; Tin:`i$g[3]; Fin:`i$g[4]
   tf: Tout*Fout
-  c: floor[e%tf]; rem: mod[e;tf]
-  tp: floor[rem%Fout]; fp: mod[rem;Fout]
+  c: e div tf; rem: e mod tf
+  tp: rem div Fout; fp: rem mod Fout
   cin: c*Tin*Fin
   set[o; e; (b[c]) + +/{[kk]
-    kt: floor[kk%3.]; kf: mod[kk;3.]
-    ti: ((2.*tp)+kt)-1.; fi: ((2.*fp)+kf)-1.
-    ok: (~(ti<0.)) & (ti<Tin) & (~(fi<0.)) & (fi<Fin)
-    ($[ok; x[cin+(ti*Fin)+fi]; 0.]) * w[(c*9.)+kk]}'!9]}; 0; 5]
+    kt: kk div 3; kf: kk mod 3
+    ti: ((2*tp)+kt)-1; fi: ((2*fp)+kf)-1
+    ok: (~(ti<0)) & (ti<Tin) & (~(fi<0)) & (fi<Fin)
+    ($[ok; x[cin+(ti*Fin)+fi]; 0.]) * w[(c*9)+kk]}'!9]}; 0; 5]
 / pointwise conv2d C→C (1×1) = per-position channel linear.
 pwConv2dK: gpu.kernel[{[o;x;w;b;g;e]
-  C:g[0]; T:g[1]; F:g[2]
+  C:`i$g[0]; T:`i$g[1]; F:`i$g[2]
   tf: T*F
-  oc: floor[e%tf]; pos: mod[e;tf]
+  oc: e div tf; pos: e mod tf
   set[o; e; (b[oc]) + +/{[ic] (x[(ic*tf)+pos]) * w[(oc*C)+ic]}'!C]}; 0; 5]
 / ReLU  (shader `|` is logical-or, not max — use the max builtin)
 reluK: gpu.kernel[{[o;x;e] set[o; e; max[0.; x[e]]]}; 0; 2]
 / flatten [C,Tp,Fp] → [Tp, C·Fp]  (out[t',c·Fp+f'] = in[c,t',f'])
 flattenK: gpu.kernel[{[o;x;g;e]
-  C:g[0]; Tp:g[1]; Fp:g[2]
+  C:`i$g[0]; Tp:`i$g[1]; Fp:`i$g[2]
   cf: C*Fp
-  tpp: floor[e%cf]; rem: mod[e;cf]
-  c: floor[rem%Fp]; fp: mod[rem;Fp]
+  tpp: e div cf; rem: e mod cf
+  c: rem div Fp; fp: rem mod Fp
   set[o; e; x[(c*Tp*Fp)+(tpp*Fp)+fp]]}; 0; 3]
 
 c2Pipe::0; c2Param::0; dw2Pipe::0; dw2Param::0; pw2Pipe::0; pw2Param::0
