@@ -321,7 +321,7 @@ jnRty: {[a;b] n: ncVec[a]+ncVec[b]; $[n=2;`v2;n=3;`v3;`v4]}
 
 / Comparison ops always produce bool; others propagate vector type or use operand type
 cmpOps: `"<"`">"`"="`"~"`"&"`"|"
-binRty: {[op;aty;bty;oty] $[op in cmpOps; `bool; op~`","; jnRty[aty;bty]; isVecTy[aty]; aty; isVecTy[bty]; bty; aty]}
+binRty: {[op;aty;bty;oty] $[op in cmpOps; `bool; op in `div`mod; `i32; op~`","; jnRty[aty;bty]; isVecTy[aty]; aty; isVecTy[bty]; bty; aty]}
 
 / ── Known 1-arg and multi-arg math function names ────────────────────────────
 mathFns:  `abs`floor`fract`sign`sqrt`exp`log`tanh`sqr`sin`cos`asin`acos`atan`length`normalize`pow`min`max`atan2`dot`cross`step`mod`clamp`mix`smoothstep
@@ -337,6 +337,8 @@ dispBin: {[op;rty;r;aty;a;bty;b]
   $[op~`"+";   $[isi; opIadd[rt;r;a;b]; opFadd[rt;r;a;b]]
     op~`"-";   $[isi; opIsub[rt;r;a;b]; opFsub[rt;r;a;b]]
     op~`"%";   $[isi; opSdiv[rt;r;a;b]; opFdiv[rt;r;a;b]]
+    op~`div;   opSdiv[Ti32;r;a;b]      / integer divide verb (explicit int dialect)
+    op~`mod;   opSrem[Ti32;r;a;b]      / integer remainder verb
     op~`"*";   $[isi; opImul[rt;r;a;b]
                isVecTy[aty] & ~isVecTy[bty]; opVTS[rt;r;a;b]
                isVecTy[bty] & ~isVecTy[aty]; opVTS[rt;r;b;a]
@@ -572,6 +574,11 @@ AKnAcc::0; AKuni::0
 AKfa::0                                        / float-atomic module? → kAsm emits the AtomicFloat32AddEXT cap + extension
 AKsg::0                                         / subgroup-arithmetic module? → kAsm emits the GroupNonUniformArithmetic cap
 AKlsz::0                                        / per-kernel LocalSize x override (0 = use the sticky `wg`)
+/ Integer-index mode (explicit, kk2 §3 follow-up): when set, the gpu.kernel thread
+/ index + fold counter are i32 and buffer indices are consumed as i32 directly (no
+/ f2s); the kernel casts f32 bounds with `i$/`f$. Default 0 keeps the f32-index
+/ dialect byte-identical (kkgold).
+Xidx::0
 kAllocI:   {[] AKrtaI::newId[]; AKtbufI::newId[]; AKpbufsI::newId[]; AKpi32::newId[]}
 kAllocDev: {[] AKdev::newId[]; emitCon (0x0004002B; AKu32; AKdev; 1); CPi32::AKpi32; CScope::AKdev}
 / Device memory-scope const only (no i32 accumulator types) — for the f32-atomic
@@ -583,7 +590,7 @@ kAllocUni: {[] AKuniT::newId[]; AKuniP::newId[]; AKuniPv4::newId[]; AKuniVar::ne
 kAllocLoop:{[] RCi0::newId[]; emitCon opConst[Ti32;RCi0;0]; RCi1::newId[]; emitCon opConst[Ti32;RCi1;1]; RCf0::newId[]; emitCon opConst[Tf32;RCf0;0.]; RCfNeg::newId[]; emitCon opConst[Tf32;RCfNeg;-1e30]}
 kAlloc: {[nAcc;nBuf;hasUni;hasLoop]
   xErr::`
-  AKfa::0; AKsg::0; AKlsz::0
+  AKfa::0; AKsg::0; AKlsz::0; Xidx::0
   Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
   AKu32::newId[]; AKv3::newId[]
   AKrta::newId[]; AKtbuf::newId[]; AKpbufs::newId[]; AKpf32::newId[]
@@ -1172,20 +1179,23 @@ shader.scatter: compScatter
 / iget/iset become f32 load/store. kAllocScope adds the Device memory-scope const;
 / AKfa flags kAsm to emit the capability + extension. fa=0 keeps the i32 fixed-point
 / path (unchanged, byte-identical). Non-accumulator kernels (nAcc=0) ignore fa.
-compGpN: {[fn; nAcc; nBuf; fa]
+compGpN: {[fn; nAcc; nBuf; fa; iidx]
   useF: fa & nAcc>0
   ids: $[useF; kAlloc[0; nAcc+nBuf; 0; 1]; kAlloc[nAcc;nBuf;0;1]]
   $[useF; kAllocScope[]; 0]
   $[useF; AKfa::1; 0]
+  Xidx:: iidx                                    / integer-index mode (thread index/counter i32)
   lam: lamOf fn; argNames: lamArgs lam
-  gx: kGidX[]; gf: kGidF[gx]
+  gx: kGidX[]
+  gp: $[iidx; (kGidI gx; `i32); (kGidF gx; `f32)]  / thread index: i32 (explicit dialect) or f32
   accPairs: $[useF; {[id] (id;`scatf)}' nAcc#ids; {[id] (id;`scat)}' nAcc#ids]
   bufPairs: {[id] (id;`buf)}' nAcc _ ids
-  env: argNames!(accPairs,bufPairs,(,(gf;`f32)))
+  env: argNames!(accPairs,bufPairs,(,gp))
   rp: kSeqIr[lamBody lam; env; `f32]
   kAsm[]}
-gpu.kernel:  {[fn; nAcc; nBuf] compGpN[fn; nAcc; nBuf; 0]}
-gpu.kernelF: {[fn; nAcc; nBuf] compGpN[fn; nAcc; nBuf; 1]}
+gpu.kernel:  {[fn; nAcc; nBuf] compGpN[fn; nAcc; nBuf; 0; 0]}
+gpu.kernelF: {[fn; nAcc; nBuf] compGpN[fn; nAcc; nBuf; 1; 0]}   / native f32-atomic accumulators
+gpu.kernelI: {[fn; nAcc; nBuf] compGpN[fn; nAcc; nBuf; 0; 1]}   / i32 thread index (explicit int dialect)
 
 / ── shader.kernel[fn] — gpu.kernel with the binding table INFERRED ───────────
 / Roles come from the lambda itself (kk.md incr 3, bindings-from-free-vars):
@@ -1201,15 +1211,16 @@ kkScats: {[]
   ap: & `apply = Cst`kind
   ss: ap @ & {[i] (kVal kF1[i;`f]) in `scatterAdd`iget`iset}' ap
   ? {[i] kVal kF1[i;`arg]}' ss}    / kF1 not *kF: `kVal *kF[…]` parses as kVal TIMES kF (noun-adjacency)
-kernelInfer: {[fn; fa]
+kernelInfer: {[fn; fa; iidx]
   ps: lamArgs lamOf fn                 / lamOf parses fn → Cst for kkScats
   am: ps in kkScats[]                  / per-param accumulator mask
   nAcc: +/ -1 _ am                     / the index param can't be an accumulator
   $[nAcc; $[&/ nAcc # am; 0; `0 0: "dye: accumulator params must come FIRST in a shader.kernel lambda\n"]; 0]
   KKnb:: (#ps)-1
-  compGpN[fn; nAcc; ((#ps)-1)-nAcc; fa]}
-shader.kernel:  {[fn] kernelInfer[fn; 0]}
-shader.kernelF: {[fn] kernelInfer[fn; 1]}     / native f32-atomic accumulators (§7)
+  compGpN[fn; nAcc; ((#ps)-1)-nAcc; fa; iidx]}
+shader.kernel:  {[fn] kernelInfer[fn; 0; 0]}
+shader.kernelF: {[fn] kernelInfer[fn; 1; 0]}     / native f32-atomic accumulators (§7)
+shader.kernelI: {[fn] kernelInfer[fn; 0; 1]}     / i32 thread index (explicit integer dialect)
 
 varOutOne:   {[ptr;vid]    (0x0004003B;ptr;vid;3)}    / OpVariable Output storage class
 
@@ -1276,10 +1287,17 @@ xLeGe: {[i;env;flip]
   ap: xNode[kF1[i;`a];env;`f32]; bp: xNode[kF1[kF1[i;`b];`a];env;`f32]
   rc: xEmit[`arith;`bool;(ap 0;bp 0);flip]
   (xEmit[`lnot;`bool;,rc;`]; `bool)}
+/ Explicit numeric cast `i$x (f32→i32, OpConvertFToS) / `f$x (i32→f32, OpConvertSToF)
+/ — the integer-index dialect's only conversion (no auto-coercion). Left is the type
+/ symbol, right the value.
+xCastI: {[i;env] rp: xNode[kF1[i;`b];env;`f32]; (xEmit[`f2s;`i32;,rp 0;0n]; `i32)}
+xCastF: {[i;env] rp: xNode[kF1[i;`b];env;`i32]; (xEmit[`i2f;`f32;,rp 0;0n]; `f32)}
+xCast:  {[i;env] ty: kVal kF1[i;`a]; $[ty~`f; xCastF[i;env]; xCastI[i;env]]}
 xTransOp: {[i;env;oty]
   op: kVal kF1[i;`v]; b: kF1[i;`b]
   isEq: ((kKind b)~`apposit) & ((kVal kF1[b;`f])~`"=")
   $[op~`"@";       xGather[i;env]
+    op~`"$";       xCast[i;env]
     (op~`"<")&isEq; xLeGe[i;env;`">"]
     (op~`">")&isEq; xLeGe[i;env;`"<"]
     xTransNorm[i;env;oty]]}
@@ -1381,9 +1399,15 @@ xApply: {[i;env;oty]
 / Every f32→i32 index truncation is its OWN `f2s node, emitted at the same
 / position the direct path allocates its OpConvertFToS id — that 1:1 id-order
 / correspondence is what keeps the IR path byte-identical (record-then-replay).
+/ Evaluate an index expression → an i32 node. In the default f32 dialect the index
+/ is computed in f32 then truncated (f2s) — byte-identical to the old inline pattern.
+/ In integer-index mode (Xidx) it is computed in i32 and used directly (no f2s): the
+/ kernel must have cast any f32 bound with `i$ (explicit, no auto-coercion).
+xIdx: {[iN; env]
+  ip: xNode[iN; env; $[Xidx; `i32; `f32]]
+  $[(ip 1)~`i32; ip 0; xEmit[`f2s; `i32; ,ip 0; 0n]]}
 xBufIdx: {[bufN; i; env]
-  ip: xNode[kF1[i;`arg]; env; `f32]
-  si: xEmit[`f2s; `i32; ,ip 0; 0n]
+  si: xIdx[kF1[i;`arg]; env]
   (xEmit[`bufidx; `f32; (bufN; si); 0n]; `f32)}
 / scatterAdd[acc;idx;val]. A `scatf accumulator (gpu.kernelF, native f32 atomics)
 / emits a saddf node adding the f32 value directly; a `scat one keeps the i32
@@ -1393,13 +1417,13 @@ xSaddI: {[accN;si;vpid] vi: xEmit[`f2s;`i32;,vpid;0n]; (xEmit[`sadd; `i32; (accN
 xSadd: {[i; env]
   args: kF[i;`arg]
   ev: env kVal args 0; accN: ev 0
-  ip: xNode[args 1; env; `f32]; si: xEmit[`f2s;`i32;,ip 0;0n]
+  si: xIdx[args 1; env]
   vp: xNode[args 2; env; `f32]
   $[(ev 1)~`scatf; xSaddF[accN;si;vp 0]; xSaddI[accN;si;vp 0]]}
 xSet: {[i; env]
   args: kF[i;`arg]
   bufN: (env kVal args 0) 0
-  ip: xNode[args 1; env; `f32]; si: xEmit[`f2s;`i32;,ip 0;0n]
+  si: xIdx[args 1; env]
   vp: xNode[args 2; env; `f32]
   z: xEmit[`setb; `f32; (bufN; si; vp 0); 0n]
   vp}
@@ -1408,12 +1432,12 @@ xSet: {[i; env]
 xIget: {[i; env]
   args: kF[i;`arg]
   ev: env kVal args 0; accN: ev 0
-  ip: xNode[args 1; env; `f32]; si: xEmit[`f2s;`i32;,ip 0;0n]
+  si: xIdx[args 1; env]
   $[(ev 1)~`scatf; (xEmit[`bufidx; `f32; (accN; si); 0n]; `f32); (xEmit[`igetb; `f32; (accN; si); 0n]; `f32)]}
 xIset: {[i; env]
   args: kF[i;`arg]
   ev: env kVal args 0; accN: ev 0
-  ip: xNode[args 1; env; `f32]; si: xEmit[`f2s;`i32;,ip 0;0n]
+  si: xIdx[args 1; env]
   vp: xNode[args 2; env; `f32]
   $[(ev 1)~`scatf; xIsetF[accN;si;vp 0]; xIsetI[accN;si;vp 0]]}
 xIsetF: {[accN;si;vpid] z: xEmit[`setb; `f32; (accN; si; vpid); 0n]; (vpid; `f32)}
@@ -1438,15 +1462,16 @@ xSample: {[i; env]
 / xFoldEach) land here, so the two are byte-identical by construction.
 xRed: {[kN; lamN; env; op]
   pn: *(Cst`value)@kF[lamN;`param]
-  kp: xNode[kN; env; `f32]
-  kx: xEmit[`f2s; `i32; ,kp 0; 0n]
+  kx: xIdx[kN; env]                              / loop bound K → i32
   L: xEmit[op; `f32; ,kx; 0n]
   sav: XOwn; XOwn:: L
-  kpar: xEmit[`kparam; `f32; (); 0n]
-  benv: ((!env),pn)!(env[!env],(,(kpar;`f32)))
+  / integer-index mode carries the counter as a raw i32 phi (kparami) so index math
+  / in the body stays integer; the default dialect keeps the f32 counter (kparam).
+  cpar: $[Xidx; xEmit[`kparami; `i32; (); 0n]; xEmit[`kparam; `f32; (); 0n]]
+  benv: ((!env),pn)!(env[!env],(,(cpar; $[Xidx;`i32;`f32])))
   bp: xSeq[kF[lamN;`stmt]; benv; `f32]
   XOwn:: sav
-  xVal[L]:: (kpar; bp 0; #xOp)
+  xVal[L]:: (cpar; bp 0; #xOp)
   (L; `f32)}
 xRsum: {[i; env] args: kF[i;`arg]; xRed[args 0; args 1; env; `rsum]}
 xRmax: {[i; env] args: kF[i;`arg]; xRed[args 0; args 1; env; `rmax]}
@@ -1517,8 +1542,7 @@ xVar:  {[i;env] nm: kVal i; $[nm in !env; xVarE[env nm]; xBake nm]}
 / (an `elem name loads w[d]); result = src[f2s(index)].
 xGather: {[i;env]
   srcp: xNode[kF1[i;`a]; env; `f32]
-  ip:   xNode[kF1[i;`b]; env; `f32]
-  si:   xEmit[`f2s; `i32; ,ip 0; 0n]
+  si:   xIdx[kF1[i;`b]; env]
   (xEmit[`bufidx; `f32; (srcp 0; si); 0n]; `f32)}
 xNode: {[i;env;oty]
   tag: kKind i
@@ -1613,7 +1637,8 @@ xMathW: {[name;ty;r;ids;at]
     name~`acos;opAcos[at;r;ids 0]; name~`atan;opAtan[at;r;ids 0]; name~`atan2;opAtan2[at;r;ids 0;ids 1]
     name~`length;opLen[Tf32;r;ids 0]; name~`normalize;opNrm[at;r;ids 0]; name~`pow;opPow[at;r;ids 0;ids 1]
     name~`min;opFmin[at;r;ids 0;ids 1]; name~`max;opFmax[at;r;ids 0;ids 1]; name~`dot;opDot[Tf32;r;ids 0;ids 1]
-    name~`cross;opCrs[Tv3;r;ids 0;ids 1]; name~`step;opStep[at;r;ids 0;ids 1]; name~`mod;opFmod[at;r;ids 0;ids 1]
+    name~`cross;opCrs[Tv3;r;ids 0;ids 1]; name~`step;opStep[at;r;ids 0;ids 1]
+    name~`mod; $[ty~`i32; opSrem[Ti32;r;ids 0;ids 1]; opFmod[at;r;ids 0;ids 1]]
     name~`clamp;opClamp[at;r;ids 0;ids 1;ids 2]; name~`mix;opMix[at;r;ids 0;ids 1;ids 2]
     name~`smoothstep;opSS[at;r;ids 0;ids 1;ids 2]; opFneg[at;r;ids 0]]}
 / One helper per op (each $[] branch must be a single expression). Each allocates
@@ -1638,6 +1663,7 @@ xLoArith:   {[k] a:xArg k; ids:xId@a; r:newId[]; emitBuf dispBin[xVal k; xTy k; 
 xLoMath:    {[k] a:xArg k; ids:xId@a; r:newId[]; emitBuf xMathW[xVal k; xTy k; r; ids; Tid[xTy a 0]]; xId[k]::r}
 / ── Compute-dialect lowerers (1:1 id-order with the direct comp* emitters) ───
 xLoF2s:    {[k] r:newId[]; emitBuf opF2s[Ti32; r; (xId@xArg k)0]; xId[k]::r}
+xLoI2f:    {[k] r:newId[]; emitBuf opI2f[Tf32; r; (xId@xArg k)0]; xId[k]::r}
 xLoBufIdx: {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPf32; p; xId a 0; CKz; xId a 1]; r:newId[]; emitBuf opLoad[Tf32; r; p]; xId[k]::r}
 xLoSadd:   {[k] a:xArg k; ptr:newId[]; emitBuf opAccChain[CPi32; ptr; xId a 0; CKz; xId a 1]; old:newId[]; emitBuf opAtomicIAdd[Ti32; old; ptr; CScope; CKz; xId a 2]; xId[k]::old}
 xLoSaddf:  {[k] a:xArg k; ptr:newId[]; emitBuf opAccChain[CPf32; ptr; xId a 0; CKz; xId a 1]; old:newId[]; emitBuf opAtomicFAdd[Tf32; old; ptr; CScope; CKz; xId a 2]; xId[k]::old}
@@ -1720,6 +1746,7 @@ xLowerOne: {[k]
     op~`arith;   xLoArith[k]
     op~`math;    xLoMath[k]
     op~`f2s;     xLoF2s[k]
+    op~`i2f;     xLoI2f[k]
     op~`bufidx;  xLoBufIdx[k]
     op~`sadd;    xLoSadd[k]
     op~`saddf;   xLoSaddf[k]

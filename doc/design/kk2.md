@@ -319,8 +319,27 @@ E: 9: [[]i:ei; j:ej; l0:l0; al:al; w0:w0; w1:w1; wt:w0+w1]
   kills the 2^24 exactness cliff on address math. spirv.k added opSdiv/opSrem/
   opBitcast. User-visible kernels (gpu.kernel/shader.*) keep the f32 thread
   index for compatibility — verified via kkgold byte-identity + nn bit-identity;
-  kkc 22/22, walkgpu PASS. (The `floor[d%3.]`→`d div 3` idiom rewrite for 2-D
-  thread-index decomposition is future work — no generated kernel emits it yet.)
+  kkc 22/22, walkgpu PASS.
+
+- **Integer-index dialect (explicit) — DONE (2026-07-17).** `gpu.kernelI` /
+  `shader.kernelI` (an `iidx` flag on `compGpN`/`kernelInfer`) give the user-facing
+  kernel an **i32 thread index**; index arithmetic then stays integer end-to-end.
+  The dialect gained: explicit casts `` `i$x `` (f32→i32, OpConvertFToS) / `` `f$x ``
+  (i32→f32, OpConvertSToF) — the ONLY conversion, no auto-coercion (Werner's call:
+  simplest, honest about truncation); the integer verbs `d div n` / `d mod n`
+  (OpSDiv/OpSRem, added to `binRty`+`dispBin`) alongside the existing `d%n` (SDiv on
+  i32) and `mod[d;n]`; an i32 fold counter (`+/{[k] e}'!K` binds `k` via `kparami`
+  when in i-mode); and a centralized `xIdx` helper so EVERY index consumer (bufidx,
+  set, iget, iset, scatterAdd, gather) takes an i32 index directly (no f2s) when the
+  operand is already i32. So `{[c;a;b;g;d] n:`i$g[1]; kk:`i$g[2]; i:d div n; j:d mod
+  n; set[c;d; +/{[k] a[(i*kk)+k]*b[(k*n)+j]}'!kk]}` compiles clean and matches the
+  f32-index GEMM and the CPU bit-for-bit. All of this is gated on the `Xidx` flag
+  (default 0), so the f32 dialect is **byte-identical** (kkgold) and all existing
+  demos are untouched. Oracle: `test/kkint.k` (4/4: f32==CPU, i32==CPU, i32==f32,
+  i32 transpose-scatter to a computed index). REMAINING: migrate the demos
+  (nn.k/clothgpu `floor[d%n]`→`d div n`) and flip the default (re-baselines kkgold),
+  once the dialect has soaked. Also unblocks §4 CPU-runnability (integer indices run
+  on the CPU interpreter; f32 indices don't).
 
 ## 4. `bits` v1: the CPU backend (increment 6)
 
