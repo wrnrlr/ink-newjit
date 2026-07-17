@@ -33,6 +33,8 @@ check kkint   test/kkint.k   'FAIL '     'kkint: [0-9]+ ok, 0 fail'
 # kkbits: the bits CPU backend (lib/bits.k) interprets each nn kernel's neutral IR
 # and must match the GPU-lowered SPIR-V from the SAME lambda (cross-backend oracle).
 check kkbits  test/kkbits.k  'FAIL '     'kkbits: [0-9]+ ok, 0 fail'
+# kkgrp: tier-2 histogram kk.freq (scatter-add) vs the CPU freq peephole.
+check kkgrp   test/kkgrp.k   'FAIL '     'kkgrp: [0-9]+ ok, 0 fail'
 check walkgpu test/walkgpu.k 'walkgpu: FAIL'  'walkgpu: PASS'
 # clothgpu: native f32-atomic XPBD (kk2 §7). INK_CLOTH_CHECK runs the headless
 # drape invariant instead of opening a window; asserts no NaN + physical drape.

@@ -361,3 +361,20 @@ kk.where: {[d]
   u:  gpu.uniform[(`f$n; `f$total; 0.; 0.)]
   gpu.dispatch[pipe; (d`gpu; incl`gpu; ob; u); n]
   [gpu: ob; t: `f; n: total; s: ,total]}
+
+/ ── Histogram #'=d (kk2 tier-2): bucket counts via one scatter-add dispatch ─────
+/ kk.freq[d; nb] counts how many of the integer indices in d fall in each of nb
+/ buckets — the device form of the CPU freq peephole `@[nb#0; d; +; 1]`. d is a
+/ placement (from a prior kk stage) or a plain host vector; the count kernel is the
+/ existing scatter-add path (kkScatAdd) with a constant +1 per index, so this is a
+/ thin wrapper. Returns a placement of counts (length nb); 8: it to read back.
+/ Native f32 atomics accumulate 1.0 exactly (< 2^24 counts); the i32 fallback is
+/ exact by construction. The index rides a module global (baked/uploaded as the
+/ scatter index) — the kernel LAMBDA must be a named global so its source keys the
+/ pipeline cache, and gpu.read[d`gpu] must bracket-apply (a bare `gpu.read d`gpu`
+/ misparses as `(gpu.read d)`gpu`).
+kkFreqI:: !0
+kkFreqK:  {@[x; kkFreqI; +; 1.]}
+kk.freq: {[d; nb]
+  kkFreqI:: $[`m ~ @d; gpu.read[d`gpu]; `f$ d]
+  kk.compile[kkFreqK; ,gpu.hold[nb#0.]]}

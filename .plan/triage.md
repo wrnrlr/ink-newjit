@@ -622,3 +622,14 @@ mutates a global value array while reading it):
    by using an F-vector value array, coercing every store to float, and sweeping via
    recursion (bSweep) rather than an each. These are almost certainly one underlying
    amend/refcount defect in src/primitive/amend.zig worth a proper fix.
+
+## vector literal: a decimal element after a bare int errors (found 2026-07-17)
+A numeric vector literal that starts with bare integers and then has an element with a
+decimal point signals `` `! `` instead of promoting to a float vector:
+- `1 2 3.` → `` `! ``  (also `1 2. 3`, `1 2 3.5`)
+- `1. 2 3` → `` `F `` (float FIRST is fine — the whole vector promotes)
+So the lexer, once it has committed to an int vector, chokes on a later `.`-bearing
+element rather than re-promoting the accumulated ints to floats. Workaround: put the
+float first, or write `` `f$1 2 3 `` / all-explicit floats `1. 2. 3.`. Cost a while
+debugging kk.freq (the test data `0 1 1 … 2.` was silently an error value). Lexer in
+src/parser/lexer.zig.
