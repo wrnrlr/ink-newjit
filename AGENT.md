@@ -150,7 +150,7 @@ Available auto-loaded libraries:
   `texture.upload`
 - `lib/dye.k` — shader compiler (loads `lib/spirv.k` encoder): `shader.fragment`/`Tex`/
   `TexN`, `shader.vertex`/`vertexU`, `shader.compute`/`compute2`, `shader.stencil`/`U`/`IP`,
-  `shader.scatter`, `shader.fragmentIr` (neutral-IR path). See `doc/design/dye.md`.
+  `shader.scatter`. Every path compiles through the neutral IR. See `doc/design/dye.md`.
 - `lib/font.k` — font functions
 - `lib/json.k` — JSON functions
 - `lib/audio.k` — audio (native miniaudio ext, `zig build audio`). Playback is fire-and-forget on miniaudio's own thread; recording is polled. `audio.play`/`load`/`stream`/`music`, `start`/`stop`/`volume`/`pitch`/`loop`/`seek`, 3D `pos`/`vel`/`dir`/`spatial`/`range`/`listener`, `decode`/`save`; `audio.rec.start`/`read`/`stop` (drain the mic ring buffer from your loop).

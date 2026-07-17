@@ -1240,10 +1240,10 @@ varOutOne:   {[ptr;vid]    (0x0004003B;ptr;vid;3)}    / OpVariable Output storag
 / per-output `vstore nodes. The direct comp* walker is retired (deleted); build
 / → lower-all in build order, loops are opaque region nodes replayed by their
 / lowerer — byte-identical to the old direct path by 1:1 id-order construction.
-/ shader.fragmentIr additionally drives the fragment subset with xFold const-
-/ folding + xReach DCE; every other path keeps those OFF until its oracle moves
-/ from byte-identity to numeric parity (see §3 multi-root fold/DCE, still TODO).
-/ See doc/design/dye.md + doc/design/kk.md.  IR node = an index into these lists:
+/ Every path (compute/fragment/vertex) now runs xFold const-folding + multi-root
+/ DCE when xOpt=1 (the default) via xLowerC; xOpt=0 lowers every node for the
+/ byte-identity oracle (test/kkgold.k pins it 0). See doc/design/dye.md +
+/ doc/design/kk.md.  IR node = an index into these lists:
 xOp::  ()   / op sym: param const cons extract select arith math neg lnot, plus
             / bufp f2s bufidx sadd setb igetb isetb (loads/effects) and the
             / opaque loop region ops rsum rmax ndo whileL kparam kparami lparam
@@ -1774,7 +1774,6 @@ xLowerOne: {[k]
     op~`whileL;  xLoWhile[k]
     0]}
 / xRe is a GLOBAL so the each's lambda can read it (no closure over the local mask).
-xLowerSpirv: {[root] xId::(#xOp)#-1; xRe:: xReach[root]; {[k] $[xRe k; xLowerOne k; 0]}' !#xOp; 0}
 
 / ── Compute bodies through the IR (kk.md incr 3: the seam migration) ─────────
 / Build the whole body as IR, then lower via xLowerC (the value result is the DCE
@@ -1795,21 +1794,7 @@ kSeqIr: {[stmts; env; oty]
 xArgStr: {[k] a:xArg k; $[0=#a;"[]"; ","/$'a]}
 xDump: {[] {[k] `0 0: ($k),": ",($xOp k)," :",($xTy k)," (",xArgStr[k],") ",$xVal k}' !#xOp; 0}
 
-/ ── Entry point: fragment shader compiled through the neutral IR ──────────────
-shader.fragmentIr: {[ioTypes; fn]
-  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::(); Xidx::0
-  TexVars:: ()
-  xReset[]
-  lam: lamOf fn; argNames: lamArgs lam
-  outTySym: ioTypes[`out]; outPtr: PtrOut[outTySym]
-  inTySyms: ioTypes' argNames; inTys: Tid' inTySyms; inPtrs: PtrIn' inTySyms
-  inVarIds: {[x] newId[]}' argNames
-  outId: newId[]
-  loadedPairs: inVarIds loadOnePair' inTySyms
-  penv: argNames!{[p] (xEmit[`param; p 1; (); p 0]; p 1)}' loadedPairs
-  rp: xSeq[lamBody lam; penv; outTySym]
-  root: rp 0
-  xFold[]
-  xLowerSpirv[root]
-  emitBuf opStore[outId; xId root]
-  buildMod[outId; inVarIds; inTys; inPtrs; outPtr; !#argNames]}
+/ (shader.fragment is the sole fragment entry point; it drives the same IR via
+/ kSeqIr/xLowerC and respects xOpt — fold + value-root DCE when on. The former
+/ shader.fragmentIr spelling was folded into it. After it returns the neutral IR
+/ still populates xOp/xTy/… so xDump can print it — see test/ir.k.)

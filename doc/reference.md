@@ -566,8 +566,8 @@ pure instruction stencils in `lib/spirv.k`), and a set of higher-level helpers
 `dye` compiles ink lambdas to SPIR-V word lists (int lists) you feed to the
 pipeline builders above. Types are symbols like `` `f32`v3`v4 ``.
 - **Fragment:** `shader.fragment[ioTypes; fn]`, `shader.fragmentTex[ioTypes; fn]`
-  / `shader.fragmentTexN[ioTypes; nTex; fn]` (sampled textures),
-  `shader.fragmentIr` (neutral-IR path).
+  / `shader.fragmentTexN[ioTypes; nTex; fn]` (sampled textures). All paths compile
+  through the neutral IR and const-fold + DCE when `xOpt=1` (the default).
 - **Vertex:** `shader.vertex[inTypes; varyTypes; fn]`,
   `shader.vertexU[…; uniNames; fn]` (with a uniform block),
   `shader.vertexPull[varyTypes; fn]` (pulled: buffers + `gl_VertexIndex`).
