@@ -56,6 +56,10 @@ ck["kernelRmax"; gpu.kernel[{[mb;sb;x;g;i]
   m: rmax[n; {[k] x[(i*n)+k]}]
   s: rsum[n; {[k] exp[(x[(i*n)+k]) - m]}]
   set[mb; i; m]; set[sb; i; s]}; 0; 4]]
+/ shader.kernelI: the inferred-binding-table entry in the integer-index dialect
+/ (Xidx=1). Pins int literals=i32, `div`/`mod` = integer ops, a gather, and a
+/ store — so the integer dialect's kernelInfer path is byte-stable too.
+ck["kernelInfer"; shader.kernelI[{[o;x;g;d] n:`i$g[0]; i:d div n; j:d mod n; set[o; d; (x[i])+x[j]]}]]
 
 / kk2 §2.4-1: the canonical full syntax  +/{[k] e}'!K  (and |/… → rmax) must
 / lower to the SAME words as the intrinsic rsum/rmax spelling above — assert

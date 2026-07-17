@@ -37,14 +37,14 @@ for spec in $DEMOS; do
   [ -f "$src" ] || { echo "snap: skip $name (no $src)"; continue; }
 
   echo "snap: $name (t=$t)"
-  rm -f "$name"-snap-*.png
+  rm -f "$name"-snap*.png
   # Hidden offscreen render; kill if it overruns.
   timeout 40 "$INK" -snap "$t" "$src" >/dev/null 2>&1
 
-  shot=$(ls -t "$name"-snap-*.png 2>/dev/null | head -1)
+  shot=$(ls -t "$name"-snap*.png 2>/dev/null | head -1)
   if [ -n "$shot" ] && [ -f "$shot" ]; then
     mv -f "$shot" "$OUT/$name.png"
-    rm -f "$name"-snap-*.png
+    rm -f "$name"-snap*.png
     cp -f "$src" "$OUT/$name.k"
     captured=$((captured + 1))
     echo "  -> $OUT/$name.png"

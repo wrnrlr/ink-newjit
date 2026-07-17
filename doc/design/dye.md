@@ -253,8 +253,8 @@ Rename the capital-letter globals into namespaces (blast radius: 3 defining libs
 window.run                                   (already namespaced)
 gpu.fill gpu.tessellate gpu.drawShader gpu.solid gpu.runShader
 gpu.buffer gpu.read gpu.write gpu.dispatch gpu.compileCompute gpu.compileSpirV
-mesh.compile mesh.draw{,U,T} mesh.upload mesh.drawGeomT mesh.drawInstanced{,T}
-shader.fragment{,Tex,TexN} shader.vertex{,U} shader.instancedVertex
+mesh.compile mesh.draw{,U,T} mesh.upload mesh.drawGeomT
+shader.fragment{,Tex,TexN} shader.vertex{,U,Pull}
 shader.compute{,2} shader.stencil{,U,IP} shader.scatter shader.kernel
 texture.upload
 spirv.*    (the op* stencils + ids; already private, zero external callers)
