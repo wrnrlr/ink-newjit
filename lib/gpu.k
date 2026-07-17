@@ -389,6 +389,55 @@ kk.max:  {[d] kk.reduce[`max;  d]}
 kk.min:  {[d] kk.reduce[`min;  d]}
 kk.prod: {[d] kk.reduce[`prod; d]}
 
+/ ── Prefix scan +\d (kk2 tier-2): inclusive running combine over a placement ────
+/ Three dispatches over P=256 contiguous chunks (chunk = ceil(n/P)): scanBlock does
+/ each chunk's local scan + total, scanPartials exclusive-scans the P totals, and
+/ addOffset folds each chunk's offset back in. out is padded to P*chunk (stores stay
+/ in-bounds, chunks disjoint). Returns a placement (like the input); op selects the
+/ running combine. As with kk.reduce, n rides an f32 uniform (exact to 2^24); float
+/ scans reorder within a chunk so results match CPU +\ to a relative tolerance.
+kkScanBMiss: {[op;key] p: gpu.compileComputeU[shader.scanBlock[op]; 3]; kkCache[key]:: p; p}
+kkScanPMiss: {[op;key] p: gpu.compileCompute[shader.scanPartials[op]; 2]; kkCache[key]:: p; p}
+kkScanAMiss: {[op;key] p: gpu.compileComputeU[shader.addOffset[op]; 2]; kkCache[key]:: p; p}
+kkScanPipe: {[which;op;miss] key: `$ which,"|",$op; $[key in !kkCache; kkCache key; miss[op;key]]}
+kk.scan: {[op; d]
+  n: d`n
+  P: kkRedP
+  ck: 1 | `i$ (n + P - 1) div P
+  m: P*ck
+  pB: kkScanPipe["scanB";op;kkScanBMiss]
+  pP: kkScanPipe["scanP";op;kkScanPMiss]
+  pA: kkScanPipe["scanA";op;kkScanAMiss]
+  ob: gpu.buffer[m # 0.]
+  bt: gpu.buffer[P # 0.]
+  bo: gpu.buffer[P # 0.]
+  u1: gpu.uniform[(`f$n; `f$ck; 0.; 0.)]
+  gpu.dispatch[pB; (d`gpu; ob; bt; u1); P]
+  gpu.dispatch[pP; (bt; bo); P]
+  u2: gpu.uniform[(`f$ck; 0.; 0.; 0.)]
+  gpu.dispatch[pA; (ob; bo; u2); P]
+  [gpu: ob; t: `f; n: n; s: d`s]}
+kk.sums:  {[d] kk.scan[`sum; d]}
+kk.maxs:  {[d] kk.scan[`max; d]}
+kk.mins:  {[d] kk.scan[`min; d]}
+
+/ ── Compaction &mask (kk2 tier-2): indices where the mask is true ─────────────
+/ The monadic `&` (Where) on a placed 0/1 mask: inclusive-scan the mask for output
+/ positions, reduce it for the true count, then one scatter dispatch writes each true
+/ index into its slot (shader.compact). Returns a placement of the (float) indices,
+/ length = true count — so `kk.where mask` mirrors `&mask` on the CPU. Value
+/ compaction `x@&mask` composes for free: kk.compile[{x@y}; (x; kk.where mask)].
+kkWhereMiss: {[key] p: gpu.compileComputeU[shader.compact[]; 3]; kkCache[key]:: p; p}
+kk.where: {[d]
+  n: d`n
+  incl: kk.sums d                                / inclusive prefix scan of the mask
+  total: `i$ kk.sum d                            / count of trues (syncs → incl is final)
+  pipe: $[`compact in !kkCache; kkCache `compact; kkWhereMiss[`compact]]
+  ob: gpu.buffer[(total + 64) # 0.]              / true-count elements + sentinel slack
+  u:  gpu.uniform[(`f$n; `f$total; 0.; 0.)]
+  gpu.dispatch[pipe; (d`gpu; incl`gpu; ob; u); n]
+  [gpu: ob; t: `f; n: total; s: ,total]}
+
 / Solid-color fragment uniforms (44 floats matching fill.wgsl FragUniforms).
 / r,g,b,a in [0,1].  Returns a flat F vector.
 gpu.solid: {[r;g;b;a] ,/(1. 0. 0. 0.;0. 1. 0. 0.;0. 0. 1. 0.;1. 0. 0. 0.;0. 1. 0. 0.;0. 0. 1. 0.;r,g,b,a;r,g,b,a;1e10 1e10 1. 1.;0. 0. 0. 0.;0. 0. 0. 0.)}

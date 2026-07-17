@@ -54,6 +54,27 @@ demo: {[]
   junk: kk.sum dA
   chkb["reduce pipeline cached"; nkeys = # !kkCache]
 
+  / prefix scan +\d (kk2 tier-2): inclusive running combine, chunked across P=256.
+  chke["sum-scan 1..10 exact";   gpu.fetch kk.sums gpu.hold `f$ 1+!10;  +\ `f$ 1+!10]
+  chke["sum-scan n=256";         gpu.fetch kk.sums gpu.hold E;          +\E]
+  chke["sum-scan n=257 (2 blk)"; gpu.fetch kk.sums gpu.hold F;          +\F]
+  chke["sum-scan n=1000 exact";  gpu.fetch kk.sums dA;                  +\A]
+  chke["max-scan signed";        gpu.fetch kk.maxs dC;                  |\C]
+  chke["min-scan signed";        gpu.fetch kk.mins dC;                  &\C]
+  chke["sum-scan n=1";           gpu.fetch kk.sums gpu.hold[,7.];       ,7.]
+  chkr["sum-scan n=1e5 float";   *| gpu.fetch kk.sums gpu.hold B;       *| +\B]
+
+  / compaction &mask (kk2 tier-2): indices where a 0/1 mask is true.
+  MK: `f$ 1 0 1 1 0 0 1 0 1
+  chke["where small";        gpu.fetch kk.where gpu.hold MK;   `f$ & `i$ MK]
+  M300: `f$ (!300) mod 2
+  chke["where n=300 (2 blk)"; gpu.fetch kk.where gpu.hold M300; `f$ & `i$ M300]
+  chke["where all-true";      gpu.fetch kk.where gpu.hold 40#1.; `f$ !40]
+  chkb["where all-false → 0"; 0 = # gpu.fetch kk.where gpu.hold 40#0.]
+  / value compaction x@&mask composes via the gather path
+  VX: `f$ 10 20 30 40 50 60 70 80 90
+  chke["x@&mask (gather∘where)"; gpu.fetch kk.compile[{x@y}; (gpu.hold VX; kk.where gpu.hold MK)]; VX @ & `i$ MK]
+
   / device-side converge (kk2 §6): the max-abs-diff reduce drives termination.
   / walk.k Jacobi on a 20×20 grid — kk.converge (tolerance) must reach the SAME
   / fixpoint as kk.loop (fixed count), and stop early (well under maxIter).

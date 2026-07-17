@@ -451,6 +451,28 @@ same caps struct. This unlocks tolerance-based `g f/ d` (device-side `|/abs
   its own stopping point instead of a hard-coded sweep count. `test/kkred.k` adds
   a 20×20 converge==fixpoint + stopped-early check (14/14 total).
 
+**DONE (2026-07-17) — first tier-2 primitives: prefix scan + compaction.**
+- **`kk.scan[op; d]` / `kk.sums`/`maxs`/`mins` — inclusive `+\d`.** Three fixed
+  kernels over P=256 CONTIGUOUS chunks (chunk = ceil(n/P)): `shader.scanBlock`
+  (each thread scans its chunk locally into out + writes the chunk total),
+  `shader.scanPartials` (thread d exclusive-scans the P totals by summing
+  totals[0..d-1] — dispatch P, a multiple of wg, so d∈[0,P) with no overflow
+  threads and no race), `shader.addOffset` (fold each chunk's offset back in). out
+  is padded to P·chunk so the in-loop stores stay in-bounds and never race (chunks
+  disjoint). op reuses `shader.reduce`'s identity+combine. Oracle `test/kkred.k`:
+  exact vs CPU `+\`/`|\`/`&\` for int/max/min across chunk boundaries (n=1/256/257/
+  1000), float total to rel-tol. All three spirv-val-clean.
+- **`kk.where[mask]` — compaction (`&mask`).** Scan-then-scatter: inclusive-scan
+  the 0/1 mask (kk.sums) for output positions + reduce it (kk.sum) for the true
+  count (one-float readback), then `shader.compact` scatters each true index i into
+  `out[incl[i]-1]`; false / over-dispatched threads scatter to a sentinel slot in
+  out's padding (same trick as the atomic-scatter kernels). Returns a placement of
+  the float indices, length = true count — mirrors CPU `&mask`. Value compaction
+  `x@&mask` composes for FREE: `kk.compile[{x@y}; (x; kk.where mask)]` (the gather
+  path). Oracle: where + value-compaction vs CPU, n>P, all-true/all-false edges.
+  DEFERRED: `=` group (compaction-per-key) and sort (a full GPU radix/merge sort —
+  its own increment); the subgroup fast paths for scan/reduce (perf only).
+
 ## 7. Float atomics
 
 caps report `atomicFadd=1` on the M1 Pro: `@[x;I;+;v]` can lower to native

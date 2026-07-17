@@ -777,6 +777,108 @@ compReduce: {[op]
   kAsm[]}
 shader.reduce: compReduce
 
+/ ── Prefix scan +\d (kk2 tier-2) — three fixed kernels, chunked ───────────────
+/ A work-partitioned inclusive scan over CONTIGUOUS chunks (P threads, chunk =
+/ ceil(n/P)): (1) scanBlock scans each thread's chunk locally into out and writes
+/ the chunk total; (2) scanPartials exclusive-scans the P chunk totals into per-
+/ chunk offsets (thread d sums totals[0..d-1]); (3) addOffset combines each chunk's
+/ offset back into its elements. out is padded to P*chunk so the in-loop stores
+/ never go OOB and never race (chunks are disjoint). op ∈ sum`max`min`prod picks the
+/ identity+combine (shared with shader.reduce). Verified vs CPU +\ / |\ (test/kkred).
+compScanBlock: {[op]
+  ids: kAlloc[0; 3; 1; 1]                        / in@0, out@1, blockTotal@2, uniform@3
+  uv: (loadUniMember AKuniKi) 0
+  nF:  newId[]; emitBuf opXtract[Tf32; nF;  uv; 0]
+  ckF: newId[]; emitBuf opXtract[Tf32; ckF; uv; 1]
+  nI:  newId[]; emitBuf opF2s[Ti32; nI;  nF]
+  ckI: newId[]; emitBuf opF2s[Ti32; ckI; ckF]
+  gx:  kGidX[]; d: kGidI[gx]
+  base: newId[]; emitBuf opImul[Ti32; base; d; ckI]
+  seed: redSeed op
+  L: loopOpen[ckI; seed; `f32]
+  iPhi:L 0; sPhi:L 1; iNext:L 2; sNext:L 3; conL:L 4; hdrL:L 5; mrgL:L 6
+  idx: newId[]; emitBuf opIadd[Ti32; idx; base; iPhi]
+  g:   newId[]; emitBuf opSLT[Tbool; g; idx; nI]
+  si:  newId[]; emitBuf opSel[Ti32; si; g; idx; RCi0]
+  p1:  newId[]; emitBuf opAccChain[AKpf32; p1; ids 0; AKz; si]
+  vl:  newId[]; emitBuf opLoad[Tf32; vl; p1]
+  v:   newId[]; emitBuf opSel[Tf32; v; g; vl; seed]
+  nv:  newId[]; emitBuf redCombW[op; Tf32; nv; sPhi; v]
+  p2:  newId[]; emitBuf opAccChain[AKpf32; p2; ids 1; AKz; idx]
+  emitBuf opStore[p2; nv]                         / out[idx] = inclusive-so-far
+  loopClose[nv; `f32; sNext; iNext; iPhi; conL; hdrL; mrgL]
+  p3:  newId[]; emitBuf opAccChain[AKpf32; p3; ids 2; AKz; d]
+  emitBuf opStore[p3; sPhi]                        / blockTotal[d] = chunk total
+  kAsm[]}
+shader.scanBlock: compScanBlock
+/ Per-thread exclusive scan of the P block totals (dispatch P = a multiple of wg so
+/ d ∈ [0,P), no overflow threads): thread d loops d times summing totals[0..d-1].
+compScanPartials: {[op]
+  ids: kAlloc[0; 2; 0; 1]                          / blockTotal@0, blockOffset@1
+  gx:  kGidX[]; d: kGidI[gx]
+  seed: redSeed op
+  L: loopOpen[d; seed; `f32]
+  iPhi:L 0; sPhi:L 1; iNext:L 2; sNext:L 3; conL:L 4; hdrL:L 5; mrgL:L 6
+  p1:  newId[]; emitBuf opAccChain[AKpf32; p1; ids 0; AKz; iPhi]
+  vl:  newId[]; emitBuf opLoad[Tf32; vl; p1]
+  nv:  newId[]; emitBuf redCombW[op; Tf32; nv; sPhi; vl]
+  loopClose[nv; `f32; sNext; iNext; iPhi; conL; hdrL; mrgL]
+  p2:  newId[]; emitBuf opAccChain[AKpf32; p2; ids 1; AKz; d]
+  emitBuf opStore[p2; sPhi]                         / blockOffset[d] = Σ totals[0..d-1]
+  kAsm[]}
+shader.scanPartials: compScanPartials
+/ Combine each chunk's offset back into its elements (in place; disjoint ranges).
+compAddOffset: {[op]
+  ids: kAlloc[0; 2; 1; 1]                           / out@0 (in place), blockOffset@1, uniform@2
+  uv: (loadUniMember AKuniKi) 0
+  ckF: newId[]; emitBuf opXtract[Tf32; ckF; uv; 0]
+  ckI: newId[]; emitBuf opF2s[Ti32; ckI; ckF]
+  gx:  kGidX[]; d: kGidI[gx]
+  base: newId[]; emitBuf opImul[Ti32; base; d; ckI]
+  po:  newId[]; emitBuf opAccChain[AKpf32; po; ids 1; AKz; d]
+  off: newId[]; emitBuf opLoad[Tf32; off; po]
+  L: loopOpen[ckI; RCf0; `f32]
+  iPhi:L 0; sPhi:L 1; iNext:L 2; sNext:L 3; conL:L 4; hdrL:L 5; mrgL:L 6
+  idx: newId[]; emitBuf opIadd[Ti32; idx; base; iPhi]
+  p1:  newId[]; emitBuf opAccChain[AKpf32; p1; ids 0; AKz; idx]
+  ov:  newId[]; emitBuf opLoad[Tf32; ov; p1]
+  nv:  newId[]; emitBuf redCombW[op; Tf32; nv; ov; off]
+  emitBuf opStore[p1; nv]
+  loopClose[RCf0; `f32; sNext; iNext; iPhi; conL; hdrL; mrgL]
+  kAsm[]}
+shader.addOffset: compAddOffset
+
+/ ── Compaction &mask (kk2 tier-2): stream-compact the true positions ──────────
+/ Given a 0/1 mask and its INCLUSIVE prefix scan, one thread per element writes the
+/ element's index i to out[incl[i]-1] when mask[i] is true — the classic scan-then-
+/ scatter compaction. False (or over-dispatched i≥n) threads scatter to a sentinel
+/ slot in out's padding tail, so the live output is never clobbered (same trick as
+/ the atomic-scatter kernels). out is sized to the true count (+slack) by the host.
+compCompact: {[]
+  ids: kAlloc[0; 3; 1; 1]                          / mask@0, incl@1, out@2, uniform@3=(n; total)
+  uv: (loadUniMember AKuniKi) 0
+  nF:  newId[]; emitBuf opXtract[Tf32; nF;  uv; 0]
+  tF:  newId[]; emitBuf opXtract[Tf32; tF;  uv; 1]
+  nI:  newId[]; emitBuf opF2s[Ti32; nI; nF]
+  tI:  newId[]; emitBuf opF2s[Ti32; tI; tF]         / total (= sentinel out index)
+  gx:  kGidX[]; i: kGidI[gx]; iF: kGidF[gx]
+  g:   newId[]; emitBuf opSLT[Tbool; g; i; nI]       / i < n
+  si:  newId[]; emitBuf opSel[Ti32; si; g; i; RCi0]  / clamp OOB load index
+  pm:  newId[]; emitBuf opAccChain[AKpf32; pm; ids 0; AKz; si]
+  mv:  newId[]; emitBuf opLoad[Tf32; mv; pm]
+  pc:  newId[]; emitBuf opAccChain[AKpf32; pc; ids 1; AKz; si]
+  cv:  newId[]; emitBuf opLoad[Tf32; cv; pc]
+  ci:  newId[]; emitBuf opF2s[Ti32; ci; cv]
+  pos: newId[]; emitBuf opIsub[Ti32; pos; ci; RCi1] / exclusive out position = incl[i]-1
+  half: constId[Tf32; 0.5]
+  tru: newId[]; emitBuf opFOgt[Tf32; tru; mv; half]  / mask[i] > 0.5
+  val: newId[]; emitBuf opLAnd[Tbool; val; g; tru]   / in-range AND true
+  sIdx:newId[]; emitBuf opSel[Ti32; sIdx; val; pos; tI]   / else sentinel (padding)
+  po:  newId[]; emitBuf opAccChain[AKpf32; po; ids 2; AKz; sIdx]
+  emitBuf opStore[po; iF]                            / out[pos] = i
+  kAsm[]}
+shader.compact: compCompact
+
 / ── Elementwise subset classifier (kk2 §2.1: "no silent fallback") ────────────
 / Walk the lambda body; return `nil if every node is in the elementwise subset
 / (arith/cmp/join, math builtins, unary -/~, literals, x/y/z, list/cond/group/
