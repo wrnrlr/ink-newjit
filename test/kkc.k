@@ -39,6 +39,12 @@ TW: [[]c0:`f$!32; c1:1.+`f$!32; c2:2.+`f$!32; c3:3.+`f$!32; c4:4.+`f$!32; c5:5.+
 DDdata: `f$ 10 20 30 40 50 60 70 80
 DDoff:  `f$ 0 3 5 7
 DD: [data: DDdata; off: DDoff]
+/ cloth edge table: 7 fields per edge (i,j,l0,al,w0,w1,wt) — clothgpu's kCon reads
+/ these as a stride-7 packed array e[7*ee+k]; interleaving the table builds that.
+ETi: `f$ 0 1 2 3; ETj: `f$ 1 2 3 0; ETl0: `f$ 10 11 12 13
+ETal: `f$ 1 1 1 1; ETw0: `f$ 2 2 2 2; ETw1: `f$ 3 3 3 3; ETwt: `f$ 4 4 4 4
+ET: [[]i:ETi; j:ETj; l0:ETl0; al:ETal; w0:ETw0; w1:ETw1; wt:ETwt]
+ETpacked: 0. + ,/ +(ETi;ETj;ETl0;ETal;ETw0;ETw1;ETwt)
 
 / Helpers are TOP-LEVEL globals: an inner lambda can't see demo's locals (ink
 / lambdas don't close over parent scope), so chk must reach chkb as a global.
@@ -135,6 +141,17 @@ demo: {[]
   chkb["placed dict layout tag";      (`dict)~pd`t]
   chkb["placed dict 8: roundtrips";   (8: pd)~DD]
   chk["dict CSR gather (data@off)";   8: kk.compile[{(x`data)@(x`off)}; ,pd]; DDdata @ `i$ DDoff]
+
+  / cloth EDGE table (kk2 §2.5): the motivating case — a thread reads EVERY field of
+  / one edge, so the interleaved layout's one buffer IS exactly the stride-7 packed
+  / array clothgpu's raw edge kernel already indexes (e[7*ee+k]). Placing the 7-column
+  / edge table interleaved constructs that buffer; the existing kernel consumes it
+  / unchanged. Assert the interleaved buffer == the hand-packed edge array.
+  gpu.tblLay:: `il
+  dE: 9: ET
+  gpu.tblLay:: `auto
+  chkb["edge table interleaves to stride-7"; 7 = dE`nc]
+  chkb["interleaved edge buffer == packed stride-7 array"; (gpu.read[dE`hand]) ~ ETpacked]
 
   / rejection: a whole-buffer reduce is neither elementwise nor a gather → kk.compile
   / SIGNALS an error (`@x ~ `! for an err value). (+/ over the whole placement is a
