@@ -30,6 +30,9 @@ check kkopt   test/kkopt.k   'FAIL '     'kkopt: [0-9]+ ok, 0 fail'
 check kkc     test/kkc.k     'FAIL '     'kkc: [0-9]+ ok, 0 fail'
 check kkred   test/kkred.k   'FAIL '     'kkred: [0-9]+ ok, 0 fail'
 check walkgpu test/walkgpu.k 'walkgpu: FAIL'  'walkgpu: PASS'
+# clothgpu: native f32-atomic XPBD (kk2 §7). INK_CLOTH_CHECK runs the headless
+# drape invariant instead of opening a window; asserts no NaN + physical drape.
+INK_CLOTH_CHECK=1 check clothgpu test/clothgpu.k 'FAIL|lacks atomicFadd' 'clothgpu: .*PASS'
 
 if [ "$fail" -ne 0 ]; then
   echo "oracles: FAILED"

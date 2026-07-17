@@ -445,15 +445,23 @@ i32 path could not do), and a forced-i32 fallback vs the int CPU ref;
 `shader.scataddf` spirv-val-clean (vulkan1.2 + spv1.4). kkgold byte-identical
 (the cap/ext words are gated on `AKfa`, zero-width when off).
 
-REMAINING (the visible clothgpu payoff): clothgpu uses the LOWER-LEVEL
-`scatterAdd` intrinsic in a `gpu.kernel` body (not `@[x;I;+;v]`), whose
-accumulators are i32-hardwired (`sadd`/`igetb`/`isetb` IR nodes → CPi32 +
-`OpAtomicIAdd` + i2f) and whose `iget…%SC`/`iset` semantics are tied to the
-fixed-point `SC` trick. Making clothgpu "lose SC" means a float-accumulator
-kind for the `gpu.kernel` path (new `saddf`/`igetf`/`isetf` lowerings reusing
-`kScatAddF`'s emitter + `AKfa`) AND rewriting/re-validating the cloth demo
-(drop `SC`, `dp`→f32, unscaled `iget`). Scoped as its own step — same
-mechanism, separate demo-migration risk (cf. §5 vertex-pull).
+**DONE (2026-07-17) — the `gpu.kernel` intrinsic surface + clothgpu.** Added a
+float-accumulator kind to the general kernel path: `gpu.kernelF`/`shader.kernelF`
+(`compGpN` gained an `fa` flag) type the `nAcc` accumulators as plain f32 buffers
+(role `scatf`, no i32 machinery), `kAllocScope` supplies the Device scope const,
+`AKfa` emits the cap/ext. `scatterAdd` on a `scatf` acc → a new `saddf` IR node →
+`OpAtomicFAddEXT`; `iget`/`iset` on it are just an f32 `bufidx`/`setb` (no i2f/f2s
+round-trip) — so ONE new node covers it. The i32 path is untouched and kkgold
+byte-identical. `test/clothgpu.k` migrated: `kCon`/`kApp` use `gpu.kernelF`, `SC`
+and the `%SC` rescale are GONE, `DP` is a genuine f32 accumulator. Headless drape
+invariant (`INK_CLOTH_CHECK=1`, wired into `test/oracles.sh`): E@center-equivalent
+`minY=0.0324` / `maxY=1.0` / no-NaN, matching the old i32+SC baseline (`0.0312`) to
+~1e-3 — the fixed-point velocity-jitter floor is gone. SUBTLE BUG this exposed:
+over-dispatched threads read OOB edge data → `ds`/`lam` go `inf`, and the `ok=0`
+guard computed `0*inf = NaN`; the i32 path silently sanitised it (`f2s(NaN)→0`) but
+native f32 propagates it — fixed by clamping OOB threads onto a valid edge so the
+math stays finite before the guard zeroes it (a real correctness lesson for the
+float path, now commented in clothgpu.k).
 
 ## 8. Decisions (reviewed 2026-07-15) + remaining questions
 

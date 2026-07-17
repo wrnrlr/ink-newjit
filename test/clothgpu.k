@@ -1,13 +1,16 @@
 / test/clothgpu.k — XPBD cloth entirely on the GPU, built on the compute stack:
-/ gpu.kernel (general n-buffer kernel), set/iget/iset (buffer stores) and scatterAdd
-/ (atomic scatter). Positions/velocities live in resident buffers across the whole
-/ sim; constraint corrections scatter-add (fixed point) into an i32 accumulator.
-/ Each frame the solver advances 15 substeps on the GPU; positions are read back to
-/ build the render mesh, drawn with lib/pbr.k. Run:  ink test/clothgpu.k
-/ (INK_SNAP=0 ink test/clothgpu.k prints solver invariants headless — see EOF.)
+/ gpu.kernelF (general n-buffer kernel with NATIVE f32-atomic accumulators), set/
+/ iget/iset (buffer stores) and scatterAdd (atomic scatter). Positions/velocities
+/ live in resident buffers across the whole sim; constraint corrections scatter-add
+/ straight into an f32 accumulator via OpAtomicFAddEXT (kk2 §7) — no fixed-point
+/ scaling, no velocity-jitter floor. Each frame the solver advances 15 substeps on
+/ the GPU; positions are read back to build the render mesh, drawn with lib/pbr.k.
+/ Run:  ink test/clothgpu.k  (INK_CLOTH_CHECK=1 … prints solver invariants headless.)
+/ Requires a device with caps.atomicFadd (all Metal/MoltenVK targets have it); the
+/ i32 fixed-point fallback (gpu.kernel + an SC scale) lives in this file's git history.
 /
 / Layout: positions P, velocities V, prev PREV are interleaved 3*nP (P[3*p+axis]).
-/ IM is per-particle inverse mass (0 = pinned). DP is an i32 fixed-point accumulator
+/ IM is per-particle inverse mass (0 = pinned). DP is an f32 correction accumulator
 / (3*nP). Each edge buffer packs 7 floats/edge: i j restlen alpha w0 w1 wt.
 
 2: "lib/dye.k"
@@ -21,13 +24,6 @@ vnorm:{x%vlen3[x@0;x@1;x@2]|0.0001}
 
 W::20; H::20; nP::W*H; nDof::3*nP        / 20x20 grid (matches test/cloth.k resolution)
 SDT::(1.%60.)%15.                        / substep dt (60fps, 15 substeps)
-/ Fixed-point scale for the scatter accumulator. This also sets the velocity jitter
-/ floor: the smallest position correction is 1/SC, so residual |v| ~ (1/SC)/SDT.
-/ 2^16 leaves ~0.013 m/s of permanent jitter (visible "buzzing"); 2^20 drops it ~16x.
-/ Referenced directly by kCon/kApp: dye bakes a host global's CURRENT value into
-/ the kernel as a constant at gpu.kernel-compile time (doc/design/kk.md §2), so
-/ there is exactly one definition — no keep-in-sync literals.
-SC::1048576.                             / 2^20
 / Velocity damping per substep (1 = none). XPBD's v=(x-prev)/dt conserves energy, so
 / without this the cloth swings forever and the fixed-point noise keeps re-exciting it.
 / Lower = settles faster / stiffer; 0.995 settles in ~3s, ~0.999 stays loose longer.
@@ -46,10 +42,15 @@ kInt::gpu.kernel[{[p;v;prev;im;g;d]
 
 / constraint scatter: one thread per edge; XPBD correction scattered (± w0/w1) into
 / DP for both endpoints, all three axes. guard value 0 for over-dispatched threads.
-kCon::gpu.kernel[{[dp;p;e;g;ee]
-  sc:SC                                  / host global, baked at compile time
+/ Native f32 atomics (gpu.kernelF): corrections accumulate directly — no SC scale.
+kCon::gpu.kernelF[{[dp;p;e;g;ee]
   ne:g[0]; sdt:g[1]; ok:$[ee<ne;1.;0.]
-  base:7.*ee
+  / clamp OOB threads onto edge 0 so every read is valid: with native f32 atomics a
+  / garbage edge makes ds/lam inf and the ok=0 guard would form 0*inf = NaN (the i32
+  / path hid this via f2s(NaN)→0). Reading a real edge keeps the math finite; ok=0
+  / then zeroes the correction cleanly.
+  eeC:$[ee<ne;ee;0.]
+  base:7.*eeC
   pi:e[base]; pj:e[base+1.]; l0:e[base+2.]; al:e[base+3.]; w0:e[base+4.]; w1:e[base+5.]; wt:e[base+6.]
   bi:3.*pi; bj:3.*pj
   dx:(p[bj])-p[bi]; dy:(p[bj+1.])-p[bi+1.]; dz:(p[bj+2.])-p[bi+2.]
@@ -57,12 +58,12 @@ kCon::gpu.kernel[{[dp;p;e;g;ee]
   safe:$[ds>0.0001;1.;0.]; dsc:$[ds>0.0001;ds;0.0001]
   cc:ds-l0
   lam:0.5*((cc*safe)%(wt+al%(sdt*sdt)))
-  cx:ok*sc*(dx%dsc)*lam; cy:ok*sc*(dy%dsc)*lam; cz:ok*sc*(dz%dsc)*lam
+  cx:ok*(dx%dsc)*lam; cy:ok*(dy%dsc)*lam; cz:ok*(dz%dsc)*lam
   a0:scatterAdd[dp;bi;cx*w0];      a1:scatterAdd[dp;bi+1.;cy*w0]; a2:scatterAdd[dp;bi+2.;cz*w0]
   b0:scatterAdd[dp;bj;(0.-cx)*w1]; b1:scatterAdd[dp;bj+1.;(0.-cy)*w1]; scatterAdd[dp;bj+2.;(0.-cz)*w1]}; 1; 3]
 
-/ apply: fold the fixed-point accumulator into positions, then clear it.
-kApp::gpu.kernel[{[dp;p;g;d] set[p; d; (p[d])+(iget[dp;d])%SC]; iset[dp;d;0.]}; 1; 2]
+/ apply: fold the f32 accumulator into positions, then clear it (no /SC rescale).
+kApp::gpu.kernelF[{[dp;p;g;d] set[p; d; (p[d])+iget[dp;d]]; iset[dp;d;0.]}; 1; 2]
 
 / velocity recovery with damping: v = damp*free*(p-prev)/dt.  g[1] = damping factor.
 kVel::gpu.kernel[{[v;p;prev;im;g;d]
@@ -126,6 +127,7 @@ P::0; V::0; PREV::0; IM::0; DP::0; G::0
 cons::(); onePass::0; substep::0
 
 initGpu::{[]
+  $[(gpu.caps[0])`atomicFadd; 0; `0 0: "clothgpu: device lacks atomicFadd (need VK_EXT_shader_atomic_float)\n"]
   pInt::gpu.compileCompute[kInt;5]; pCon::gpu.compileCompute[kCon;4]
   pApp::gpu.compileCompute[kApp;3]; pVel::gpu.compileCompute[kVel;5]
   P::gpu.buffer[,/+(px0;py0;pz0)]; V::gpu.buffer[nDof#0.]; PREV::gpu.buffer[nDof#0.]
@@ -150,11 +152,19 @@ loop::{[props]
   $[gMesh=0; gMesh::mesh.compile[clothVtx; PbrFragment]; 0]
   15 substep/0                          / 15 substeps this frame
   mesh.draw[buildMesh[gpu.read[P]]; gMesh]}
-window.run[loop; 0]
 
-/
-Headless invariant check (no window) — run with INK_SNAP=0:
-  initGpu[]; (15*40) substep/0
-  R:gpu.read[P]; yv:R@1+3*ii
-  minY:&/yv                              / drape height (pinned corners stay at 1)
-\
+/ Headless invariant check (no window): drive the solver on a headless device and
+/ assert the drape is physical — pinned corners stay at y=1, the sheet hangs to a
+/ sane height, and (critically for the native-f32-atomic path) NO cell went NaN.
+/ Gated on INK_CLOTH_CHECK (the oracle harness sets it) so INK_SNAP still snapshots.
+clothHeadless::{[]
+  gpu.computeRun[{[x]
+    initGpu[]
+    (15*40) substep/0
+    R:gpu.read[P]; yv:R@1+3*ii
+    minY:&/yv; maxY:|/yv; finite:&/yv=yv     / NaN≠NaN → finite=0 if any NaN
+    ok:finite & (maxY~1.) & (minY>0.02) & minY<0.06
+    `0 0: "clothgpu: minY=",($minY),"  maxY=",($maxY),"  ",$[ok;"PASS";"FAIL"],"\n"}]}
+/ (`env`-key membership: `in` on symbols errors, and a missing key indexes to an
+/ error value, so test presence by counting matches in the key vector.)
+$[0 < +/ (!`env[]) = `s$"INK_CLOTH_CHECK"; clothHeadless[]; window.run[loop; 0]]

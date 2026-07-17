@@ -922,16 +922,25 @@ shader.scatter: compScatter
 / write set[b;j;v]) + i. No automatic output store — one kernel can update
 / several buffers (XPBD integrate writes p, v AND prev). In-kernel loops
 / (rsum/rmax, i f/ x, f g/ x) are available here (kAlloc emits the loop consts).
-compGpN: {[fn; nAcc; nBuf]
-  ids: kAlloc[nAcc;nBuf;0;1]
+/ fa=1 → native f32 atomic accumulators (gpu.kernelF): the nAcc accumulators are
+/ plain f32 buffers (no i32 type machinery), scatterAdd → OpAtomicFAddEXT, and
+/ iget/iset become f32 load/store. kAllocScope adds the Device memory-scope const;
+/ AKfa flags kAsm to emit the capability + extension. fa=0 keeps the i32 fixed-point
+/ path (unchanged, byte-identical). Non-accumulator kernels (nAcc=0) ignore fa.
+compGpN: {[fn; nAcc; nBuf; fa]
+  useF: fa & nAcc>0
+  ids: $[useF; kAlloc[0; nAcc+nBuf; 0; 1]; kAlloc[nAcc;nBuf;0;1]]
+  $[useF; kAllocScope[]; 0]
+  $[useF; AKfa::1; 0]
   lam: lamOf fn; argNames: lamArgs lam
   gx: kGidX[]; gf: kGidF[gx]
-  accPairs: {[id] (id;`scat)}' nAcc#ids
+  accPairs: $[useF; {[id] (id;`scatf)}' nAcc#ids; {[id] (id;`scat)}' nAcc#ids]
   bufPairs: {[id] (id;`buf)}' nAcc _ ids
   env: argNames!(accPairs,bufPairs,(,(gf;`f32)))
   rp: kSeqIr[lamBody lam; env; `f32]
   kAsm[]}
-gpu.kernel: compGpN
+gpu.kernel:  {[fn; nAcc; nBuf] compGpN[fn; nAcc; nBuf; 0]}
+gpu.kernelF: {[fn; nAcc; nBuf] compGpN[fn; nAcc; nBuf; 1]}
 
 / ── shader.kernel[fn] — gpu.kernel with the binding table INFERRED ───────────
 / Roles come from the lambda itself (kk.md incr 3, bindings-from-free-vars):
@@ -947,13 +956,15 @@ kkScats: {[]
   ap: & `apply = Cst`kind
   ss: ap @ & {[i] (kVal kF1[i;`f]) in `scatterAdd`iget`iset}' ap
   ? {[i] kVal kF1[i;`arg]}' ss}    / kF1 not *kF: `kVal *kF[…]` parses as kVal TIMES kF (noun-adjacency)
-shader.kernel: {[fn]
+kernelInfer: {[fn; fa]
   ps: lamArgs lamOf fn                 / lamOf parses fn → Cst for kkScats
   am: ps in kkScats[]                  / per-param accumulator mask
   nAcc: +/ -1 _ am                     / the index param can't be an accumulator
   $[nAcc; $[&/ nAcc # am; 0; `0 0: "dye: accumulator params must come FIRST in a shader.kernel lambda\n"]; 0]
   KKnb:: (#ps)-1
-  compGpN[fn; nAcc; ((#ps)-1)-nAcc]}
+  compGpN[fn; nAcc; ((#ps)-1)-nAcc; fa]}
+shader.kernel:  {[fn] kernelInfer[fn; 0]}
+shader.kernelF: {[fn] kernelInfer[fn; 1]}     / native f32-atomic accumulators (§7)
 
 varOutOne:   {[ptr;vid]    (0x0004003B;ptr;vid;3)}    / OpVariable Output storage class
 
@@ -1129,12 +1140,17 @@ xBufIdx: {[bufN; i; env]
   ip: xNode[kF1[i;`arg]; env; `f32]
   si: xEmit[`f2s; `i32; ,ip 0; 0n]
   (xEmit[`bufidx; `f32; (bufN; si); 0n]; `f32)}
+/ scatterAdd[acc;idx;val]. A `scatf accumulator (gpu.kernelF, native f32 atomics)
+/ emits a saddf node adding the f32 value directly; a `scat one keeps the i32
+/ fixed-point OpAtomicIAdd (val truncated via f2s).
+xSaddF: {[accN;si;vpid] (xEmit[`saddf; `f32; (accN; si; vpid); 0n]; `f32)}
+xSaddI: {[accN;si;vpid] vi: xEmit[`f2s;`i32;,vpid;0n]; (xEmit[`sadd; `i32; (accN; si; vi); 0n]; `i32)}
 xSadd: {[i; env]
   args: kF[i;`arg]
-  accN: (env kVal args 0) 0
+  ev: env kVal args 0; accN: ev 0
   ip: xNode[args 1; env; `f32]; si: xEmit[`f2s;`i32;,ip 0;0n]
-  vp: xNode[args 2; env; `f32]; vi: xEmit[`f2s;`i32;,vp 0;0n]
-  (xEmit[`sadd; `i32; (accN; si; vi); 0n]; `i32)}
+  vp: xNode[args 2; env; `f32]
+  $[(ev 1)~`scatf; xSaddF[accN;si;vp 0]; xSaddI[accN;si;vp 0]]}
 xSet: {[i; env]
   args: kF[i;`arg]
   bufN: (env kVal args 0) 0
@@ -1142,18 +1158,21 @@ xSet: {[i; env]
   vp: xNode[args 2; env; `f32]
   z: xEmit[`setb; `f32; (bufN; si; vp 0); 0n]
   vp}
+/ iget/iset on a `scatf (f32) accumulator are just an f32 buffer load/store — reuse
+/ bufidx/setb (no i2f / f2s round-trip); a `scat (i32) acc keeps igetb/isetb.
 xIget: {[i; env]
   args: kF[i;`arg]
-  accN: (env kVal args 0) 0
+  ev: env kVal args 0; accN: ev 0
   ip: xNode[args 1; env; `f32]; si: xEmit[`f2s;`i32;,ip 0;0n]
-  (xEmit[`igetb; `f32; (accN; si); 0n]; `f32)}
+  $[(ev 1)~`scatf; (xEmit[`bufidx; `f32; (accN; si); 0n]; `f32); (xEmit[`igetb; `f32; (accN; si); 0n]; `f32)]}
 xIset: {[i; env]
   args: kF[i;`arg]
-  accN: (env kVal args 0) 0
+  ev: env kVal args 0; accN: ev 0
   ip: xNode[args 1; env; `f32]; si: xEmit[`f2s;`i32;,ip 0;0n]
-  vp: xNode[args 2; env; `f32]; vi: xEmit[`f2s;`i32;,vp 0;0n]
-  z: xEmit[`isetb; `i32; (accN; si; vi); 0n]
-  (vi; `i32)}
+  vp: xNode[args 2; env; `f32]
+  $[(ev 1)~`scatf; xIsetF[accN;si;vp 0]; xIsetI[accN;si;vp 0]]}
+xIsetF: {[accN;si;vpid] z: xEmit[`setb; `f32; (accN; si; vpid); 0n]; (vpid; `f32)}
+xIsetI: {[accN;si;vpid] vi: xEmit[`f2s;`i32;,vpid;0n]; z: xEmit[`isetb; `i32; (accN; si; vi); 0n]; (vi; `i32)}
 / sample[uv] / sample[k;uv] — texture lookup (fragmentTexN only). xVal carries
 / the literal texture index; the lowerer reads the Timg2/TexVars/SampVar globals.
 xSample: {[i; env]
@@ -1321,7 +1340,7 @@ xReach: {[root] {[m;k] $[(m k) & 0<#xArg k; @[m; xArg k; :; 1b]; m]}/[@[(#xOp)#0
 / xArg sweep descend into owned loop bodies and mark the top-level values they use
 / (e.g. a `base` computed before the loop) — without which those would be culled.
 / Un-reached owned nodes are then skipped by xLoRegion, giving intra-loop DCE too.
-xEffOps::  `setb`sadd`isetb`vstore
+xEffOps::  `setb`sadd`saddf`isetb`vstore
 xLoopOps:: `rsum`rmax`ndo`whileL
 xLoopRes: {[L] v:xVal L; $[(xOp L)~`whileL; (v 1;v 3); ,v 1]}
 xReachC: {[extra]
@@ -1376,6 +1395,7 @@ xLoMath:    {[k] a:xArg k; ids:xId@a; r:newId[]; emitBuf xMathW[xVal k; xTy k; r
 xLoF2s:    {[k] r:newId[]; emitBuf opF2s[Ti32; r; (xId@xArg k)0]; xId[k]::r}
 xLoBufIdx: {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPf32; p; xId a 0; CKz; xId a 1]; r:newId[]; emitBuf opLoad[Tf32; r; p]; xId[k]::r}
 xLoSadd:   {[k] a:xArg k; ptr:newId[]; emitBuf opAccChain[CPi32; ptr; xId a 0; CKz; xId a 1]; old:newId[]; emitBuf opAtomicIAdd[Ti32; old; ptr; CScope; CKz; xId a 2]; xId[k]::old}
+xLoSaddf:  {[k] a:xArg k; ptr:newId[]; emitBuf opAccChain[CPf32; ptr; xId a 0; CKz; xId a 1]; old:newId[]; emitBuf opAtomicFAdd[Tf32; old; ptr; CScope; CKz; xId a 2]; xId[k]::old}
 xLoSet:    {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPf32; p; xId a 0; CKz; xId a 1]; emitBuf opStore[p; xId a 2]; xId[k]::0}
 xLoIget:   {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPi32; p; xId a 0; CKz; xId a 1]; iv:newId[]; emitBuf opLoad[Ti32; iv; p]; fv:newId[]; emitBuf opI2f[Tf32; fv; iv]; xId[k]::fv}
 xLoIset:   {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPi32; p; xId a 0; CKz; xId a 1]; emitBuf opStore[p; xId a 2]; xId[k]:: xId a 2}
@@ -1457,6 +1477,7 @@ xLowerOne: {[k]
     op~`f2s;     xLoF2s[k]
     op~`bufidx;  xLoBufIdx[k]
     op~`sadd;    xLoSadd[k]
+    op~`saddf;   xLoSaddf[k]
     op~`setb;    xLoSet[k]
     op~`igetb;   xLoIget[k]
     op~`isetb;   xLoIset[k]
@@ -1479,7 +1500,7 @@ xLowerSpirv: {[root] xId::(#xOp)#-1; xRe:: xReach[root]; {[k] $[xRe k; xLowerOne
 / (test/kkgold.k); xOpt=1 turns on fold+DCE (numeric parity, test/kkopt.k). Env
 / pairs from the prologue become param (loaded value) / bufp (binding var) nodes;
 / the prologue/epilogue stay direct — the IR owns only the body.
-kIrEnvOne: {[p] $[(p 1) in `buf`scat; (xEmit[`bufp; p 1; (); p 0]; p 1); (xEmit[`param; p 1; (); p 0]; p 1)]}
+kIrEnvOne: {[p] $[(p 1) in `buf`scat`scatf; (xEmit[`bufp; p 1; (); p 0]; p 1); (xEmit[`param; p 1; (); p 0]; p 1)]}
 kSeqIr: {[stmts; env; oty]
   xReset[]
   e2: (!env) ! kIrEnvOne' env[!env]
