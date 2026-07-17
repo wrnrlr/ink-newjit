@@ -926,11 +926,6 @@ export fn gpuCaps(_: ?K) callconv(.c) ?K {
   return k_make_dict(10, &keys, &vals);
 }
 
-// ── Render/window exports — stubs until Phase 3 increment 2 ───────────────────
-export fn gpuDrawInstanced(_: ?K, _: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
-export fn gpuDrawGeomResident(_: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
-export fn gpuDrawInstancedT(_: ?K, _: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
-export fn gpuDrawMeshT(_: ?K, _: ?K, _: ?K) callconv(.c) ?K { return ki(0); }
 // gpuWgsl was dropped at the Dawn cutover — WGSL authoring contradicts the
 // SPIR-V-native direction; use dye.k → gpu.compileSpirv instead.
 
@@ -955,7 +950,6 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuComputeNewU", @ptrCast(&gpuComputeNewU), 2);
   r.k_register("gpuDispatch", @ptrCast(&gpuDispatch), 3);
   r.k_register("gpuDispatchLoop", @ptrCast(&gpuDispatchLoop), 3);
-  // render stubs (registered so lib/gpu.k loads; real impl in Phase 3)
   r.k_register("gpuRun", @ptrCast(&gpuRun), 2);
   r.k_register("gpuFill", @ptrCast(&gpuFill), 2);
   r.k_register("gpuTess", @ptrCast(&gpuTess), 1);
@@ -963,14 +957,10 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuFillShader", @ptrCast(&gpuFillShader), 2);
   r.k_register("gpuMesh", @ptrCast(&gpuMesh), 2);
   r.k_register("gpuUploadMesh", @ptrCast(&gpuUploadMesh), 2);
-  r.k_register("gpuDrawInstanced", @ptrCast(&gpuDrawInstanced), 3);
-  r.k_register("gpuDrawGeomResident", @ptrCast(&gpuDrawGeomResident), 2);
-  r.k_register("gpuDrawInstancedT", @ptrCast(&gpuDrawInstancedT), 3);
   r.k_register("gpuDrawMesh", @ptrCast(&gpuDrawMesh), 2);
   r.k_register("gpuDrawMeshU", @ptrCast(&gpuDrawMeshU), 3);
   r.k_register("gpuMeshPull", @ptrCast(&gpuMeshPull), 2);
   r.k_register("gpuDrawPull", @ptrCast(&gpuDrawPull), 3);
-  r.k_register("gpuDrawMeshT", @ptrCast(&gpuDrawMeshT), 3);
   r.k_register("gpuDrawGeomT", @ptrCast(&gpuDrawGeomT), 3);
   r.k_register("gpuTexture", @ptrCast(&gpuTexture), 2);
   r.k_register("gpuCaps", @ptrCast(&gpuCaps), 1);

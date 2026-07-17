@@ -146,7 +146,7 @@ Available auto-loaded libraries:
 - `lib/gpu.k` — namespaced GPU API (Phase 4): `window.run`; `gpu.fill`, `gpu.tessellate`,
   `gpu.compileSpirv`, `gpu.drawShader`, `gpu.runShader`, `gpu.buffer`, `gpu.read`,
   `gpu.write`, `gpu.dispatch`, `gpu.compileCompute`, `gpu.solid`, `gpu.kernel`;
-  `mesh.compile`, `mesh.draw`/`drawU`/`drawT`, `mesh.upload`, `mesh.drawInstanced`;
+  `mesh.compile`, `mesh.draw`/`drawU`/`drawGeomT`, `mesh.upload`, `mesh.compilePull`/`drawPull`;
   `texture.upload`
 - `lib/dye.k` — shader compiler (loads `lib/spirv.k` encoder): `shader.fragment`/`Tex`/
   `TexN`, `shader.vertex`/`vertexU`, `shader.compute`/`compute2`, `shader.stencil`/`U`/`IP`,

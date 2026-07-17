@@ -67,20 +67,15 @@ mesh.compilePull: so 2: (`gpuMeshPull;  2)   / (vtx_I; frg_I) → handle : verte
 gpuDrawPull0:     so 2: (`gpuDrawPull;  3)   / (pipe; bufHandles_I; count) → 0
 mesh.drawPull: {[pipe; bufs; count] gpuDrawPull0[pipe; `i$bufs; count]}
 mesh.drawU:    so 2: (`gpuDrawMeshU; 3)   / (verts_F; handle; uni_F) → 0 : draw mesh + per-draw uniform block (8 vec4 slots; see shader.vertexU)
-gpuDrawMeshT0: so 2: (`gpuDrawMeshT; 3)  / (verts_F; (handle,texHandles)_I; uni_F) → 0 : draw mesh + uniform + textures@group(1)
 gpuTexture0:   so 2: (`gpuTexture;  2)   / ((w;h;comp)_I; data_I) → texHandle : upload an image to a sampled GPU texture
-/ Draw a mesh with a per-draw uniform block AND textures (see shader.fragmentTexN).
-/ texs is an int vector of gpuTexture handles: image k = binding k (sample[k;uv]).
-mesh.drawT: {[verts; handle; uni; texs] gpuDrawMeshT0[verts; handle,texs; uni]}
-/ Retained (upload-once) counterpart: mesh.upload the geometry to a persistent
-/ buffer, then mesh.drawGeomT it each frame with only the uniform+textures — the vertex
-/ data is never re-uploaded.  mesh.upload also lives in lib/instancing.k.
+/ Textured draws are retained-only: mesh.upload the geometry to a persistent
+/ buffer once, then mesh.drawGeomT it each frame with only the uniform+textures
+/ (see shader.fragmentTexN; image k = binding k, sample[k;uv]).
 mesh.upload:    so 2: (`gpuUploadMesh; 2)  / (verts_F; meshHandle) → geomHandle : geometry → persistent vertex buffer
 gpuDrawGeomT0: so 2: (`gpuDrawGeomT;  3)  / (geom; uni_F; texHandles_I) → 0 : draw retained geom + uniform + textures
 mesh.drawGeomT: {[geom; uni; texs] gpuDrawGeomT0[geom; uni; texs]}
 / Upload an image dict (`width`height`comp`data, e.g. from image.read) as a texture.
 texture.upload: {[img] w:img`width; h:img`height; c:img`comp; d:img`data; gpuTexture0[(w;h;c); d]}
-/ mesh.upload / mesh.drawInstanced (retained geometry + instancing) live in lib/instancing.k
 
 / ── Placed arrays: the 9:/8: io-verb targets (doc/design/kk.md §1) ────────────
 / The GPU is an io channel: 9: places data on the device, 8: fetches it back;
@@ -466,6 +461,6 @@ kk.where: {[d]
   gpu.dispatch[pipe; (d`gpu; incl`gpu; ob; u); n]
   [gpu: ob; t: `f; n: total; s: ,total]}
 
-/ Solid-color fragment uniforms (44 floats matching fill.wgsl FragUniforms).
+/ Solid-color fragment uniforms (44 floats matching the built-in fill shader FragUniforms).
 / r,g,b,a in [0,1].  Returns a flat F vector.
 gpu.solid: {[r;g;b;a] ,/(1. 0. 0. 0.;0. 1. 0. 0.;0. 0. 1. 0.;1. 0. 0. 0.;0. 1. 0. 0.;0. 0. 1. 0.;r,g,b,a;r,g,b,a;1e10 1e10 1. 1.;0. 0. 0. 0.;0. 0. 0. 0.)}

@@ -511,7 +511,7 @@ Ink's GPU stack is three layers that load on demand:
 `lib/gpu.k` (the native `libgpu.dylib` bindings — raw Vulkan via MoltenVK), `lib/dye.k`
 (the **dye** shader compiler that turns ink lambdas into SPIR-V, backed by the
 pure instruction stencils in `lib/spirv.k`), and a set of higher-level helpers
-(`draw.k`, `camera.k`, `pbr.k`, `instancing.k`, `layout.k`, `font.k`, `color.k`).
+(`camera.k`, `pbr.k`, `font.k`, `color.k`).
 
 #### Window & event loop (`lib/gpu.k`)
 - `window.run[loop; cfg]` — open a window and call `loop[props]` every frame
@@ -529,18 +529,18 @@ pure instruction stencils in `lib/spirv.k`), and a set of higher-level helpers
 - `gpu.solid[r;g;b;a]` — build a solid-color `frag` block (channels in `[0,1]`).
 - `gpu.tessellate[pts]` — triangulate a polygon `F` to a vertex buffer (NaN x/y
   pairs separate contours to cut holes).
-- `lib/draw.k` immediate-mode helpers: `rectV[x;y;w;h]` (rect → 6 verts),
-  `rect[x;y;w;h;col]` (filled rect), `drawGlyph[h;id;ox;oy;size;frag]`
-  (tessellate + draw a font glyph).
 
 #### Meshes & 3D
 - `mesh.compile[vtx; frg]` — compile a vertex+fragment SPIR-V pair into a
   pipeline; the vertex stride is derived from the shader's declared inputs.
 - `mesh.draw[verts; h]`, `mesh.drawU[verts; h; uni]` (per-draw uniform block, 8
-  vec4 slots), `mesh.drawT[verts; h; uni; texs]` (uniform + textures).
-- `mesh.upload[verts; h]` → persistent geometry buffer; then `mesh.drawGeomT`,
-  `mesh.drawInstanced[geom; count; inst]` / `mesh.drawInstancedT`,
-  `mesh.drawResident` (`lib/instancing.k`) draw it without re-uploading.
+  vec4 slots).
+- `mesh.upload[verts; h]` → persistent geometry buffer; then `mesh.drawGeomT`
+  draws it with uniform+textures without re-uploading.
+- `mesh.compilePull[vtx; frg]` / `mesh.drawPull[pipe; bufs; count]` — vertex
+  pulling: the vertex shader (`shader.vertexPull`) reads resident storage
+  buffers by `gl_VertexIndex`; instancing is an index computation
+  (`inst: floor[vid % NV]`, see `demo/scene.k`).
 - `lib/pbr.k` — a physically-based `pbrVtx` / `PbrFragment` shader pair;
   `lib/camera.k` — orbit camera (`CamNew`, `CamUpdate[c;props]`) folding one
   frame of input into a camera-state dict (WASD pan, scroll zoom, right-drag
@@ -570,7 +570,7 @@ pipeline builders above. Types are symbols like `` `f32`v3`v4 ``.
   `shader.fragmentIr` (neutral-IR path).
 - **Vertex:** `shader.vertex[inTypes; varyTypes; fn]`,
   `shader.vertexU[…; uniNames; fn]` (with a uniform block),
-  `shader.instancedVertex` (`lib/instancing.k`).
+  `shader.vertexPull[varyTypes; fn]` (pulled: buffers + `gl_VertexIndex`).
 - **Compute:** `shader.kernel[fn]` — the general kernel with the binding table
   INFERRED from the lambda (params fed to `scatterAdd`/`iget`/`iset` are i32
   accumulators and must come first; the LAST param is the thread index; the
@@ -598,8 +598,6 @@ there is no `>=`, use `~(a<b)`. See `doc/design/dye.md` and `doc/design/kk.md`.
   `font.family`/`subfamily`/`fullName`.
 - `lib/color.k` — `hsl2rgb`, `pct2rgb`, and the full OKLCH Tailwind palette as
   named constants (`Red500`, `Amber300`, …), each an `[r,g,b,a]` vector.
-- `lib/layout.k` — a small constraint-based view layout solver
-  (`View`, `Pin`, `Eq`, `Contain`, `Layout`, `DrawLayout`).
 
 ### Network Library
 HTTP client over Zig's `std.http.Client` (`lib/http.k`, build `zig build http`).

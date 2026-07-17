@@ -54,7 +54,7 @@ shader.fragment: {[ioTypes; fn]
 / Like shader.fragment, plus nTex sampled 2-D textures at @group(1): image k is at
 / binding k, and one shared sampler at binding nTex.  The body samples texture k
 / with  sample[k; uv]  → v4 (sample[uv] is texture 0).  See xSample.  The host
-/ wires the textures with gpuTexture + mesh.drawT/mesh.drawGeomT/mesh.drawInstancedT, passing
+/ wires the textures with gpuTexture + mesh.drawGeomT, passing
 / a list of texture handles.  Interpolate the UV(s) as v2 vertex varyings.
 shader.fragmentTexN: {[ioTypes; nTex; fn]
   Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()

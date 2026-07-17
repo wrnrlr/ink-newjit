@@ -83,7 +83,6 @@ opMix:  {[t;r;a;b;c] (0x0008000C;t;r;Glsl;46;a;b;c)} / FMix (lerp)
 opSS:   {[t;r;a;b;c] (0x0008000C;t;r;Glsl;49;a;b;c)} / SmoothStep
 / Arithmetic / conversion
 opI2f:  {[t;r;a]   (0x0004006F;t;r;a)}     / OpConvertSToF 111
-opF2i:  {[t;r;a]   (0x00040070;t;r;a)}     / OpConvertSToF 112
 opU2f:  {[t;r;a]   (0x00040070;t;r;a)}     / OpConvertUToF 112 (gid u32 → f32)
 opF2s:  {[t;r;a]   (0x0004006E;t;r;a)}     / OpConvertFToS 110 (index f32 → i32)
 opAtomicIAdd: {[t;r;ptr;sc;sem;v] (0x000700EA;t;r;ptr;sc;sem;v)}  / OpAtomicIAdd 234 (scatter-add)
