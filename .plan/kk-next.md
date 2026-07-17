@@ -25,9 +25,19 @@ level): (1) `L[k]::expr` corrupts L when expr reads L (also inside a `'` each);
 (2) amending a typed/null vector slot with an INTEGER collapses it; (3) a vector
 literal with a decimal element after a bare int (`1 2 3.5`) errors.
 
-STILL OPEN: Task 3 (interleaved placed tables — vk.zig MAX_BIND), Task 4 (earth on
-vertex pulling — vk.zig pull pipeline uniforms+textures), Task 6 (`n f/ d`
-recording + compile-on-apply caching). 3 and 4 are native-heavy; 6a is design-gated.
+- **Task 3 (interleaved placed tables + placed dicts)** — DONE. Interleaved table
+  layout (one row-major buffer, 2 bindings not n+1; `gpu.tblLay` picks planar/il/auto
+  — it AVOIDS the MAX_BIND limit rather than raising it, so no vk.zig bump). Placed
+  dicts (ragged CSR named buffers, `gpu.holdD`; the one zig change = a `_m` monadic
+  handler on the `9:` Place verb so `9: dict` reaches gpu.hold). Cloth edge table =
+  the interleaved packed stride-7 buffer the raw edge kernel already reads (kkc 39/39).
+  Remaining stretch: routing the edge kernel THROUGH kk.compile with (E`i) column
+  syntax composed with gather+scatterAdd (unify raw-kernel emitter + table bindings)
+  — not needed for the edge use case (interleaving covers it).
+
+STILL OPEN: Task 4 (earth on vertex pulling — vk.zig pull pipeline uniforms+textures),
+Task 6 (`n f/ d` recording + compile-on-apply caching). 4 is native-heavy; 6a is
+design-gated.
 
 ## Where the codebase stands
 
