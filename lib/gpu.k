@@ -101,9 +101,16 @@ gpu.pipeline: {[fn] w: shader.kernel fn; gpu.compileCompute[w; KKnb]}
 / any nesting depth (needs the triage #21 fix; before that only the 1-param
 / lambda spelling `{,/x}/` worked, forcing the per-step guard).
 gpu.flat: {[x] $[`L~@x; ,//x; x]}
-gpu.hold:     {[x] f: gpu.flat x; [gpu: gpu.buffer[0.+f]; t: `f; n: #f; s: %x]}
+/ 9: x — a table places as a structured buffer (one resident buffer per column,
+/ gpu.holdT); anything else flattens and uploads as a plain f32 placement.
+gpu.hold:     {[x] $[`M~@x; gpu.holdT x; gpu.holdA x]}
+gpu.holdA:    {[x] f: gpu.flat x; [gpu: gpu.buffer[0.+f]; t: `f; n: #f; s: %x]}
 gpu.holdInto: {[d;x] gpu.write[d`gpu; 0.+gpu.flat x]; d}
-gpu.fetch:    {[d] r: (d`n) # $[(d`t)~`i; gpu.readI d`gpu; gpu.read d`gpu]; $[1 < #d`s; (d`s)#r; r]}
+/ 8: d — a `tbl descriptor reads every column back and reassembles the table
+/ (flip of the column dict); plain placements reshape to the recorded shape.
+gpu.fetchT:   {[d] + (d`cols) ! (d`n) #' gpu.read' d`hand}
+gpu.fetchA:   {[d] r: (d`n) # $[(d`t)~`i; gpu.readI d`gpu; gpu.read d`gpu]; $[1 < #d`s; (d`s)#r; r]}
+gpu.fetch:    {[d] $[(d`t)~`tbl; gpu.fetchT d; gpu.fetchA d]}
 / Place a k table as a STRUCTURED buffer (kk2 §2.5): one resident buffer per column
 / (planar/splayed layout), the descriptor carrying the column names + handles so
 / kk.compile can bind only the columns a kernel reads. `t`c` on the CPU already IS

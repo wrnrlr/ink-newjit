@@ -311,8 +311,13 @@ Each increment independently shippable; oracle in parentheses.
    `io.zig` (`callGlobal` → `Call.apply`) to `gpu.hold`/`holdInto`/`fetch`/
    `fetchN` in lib/gpu.k; descriptor = `[gpu:handle;t;n]`; `!io` when gpu.k
    isn't loaded, so the core stays GPU-free. Verified: upload/fetch/overwrite/
-   trimmed-fetch roundtrip on-device. REMAINING: shape in the descriptor used
-   by verbs, `n f/ d` → dispatchLoop recording, kernel compile-on-apply.
+   trimmed-fetch roundtrip on-device. ◐ ADOPTED (2026-07-17): the kk oracles
+   (kkc/kkred/walkgpu) now spell placement/fetch with the verbs (`E: 8:
+   kk.loop[f; 9: x0; n]`), monadic `9:` on a TABLE routes to gpu.holdT (a new
+   `_M` dispatch entry) and `8:` on a `tbl` descriptor reassembles the table;
+   unit-tested `!io`/`!type` behavior without the device lib (src/test.zig).
+   Parse note: `f 9: x` after a name is DYADIC — write `f[9: x]`.
+   REMAINING: `n f/ d` → dispatchLoop recording, kernel compile-on-apply.
 5. **kk tier 1 rewrites** — each/zip/gather/amend/amend-+/fold-over-iota,
    stencil adverb, eachprior. (`walk.k`'s `f` verbatim on GPU == CPU result;
    `clothgpu` kernels rewritten in array form.)

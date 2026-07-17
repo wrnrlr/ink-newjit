@@ -13,8 +13,8 @@ f:{@[x;I;:;1.+.25*+/x@W]}          / walk.k's f, unchanged
 ctr: h+N*h
 
 demo: {[]
-  x0d: gpu.hold (N*N)#0.
-  E: gpu.fetch kk.loop[f; x0d; 30000]
+  x0d: 9: (N*N)#0.                 / place (kk.md §1: E: 8: … f/ 9: x0)
+  E: 8: kk.loop[f; x0d; 30000]
   v: E ctr
   `0 0: "walkgpu: E@center = ",($v),"  (target 2887.34)\n"
   `0 0: $[0.02 > abs v - 2887.34; "walkgpu: PASS\n"; "walkgpu: FAIL\n"]

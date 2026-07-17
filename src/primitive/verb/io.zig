@@ -366,6 +366,7 @@ pub const Place = struct {
   _I: VM.Monad = placeAny,
   _B: VM.Monad = placeAny,
   _L: VM.Monad = placeAny,
+  _M: VM.Monad = placeAny, // table → gpu.hold routes to gpu.holdT (structured buffer, kk2 §2.5)
 };
 pub const PlaceInto = struct {
   pub const op = .@"9:";

@@ -1,5 +1,5 @@
 / test/kkred.k — whole-buffer reduce (kk2 §6, tier-2 gateway) vs CPU.
-/ Places arrays with gpu.hold, runs kk.sum/max/min/prod (two-stage shader.reduce),
+/ Places arrays with the 9: io verb, runs kk.sum/max/min/prod (two-stage reduce),
 / and checks against the CPU fold. Float sum reorders (grid-stride), so sum is
 / checked to a relative tolerance; max/min/prod-of-ints match exactly.
 / Run headless:  INK_SNAP=0 ink test/kkred.k
@@ -16,37 +16,37 @@ chke: {[nm;g;c] chkb[nm; g ~ c]}      / exact
 demo: {[]
   / exact integer sums (representable in f32) match bit-for-bit
   A: `f$ 1 + !1000
-  dA: gpu.hold A
+  dA: 9: A
   chke["sum 1..1000 exact";  kk.sum dA; +/A]
   chke["max 1..1000";        kk.max dA; |/A]
   chke["min 1..1000";        kk.min dA; &/A]
 
   / n exactly P (256) and just over — grid-stride boundary
   E: `f$ 1 + !256
-  chke["sum n=256";  kk.sum gpu.hold E; +/E]
+  chke["sum n=256";  kk.sum[9: E]; +/E]
   F: `f$ 1 + !257
-  chke["sum n=257";  kk.sum gpu.hold F; +/F]
+  chke["sum n=257";  kk.sum[9: F]; +/F]
 
   / n=1 (bracket form: `gpu.hold ,7.` would parse `,` as dyadic join)
   chke["sum n=1"; kk.sum gpu.hold[,7.]; 7.]
 
   / large float array — reordered sum within relative tolerance
   B: 0.001 * `f$ !100000
-  chkr["sum n=1e5 float";  kk.sum gpu.hold B; +/B]
+  chkr["sum n=1e5 float";  kk.sum[9: B]; +/B]
 
   / max/min over signed floats
   C: (`f$ !64) - 20.
-  dC: gpu.hold C
+  dC: 9: C
   chke["max signed"; kk.max dC; |/C]
   chke["min signed"; kk.min dC; &/C]
 
   / product of near-one factors (relative tolerance)
   P: 20 # 1.1
-  chkr["prod 1.1^20"; kk.prod gpu.hold P; */P]
+  chkr["prod 1.1^20"; kk.prod[9: P]; */P]
 
   / 2-D placement reduces over all elements (shape ignored for the fold)
   M: (8;8) # `f$ 1 + !64
-  chke["sum of 8x8 grid"; kk.sum gpu.hold M; +/ ,/ M]
+  chke["sum of 8x8 grid"; kk.sum[9: M]; +/ ,/ M]
 
   / pipeline cache: second sum reuses the cached `sum` pipeline (no recompile)
   nkeys: # !kkCache
@@ -64,20 +64,20 @@ demo: {[]
   chkb["subgroup path used by default"; (kkGetCaps[])`sgArith]
 
   / prefix scan +\d (kk2 tier-2): inclusive running combine, chunked across P=256.
-  chke["sum-scan 1..10 exact";   gpu.fetch kk.sums gpu.hold `f$ 1+!10;  +\ `f$ 1+!10]
-  chke["sum-scan n=256";         gpu.fetch kk.sums gpu.hold E;          +\E]
-  chke["sum-scan n=257 (2 blk)"; gpu.fetch kk.sums gpu.hold F;          +\F]
-  chke["sum-scan n=1000 exact";  gpu.fetch kk.sums dA;                  +\A]
-  chke["max-scan signed";        gpu.fetch kk.maxs dC;                  |\C]
-  chke["min-scan signed";        gpu.fetch kk.mins dC;                  &\C]
-  chke["sum-scan n=1";           gpu.fetch kk.sums gpu.hold[,7.];       ,7.]
-  chkr["sum-scan n=1e5 float";   *| gpu.fetch kk.sums gpu.hold B;       *| +\B]
+  chke["sum-scan 1..10 exact";   8: kk.sums[9: `f$ 1+!10];  +\ `f$ 1+!10]
+  chke["sum-scan n=256";         8: kk.sums[9: E];          +\E]
+  chke["sum-scan n=257 (2 blk)"; 8: kk.sums[9: F];          +\F]
+  chke["sum-scan n=1000 exact";  8: kk.sums dA;                  +\A]
+  chke["max-scan signed";        8: kk.maxs dC;                  |\C]
+  chke["min-scan signed";        8: kk.mins dC;                  &\C]
+  chke["sum-scan n=1";           8: kk.sums gpu.hold[,7.];       ,7.]
+  chkr["sum-scan n=1e5 float";   *| 8: kk.sums[9: B];       *| +\B]
 
   / compaction &mask (kk2 tier-2): indices where a 0/1 mask is true.
   MK: `f$ 1 0 1 1 0 0 1 0 1
-  chke["where small";        gpu.fetch kk.where gpu.hold MK;   `f$ & `i$ MK]
+  chke["where small";        8: kk.where[9: MK];   `f$ & `i$ MK]
   M300: `f$ (!300) mod 2
-  chke["where n=300 (2 blk)"; gpu.fetch kk.where gpu.hold M300; `f$ & `i$ M300]
+  chke["where n=300 (2 blk)"; 8: kk.where[9: M300]; `f$ & `i$ M300]
   chke["where all-true";      gpu.fetch kk.where gpu.hold 40#1.; `f$ !40]
   chkb["where all-false → 0"; 0 = # gpu.fetch kk.where gpu.hold 40#0.]
   / value compaction x@&mask composes via the gather path

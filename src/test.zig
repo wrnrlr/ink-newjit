@@ -1194,6 +1194,19 @@ test "io verbs" {
   try t.check("f: <`\"user.csv\"; 1: f", "\"name,age\\nAlice,23\\nBob,47\\n\"");
 }
 
+// GPU io verbs 9: (place) / 8: (fetch) — thin trampolines to gpu.hold/fetch in
+// lib/gpu.k (doc/design/kk.md §1). Without the device lib loaded the core stays
+// GPU-free and every form errors !io (a placed-array TABLE dispatches via _M).
+test "gpu io verbs error without device lib" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("9: 1 2 3", "!io");
+  try t.check("9: 1. 2. 3.", "!io");
+  try t.check("9: +`a`b!(1 2;3 4)", "!io"); // table place → gpu.holdT route (_M)
+  try t.check("8: `a`b!(1;2)", "!io"); //     fetch dispatches on descriptor dicts
+  try t.check("3 8: `a`b!(1;2)", "!io");
+  try t.check("8: 1", "!type"); //             a non-descriptor operand is a type error
+}
+
 test "grade ascending list" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("<(1 2 3; 4 5 6)", "0 1");
