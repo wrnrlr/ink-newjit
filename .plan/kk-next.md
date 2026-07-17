@@ -5,6 +5,30 @@ Self-contained brief for a fresh agent session. Read this, then skim
 landed, with per-milestone status notes). CLAUDE.md / AGENT.md have the language
 gotchas — the ones that actually bite are repeated per task below.
 
+## STATUS (updated 2026-07-17, session 2)
+
+DONE this session (all oracles green, 10/10 + spirv-val 20/20):
+- **Task 1 (bits CPU backend)** — `lib/bits.k` interprets dye's neutral IR on the
+  CPU; `test/kkbits.k` is the cross-backend oracle (bits CPU == gpu.kernel GPU on
+  the exact nn kernel lambdas, 12/12). Remaining: regenerate test/nn.k's COMPOSITE
+  FFN/MHSA/Conv references (multi-kernel host pipelines) from bits and delete the
+  hand-written gref/sref/mref (single-kernel refs are already covered by kkbits).
+- **Task 2 (fragmentIr fold-in)** — done; `shader.fragment` respects xOpt,
+  `shader.fragmentIr` deleted, test/ir.k rewritten as xOpt=0-vs-1.
+- **Task 5 (partial) — kk.freq** — tier-2 histogram via scatter-add; `test/kkgrp.k`.
+  Remaining in Task 5: `kk.group` (compaction with per-bucket atomic cursors — needs
+  the OLD value from the i32 scatter-add exposed) and radix sort.
+- **Task 7 chores** — snap.sh glob fixed, kkgold integer-dialect dump pinned, docs.
+
+Three VM/parser bugs found + logged in `.plan/triage.md` (worth fixing at the Zig
+level): (1) `L[k]::expr` corrupts L when expr reads L (also inside a `'` each);
+(2) amending a typed/null vector slot with an INTEGER collapses it; (3) a vector
+literal with a decimal element after a bare int (`1 2 3.5`) errors.
+
+STILL OPEN: Task 3 (interleaved placed tables — vk.zig MAX_BIND), Task 4 (earth on
+vertex pulling — vk.zig pull pipeline uniforms+textures), Task 6 (`n f/ d`
+recording + compile-on-apply caching). 3 and 4 are native-heavy; 6a is design-gated.
+
 ## Where the codebase stands
 
 Commits `1329398..9587c79` (2026-07-17) finished a large cleanup + the tier-1
