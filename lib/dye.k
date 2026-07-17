@@ -218,6 +218,96 @@ shader.vertexU: {[inTypes; varyTypes; uniNames; fn]
   ,/(hdr;cap;ext;mem;ep;decIn;decBlk;decPos;decVary;decUni;types;vtxTypes;uniTypes;varIn;varPerVtx;varVary;varUni;conWds;fn;bodWds;ret)
 }
 
+/ ── shader.vertexPull[varyTypes; fn] — vertex pulling (kk2 §5) ────────────────
+/ A vertex shader as a kernel-shaped fn `{[buf0;buf1;…; vid] (posV4; vary0;…)}`:
+/ the LAST param is the vertex index (gl_VertexIndex), every other param is an f32
+/ STORAGE buffer read at that index (`buf[3.*vid]` …) — NO vertex-input attributes,
+/ no vertex buffer. The host binds the resident buffers to the vertex stage and
+/ draws by count (mesh.compilePull / mesh.drawPull). Reuses the compute buffer-index
+/ IR (bufidx) for the body and the shader.vertex output interface (gl_PerVertex block
+/ + varyings + `vstore` effect nodes) for the result.
+vpBufDec: {[p] (0x00040047; p 0; 34; 0),(0x00040047; p 0; 33; p 1)}   / DescriptorSet 0 + Binding k
+vpBufVar: {[id] (0x0004003B; VPpbufs; id; 12)}                         / OpVariable StorageBuffer
+shader.vertexPull: {[varyTypes; fn]
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
+  lam: lamOf fn; argNames: lamArgs lam
+  nBuf:    (#argNames)-1
+  bufNames: -1 _ argNames
+  vidName:  *| argNames
+
+  / storage-buffer f32 types (mirror the compute assembler's cTf) + an Input-i32
+  / pointer for gl_VertexIndex + the u32 member-index const for the access chain.
+  Su32: newId[]; rta: newId[]; tbuf: newId[]; pbufs: newId[]; pf32: newId[]; pinI: newId[]
+  VPpbufs:: pbufs
+  zc: newId[]; emitCon (0x0004002B; Su32; zc; 0)
+  CKz:: zc; CPf32:: pf32
+  vidVar:  newId[]
+  bufVars: {[k] newId[]}' !nBuf
+
+  / gl_PerVertex output block + varyings (as in shader.vertexU)
+  TperVtx: newId[]; PperVtx: newId[]; perVtxVar: newId[]; Kzero: newId[]
+  emitCon opConst[Ti32; Kzero; 0]
+  varyNames:  !varyTypes
+  varyTySyms: varyTypes' varyNames
+  varyPtrs:   PtrOut' varyTySyms
+  varyVarIds: {[x] newId[]}' varyNames
+  nVary:      #varyVarIds
+
+  / function body: load gl_VertexIndex (i32) → f32 (index math stays f32 like the
+  / compute thread index), then the IR body reads buffers via bufidx.
+  vidI: newId[]; emitBuf opLoad[Ti32; vidI; vidVar]
+  vidF: newId[]; emitBuf opI2f[Tf32; vidF; vidI]
+
+  stmts:    lamBody lam
+  lastStmt: last stmts
+  outElems: $[(nVary>0) & ((kKind lastStmt)~`list); kF[lastStmt;`elem]; ,lastStmt]
+
+  VXpvtx:: perVtxVar; VXkz:: Kzero
+  xReset[]
+  env:  (bufNames , vidName) ! (bufVars ,' (nBuf # `buf)) , ,(vidF; `f32)
+  e0:   (!env) ! kIrEnvOne' env[!env]
+  env2: xSeqEnv[-1_stmts; e0]
+
+  gp: xNode[outElems[0]; env2; `v4]
+  xEmit[`vstore; `v4; ,gp 0; `pos]
+  $[nVary>0; xVary1[outElems[1]; varyTySyms[0]; varyVarIds[0]; env2]; 0]
+  $[nVary>1; xVary1[outElems[2]; varyTySyms[1]; varyVarIds[1]; env2]; 0]
+  $[nVary>2; xVary1[outElems[3]; varyTySyms[2]; varyVarIds[2]; env2]; 0]
+  $[nVary>3; xVary1[outElems[4]; varyTySyms[3]; varyVarIds[3]; env2]; 0]
+  xLowerC[!0]
+
+  bnd:   Nid+1
+  iface: (,vidVar),(,perVtxVar),varyVarIds,bufVars
+
+  hdr: (0x07230203; 0x00010400; 0; bnd; 0)
+  cap: (0x00020011; 1)
+  ext: (0x0006000B; Glsl; 0x4C534C47; 0x6474732E; 0x3035342E; 0)
+  mem: (0x0003000E; 0; 1)
+  ep:  (0x000F+(0x10000*(5+#iface)); 0; Fmain; 0x6E69616D; 0), iface
+
+  decVid:  (0x00040047; vidVar; 11; 42)                / BuiltIn VertexIndex
+  decBlk:  (0x00030047; TperVtx; 2)
+  decPos:  (0x00050048; TperVtx; 0; 11; 0)
+  decVary: $[nVary>0; ,/ varyVarIds decInOne' !nVary; !0]
+  decBuf:  (0x00040047;rta;6;4),(0x00050048;tbuf;0;35;0),(0x00030047;tbuf;2),(,/ vpBufDec' bufVars ,' !nBuf)
+
+  types:    (0x00020013;Tvoid;0x00020014;Tbool;0x00030016;Tf32;32;0x00040017;Tv4;Tf32;4;0x00040017;Tv2;Tf32;2;0x00040017;Tv3;Tf32;3;0x00040015;Ti32;32;1;0x00030021;Tfunc;Tvoid;0x00040020;PoutF32;3;Tf32;0x00040020;PoutV4;3;Tv4;0x00040020;PoutV2;3;Tv2;0x00040020;PoutV3;3;Tv3)
+  bufTypes: (0x00040015;Su32;32;0; 0x0003001D;rta;Tf32; 0x0003001E;tbuf;rta; 0x00040020;pbufs;12;tbuf; 0x00040020;pf32;12;Tf32; 0x00040020;pinI;1;Ti32)
+  vtxTypes: (0x0003001E;TperVtx;Tv4;0x00040020;PperVtx;3;TperVtx)
+
+  varVid:    (0x0004003B; pinI; vidVar; 1)             / OpVariable Input
+  varBuf:    ,/ vpBufVar' bufVars
+  varPerVtx: (0x0004003B; PperVtx; perVtxVar; 3)
+  varVary:   $[nVary>0; ,/ varyPtrs varOutOne' varyVarIds; !0]
+
+  label: newId[]
+  fnh: (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
+  ret: (0x000100FD; 0x00010038)
+  conWds: $[#Con; ,/Con; !0]
+  bodWds: $[#Buf; ,/Buf; !0]
+  ,/(hdr;cap;ext;mem;ep;decVid;decBlk;decPos;decVary;decBuf;types;bufTypes;vtxTypes;varVid;varBuf;varPerVtx;varVary;conWds;fnh;bodWds;ret)
+}
+
 
 
 / ── Type helpers ─────────────────────────────────────────────────────────────

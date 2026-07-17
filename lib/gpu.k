@@ -58,6 +58,14 @@ gpuDispatchLoop0: so 2: (`gpuDispatchLoop; 3) / (pipe; (nThreads,bufsA,bufsB)_I;
 gpu.dispatchLoop: {[pipe;bufsA;bufsB;nThreads;reps] gpuDispatchLoop0[pipe; nThreads,bufsA,bufsB; reps]}
 mesh.compile:  so 2: (`gpuMesh;      2)   / (vtx_I; frg_I) → handle : compile vertex+fragment SPIR-V mesh pipeline
 mesh.draw:     so 2: (`gpuDrawMesh;  2)   / (verts_F; handle) → 0 : draw mesh; vertex stride follows the shader's declared inputs
+/ Vertex pulling (kk2 §5): the vertex shader (shader.vertexPull) reads RESIDENT
+/ storage buffers indexed by gl_VertexIndex — no vertex buffer, no per-frame upload.
+/ mesh.compilePull builds the pipeline (nbuf storage buffers inferred from the shader);
+/ mesh.drawPull binds resident buffer handles (in binding order) and draws `count`
+/ vertices straight from the device.  e.g.  mesh.drawPull[p; (Pbuf;Nbuf); 3*nTri]
+mesh.compilePull: so 2: (`gpuMeshPull;  2)   / (vtx_I; frg_I) → handle : vertex-pull pipeline
+gpuDrawPull0:     so 2: (`gpuDrawPull;  3)   / (pipe; bufHandles_I; count) → 0
+mesh.drawPull: {[pipe; bufs; count] gpuDrawPull0[pipe; `i$bufs; count]}
 mesh.drawU:    so 2: (`gpuDrawMeshU; 3)   / (verts_F; handle; uni_F) → 0 : draw mesh + per-draw uniform block (8 vec4 slots; see shader.vertexU)
 gpuDrawMeshT0: so 2: (`gpuDrawMeshT; 3)  / (verts_F; (handle,texHandles)_I; uni_F) → 0 : draw mesh + uniform + textures@group(1)
 gpuTexture0:   so 2: (`gpuTexture;  2)   / ((w;h;comp)_I; data_I) → texHandle : upload an image to a sampled GPU texture

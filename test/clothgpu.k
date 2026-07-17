@@ -100,30 +100,43 @@ triIds::,/+(c00;c00+W+1;c00+1;c00;c00+W;c00+W+1)   / (i00,i11,i01) (i00,i10,i11)
 nTris::2*(H-1)*(W-1)
 tris::(nTris;3)#triIds
 
-/ Cloth's own projection (matches test/cloth.k) → standard PBR varyings.
-clothVtx:: shader.vertex[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
+/ VERTEX PULLING (kk2 §5): the vertex shader reads the RESIDENT position buffer P
+/ and the triangle-index buffer straight off the device — no readback, no CPU mesh
+/ build, no per-frame re-upload. Thread = vertex (3 per triangle); it looks up its
+/ triangle's 3 particle indices, gathers their positions from P, computes the face
+/ normal (cross of the two edges), and outputs this corner's projected clip position
+/ + the standard PBR varyings. Material/lighting are constants (clothMat), baked in.
+/ (Rasterizer cull is NONE, so the sheet shows from both sides with one draw.)
+clothVtxPull:: shader.vertexPull[[wNor:`v3; wMat:`v4; wLit:`f32]; {[p; tri; vid]
+  t:floor[vid%3.]                     / triangle id (3 verts per triangle)
+  cor:vid-3.*t                        / corner 0/1/2
+  b:3.*t
+  i0:tri[b]; i1:tri[b+1.]; i2:tri[b+2.]
+  a0:3.*i0; a1:3.*i1; a2:3.*i2
+  x0:p[a0]; y0:p[a0+1.]; z0:p[a0+2.]
+  x1:p[a1]; y1:p[a1+1.]; z1:p[a1+2.]
+  x2:p[a2]; y2:p[a2+1.]; z2:p[a2+2.]
+  ex1:x1-x0; ey1:y1-y0; ez1:z1-z0
+  ex2:x2-x0; ey2:y2-y0; ez2:z2-z0
+  cx:(ey1*ez2)-(ez1*ey2); cy:(ez1*ex2)-(ex1*ez2); cz:(ex1*ey2)-(ey1*ex2)
+  lr:sqrt[(cx*cx)+(cy*cy)+(cz*cz)]; ln:$[lr<0.0001;0.0001;lr]   / |·| is OpLogicalOr in kernels — guard with select
+  nx:cx%ln; ny:cy%ln; nz:cz%ln
+  px:$[cor<0.5;x0; cor<1.5;x1; x2]
+  py:$[cor<0.5;y0; cor<1.5;y1; y2]
+  pz:$[cor<0.5;z0; cor<1.5;z1; z2]
+  / cloth's isometric projection (matches the old clothVtx / test/cloth.k)
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.6
-  py0:(c45*pos[0])+(s45*pos[2])
-  py2:(c45*pos[2])-(s45*pos[0])
-  cy:pos[1]-1.0
-  px1:(c30*cy)-(s30*py2)
-  px2:(s30*cy)+(c30*py2)
-  ((sc*py0;sc*px1;0.5-(px2*sc*0.5);1.0);nor;mat;lit)}]
-
-/ Build the double-sided per-face-normal vertex buffer from a flat position readback.
-/ The accessor Pv and the readback gR are GLOBAL so the per-triangle lambda can see
-/ them — ink lambdas don't close over a parent's locals (that silently mis-meshes).
-gR::0
-Pv::{[k] (gR@3*k;gR@(3*k)+1;gR@(3*k)+2)}
-buildMesh::{[R] gR::R;
-  ,/ {[t] p0:Pv t@0; p1:Pv t@1; p2:Pv t@2
-    nor:vnorm cross3[p1-p0;p2-p0]; nf:0.-nor; m:clothMat
-    ((p0,nor,m),(p1,nor,m),(p2,nor,m)),(p0,nf,m),(p2,nf,m),(p1,nf,m)}'tris}
+  qy0:(c45*px)+(s45*pz)
+  qy2:(c45*pz)-(s45*px)
+  ncy:py-1.0
+  qx1:(c30*ncy)-(s30*qy2)
+  qx2:(s30*ncy)+(c30*qy2)
+  ((sc*qy0; sc*qx1; 0.5-(qx2*sc*0.5); 1.0); (nx;ny;nz); (0.18;0.28;0.62;0.75); 1.)}]
 
 / ── GPU sim state (created once on the first frame) ───────────────────────────
-gReady::0; gMesh::0
+gReady::0; gPull::0
 pInt::0; pCon::0; pApp::0; pVel::0
-P::0; V::0; PREV::0; IM::0; DP::0; G::0
+P::0; V::0; PREV::0; IM::0; DP::0; G::0; Ptri::0
 cons::(); onePass::0; substep::0
 
 initGpu::{[]
@@ -132,6 +145,7 @@ initGpu::{[]
   pApp::gpu.compileCompute[kApp;3]; pVel::gpu.compileCompute[kVel;5]
   P::gpu.buffer[,/+(px0;py0;pz0)]; V::gpu.buffer[nDof#0.]; PREV::gpu.buffer[nDof#0.]
   IM::gpu.buffer[im0]; DP::gpu.buffer[nDof#0.]
+  Ptri::gpu.buffer[`f$ ,/tris]                            / resident triangle indices (vertex-pull source)
   bH:gpu.buffer[EH]; bV:gpu.buffer[EV]; bD:gpu.buffer[ED]; bB:gpu.buffer[EB]
   G::gpu.buffer[SDT,DAMP,0.,0.]                            / g[0]=sdt, g[1]=damping
   GH:gpu.buffer[(0.+(#hi)),SDT,0.,0.]; GV:gpu.buffer[(0.+(#vi)),SDT,0.,0.]
@@ -149,9 +163,9 @@ substep::{[s]
 
 loop::{[props]
   $[gReady=0; initGpu[]; 0]
-  $[gMesh=0; gMesh::mesh.compile[clothVtx; PbrFragment]; 0]
-  15 substep/0                          / 15 substeps this frame
-  mesh.draw[buildMesh[gpu.read[P]]; gMesh]}
+  $[gPull=0; gPull::mesh.compilePull[clothVtxPull; PbrFragment]; 0]
+  15 substep/0                          / 15 substeps this frame (gpuRun syncs before the draw)
+  mesh.drawPull[gPull; (P; Ptri); 3*nTris]}   / pull straight from resident P — no readback
 
 / Headless invariant check (no window): drive the solver on a headless device and
 / assert the drape is physical — pinned corners stay at y=1, the sheet hangs to a

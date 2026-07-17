@@ -362,6 +362,39 @@ returning `(pos_v4; varyings…)` — storage-buffer reads indexed by
 4. Instance index the same way (`gl_InstanceIndex`) — subsumes the stubbed
    instancing exports; delete them.
 
+**DONE (2026-07-17) — mechanism + clothgpu port.**
+- **`shader.vertexPull[varyTypes; fn]`** (dye): fn is a kernel-shaped
+  `{[buf0;…; vid] (posV4; vary0;…)}` — the LAST param is `gl_VertexIndex`
+  (BuiltIn **42**, loaded as i32 → f32 like the compute thread index), every
+  other param is an f32 StorageBuffer read at that index (`buf[3.*vid]`). Reuses
+  the compute `bufidx` IR for the body and the `shader.vertexU` output interface
+  (gl_PerVertex block + varyings + `vstore` effect nodes). One new type-set (f32
+  runtime-array storage types + an Input-i32 pointer) hand-assembled; the vertex
+  execution model has no OpExecutionMode. spirv-val-clean (vulkan1.2) for
+  0-buffer/N-buffer × 0/N-varying.
+- **`createPullPipeline`/`drawPull` (vk.zig) + `gpuMeshPull`/`gpuDrawPull`
+  (gpu_vk.zig) + `mesh.compilePull`/`mesh.drawPull` (gpu.k).** A graphics
+  pipeline with EMPTY vertex-input state; `nbuf` storage buffers (inferred by
+  counting StorageBuffer OpVariables in the vertex words) bound at set 0, VERTEX
+  stage, via a per-frame descriptor pool (`pull_upool[FRAMES]`, reset in
+  beginFrame). The draw is `vkCmdDraw(count,1,0,0)` — no vertex buffer. Pull draws
+  record after meshes/geoms in the frame; `gpuRun` already `v.sync()`s the
+  callback's compute before the frame, so the vertex shader reads the FINAL P.
+  Smoke test: `test/vpulltri.k` (a gradient triangle pulled from a resident buffer
+  by gl_VertexIndex — renders, varyings interpolate).
+- **clothgpu.k ported.** `clothVtxPull` reads the resident position buffer `P`
+  and a resident triangle-index buffer, gathers its triangle's 3 particle
+  positions, computes the face normal IN-SHADER (cross of the edges; `|·|` is
+  OpLogicalOr in kernels, so the length floor uses a `$[…]` select not `|`),
+  and outputs the projected clip position + PBR varyings (material/lighting baked
+  constants). The `gpu.read[P]`→`buildMesh`→re-upload loop is DELETED —
+  `mesh.drawPull[gPull; (P;Ptri); 3*nTris]` pulls straight from the device.
+  Rasterizer cull NONE gives both sides from one draw (single-sided geometry).
+  Verified: renders the blue cloth flat at frame 0 and correctly draped/folds-lit
+  at frame 80; the headless sim invariant is untouched (oracle still PASS). GAP:
+  double-sided per-side normals (the old 6-verts/tri) and `earth.k` + instancing
+  (`gl_InstanceIndex`) not ported — single-sided is enough for the demo.
+
 ## 6. Whole-buffer reductions (increment 8, tier 2 gateway)
 
 `+/ d` on a placement: two-stage — workgroup partials into a small buffer,

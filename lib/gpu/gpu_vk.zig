@@ -123,14 +123,17 @@ fn resetRegistries() void {
   for (g_spirv_pipes.items) |fp| v.destroyFillShaderPipe(fp);
   for (g_textures.items) |t| v.destroyTexture(t);
   for (g_geoms.items) |gm| v.destroyBuffer(gm.buf);
+  for (g_pull_pipes.items) |pp| v.destroyPullPipeline(pp);
   g_bufs.deinit(alloc); g_pipes.deinit(alloc); g_mesh_pipes.deinit(alloc);
   g_mesh_verts.deinit(alloc); g_mesh_calls.deinit(alloc);
   g_fill_verts.deinit(alloc); g_fill_calls.deinit(alloc); g_spirv_pipes.deinit(alloc);
   g_textures.deinit(alloc); g_geoms.deinit(alloc); g_geom_calls.deinit(alloc);
+  g_pull_pipes.deinit(alloc); g_pull_calls.deinit(alloc);
   g_bufs = .empty; g_pipes = .empty; g_mesh_pipes = .empty;
   g_mesh_verts = .empty; g_mesh_calls = .empty; g_vbuf = null; g_vbuf_cap = 0;
   g_fill_verts = .empty; g_fill_calls = .empty; g_fbuf = null; g_fbuf_cap = 0; g_spirv_pipes = .empty;
   g_textures = .empty; g_geoms = .empty; g_geom_calls = .empty;
+  g_pull_pipes = .empty; g_pull_calls = .empty;
 }
 
 fn wordsOf(k: ?K) ?[]const u32 {
@@ -445,6 +448,72 @@ export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
   return ki(@intCast(g_mesh_pipes.items.len));
 }
 
+// Count OpVariables in the StorageBuffer storage class (12) — the vertex-pull
+// shader's storage buffers (kk2 §5).
+fn storageBufCount(words: []const u32) u32 {
+  var sc: u32 = 0;
+  var i: usize = 5;
+  while (i < words.len) {
+    const w0 = words[i];
+    const wc: usize = w0 >> 16;
+    if (wc == 0) break;
+    if ((w0 & 0xffff) == 59 and i + 3 < words.len and words[i + 3] == 12) sc += 1;
+    i += wc;
+  }
+  return sc;
+}
+
+// ── vertex-pulling pipelines + draws (kk2 §5) ─────────────────────────────────
+var g_pull_pipes: std.ArrayList(vk.PullPipe) = .empty; // 1-based handles
+const PullCall = struct { pipe: usize, bufs: [vk.MAX_BIND]i32, nbuf: usize, count: u32 };
+var g_pull_calls: std.ArrayList(PullCall) = .empty; // this frame's pull draws
+
+// gpuMeshPull[vtx_I; frg_I] -> handle : compile a vertex-pull pipeline (nbuf storage
+// buffers in the vertex stage inferred from the shader).
+export fn gpuMeshPull(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
+  const v = g_vk orelse return ki(0);
+  const vwords = wordsOf(vtx_k) orelse return ki(0);
+  const fwords = wordsOf(frg_k) orelse return ki(0);
+  const nbuf = storageBufCount(vwords);
+  if (nbuf == 0 or nbuf > vk.MAX_BIND) return ki(0);
+  const pp = v.createPullPipeline(vwords, fwords, nbuf) catch return ki(0);
+  g_pull_pipes.append(alloc, pp) catch { v.destroyPullPipeline(pp); return ki(0); };
+  return ki(@intCast(g_pull_pipes.items.len));
+}
+
+// gpuDrawPull[pipe; bufHandles_I; count] : record a pull draw — bind the resident
+// storage buffers (by handle, in binding order) and draw `count` vertices.
+export fn gpuDrawPull(pipe_k: ?K, bufs_k: ?K, count_k: ?K) callconv(.c) ?K {
+  const ph = ki_val(pipe_k);
+  if (ph <= 0 or ph > g_pull_pipes.items.len) return ki(0);
+  const nbuf = g_pull_pipes.items[@intCast(ph - 1)].nbuf;
+  const bp = kip(bufs_k) orelse return ki(0);
+  const ngiven: usize = @intCast(@max(kn(bufs_k), 0));
+  if (ngiven < nbuf) return ki(0);
+  const count = ki_val(count_k);
+  if (count <= 0) return ki(0);
+  var pc: PullCall = .{ .pipe = @intCast(ph - 1), .bufs = [_]i32{0} ** vk.MAX_BIND, .nbuf = nbuf, .count = @intCast(count) };
+  var i: usize = 0;
+  while (i < nbuf) : (i += 1) pc.bufs[i] = bp[i];
+  g_pull_calls.append(alloc, pc) catch return ki(0);
+  return ki(0);
+}
+
+// Record all pull draws into cb (resolve handles → resident buffers per draw).
+fn recordPulls(v: *vk.Vk, cb: anytype) void {
+  for (g_pull_calls.items) |pc| {
+    var bufs: [vk.MAX_BIND]vk.Buffer = undefined;
+    var ok_all = true;
+    var i: usize = 0;
+    while (i < pc.nbuf) : (i += 1) {
+      const h = pc.bufs[i];
+      if (h <= 0 or h > g_bufs.items.len) { ok_all = false; break; }
+      bufs[i] = g_bufs.items[@intCast(h - 1)];
+    }
+    if (ok_all) v.drawPull(cb, g_pull_pipes.items[pc.pipe], bufs[0..pc.nbuf], pc.count);
+  }
+}
+
 // ── textures + retained geometry (Phase 3, increment 2c) ──────────────────────
 var g_textures: std.ArrayList(vk.Texture) = .empty; // 1-based handles
 const Geom = struct { buf: vk.Buffer, count: u32, pipe: usize };
@@ -595,6 +664,7 @@ fn resetFrameMeshes() void {
   g_fill_verts.clearRetainingCapacity();
   g_fill_calls.clearRetainingCapacity();
   g_geom_calls.clearRetainingCapacity();
+  g_pull_calls.clearRetainingCapacity();
 }
 
 // ── 2-D fill pipeline (Phase 3, increment 3) ──────────────────────────────────
@@ -817,6 +887,7 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
       recordFills(&v, cb, @floatFromInt(fbw), @floatFromInt(fbh)); // 2-D base layer
       recordMeshes(&v, cb); // 3-D on top (depth-tested)
       recordGeoms(&v, cb); // retained 3-D geometry (uniform + textures)
+      recordPulls(&v, cb); // vertex-pulled geometry (kk2 §5): reads resident buffers
       v.endFrame(@intCast(fbw), @intCast(fbh), if (do_snap) snap_buf else null);
       if (do_snap) if (snap_buf) |sb| {
         v.waitIdle();
@@ -897,6 +968,8 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuDrawInstancedT", @ptrCast(&gpuDrawInstancedT), 3);
   r.k_register("gpuDrawMesh", @ptrCast(&gpuDrawMesh), 2);
   r.k_register("gpuDrawMeshU", @ptrCast(&gpuDrawMeshU), 3);
+  r.k_register("gpuMeshPull", @ptrCast(&gpuMeshPull), 2);
+  r.k_register("gpuDrawPull", @ptrCast(&gpuDrawPull), 3);
   r.k_register("gpuDrawMeshT", @ptrCast(&gpuDrawMeshT), 3);
   r.k_register("gpuDrawGeomT", @ptrCast(&gpuDrawGeomT), 3);
   r.k_register("gpuTexture", @ptrCast(&gpuTexture), 2);
