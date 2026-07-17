@@ -4,8 +4,7 @@
 / checked to a relative tolerance; max/min/prod-of-ints match exactly.
 / Run headless:  INK_SNAP=0 ink test/kkred.k
 
-2: "lib/dye.k"
-2: "lib/gpu.k"
+2: "lib/kk.k"
 
 ok:: 0; nok:: 0
 chkb: {[nm;b] $[b; ok::ok+1; nok::nok+1]; $[b; 0; `0 0: "FAIL ",nm,"\n"]}

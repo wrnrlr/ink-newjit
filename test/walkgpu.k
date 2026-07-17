@@ -4,8 +4,7 @@
 / in test/walk.k), matching the CPU relaxation.
 / Slow (~30k sweeps on 9604 cells) — run on demand:  INK_SNAP=0 ink test/walkgpu.k
 
-2: "lib/dye.k"
-2: "lib/gpu.k"
+2: "lib/kk.k"
 
 N:100; h: N div 2
 (r;c):1+!2#N-2; I:c+N*r

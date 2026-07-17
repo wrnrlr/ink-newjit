@@ -4,8 +4,7 @@
 / the pipeline cache and the non-elementwise rejection path.
 / Run headless:  INK_SNAP=0 ink test/kkc.k
 
-2: "lib/dye.k"
-2: "lib/gpu.k"
+2: "lib/kk.k"
 
 X:  1. + `f$ !64
 Y:  0.5 * `f$ !64
