@@ -71,6 +71,19 @@ demo: {[]
   z2: kk.compile[{7.*x}; ,a]
   chkb["cache reuse on repeat compile"; (#!kkCache)=n0]
 
+  / plan cache (kk.plan/kk.run split): a repeat compile of the same lambda+shapes
+  / does ZERO CST re-parse/re-classify — kkPlanMisses (built-from-scratch count) and
+  / kkCache size both stay put. kk.plan returns the reusable plan; kk.run dispatches.
+  m0: kkPlanMisses; k0: #!kkCache
+  pl: kk.plan[{9.*x}; ,a]                        / first plan: one miss, one pipeline
+  r1: 8: kk.run[pl; ,a]
+  chkb["kk.plan built once (miss)"; kkPlanMisses = m0+1]
+  r2: 8: kk.compile[{9.*x}; ,a]                  / repeat: plan hit → no CST, no new pipe
+  chkb["plan cache hit: zero re-parse";  kkPlanMisses = m0+1]
+  chkb["plan cache hit: no new pipeline"; (#!kkCache) = k0+1]
+  chk["kk.run matches kk.compile"; r1; r2]
+  chk["kk.run result correct";     r1; 9.*X]
+
   / gather: x@y → x[y[d]] (both operands placed; index vector = output extent)
   chk["{x@y} gather"; 8: kk.compile[{x@y}; (a;iw)]; X@`i$IW]
 
