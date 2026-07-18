@@ -96,23 +96,33 @@ earthMesh: ,/ +(X;Y;Z;X;Y;Z;us;v)
 / get the same rotation for a consistent lighting/bump frame.  The sun rides
 / through unrotated (it lives in view space, set by the arrow keys → arrows move
 / the day, camera moves the view).  Varyings: wNor, wTan, wUvF=(u;v;cloudsOn), wSun.
-earthVtx: shader.vertexU[[pos:`v3;nor:`v3;uv:`v2]; [wNor:`v3;wTan:`v3;wUvF:`v3;wSun:`v3]; `uRot`uView`uFlag`uSun; {[pos;nor;uv]
-  yc:uRot[0]; ys:uRot[1]; pc:uRot[2]; ps:uRot[3]
-  zoom:uView[0]; asp:uView[3]
+/ VERTEX PULLING (kk2 §5): geometry lives in a resident storage buffer `vb` (stride 8,
+/ pos/nor/uv at 8*vid) and the per-frame uniforms in a second storage buffer `ub` (16
+/ floats, same layout the old uniform block used) — both PULLED by gl_VertexIndex, no
+/ vertex-input state.  ub: [0..3]=yaw/pitch cos/sin, 4=zoom, 7=aspect, 8=cloudsOn,
+/ 12..14=view-space sun.  The math is identical to the attribute version.
+earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v3;wSun:`v3]; {[vb;ub;vid]
+  b:8.*vid
+  px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
+  nx:vb[b+3.]; ny:vb[b+4.]; nz:vb[b+5.]
+  uu:vb[b+6.]; vv:vb[b+7.]
+  yc:ub[0.]; ys:ub[1.]; pc:ub[2.]; ps:ub[3.]
+  zoom:ub[4.]; asp:ub[7.]; cloudsOn:ub[8.]
+  Lx:ub[12.]; Ly:ub[13.]; Lz:ub[14.]
   / rotate position: yaw about Y, then pitch about X
-  rx:(yc*pos[0])+(ys*pos[2]); rz:(yc*pos[2])-(ys*pos[0])
-  wx:rx; wy:(pc*pos[1])-(ps*rz); wz:(ps*pos[1])+(pc*rz)
+  rx:(yc*px)+(ys*pz); rz:(yc*pz)-(ys*px)
+  wx:rx; wy:(pc*py)-(ps*rz); wz:(ps*py)+(pc*rz)
   / rotate normal the same way
-  mrx:(yc*nor[0])+(ys*nor[2]); mrz:(yc*nor[2])-(ys*nor[0])
-  nwx:mrx; nwy:(pc*nor[1])-(ps*mrz); nwz:(ps*nor[1])+(pc*mrz)
+  mrx:(yc*nx)+(ys*nz); mrz:(yc*nz)-(ys*nx)
+  nwx:mrx; nwy:(pc*ny)-(ps*mrz); nwz:(ps*ny)+(pc*mrz)
   / east tangent = normalize(cross(nor,(0,1,0))) = (nor.z;0;-nor.x), then rotated
-  t0x:nor[2]; t0z:0.0-nor[0]
+  t0x:nz; t0z:0.0-nx
   til:1.0%sqrt[(t0x*t0x)+(t0z*t0z)+0.0001]
   Tx:t0x*til; Tz:t0z*til
   trx:(yc*Tx)+(ys*Tz); trz:(yc*Tz)-(ys*Tx)
   twx:trx; twy:0.0-(ps*trz); twz:pc*trz
   / orthographic: zoom scales screen XY; depth from wz only → no zoom clipping
-  ((asp*zoom*wx; zoom*wy; 0.5-0.45*wz; 1.0); (nwx;nwy;nwz); (twx;twy;twz); (uv[0];uv[1];uFlag[0]); (uSun[0];uSun[1];uSun[2]))
+  ((asp*zoom*wx; zoom*wy; 0.5-0.45*wz; 1.0); (nwx;nwy;nwz); (twx;twy;twz); (uu;vv;cloudsOn); (Lx;Ly;Lz))
 }]
 
 / ── Fragment shader: PBR-ish earth — bump + specular + day/night + clouds ──────
@@ -162,10 +172,13 @@ earthFrag: shader.fragmentTexN[[wNor:`v3; wTan:`v3; wUvF:`v3; wSun:`v3; out:`v4]
 starQuad: -1. -1. 1. -1. 1. 1. -1. -1. 1. 1. -1. 1.
 STARFOV:  0.85      / how much sky fills the view
 
-starVtx: shader.vertexU[[pos:`v2]; [wRay:`v2;wRot:`v4]; `uRot`uView; {[pos]
-  cy:uRot[0]; sy:uRot[1]; cp:uRot[2]; sp:uRot[3]
-  asp:uView[0]; fov:uView[1]
-  ((pos[0]; pos[1]; 0.9999; 1.0); (pos[0]*fov%asp; pos[1]*fov); (cy;sy;cp;sp))
+/ Pulled too: qb = the quad (stride 2), ub = 8 uniform floats (0..3 yaw/pitch, 4=asp, 5=fov).
+starVtx: shader.vertexPull[[wRay:`v2;wRot:`v4]; {[qb;ub;vid]
+  b:2.*vid
+  px:qb[b]; py:qb[b+1.]
+  cy:ub[0.]; sy:ub[1.]; cp:ub[2.]; sp:ub[3.]
+  asp:ub[4.]; fov:ub[5.]
+  ((px; py; 0.9999; 1.0); (px*fov%asp; py*fov); (cy;sy;cp;sp))
 }]
 
 starFrag: shader.fragmentTexN[[wRay:`v2; wRot:`v4; out:`v4]; 1; {[wRay;wRot]
@@ -202,20 +215,27 @@ lastMx::0.; lastMy:: 0.
 held::0;hL::0;hR::0                          / held: left-mouse, ←, →
 cloudsOn:: 1.
 
-earthHandle:: 0
-earthGeom::   0
+/ Resident buffers (vertex pulling): geometry + a per-frame uniform buffer each,
+/ overwritten with gpu.write and pulled by the vertex shader.
+earthPipe::   0
+earthVB::     0                                  / stride-8 sphere geometry (once)
+earthUB::     0                                  / 16 per-frame uniform floats
 earthTex::    0
-starHandle::  0
-starGeom::    0
+earthN::      (#earthMesh) div 8                 / vertex count
+starPipe::    0
+starVB::      0
+starUB::      0
 starTex::     0
 
 window.run[{[props]
-  $[earthHandle=0; earthHandle:: mesh.compile[earthVtx; earthFrag];  0]
-  $[earthGeom=0;   earthGeom::   mesh.upload[earthMesh; earthHandle]; 0]
+  $[earthPipe=0;   earthPipe::   mesh.compilePull[earthVtx; earthFrag]; 0]
+  $[earthVB=0;     earthVB::     gpu.buffer[earthMesh]; 0]
+  $[earthUB=0;     earthUB::     gpu.buffer[16#0.];     0]
   $[0~earthTex;    earthTex::    {texture.upload x}'(imgDay;imgNight;imgClouds;imgSpec;imgNorm); 0]
-  $[starHandle=0;  starHandle::  mesh.compile[starVtx; starFrag];     0]
-  $[starGeom=0;    starGeom::    mesh.upload[starQuad; starHandle];   0]
-  $[0~starTex;     starTex::     ,texture.upload[imgStars];                 0]
+  $[starPipe=0;    starPipe::    mesh.compilePull[starVtx; starFrag]; 0]
+  $[starVB=0;      starVB::      gpu.buffer[starQuad]; 0]
+  $[starUB=0;      starUB::      gpu.buffer[8#0.];     0]
+  $[0~starTex;     starTex::     ,texture.upload[imgStars];              0]
 
   E: props`events
   w: props`width; h: props`height
@@ -242,9 +262,12 @@ window.run[{[props]
   ce: cos SUNEL
   Lx: (sin sunAz)*ce; Ly: sin SUNEL; Lz: (cos sunAz)*ce
   asp: h%w
-  / stars first (behind), then the earth depth-tests in front
+  / stars first (behind), then the earth depth-tests in front. Each: refresh the
+  / uniform buffer, then one pulled+textured draw (mesh.drawPullT).
   starUni: (cos yaw; sin yaw; cos pitch; sin pitch; asp;STARFOV;0.;0.)
-  mesh.drawGeomT[starGeom; starUni; starTex]
+  gpu.write[starUB; starUni]
+  mesh.drawPullT[starPipe; (starVB;starUB); 6; starTex]
   uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;0.;0.;asp; cloudsOn;0.;0.;0.; Lx;Ly;Lz;0.)
-  mesh.drawGeomT[earthGeom; uni; earthTex]
+  gpu.write[earthUB; uni]
+  mesh.drawPullT[earthPipe; (earthVB;earthUB); earthN; earthTex]
 }; 0]

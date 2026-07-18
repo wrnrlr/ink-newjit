@@ -178,6 +178,8 @@ pub const PullPipe = struct {
   vmod: c.VkShaderModule,
   fmod: c.VkShaderModule,
   nbuf: u32,
+  n_tex: u32 = 0, // textures sampled at @group(1) by the fragment (0 = none)
+  tex_dsl: c.VkDescriptorSetLayout = null, // set 1: n images + 1 sampler, or null
 };
 
 pub const Texture = struct {
@@ -703,21 +705,28 @@ pub const Vk = struct {
   // Allocate a @group(1) descriptor set binding `texs` (n sampled images + one
   // shared sampler) for pipeline `mp`, from the current frame's texture pool.
   pub fn texSet(self: *Vk, mp: MeshPipe, texs: []const Texture) c.VkDescriptorSet {
-    if (mp.n_tex == 0 or texs.len == 0) return null;
+    return self.texSetL(mp.tex_dsl, mp.n_tex, texs);
+  }
+  // Build a @group(1) texture set (n sampled images at 0..n-1 + one shared sampler at
+  // n) for any pipeline carrying `tex_dsl` — shared by the mesh (attribute) and pull
+  // paths, so a vertex-pulled draw samples textures exactly like a mesh draw.
+  pub fn texSetL(self: *Vk, tex_dsl: c.VkDescriptorSetLayout, n_tex: u32, texs: []const Texture) c.VkDescriptorSet {
+    if (n_tex == 0 or texs.len == 0) return null;
     var set: c.VkDescriptorSet = undefined;
-    const dsai = c.VkDescriptorSetAllocateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = self.tex_upool[self.frame], .descriptorSetCount = 1, .pSetLayouts = &mp.tex_dsl };
+    var dsl_copy = tex_dsl;
+    const dsai = c.VkDescriptorSetAllocateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = self.tex_upool[self.frame], .descriptorSetCount = 1, .pSetLayouts = &dsl_copy };
     if (!ok(vkAllocateDescriptorSets(self.dev, &dsai, &set))) return null;
     var imgs: [MAX_BIND]c.VkDescriptorImageInfo = undefined;
     var writes: [MAX_BIND + 1]c.VkWriteDescriptorSet = undefined;
     var i: u32 = 0;
-    while (i < mp.n_tex) : (i += 1) {
+    while (i < n_tex) : (i += 1) {
       const ti = if (i < texs.len) i else 0;
       imgs[i] = .{ .imageView = texs[ti].view, .imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
       writes[i] = .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = i, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .pImageInfo = &imgs[i] };
     }
     const smp = c.VkDescriptorImageInfo{ .sampler = texs[0].sampler };
-    writes[mp.n_tex] = .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = mp.n_tex, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLER, .pImageInfo = &smp };
-    vkUpdateDescriptorSets(self.dev, mp.n_tex + 1, &writes, 0, null);
+    writes[n_tex] = .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = n_tex, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLER, .pImageInfo = &smp };
+    vkUpdateDescriptorSets(self.dev, n_tex + 1, &writes, 0, null);
     return set;
   }
 
@@ -1194,19 +1203,33 @@ pub const Vk = struct {
   // `nbuf` storage buffers (set 0, VERTEX stage) indexed by gl_VertexIndex. Same
   // fixed-function state as the mesh pipeline (triangle list, depth test, alpha
   // blend, dynamic viewport) so pulled geometry composites with the rest.
-  pub fn createPullPipeline(self: *Vk, vtx: []const u32, frg: []const u32, nbuf: u32) Error!PullPipe {
-    var pp: PullPipe = .{ .pipe = undefined, .layout = undefined, .dsl = undefined, .vmod = undefined, .fmod = undefined, .nbuf = nbuf };
+  pub fn createPullPipeline(self: *Vk, vtx: []const u32, frg: []const u32, nbuf: u32, n_tex: u32) Error!PullPipe {
+    var pp: PullPipe = .{ .pipe = undefined, .layout = undefined, .dsl = undefined, .vmod = undefined, .fmod = undefined, .nbuf = nbuf, .n_tex = n_tex, .tex_dsl = null };
     const vsmi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = vtx.len * 4, .pCode = vtx.ptr };
     if (!ok(vkCreateShaderModule(self.dev, &vsmi, null, &pp.vmod))) return Error.ShaderModule;
     const fsmi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = frg.len * 4, .pCode = frg.ptr };
     if (!ok(vkCreateShaderModule(self.dev, &fsmi, null, &pp.fmod))) { vkDestroyShaderModule(self.dev, pp.vmod, null); return Error.ShaderModule; }
 
+    // set 0: nbuf storage buffers (vertex stage)
     var binds: [MAX_BIND]c.VkDescriptorSetLayoutBinding = undefined;
     var i: u32 = 0;
     while (i < nbuf) : (i += 1) binds[i] = .{ .binding = i, .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT };
     const dsli = c.VkDescriptorSetLayoutCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = nbuf, .pBindings = &binds };
     if (!ok(vkCreateDescriptorSetLayout(self.dev, &dsli, null, &pp.dsl))) { vkDestroyShaderModule(self.dev, pp.vmod, null); vkDestroyShaderModule(self.dev, pp.fmod, null); return Error.Pipeline; }
-    const plci = c.VkPipelineLayoutCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1, .pSetLayouts = &pp.dsl };
+    // set 1: @group(1) texture layout — n_tex sampled images (0..n-1) + one shared
+    // sampler (n), fragment stage; identical to the mesh path so fragmentTexN samples
+    // the same way whether geometry is attribute-fed or vertex-pulled.
+    if (n_tex > 0) {
+      var tb: [MAX_BIND + 1]c.VkDescriptorSetLayoutBinding = undefined;
+      var ti: u32 = 0;
+      while (ti < n_tex) : (ti += 1) tb[ti] = .{ .binding = ti, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT };
+      tb[n_tex] = .{ .binding = n_tex, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT };
+      const tdsli = c.VkDescriptorSetLayoutCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = n_tex + 1, .pBindings = &tb };
+      _ = vkCreateDescriptorSetLayout(self.dev, &tdsli, null, &pp.tex_dsl);
+    }
+    var set_layouts: [2]c.VkDescriptorSetLayout = .{ pp.dsl, pp.tex_dsl };
+    const nset: u32 = if (n_tex > 0) 2 else 1;
+    const plci = c.VkPipelineLayoutCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = nset, .pSetLayouts = &set_layouts };
     if (!ok(vkCreatePipelineLayout(self.dev, &plci, null, &pp.layout))) return Error.Pipeline;
 
     const stages = [2]c.VkPipelineShaderStageCreateInfo{
@@ -1250,13 +1273,16 @@ pub const Vk = struct {
     vkDestroyPipeline(self.dev, pp.pipe, null);
     vkDestroyPipelineLayout(self.dev, pp.layout, null);
     vkDestroyDescriptorSetLayout(self.dev, pp.dsl, null);
+    if (pp.tex_dsl != null) vkDestroyDescriptorSetLayout(self.dev, pp.tex_dsl, null);
     vkDestroyShaderModule(self.dev, pp.vmod, null);
     vkDestroyShaderModule(self.dev, pp.fmod, null);
   }
 
   // Allocate a per-frame descriptor set binding `bufs` (storage) in order, and
   // record the pull draw: bind set 0, draw `count` vertices (no vertex buffer).
-  pub fn drawPull(self: *Vk, cb: c.VkCommandBuffer, pp: PullPipe, bufs: []const Buffer, count: u32) void {
+  // `tset` = @group(1) texture set (from texSetL) or null; bound when the pipeline
+  // carries textures so a vertex-pulled draw can sample maps like a mesh draw.
+  pub fn drawPull(self: *Vk, cb: c.VkCommandBuffer, pp: PullPipe, bufs: []const Buffer, count: u32, tset: c.VkDescriptorSet) void {
     var set: c.VkDescriptorSet = undefined;
     const dsai = c.VkDescriptorSetAllocateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = self.pull_upool[self.frame], .descriptorSetCount = 1, .pSetLayouts = &pp.dsl };
     if (!ok(vkAllocateDescriptorSets(self.dev, &dsai, &set))) return;
@@ -1270,6 +1296,8 @@ pub const Vk = struct {
     vkUpdateDescriptorSets(self.dev, pp.nbuf, &writes, 0, null);
     vkCmdBindPipeline(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, pp.pipe);
     vkCmdBindDescriptorSets(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, pp.layout, 0, 1, @ptrCast(&set), 0, null);
+    if (pp.n_tex > 0 and tset != null)
+      vkCmdBindDescriptorSets(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, pp.layout, 1, 1, @ptrCast(&tset), 0, null);
     vkCmdDraw(cb, count, 1, 0, 0);
   }
 

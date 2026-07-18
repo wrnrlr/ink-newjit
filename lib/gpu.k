@@ -65,7 +65,13 @@ mesh.draw:     so 2: (`gpuDrawMesh;  2)   / (verts_F; handle) → 0 : draw mesh;
 / vertices straight from the device.  e.g.  mesh.drawPull[p; (Pbuf;Nbuf); 3*nTri]
 mesh.compilePull: so 2: (`gpuMeshPull;  2)   / (vtx_I; frg_I) → handle : vertex-pull pipeline
 gpuDrawPull0:     so 2: (`gpuDrawPull;  3)   / (pipe; bufHandles_I; count) → 0
+gpuDrawPullT0:    so 2: (`gpuDrawPullT; 3)   / (pipe; bufHandles_I; (count,texHandles)_I) → 0
 mesh.drawPull: {[pipe; bufs; count] gpuDrawPull0[pipe; `i$bufs; count]}
+/ A vertex-pulled draw that also samples textures at @group(1) (fragmentTexN). texs =
+/ gpuTexture handles, in binding order; the vertex shader still pulls geometry (and any
+/ per-frame uniforms) from the resident storage buffers in `bufs`. The FFI is capped at
+/ arity 3, so count + the texture handles travel packed in one int vector (count first).
+mesh.drawPullT: {[pipe; bufs; count; texs] gpuDrawPullT0[pipe; `i$bufs; (`i$count), `i$texs]}
 mesh.drawU:    so 2: (`gpuDrawMeshU; 3)   / (verts_F; handle; uni_F) → 0 : draw mesh + per-draw uniform block (8 vec4 slots; see shader.vertexU)
 gpuTexture0:   so 2: (`gpuTexture;  2)   / ((w;h;comp)_I; data_I) → texHandle : upload an image to a sampled GPU texture
 / Textured draws are retained-only: mesh.upload the geometry to a persistent

@@ -465,7 +465,7 @@ fn storageBufCount(words: []const u32) u32 {
 
 // ── vertex-pulling pipelines + draws (kk2 §5) ─────────────────────────────────
 var g_pull_pipes: std.ArrayList(vk.PullPipe) = .empty; // 1-based handles
-const PullCall = struct { pipe: usize, bufs: [vk.MAX_BIND]i32, nbuf: usize, count: u32 };
+const PullCall = struct { pipe: usize, bufs: [vk.MAX_BIND]i32, nbuf: usize, count: u32, tex: [MAX_TEX]i32 = [_]i32{0} ** MAX_TEX, ntex: usize = 0 };
 var g_pull_calls: std.ArrayList(PullCall) = .empty; // this frame's pull draws
 
 // gpuMeshPull[vtx_I; frg_I] -> handle : compile a vertex-pull pipeline (nbuf storage
@@ -476,7 +476,8 @@ export fn gpuMeshPull(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
   const fwords = wordsOf(frg_k) orelse return ki(0);
   const nbuf = storageBufCount(vwords);
   if (nbuf == 0 or nbuf > vk.MAX_BIND) return ki(0);
-  const pp = v.createPullPipeline(vwords, fwords, nbuf) catch return ki(0);
+  const n_tex = texCount(fwords); // textures @group(1) sampled by the fragment
+  const pp = v.createPullPipeline(vwords, fwords, nbuf, n_tex) catch return ki(0);
   g_pull_pipes.append(alloc, pp) catch { v.destroyPullPipeline(pp); return ki(0); };
   return ki(@intCast(g_pull_pipes.items.len));
 }
@@ -484,24 +485,45 @@ export fn gpuMeshPull(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
 // gpuDrawPull[pipe; bufHandles_I; count] : record a pull draw — bind the resident
 // storage buffers (by handle, in binding order) and draw `count` vertices.
 export fn gpuDrawPull(pipe_k: ?K, bufs_k: ?K, count_k: ?K) callconv(.c) ?K {
+  return recordPull(pipe_k, bufs_k, ki_val(count_k), &[_]i32{});
+}
+
+// gpuDrawPullT[pipe; bufHandles_I; (count, texHandles…)_I] : a pull draw that also
+// binds textures at @group(1) — a vertex-pulled, textured draw (e.g. demo/earth.k).
+// The FFI is capped at arity 3, so count + the texture handles ride in ONE packed
+// int vector: element 0 is the vertex count, elements 1.. are the texture handles.
+export fn gpuDrawPullT(pipe_k: ?K, bufs_k: ?K, ct_k: ?K) callconv(.c) ?K {
+  const cp = kip(ct_k) orelse return ki(0);
+  const cn: usize = @intCast(@max(kn(ct_k), 0));
+  if (cn == 0) return ki(0);
+  return recordPull(pipe_k, bufs_k, cp[0], cp[1..cn]);
+}
+
+fn recordPull(pipe_k: ?K, bufs_k: ?K, count: i32, texs: []const i32) ?K {
   const ph = ki_val(pipe_k);
   if (ph <= 0 or ph > g_pull_pipes.items.len) return ki(0);
   const nbuf = g_pull_pipes.items[@intCast(ph - 1)].nbuf;
   const bp = kip(bufs_k) orelse return ki(0);
   const ngiven: usize = @intCast(@max(kn(bufs_k), 0));
   if (ngiven < nbuf) return ki(0);
-  const count = ki_val(count_k);
   if (count <= 0) return ki(0);
   var pc: PullCall = .{ .pipe = @intCast(ph - 1), .bufs = [_]i32{0} ** vk.MAX_BIND, .nbuf = nbuf, .count = @intCast(count) };
   var i: usize = 0;
   while (i < nbuf) : (i += 1) pc.bufs[i] = bp[i];
+  const nt: usize = @min(texs.len, MAX_TEX);
+  var j: usize = 0;
+  while (j < nt) : (j += 1) pc.tex[j] = texs[j];
+  pc.ntex = nt;
   g_pull_calls.append(alloc, pc) catch return ki(0);
   return ki(0);
 }
 
-// Record all pull draws into cb (resolve handles → resident buffers per draw).
+// Record all pull draws into cb (resolve handles → resident buffers per draw, plus
+// an optional @group(1) texture set built the same way as the mesh path).
 fn recordPulls(v: *vk.Vk, cb: anytype) void {
+  var tbuf: [MAX_TEX]vk.Texture = undefined;
   for (g_pull_calls.items) |pc| {
+    const pp = g_pull_pipes.items[pc.pipe];
     var bufs: [vk.MAX_BIND]vk.Buffer = undefined;
     var ok_all = true;
     var i: usize = 0;
@@ -510,7 +532,17 @@ fn recordPulls(v: *vk.Vk, cb: anytype) void {
       if (h <= 0 or h > g_bufs.items.len) { ok_all = false; break; }
       bufs[i] = g_bufs.items[@intCast(h - 1)];
     }
-    if (ok_all) v.drawPull(cb, g_pull_pipes.items[pc.pipe], bufs[0..pc.nbuf], pc.count);
+    if (!ok_all) continue;
+    var tset = vk.Vk.nullSet();
+    if (pp.n_tex > 0 and pc.ntex > 0) {
+      var k: usize = 0;
+      while (k < pc.ntex) : (k += 1) {
+        const th = pc.tex[k];
+        tbuf[k] = if (th > 0 and th <= g_textures.items.len) g_textures.items[@intCast(th - 1)] else g_textures.items[0];
+      }
+      tset = v.texSetL(pp.tex_dsl, pp.n_tex, tbuf[0..pc.ntex]);
+    }
+    v.drawPull(cb, pp, bufs[0..pc.nbuf], pc.count, tset);
   }
 }
 
@@ -961,6 +993,7 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuDrawMeshU", @ptrCast(&gpuDrawMeshU), 3);
   r.k_register("gpuMeshPull", @ptrCast(&gpuMeshPull), 2);
   r.k_register("gpuDrawPull", @ptrCast(&gpuDrawPull), 3);
+  r.k_register("gpuDrawPullT", @ptrCast(&gpuDrawPullT), 3);
   r.k_register("gpuDrawGeomT", @ptrCast(&gpuDrawGeomT), 3);
   r.k_register("gpuTexture", @ptrCast(&gpuTexture), 2);
   r.k_register("gpuCaps", @ptrCast(&gpuCaps), 1);
