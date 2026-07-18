@@ -26,8 +26,8 @@
 2: "lib/dye.k"
 2: "lib/gpu.k"
 
-PI: 3.14159265
-
+PI:3.14159265
+phi:(1+sqrt 5)%2
 / texture.upload resolution: "2k" (fast start) or "8k" (sharp when zoomed in, heavier).
 TEXRES: "2k"
 
