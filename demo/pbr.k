@@ -71,11 +71,11 @@ RDB: 0.5 0. -0.5; RDF: 0.5 0. 0.5; RUB: 0.5 1. -0.5; RUF: 0.5 1. 0.5
 / ── Global state ──────────────────────────────────────────────────────────────
 cam:: CamNew[]                  / orbit camera state (see lib/camera.k)
 
-pbrHandle:: 0; skyHandle:: 0
+pbrHandle:: 0; skyHandle:: 0; pbrVB:: 0
 
 / ── Window loop ───────────────────────────────────────────────────────────────
 window.run[{[props]
-  $[pbrHandle=0; pbrHandle:: mesh.compile[pbrVtx; PbrFragment]; 0]
+  $[pbrHandle=0; pbrHandle:: mesh.compilePull[pbrVtx; PbrFragment]; 0]
   $[skyHandle=0; skyHandle:: gpu.compileSpirv[skyWds; 0];      0]
 
   / Fold one frame of input into the orbit camera, then read its pose
@@ -115,11 +115,13 @@ window.run[{[props]
   pan: {[v;zM;cM] n:#v; (n#zM)*(v-(n#cM))}
   tvg: pan[gndVerts;zMask;cMask]; tvb: pan[boxVerts;zMask;cMask]; tvs: pan[shadVerts;zMask;cMask]
 
-  / Draw: sky → ground → shadow (on ground, blocked by box) → box
+  / Draw: sky → ground → shadow (on ground, blocked by box) → box.  The three PBR
+  / meshes concatenate into one resident buffer (stride 11), pulled in one draw;
+  / depth-testing keeps the shadow above the ground.
   w: props`width; h: props`height
   skyV: 0.,0.,0.,0., w,0.,1.,0., w,h,1.,1., 0.,0.,0.,0., w,h,1.,1., 0.,h,0.,1.
   gpu.drawShader[skyV; skyHandle]
-  mesh.draw[tvg; pbrHandle]
-  mesh.draw[tvs; pbrHandle]
-  mesh.draw[tvb; pbrHandle]
+  scene: tvg,tvs,tvb
+  $[pbrVB=0; pbrVB:: gpu.buffer[scene]; gpu.write[pbrVB; scene]]
+  mesh.drawPull[pbrHandle; ,pbrVB; (#scene) div 11]
 }; 0]

@@ -56,19 +56,23 @@ PbrFragment: shader.fragment[[wNor:`v3; wMat:`v4; wLit:`f32; out:`v4]; {[wNor;wM
   (lr; lg; lb; 1.0)
 }]
 
-/ ── Vertex shader (isometric-ish projection) ─────────────────────────────────
-/ Projects pos to clip space and passes normal + material + sun through. The
-/ near-flat depth term relies on painter-order draws / mostly-convex meshes;
-/ self-occluding geometry (e.g. cloth) should use its own stronger depth term.
-pbrVtx: shader.vertex[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
+/ ── Vertex shader (isometric-ish projection, VERTEX PULLING) ──────────────────
+/ Projects pos to clip space and passes normal + material + sun through. Geometry
+/ lives in a resident storage buffer (stride 11) PULLED by gl_VertexIndex — no
+/ vertex-input state. The near-flat depth term relies on painter-order draws /
+/ mostly-convex meshes; self-occluding geometry (e.g. cloth) uses a stronger term.
+pbrVtx: shader.vertexPull[[wNor:`v3;wMat:`v4;wLit:`f32]; {[vb;vid]
+  b:11.*vid
+  px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.3
-  py0:(c45*pos[0])+(s45*pos[2])
-  py2:(c45*pos[2])-(s45*pos[0])
-  px1:(c30*pos[1])-(s30*py2)
-  px2:(s30*pos[1])+(c30*py2)
-  ((sc*py0; sc*px1; 0.5-px2*0.001; 1.0); nor; mat; lit)
+  py0:(c45*px)+(s45*pz)
+  py2:(c45*pz)-(s45*px)
+  px1:(c30*py)-(s30*py2)
+  px2:(s30*py)+(c30*py2)
+  ((sc*py0; sc*px1; 0.5-px2*0.001; 1.0); (vb[b+3.];vb[b+4.];vb[b+5.]); (vb[b+6.];vb[b+7.];vb[b+8.];vb[b+9.]); vb[b+10.])
 }]
 
-/ Compile the standard pipeline with  mesh.compile[pbrVtx; PbrFragment]  and build a
+/ Compile the standard pipeline with  mesh.compilePull[pbrVtx; PbrFragment]  and a
 / material+lit vertex tail with  r,g,b,rough,lit  (kept inline, not as helpers, to
-/ spend fewer of the VM's 256 global slots — see doc/bug.md).
+/ spend fewer of the VM's 256 global slots — see doc/bug.md). Draw with a resident
+/ stride-11 buffer:  vb: gpu.buffer verts;  mesh.drawPull[pipe; ,vb; (#verts) div 11].

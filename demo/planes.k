@@ -34,17 +34,23 @@ frag: shader.fragment[[nor:`v3; out:`v4]; {[nor]
 
 / Vertex shader: 45° Y-rotation then isometric X-tilt, scale by 0.5.
 / c30=cos(35.26°)=√(2/3), s30=sin(35.26°)=1/√3 — equal rhombuses for all planes.
-vert: shader.vertex[[pos:`v3;nor:`v3]; [vNor:`v3]; {[pos;nor]
+/ Vertex pulling: stride-6 geometry (pos, nor) in a resident buffer, read at 6*vid.
+vert: shader.vertexPull[[vNor:`v3]; {[vb;vid]
+  b:6.*vid
+  px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.5
-  py0: (c45*pos[0])+(s45*pos[2])
-  py2: (c45*pos[2])-(s45*pos[0])
-  px1: (c30*pos[1])-(s30*py2)
-  px2: (s30*pos[1])+(c30*py2)
-  ((sc*py0; sc*px1; 0.5-px2*sc*0.5; 1.0); nor)
+  py0: (c45*px)+(s45*pz)
+  py2: (c45*pz)-(s45*px)
+  px1: (c30*py)-(s30*py2)
+  px2: (s30*py)+(c30*py2)
+  ((sc*py0; sc*px1; 0.5-px2*sc*0.5; 1.0); (vb[b+3.];vb[b+4.];vb[b+5.]))
 }]
 
-handle:: 0
+pipe:: 0
+vbuf:: 0
+nvert:: (#verts) div 6
 window.run[{[props]
-  $[handle=0; handle:: mesh.compile[vert; frag]; 0]
-  mesh.draw[verts; handle]
+  $[pipe=0; pipe:: mesh.compilePull[vert; frag]; 0]
+  $[vbuf=0; vbuf:: gpu.buffer[verts]; 0]
+  mesh.drawPull[pipe; ,vbuf; nvert]
 }; 0]

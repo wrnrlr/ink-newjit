@@ -61,22 +61,29 @@ icoMesh: ,/ sphVert' icoTris
 / Vertex shader: 45° Y + isometric X tilt; rotates the normal by the same matrix
 / in-shader (no CPU normal pass), then emits the standard wNor;wMat;wLit varyings
 / so lib/pbr.k's PbrFragment shades it.
-sphereVtx: shader.vertex[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
+/ Vertex pulling: geometry (stride 11) lives in a resident buffer, read at 11*vid.
+sphereVtx: shader.vertexPull[[wNor:`v3;wMat:`v4;wLit:`f32]; {[vb;vid]
+  b:11.*vid
+  px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
+  nx:vb[b+3.]; ny:vb[b+4.]; nz:vb[b+5.]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.8
-  py0: (c45*pos[0])+(s45*pos[2])
-  py2: (c45*pos[2])-(s45*pos[0])
-  px1: (c30*pos[1])-(s30*py2)
-  px2: (s30*pos[1])+(c30*py2)
-  ny0: (c45*nor[0])+(s45*nor[2])
-  ny2: (c45*nor[2])-(s45*nor[0])
-  nx1: (c30*nor[1])-(s30*ny2)
-  nx2: (s30*nor[1])+(c30*ny2)
-  ((sc*py0; sc*px1; 0.5-px2*sc*0.5; 1.0); (ny0;nx1;nx2); mat; lit)
+  py0: (c45*px)+(s45*pz)
+  py2: (c45*pz)-(s45*px)
+  px1: (c30*py)-(s30*py2)
+  px2: (s30*py)+(c30*py2)
+  ny0: (c45*nx)+(s45*nz)
+  ny2: (c45*nz)-(s45*nx)
+  nx1: (c30*ny)-(s30*ny2)
+  nx2: (s30*ny)+(c30*ny2)
+  ((sc*py0; sc*px1; 0.5-px2*sc*0.5; 1.0); (ny0;nx1;nx2); (vb[b+6.];vb[b+7.];vb[b+8.];vb[b+9.]); vb[b+10.])
 }]
 
-meshHandle:: 0
+meshPipe:: 0
+meshVB::   0
+meshN::    (#icoMesh) div 11
 loop: {[props]
-  $[meshHandle=0; meshHandle:: mesh.compile[sphereVtx; PbrFragment]; 0]
-  mesh.draw[icoMesh; meshHandle]}
+  $[meshPipe=0; meshPipe:: mesh.compilePull[sphereVtx; PbrFragment]; 0]
+  $[meshVB=0;   meshVB::   gpu.buffer[icoMesh]; 0]
+  mesh.drawPull[meshPipe; ,meshVB; meshN]}
 
 window.run[loop; 0]

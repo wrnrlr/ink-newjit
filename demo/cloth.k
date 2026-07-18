@@ -130,23 +130,30 @@ buildClothMesh:{[]
 / Cloth keeps its own projection (bigger scale, y-recentre, and a real depth term
 / so the draped sheet self-occludes correctly), but emits the standard
 / wNor;wMat;wLit varyings so lib/pbr.k's PbrFragment can shade it.
-clothVtx: shader.vertex[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; {[pos;nor;mat;lit]
+/ Vertex pulling: the (per-frame rebuilt) stride-11 cloth mesh lives in a resident
+/ buffer overwritten each frame with gpu.write and pulled at 11*vid.
+clothVtx: shader.vertexPull[[wNor:`v3;wMat:`v4;wLit:`f32]; {[vb;vid]
+  b:11.*vid
+  px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.6
-  py0:(c45*pos[0])+(s45*pos[2])
-  py2:(c45*pos[2])-(s45*pos[0])
-  cy:pos[1]-1.0
+  py0:(c45*px)+(s45*pz)
+  py2:(c45*pz)-(s45*px)
+  cy:py-1.0
   px1:(c30*cy)-(s30*py2)
   px2:(s30*cy)+(c30*py2)
-  ((sc*py0;sc*px1;0.5-(px2*sc*0.5);1.0);nor;mat;lit)
+  ((sc*py0;sc*px1;0.5-(px2*sc*0.5);1.0);(vb[b+3.];vb[b+4.];vb[b+5.]);(vb[b+6.];vb[b+7.];vb[b+8.];vb[b+9.]);vb[b+10.])
 }]
 
 / ── Window loop ───────────────────────────────────────────────────────────────
-gHandle:: 0
+gPipe:: 0
+gVB::   0
 
 loop: {[props]
-  $[gHandle=0; gHandle::mesh.compile[clothVtx;PbrFragment]; 0]
+  $[gPipe=0; gPipe:: mesh.compilePull[clothVtx;PbrFragment]; 0]
   clothFrame[]
-  mesh.draw[buildClothMesh[]; gHandle]
+  cm: buildClothMesh[]
+  $[gVB=0; gVB:: gpu.buffer[cm]; gpu.write[gVB; cm]]
+  mesh.drawPull[gPipe; ,gVB; (#cm) div 11]
 }
 
 window.run[loop; 0]
