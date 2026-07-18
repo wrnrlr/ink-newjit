@@ -117,22 +117,17 @@ fn resetRegistries() void {
   v.sync(); // finish any in-flight dispatch before freeing its buffers
   for (g_bufs.items) |b| v.destroyBuffer(b);
   for (g_pipes.items) |p| v.destroyPipeline(p);
-  for (g_mesh_pipes.items) |mp| v.destroyMeshPipeline(mp);
-  if (g_vbuf) |b| v.destroyBuffer(b);
   if (g_fbuf) |b| v.destroyBuffer(b);
   for (g_spirv_pipes.items) |fp| v.destroyFillShaderPipe(fp);
   for (g_textures.items) |t| v.destroyTexture(t);
-  for (g_geoms.items) |gm| v.destroyBuffer(gm.buf);
   for (g_pull_pipes.items) |pp| v.destroyPullPipeline(pp);
-  g_bufs.deinit(alloc); g_pipes.deinit(alloc); g_mesh_pipes.deinit(alloc);
-  g_mesh_verts.deinit(alloc); g_mesh_calls.deinit(alloc);
+  g_bufs.deinit(alloc); g_pipes.deinit(alloc);
   g_fill_verts.deinit(alloc); g_fill_calls.deinit(alloc); g_spirv_pipes.deinit(alloc);
-  g_textures.deinit(alloc); g_geoms.deinit(alloc); g_geom_calls.deinit(alloc);
+  g_textures.deinit(alloc);
   g_pull_pipes.deinit(alloc); g_pull_calls.deinit(alloc);
-  g_bufs = .empty; g_pipes = .empty; g_mesh_pipes = .empty;
-  g_mesh_verts = .empty; g_mesh_calls = .empty; g_vbuf = null; g_vbuf_cap = 0;
+  g_bufs = .empty; g_pipes = .empty;
   g_fill_verts = .empty; g_fill_calls = .empty; g_fbuf = null; g_fbuf_cap = 0; g_spirv_pipes = .empty;
-  g_textures = .empty; g_geoms = .empty; g_geom_calls = .empty;
+  g_textures = .empty;
   g_pull_pipes = .empty; g_pull_calls = .empty;
 }
 
@@ -353,72 +348,6 @@ fn floatsOut(bytes: []const u8, n: usize) ?K {
   return out;
 }
 
-// ── Mesh pipelines + per-frame draw accumulation (Phase 3, increment 2) ───────
-var g_mesh_pipes: std.ArrayList(vk.MeshPipe) = .empty; // 1-based handles
-const MeshCall = struct { pipe: usize, byte_offset: u64, count: u32, has_uni: bool, uniform: [vk.MESH_UNI_FLOATS]f32 };
-var g_mesh_calls: std.ArrayList(MeshCall) = .empty; // this frame's draws
-var g_mesh_verts: std.ArrayList(f32) = .empty; // this frame's vertex data
-var g_vbuf: ?vk.Buffer = null; // persistent mesh vertex buffer (grows)
-var g_vbuf_cap: u64 = 0;
-
-// Derive the vertex attribute layout from the vertex shader's Input variables +
-// Location decorations (ported from gpu.zig meshVtxLayout). Component count comes
-// from the fixed input pointer type ids in lib/gpu/spirv.k
-// (PinF32=10→1, PinV2=14→2, PinV3=18→3, PinV4=12→4). Returns count + float stride.
-fn meshVtxLayout(words: []const u32, out: *[16]vk.Vk.VtxAttr) struct { count: usize, stride_floats: u32 } {
-  var dec_id: [16]u32 = undefined;
-  var dec_loc: [16]u32 = undefined;
-  var ndec: usize = 0;
-  var in_id: [16]u32 = undefined;
-  var in_comp: [16]u32 = undefined;
-  var nin: usize = 0;
-  var i: usize = 5;
-  while (i < words.len) {
-    const w0 = words[i];
-    const wc: usize = w0 >> 16;
-    const op: u32 = w0 & 0xffff;
-    if (wc == 0) break;
-    if (op == 71 and i + 3 < words.len and words[i + 2] == 30) { // OpDecorate Location
-      if (ndec < 16) { dec_id[ndec] = words[i + 1]; dec_loc[ndec] = words[i + 3]; ndec += 1; }
-    } else if (op == 59 and i + 3 < words.len and words[i + 3] == 1) { // OpVariable Input
-      const comp: u32 = switch (words[i + 1]) { 10 => 1, 14 => 2, 18 => 3, 12 => 4, else => 0 };
-      if (comp > 0 and nin < 16) { in_id[nin] = words[i + 2]; in_comp[nin] = comp; nin += 1; }
-    }
-    i += wc;
-  }
-  var offset: u32 = 0;
-  var count: usize = 0;
-  var loc: u32 = 0;
-  while (loc < nin) : (loc += 1) {
-    var idx: usize = nin;
-    var k: usize = 0;
-    while (k < nin) : (k += 1) {
-      var d: usize = 0;
-      while (d < ndec) : (d += 1) { if (dec_id[d] == in_id[k] and dec_loc[d] == loc) { idx = k; break; } }
-      if (idx != nin) break;
-    }
-    if (idx == nin) break;
-    const comp = in_comp[idx];
-    out[count] = .{ .location = loc, .comps = comp, .offset = offset };
-    offset += comp * @sizeOf(f32);
-    count += 1;
-  }
-  return .{ .count = count, .stride_floats = offset / @sizeOf(f32) };
-}
-
-// Does the shader declare an OpVariable in the Uniform storage class (2)?
-fn hasUniformVar(words: []const u32) bool {
-  var i: usize = 5;
-  while (i < words.len) {
-    const w0 = words[i];
-    const wc: usize = w0 >> 16;
-    if (wc == 0) break;
-    if ((w0 & 0xffff) == 59 and i + 3 < words.len and words[i + 3] == 2) return true;
-    i += wc;
-  }
-  return false;
-}
-
 // Textures sampled at @group(1): count OpVariables in UniformConstant storage (0)
 // in the fragment; n_tex = that count minus the one shared sampler.
 fn texCount(words: []const u32) u32 {
@@ -432,20 +361,6 @@ fn texCount(words: []const u32) u32 {
     i += wc;
   }
   return if (uc > 0) uc - 1 else 0;
-}
-
-export fn gpuMesh(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
-  const v = g_vk orelse return ki(0);
-  const vwords = wordsOf(vtx_k) orelse return ki(0);
-  const fwords = wordsOf(frg_k) orelse return ki(0);
-  var attrs: [16]vk.Vk.VtxAttr = undefined;
-  const li = meshVtxLayout(vwords, &attrs);
-  if (li.count == 0) return ki(0);
-  const has_uni = hasUniformVar(vwords) or hasUniformVar(fwords);
-  const n_tex = texCount(fwords);
-  const mp = v.createMeshPipeline(vwords, fwords, attrs[0..li.count], li.stride_floats * 4, has_uni, n_tex) catch return ki(0);
-  g_mesh_pipes.append(alloc, mp) catch { v.destroyMeshPipeline(mp); return ki(0); };
-  return ki(@intCast(g_mesh_pipes.items.len));
 }
 
 // Count OpVariables in the StorageBuffer storage class (12) — the vertex-pull
@@ -544,13 +459,9 @@ fn recordPulls(v: *vk.Vk, cb: anytype) void {
   }
 }
 
-// ── textures + retained geometry (Phase 3, increment 2c) ──────────────────────
+// ── textures (Phase 3, increment 2c); sampled by fragmentTexN on the pull path ──
 var g_textures: std.ArrayList(vk.Texture) = .empty; // 1-based handles
-const Geom = struct { buf: vk.Buffer, count: u32, pipe: usize };
-var g_geoms: std.ArrayList(Geom) = .empty; // 1-based handles
 const MAX_TEX = 8;
-const GeomCall = struct { geom: usize, has_uni: bool, uniform: [vk.MESH_UNI_FLOATS]f32, tex: [MAX_TEX]i32, ntex: usize };
-var g_geom_calls: std.ArrayList(GeomCall) = .empty; // this frame's retained draws
 
 // gpuTexture[(w;h;comp)_I; data_I] -> handle : upload an image (expanded to RGBA).
 export fn gpuTexture(whc_k: ?K, data_k: ?K) callconv(.c) ?K {
@@ -580,120 +491,9 @@ export fn gpuTexture(whc_k: ?K, data_k: ?K) callconv(.c) ?K {
   return ki(@intCast(g_textures.items.len));
 }
 
-// gpuUploadMesh[verts_F; meshHandle] -> geomHandle : upload geometry to a retained
-// vertex buffer (once, not per frame).
-export fn gpuUploadMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
-  const v = g_vk orelse return ki(0);
-  const h = ki_val(handle_k);
-  if (h <= 0 or h > g_mesh_pipes.items.len) return ki(0);
-  const stride_floats: usize = g_mesh_pipes.items[@intCast(h - 1)].stride / 4;
-  if (stride_floats == 0) return ki(0);
-  const vf = kfp(verts_k) orelse return ki(0);
-  const vn = kn(verts_k);
-  if (vn < @as(i32, @intCast(stride_floats))) return ki(0);
-  const nfloats: usize = (@as(usize, @intCast(vn)) / stride_floats) * stride_floats;
-  const buf = v.createVertexBuffer(nfloats * @sizeOf(f32)) catch return ki(0);
-  @memcpy(buf.mapped[0 .. nfloats * 4], std.mem.sliceAsBytes(vf[0..nfloats]));
-  g_geoms.append(alloc, .{ .buf = buf, .count = @intCast(nfloats / stride_floats), .pipe = @intCast(h - 1) }) catch { v.destroyBuffer(buf); return ki(0); };
-  return ki(@intCast(g_geoms.items.len));
-}
-
-// gpuDrawGeomT[geom; uni_F; texHandles_I] : draw retained geometry with a per-draw
-// uniform block (@group0) and textures (@group1).
-export fn gpuDrawGeomT(geom_k: ?K, uni_k: ?K, tex_k: ?K) callconv(.c) ?K {
-  const g = ki_val(geom_k);
-  if (g <= 0 or g > g_geoms.items.len) return ki(0);
-  var gc: GeomCall = .{ .geom = @intCast(g - 1), .has_uni = false, .uniform = [_]f32{0} ** vk.MESH_UNI_FLOATS, .tex = [_]i32{0} ** MAX_TEX, .ntex = 0 };
-  if (kfp(uni_k)) |up| {
-    const m: usize = @min(@as(usize, @intCast(@max(kn(uni_k), 0))), vk.MESH_UNI_FLOATS);
-    var j: usize = 0;
-    while (j < m) : (j += 1) gc.uniform[j] = up[j];
-    gc.has_uni = m > 0;
-  }
-  if (kip(tex_k)) |tp| {
-    const nt: usize = @min(@as(usize, @intCast(@max(kn(tex_k), 0))), MAX_TEX);
-    var j: usize = 0;
-    while (j < nt) : (j += 1) gc.tex[j] = tp[j];
-    gc.ntex = nt;
-  }
-  g_geom_calls.append(alloc, gc) catch return ki(0);
-  return ki(0);
-}
-
-// Record retained-geometry draws (after per-frame meshes).
-fn recordGeoms(v: *vk.Vk, cb: anytype) void {
-  var tbuf: [MAX_TEX]vk.Texture = undefined;
-  for (g_geom_calls.items) |gc| {
-    const geom = g_geoms.items[gc.geom];
-    const mp = g_mesh_pipes.items[geom.pipe];
-    const uset = if (gc.has_uni) v.meshUniformSet(gc.uniform[0..]) else vk.Vk.nullSet();
-    var tset = vk.Vk.nullSet();
-    if (mp.n_tex > 0 and gc.ntex > 0) {
-      var k: usize = 0;
-      while (k < gc.ntex) : (k += 1) {
-        const th = gc.tex[k];
-        tbuf[k] = if (th > 0 and th <= g_textures.items.len) g_textures.items[@intCast(th - 1)] else g_textures.items[0];
-      }
-      tset = v.texSet(mp, tbuf[0..gc.ntex]);
-    }
-    v.drawMesh(cb, mp, geom.buf, 0, geom.count, uset, tset);
-  }
-}
-
-fn drawMeshCommon(verts_k: ?K, handle: i32, uni: [vk.MESH_UNI_FLOATS]f32, has_uni: bool) void {
-  if (handle <= 0 or handle > g_mesh_pipes.items.len) return;
-  const stride_floats: usize = g_mesh_pipes.items[@intCast(handle - 1)].stride / 4;
-  if (stride_floats == 0) return;
-  const vf = kfp(verts_k) orelse return;
-  const vn = kn(verts_k);
-  if (vn < @as(i32, @intCast(stride_floats))) return;
-  const nfloats: usize = (@as(usize, @intCast(vn)) / stride_floats) * stride_floats;
-  const byte_offset: u64 = g_mesh_verts.items.len * @sizeOf(f32);
-  g_mesh_verts.appendSlice(alloc, vf[0..nfloats]) catch return;
-  g_mesh_calls.append(alloc, .{ .pipe = @intCast(handle - 1), .byte_offset = byte_offset, .count = @intCast(nfloats / stride_floats), .has_uni = has_uni, .uniform = uni }) catch return;
-}
-
-export fn gpuDrawMesh(verts_k: ?K, handle_k: ?K) callconv(.c) ?K {
-  drawMeshCommon(verts_k, ki_val(handle_k), [_]f32{0} ** vk.MESH_UNI_FLOATS, false);
-  return ki(0);
-}
-
-export fn gpuDrawMeshU(verts_k: ?K, handle_k: ?K, uni_k: ?K) callconv(.c) ?K {
-  var uni = [_]f32{0} ** vk.MESH_UNI_FLOATS;
-  if (kfp(uni_k)) |up| {
-    const m: usize = @min(@as(usize, @intCast(@max(kn(uni_k), 0))), vk.MESH_UNI_FLOATS);
-    var j: usize = 0;
-    while (j < m) : (j += 1) uni[j] = up[j];
-  }
-  drawMeshCommon(verts_k, ki_val(handle_k), uni, true);
-  return ki(0);
-}
-
-// Upload the frame's accumulated mesh vertices and record all draws into cb.
-fn recordMeshes(v: *vk.Vk, cb: anytype) void {
-  const nf = g_mesh_verts.items.len;
-  if (nf == 0) return;
-  const need: u64 = nf * @sizeOf(f32);
-  if (g_vbuf == null or need > g_vbuf_cap) {
-    if (g_vbuf) |b| v.destroyBuffer(b);
-    const cap = need * 2;
-    g_vbuf = v.createVertexBuffer(cap) catch { g_vbuf = null; return; };
-    g_vbuf_cap = cap;
-  }
-  const vb = g_vbuf.?;
-  @memcpy(vb.mapped[0..need], std.mem.sliceAsBytes(g_mesh_verts.items[0..nf]));
-  for (g_mesh_calls.items) |mc| {
-    const set = if (mc.has_uni) v.meshUniformSet(mc.uniform[0..]) else null;
-    v.drawMesh(cb, g_mesh_pipes.items[mc.pipe], vb, mc.byte_offset, mc.count, set, vk.Vk.nullSet());
-  }
-}
-
 fn resetFrameMeshes() void {
-  g_mesh_verts.clearRetainingCapacity();
-  g_mesh_calls.clearRetainingCapacity();
   g_fill_verts.clearRetainingCapacity();
   g_fill_calls.clearRetainingCapacity();
-  g_geom_calls.clearRetainingCapacity();
   g_pull_calls.clearRetainingCapacity();
 }
 
@@ -915,8 +715,6 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
     }
     if (v.beginFrame(@intCast(fbw), @intCast(fbh), .{ 0, 0, 0, 1 })) |cb| {
       recordFills(&v, cb, @floatFromInt(fbw), @floatFromInt(fbh)); // 2-D base layer
-      recordMeshes(&v, cb); // 3-D on top (depth-tested)
-      recordGeoms(&v, cb); // retained 3-D geometry (uniform + textures)
       recordPulls(&v, cb); // vertex-pulled geometry (kk2 §5): reads resident buffers
       v.endFrame(@intCast(fbw), @intCast(fbh), if (do_snap) snap_buf else null);
       if (do_snap) if (snap_buf) |sb| {
@@ -985,14 +783,9 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuTess", @ptrCast(&gpuTess), 1);
   r.k_register("gpuSpirv", @ptrCast(&gpuSpirv), 2);
   r.k_register("gpuFillShader", @ptrCast(&gpuFillShader), 2);
-  r.k_register("gpuMesh", @ptrCast(&gpuMesh), 2);
-  r.k_register("gpuUploadMesh", @ptrCast(&gpuUploadMesh), 2);
-  r.k_register("gpuDrawMesh", @ptrCast(&gpuDrawMesh), 2);
-  r.k_register("gpuDrawMeshU", @ptrCast(&gpuDrawMeshU), 3);
   r.k_register("gpuMeshPull", @ptrCast(&gpuMeshPull), 2);
   r.k_register("gpuDrawPull", @ptrCast(&gpuDrawPull), 3);
   r.k_register("gpuDrawPullT", @ptrCast(&gpuDrawPullT), 4);
-  r.k_register("gpuDrawGeomT", @ptrCast(&gpuDrawGeomT), 3);
   r.k_register("gpuTexture", @ptrCast(&gpuTexture), 2);
   r.k_register("gpuCaps", @ptrCast(&gpuCaps), 1);
 }

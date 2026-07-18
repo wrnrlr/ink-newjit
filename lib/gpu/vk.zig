@@ -126,7 +126,6 @@ pub const FRAMES = 2; // frames in flight for windowed rendering
 // dye.k emits SPIR-V 1.4 natively (version word 0x00010400 + full-interface
 // OpEntryPoint) since the Dawn cutover; the old INK_SPV14 maybeBump transform
 // that proved 1.4 on MoltenVK was folded into the compiler and removed.
-pub const MESH_UNI_FLOATS = 32; // 8 vec4 per-draw uniform block
 const UNI_SLOT = 256; // bytes per uniform slot (alignment-friendly)
 const MAX_MCALLS = 1024; // max uniform mesh draws per frame
 
@@ -157,16 +156,6 @@ pub const Pipeline = struct {
   wgx: u32,
 };
 
-pub const MeshPipe = struct {
-  pipe: c.VkPipeline,
-  layout: c.VkPipelineLayout,
-  vmod: c.VkShaderModule,
-  fmod: c.VkShaderModule,
-  stride: u32, // vertex stride in bytes
-  has_uniform: bool, // pipeline layout includes the @group(0) uniform block
-  n_tex: u32, // textures sampled at @group(1) (0 = none)
-  tex_dsl: c.VkDescriptorSetLayout, // @group(1) layout (n images + 1 sampler), or null
-};
 
 // Vertex-pulling pipeline (kk2 §5): no vertex-input state; the vertex shader reads
 // `nbuf` resident storage buffers (set 0, VERTEX stage) indexed by gl_VertexIndex,
@@ -279,11 +268,6 @@ pub const Vk = struct {
   frame_cmd: [FRAMES]c.VkCommandBuffer,
   frame: u32, // frame-in-flight index (0..FRAMES-1)
   img_index: u32, // acquired swapchain image for the current frame
-  // per-draw mesh uniform block (@group(0) binding 0): one pool+buffer per frame
-  mesh_dsl: c.VkDescriptorSetLayout,
-  mesh_upool: [FRAMES]c.VkDescriptorPool,
-  mesh_ubuf: [FRAMES]Buffer,
-  mesh_uslot: [FRAMES]u32,
   // 2-D fill pipeline (fill.vert/frag) + its 6-binding set + dummy texture
   fill_dsl: c.VkDescriptorSetLayout,
   fill_pipe: c.VkPipeline,
@@ -428,15 +412,12 @@ pub const Vk = struct {
         vkDestroySemaphore(self.dev, self.img_avail[i], null);
         vkDestroySemaphore(self.dev, self.render_done[i], null);
         vkDestroyFence(self.dev, self.in_flight[i], null);
-        vkDestroyDescriptorPool(self.dev, self.mesh_upool[i], null);
-        self.destroyBuffer(self.mesh_ubuf[i]);
         vkDestroyDescriptorPool(self.dev, self.fill_upool[i], null);
         vkDestroyDescriptorPool(self.dev, self.tex_upool[i], null);
         vkDestroyDescriptorPool(self.dev, self.pull_upool[i], null);
         self.destroyBuffer(self.view_ubuf[i]);
         self.destroyBuffer(self.frag_ubuf[i]);
       }
-      vkDestroyDescriptorSetLayout(self.dev, self.mesh_dsl, null);
       vkDestroyPipeline(self.dev, self.fill_pipe, null);
       vkDestroyPipelineLayout(self.dev, self.fill_layout, null);
       vkDestroyDescriptorSetLayout(self.dev, self.fill_dsl, null);
@@ -589,20 +570,10 @@ pub const Vk = struct {
       }
     }
 
-    // per-draw mesh uniform block: DSL (binding 0, uniform, vertex+fragment) +
-    // one descriptor pool & host-visible uniform buffer per frame in flight.
-    const ubind = c.VkDescriptorSetLayoutBinding{ .binding = 0, .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT };
-    const udsli = c.VkDescriptorSetLayoutCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &ubind };
-    if (!ok(vkCreateDescriptorSetLayout(self.dev, &udsli, null, &self.mesh_dsl))) return Error.VulkanInit;
+    // per-frame storage-buffer sets for vertex-pull draws (kk2 §5)
     {
       var i: u32 = 0;
       while (i < FRAMES) : (i += 1) {
-        const usz = c.VkDescriptorPoolSize{ .type = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = MAX_MCALLS };
-        const updci = c.VkDescriptorPoolCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = MAX_MCALLS, .poolSizeCount = 1, .pPoolSizes = &usz };
-        _ = vkCreateDescriptorPool(self.dev, &updci, null, &self.mesh_upool[i]);
-        self.mesh_ubuf[i] = self.createBuffer(MAX_MCALLS * UNI_SLOT, true) catch return Error.VulkanInit;
-        self.mesh_uslot[i] = 0;
-        // per-frame storage-buffer sets for vertex-pull draws (kk2 §5)
         const psz = c.VkDescriptorPoolSize{ .type = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = MAX_MCALLS * MAX_BIND };
         const ppci = c.VkDescriptorPoolCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = MAX_MCALLS, .poolSizeCount = 1, .pPoolSizes = &psz };
         _ = vkCreateDescriptorPool(self.dev, &ppci, null, &self.pull_upool[i]);
@@ -702,11 +673,6 @@ pub const Vk = struct {
     }
   }
 
-  // Allocate a @group(1) descriptor set binding `texs` (n sampled images + one
-  // shared sampler) for pipeline `mp`, from the current frame's texture pool.
-  pub fn texSet(self: *Vk, mp: MeshPipe, texs: []const Texture) c.VkDescriptorSet {
-    return self.texSetL(mp.tex_dsl, mp.n_tex, texs);
-  }
   // Build a @group(1) texture set (n sampled images at 0..n-1 + one shared sampler at
   // n) for any pipeline carrying `tex_dsl` — shared by the mesh (attribute) and pull
   // paths, so a vertex-pulled draw samples textures exactly like a mesh draw.
@@ -837,26 +803,6 @@ pub const Vk = struct {
     return null;
   }
 
-  // Reserve a per-draw uniform slot in the current frame's buffer, upload `floats`,
-  // and return a descriptor set bound to it (for a has_uniform mesh pipeline).
-  pub fn meshUniformSet(self: *Vk, floats: []const f32) c.VkDescriptorSet {
-    const f = self.frame;
-    const slot = self.mesh_uslot[f];
-    if (slot >= MAX_MCALLS) return null;
-    self.mesh_uslot[f] = slot + 1;
-    const off: usize = @as(usize, slot) * UNI_SLOT;
-    const n = @min(floats.len, @as(usize, MESH_UNI_FLOATS));
-    const src = std.mem.sliceAsBytes(floats[0..n]);
-    @memcpy(self.mesh_ubuf[f].mapped[off..][0..src.len], src);
-    var set: c.VkDescriptorSet = undefined;
-    const dsai = c.VkDescriptorSetAllocateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = self.mesh_upool[f], .descriptorSetCount = 1, .pSetLayouts = &self.mesh_dsl };
-    if (!ok(vkAllocateDescriptorSets(self.dev, &dsai, &set))) return null;
-    const binfo = c.VkDescriptorBufferInfo{ .buffer = self.mesh_ubuf[f].buf, .offset = off, .range = UNI_SLOT };
-    const wr = c.VkWriteDescriptorSet{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 0, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &binfo };
-    vkUpdateDescriptorSets(self.dev, 1, @ptrCast(&wr), 0, null);
-    return set;
-  }
-
   fn createSwapObjects(self: *Vk, w: u32, h: u32) void {
     var caps: c.VkSurfaceCapabilitiesKHR = undefined;
     _ = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(self.pdev, self.surface, &caps);
@@ -970,8 +916,6 @@ pub const Vk = struct {
     if (acq == c.VK_ERROR_OUT_OF_DATE_KHR) { self.recreateSwapchain(w, h); return null; }
     _ = vkResetFences(self.dev, 1, @ptrCast(&self.in_flight[self.frame]));
     // this frame's prior uniform sets are done (fence waited) — recycle them
-    _ = vkResetDescriptorPool(self.dev, self.mesh_upool[self.frame], 0);
-    self.mesh_uslot[self.frame] = 0;
     _ = vkResetDescriptorPool(self.dev, self.fill_upool[self.frame], 0);
     self.fill_uslot[self.frame] = 0;
     _ = vkResetDescriptorPool(self.dev, self.tex_upool[self.frame], 0);
@@ -1079,123 +1023,6 @@ pub const Vk = struct {
     const pr = vkQueuePresentKHR(self.queue, &pi);
     if (pr == c.VK_ERROR_OUT_OF_DATE_KHR or pr == c.VK_SUBOPTIMAL_KHR) self.recreateSwapchain(w, h);
     self.frame = (self.frame + 1) % FRAMES;
-  }
-
-  // Plain vertex-attribute description (the FFI layer builds these without needing
-  // Vulkan types): location, component count (1..4 → R/RG/RGB/RGBA f32), byte offset.
-  pub const VtxAttr = struct { location: u32, comps: u32, offset: u32 };
-
-  // Basic mesh graphics pipeline: vertex+fragment SPIR-V, one vertex binding with
-  // caller-derived attributes, depth-test on, alpha blend, dynamic viewport/scissor.
-  // (Increment 2: no descriptor sets — uniform/texture/instance variants come next.)
-  pub fn createMeshPipeline(self: *Vk, vtx: []const u32, frg: []const u32, in_attrs: []const VtxAttr, stride_bytes: u32, has_uniform_in: bool, n_tex: u32) Error!MeshPipe {
-    // A textured mesh always carries the @group(0) uniform block too (matches Dawn).
-    const has_uniform = has_uniform_in or n_tex > 0;
-    var attr_buf: [16]c.VkVertexInputAttributeDescription = undefined;
-    for (in_attrs, 0..) |a, i| {
-      attr_buf[i] = .{
-        .location = a.location,
-        .binding = 0,
-        .format = switch (a.comps) {
-          1 => c.VK_FORMAT_R32_SFLOAT,
-          2 => c.VK_FORMAT_R32G32_SFLOAT,
-          3 => c.VK_FORMAT_R32G32B32_SFLOAT,
-          else => c.VK_FORMAT_R32G32B32A32_SFLOAT,
-        },
-        .offset = a.offset,
-      };
-    }
-    const attrs = attr_buf[0..in_attrs.len];
-    var mp: MeshPipe = .{ .pipe = undefined, .layout = undefined, .vmod = undefined, .fmod = undefined, .stride = stride_bytes, .has_uniform = has_uniform, .n_tex = n_tex, .tex_dsl = null };
-    const vsmi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = vtx.len * 4, .pCode = vtx.ptr };
-    if (!ok(vkCreateShaderModule(self.dev, &vsmi, null, &mp.vmod))) return Error.ShaderModule;
-    const fsmi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = frg.len * 4, .pCode = frg.ptr };
-    if (!ok(vkCreateShaderModule(self.dev, &fsmi, null, &mp.fmod))) { vkDestroyShaderModule(self.dev, mp.vmod, null); return Error.ShaderModule; }
-
-    // @group(1) texture layout: n_tex sampled images (0..n-1) + one shared sampler (n).
-    if (n_tex > 0) {
-      var tb: [MAX_BIND + 1]c.VkDescriptorSetLayoutBinding = undefined;
-      var i: u32 = 0;
-      while (i < n_tex) : (i += 1) tb[i] = .{ .binding = i, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT };
-      tb[n_tex] = .{ .binding = n_tex, .descriptorType = c.VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT };
-      const tdsli = c.VkDescriptorSetLayoutCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = n_tex + 1, .pBindings = &tb };
-      _ = vkCreateDescriptorSetLayout(self.dev, &tdsli, null, &mp.tex_dsl);
-    }
-
-    var set_layouts: [2]c.VkDescriptorSetLayout = undefined;
-    var nset: u32 = 0;
-    if (has_uniform) { set_layouts[nset] = self.mesh_dsl; nset += 1; }
-    if (n_tex > 0) { set_layouts[nset] = mp.tex_dsl; nset += 1; }
-    const plci = c.VkPipelineLayoutCreateInfo{
-      .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-      .setLayoutCount = nset,
-      .pSetLayouts = if (nset > 0) &set_layouts else null,
-    };
-    if (!ok(vkCreatePipelineLayout(self.dev, &plci, null, &mp.layout))) return Error.Pipeline;
-
-    const stages = [2]c.VkPipelineShaderStageCreateInfo{
-      .{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = c.VK_SHADER_STAGE_VERTEX_BIT, .module = mp.vmod, .pName = "main" },
-      .{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = c.VK_SHADER_STAGE_FRAGMENT_BIT, .module = mp.fmod, .pName = "main" },
-    };
-    const vbind = c.VkVertexInputBindingDescription{ .binding = 0, .stride = stride_bytes, .inputRate = c.VK_VERTEX_INPUT_RATE_VERTEX };
-    const vin = c.VkPipelineVertexInputStateCreateInfo{
-      .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-      .vertexBindingDescriptionCount = 1, .pVertexBindingDescriptions = &vbind,
-      .vertexAttributeDescriptionCount = @intCast(attrs.len), .pVertexAttributeDescriptions = attrs.ptr,
-    };
-    const ia = c.VkPipelineInputAssemblyStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, .topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST };
-    const vps = c.VkPipelineViewportStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1 };
-    const rs = c.VkPipelineRasterizationStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, .polygonMode = c.VK_POLYGON_MODE_FILL, .cullMode = c.VK_CULL_MODE_NONE, .frontFace = c.VK_FRONT_FACE_COUNTER_CLOCKWISE, .lineWidth = 1.0 };
-    const ms = c.VkPipelineMultisampleStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, .rasterizationSamples = c.VK_SAMPLE_COUNT_1_BIT };
-    const ds = c.VkPipelineDepthStencilStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO, .depthTestEnable = c.VK_TRUE, .depthWriteEnable = c.VK_TRUE, .depthCompareOp = c.VK_COMPARE_OP_LESS };
-    const cba = c.VkPipelineColorBlendAttachmentState{
-      .blendEnable = c.VK_TRUE,
-      .srcColorBlendFactor = c.VK_BLEND_FACTOR_SRC_ALPHA, .dstColorBlendFactor = c.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, .colorBlendOp = c.VK_BLEND_OP_ADD,
-      .srcAlphaBlendFactor = c.VK_BLEND_FACTOR_ONE, .dstAlphaBlendFactor = c.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, .alphaBlendOp = c.VK_BLEND_OP_ADD,
-      .colorWriteMask = c.VK_COLOR_COMPONENT_R_BIT | c.VK_COLOR_COMPONENT_G_BIT | c.VK_COLOR_COMPONENT_B_BIT | c.VK_COLOR_COMPONENT_A_BIT,
-    };
-    const cb = c.VkPipelineColorBlendStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &cba };
-    const dyn_states = [2]c.VkDynamicState{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR };
-    const dyn = c.VkPipelineDynamicStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 2, .pDynamicStates = &dyn_states };
-
-    const gpci = c.VkGraphicsPipelineCreateInfo{
-      .sType = c.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-      .stageCount = 2, .pStages = &stages,
-      .pVertexInputState = &vin, .pInputAssemblyState = &ia, .pViewportState = &vps,
-      .pRasterizationState = &rs, .pMultisampleState = &ms, .pDepthStencilState = &ds,
-      .pColorBlendState = &cb, .pDynamicState = &dyn,
-      .layout = mp.layout, .renderPass = self.render_pass, .subpass = 0, .basePipelineIndex = -1,
-    };
-    if (!ok(vkCreateGraphicsPipelines(self.dev, null, 1, @ptrCast(&gpci), null, @ptrCast(&mp.pipe)))) {
-      vkDestroyPipelineLayout(self.dev, mp.layout, null);
-      vkDestroyShaderModule(self.dev, mp.vmod, null);
-      vkDestroyShaderModule(self.dev, mp.fmod, null);
-      return Error.Pipeline;
-    }
-    return mp;
-  }
-
-  pub fn destroyMeshPipeline(self: *Vk, mp: MeshPipe) void {
-    vkDestroyPipeline(self.dev, mp.pipe, null);
-    vkDestroyPipelineLayout(self.dev, mp.layout, null);
-    if (mp.tex_dsl != null) vkDestroyDescriptorSetLayout(self.dev, mp.tex_dsl, null);
-    vkDestroyShaderModule(self.dev, mp.vmod, null);
-    vkDestroyShaderModule(self.dev, mp.fmod, null);
-  }
-
-  // Record a mesh draw into the given (render-pass-open) command buffer, binding
-  // the shared vertex buffer at byte_offset so meshes of different strides coexist.
-  // `uset` = per-draw uniform set (@group0) or null; `tset` = texture set (@group1)
-  // or null. `vbuf`/`byte_offset`/`vcount` describe the vertices (per-frame or retained).
-  pub fn drawMesh(_: *Vk, cb: c.VkCommandBuffer, mp: MeshPipe, vbuf: Buffer, byte_offset: u64, vcount: u32, uset: c.VkDescriptorSet, tset: c.VkDescriptorSet) void {
-    const off: c.VkDeviceSize = byte_offset;
-    vkCmdBindPipeline(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, mp.pipe);
-    if (mp.has_uniform and uset != null)
-      vkCmdBindDescriptorSets(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, mp.layout, 0, 1, @ptrCast(&uset), 0, null);
-    if (mp.n_tex > 0 and tset != null)
-      vkCmdBindDescriptorSets(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, mp.layout, 1, 1, @ptrCast(&tset), 0, null);
-    vkCmdBindVertexBuffers(cb, 0, 1, @ptrCast(&vbuf.buf), @ptrCast(&off));
-    vkCmdDraw(cb, vcount, 1, 0, 0);
   }
 
   // ── vertex pulling (kk2 §5) ────────────────────────────────────────────────
