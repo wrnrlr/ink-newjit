@@ -540,7 +540,12 @@ pure instruction stencils in `lib/spirv.k`), and a set of higher-level helpers
 - `mesh.compilePull[vtx; frg]` / `mesh.drawPull[pipe; bufs; count]` — vertex
   pulling: the vertex shader (`shader.vertexPull`) reads resident storage
   buffers by `gl_VertexIndex`; instancing is an index computation
-  (`inst: floor[vid % NV]`, see `demo/scene.k`).
+  (`inst: floor[vid % NV]`, see `demo/scene.k`). Per-frame uniforms ride in one
+  of those storage buffers (overwrite it with `gpu.write`), so no uniform block
+  is needed.
+- `mesh.drawPullT[pipe; bufs; count; texs]` — a pulled draw that also samples
+  textures at `@group(1)` (a `shader.fragmentTexN` fragment); `texs` = `gpuTexture`
+  handles. `demo/earth.k` is fully pulled + textured this way.
 - `lib/pbr.k` — a physically-based `pbrVtx` / `PbrFragment` shader pair;
   `lib/camera.k` — orbit camera (`CamNew`, `CamUpdate[c;props]`) folding one
   frame of input into a camera-state dict (WASD pan, scroll zoom, right-drag

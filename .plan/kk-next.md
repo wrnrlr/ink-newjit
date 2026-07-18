@@ -35,9 +35,21 @@ literal with a decimal element after a bare int (`1 2 3.5`) errors.
   syntax composed with gather+scatterAdd (unify raw-kernel emitter + table bindings)
   — not needed for the edge use case (interleaving covers it).
 
-STILL OPEN: Task 4 (earth on vertex pulling — vk.zig pull pipeline uniforms+textures),
-Task 6 (`n f/ d` recording + compile-on-apply caching). 4 is native-heavy; 6a is
-design-gated.
+- **Task 4 (earth.k on vertex pulling)** — DONE. Pull pipelines gained texture
+  support at @group(1) (vk.zig createPullPipeline/drawPull + texSetL; gpuMeshPull
+  infers n_tex; gpuDrawPullT packs count+tex into one arg since FFI caps at arity 3).
+  Per-frame uniforms ride in a pulled storage buffer (no uniform-block support
+  needed). demo/earth.k fully pulled + textured, pixel-identical (-snap). Open call
+  for Werner: whether the attribute mesh path (mesh.compile/draw/drawU/upload/
+  drawGeomT) can retire — sword/pbr/typeset/eyes still use it; sword.k is the
+  simplest next port (textured + uniform mesh).
+
+STILL OPEN: Task 6 (`n f/ d` recording + compile-on-apply caching) — 6b is pure
+kk.k (cache the classification per call-site), 6a is design-gated (needs a VM hook
+or a k-level `f/` overload on a placed descriptor — discuss the mechanism first).
+
+Three triage bugs fixed at the Zig level (amend numeric coercion, mixed int/float
+literals; the "aliasing" one was a misdiagnosis of the coercion bug).
 
 ## Where the codebase stands
 
