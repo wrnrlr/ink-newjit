@@ -486,3 +486,37 @@ kkFreqK:  {@[x; kkFreqI; +; 1.]}
 kk.freq: {[d; nb]
   kkFreqI:: $[`m ~ @d; gpu.read[d`gpu]; `f$ d]
   kk.compile[kkFreqK; ,gpu.hold[nb#0.]]}
+
+/ ── Group =d (kk2 §5 / kk.md §2): bucketed CSR permutation via atomic cursors ────
+/ kk.group[d; nb] partitions the n integer bucket-ids in d into a CSR layout: counts
+/ (kk.freq), exclusive offsets off[b] = Σ counts[0..b-1] (kk.sums − counts), and a
+/ permutation `perm` of !n such that bucket b owns perm[off[b] .. off[b]+counts[b]).
+/ One thread per element scatters its index into its bucket slot using a per-bucket
+/ ATOMIC CURSOR: pos = atomicAdd(cursor[b], 1) is the OLD cursor value (the i32
+/ scatter-add returns it — xLoSadd's `old`), so pos is this element's rank within its
+/ bucket and off[b]+pos its global slot. Atomics race → intra-bucket order is
+/ NONDETERMINISTIC (unlike CPU =d's stable order), but the SET per bucket and the
+/ counts are exact, and d@perm is non-decreasing (correctness the oracle checks
+/ order-independently). Over-dispatched threads (i≥n) read element 0 (clamped),
+/ add 0 to the cursor (ok=0.) and park their write at perm[i] in the ×64 padding.
+/ Returns the perm placement with `off/`cnt sub-placements attached (8: any of them).
+kkGrpK: gpu.kernel[{[cursor; d; off; g; perm; i]
+  n:  `i$ g[0]
+  ok: $[i<n; 1.; 0.]
+  ii: $[i<n; i; 0]                          / clamp the read for over-dispatched threads
+  b:  `i$ d[ii]
+  pos: scatterAdd[cursor; b; ok]            / OLD cursor value = rank within bucket b
+  slot: $[i<n; (`i$ off[b]) + pos; i]       / i≥n → park in perm's padding at perm[i]
+  set[perm; slot; `f$ i]}; 1; 4]
+kkGrpPipe:: 0
+kk.group: {[d; nb]
+  dd:  $[`m ~ @d; d; gpu.hold `f$ d]         / accept a placement or a host vector
+  cnt: kk.freq[dd; nb]                       / bucket counts (placement, length nb)
+  off: kk.compile[{x-y}; (kk.sums cnt; cnt)] / exclusive offsets = inclusive scan − counts
+  n:   dd`n
+  $[kkGrpPipe=0; kkGrpPipe:: gpu.compileCompute[kkGrpK; 5]; 0]
+  cur: gpu.buffer[(nb + 64) # 0.]            / per-bucket atomic cursors (zeroed, i32)
+  g:   gpu.buffer[(`f$ n) , 63 # 0.]         / g[0] = element count (over-dispatch guard)
+  perm: gpu.buffer[(kkPad n) # 0.]           / output permutation (padding parks OOB writes)
+  gpu.dispatch[kkGrpPipe; (cur; dd`gpu; off`gpu; g; perm); n]
+  [gpu: perm; t: `f; n: n; s: ,n; off: off; cnt: cnt]}

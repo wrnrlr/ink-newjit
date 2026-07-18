@@ -12,6 +12,25 @@ chk: {[nm; b] $[b; ok:: ok + 1; nok:: nok + 1]; $[b; 0; `0 0: "FAIL ",nm,"\n"]}
 / CPU histogram reference: counts[b] = number of indices equal to b.
 cpuFreq: {[idx; nb] `f$ @[nb#0; idx; +; (#idx)#1]}
 
+/ CPU group reference + the order-independent checks (helpers are top-level: the
+/ inner set-builders and chk/cpuFreq are globals — no closure over run's locals).
+grpChk: {[nb; idx]
+  n: #idx
+  gr: kk.group[idx; nb]
+  perm: `i$ 8: gr
+  goff: `i$ nb # 8: gr`off
+  gcnt: `i$ nb # 8: gr`cnt
+  cnt:  `i$ cpuFreq[idx; nb]
+  coff: 0 , +\ -1 _ cnt                        / exclusive offsets = 0, running Σ of all-but-last
+  dp:   idx @ perm
+  gsets: {[b] p: perm @ (goff b) + ! gcnt b; p @ < p}' ! nb
+  csets: {[b] & idx = b}' ! nb
+  chk["group nb=",($nb)," counts match";        gcnt ~ cnt]
+  chk["group nb=",($nb)," offsets match";        goff ~ coff]
+  chk["group nb=",($nb)," perm is permutation";  (perm @ < perm) ~ ! n]
+  chk["group nb=",($nb)," d@perm bucketed";      dp ~ dp @ < dp]
+  chk["group nb=",($nb)," per-bucket sets";      gsets ~ csets]}
+
 run: {[]
   / 1. skewed indices, 8 buckets (duplicates accumulate) — host-vector input
   nb1: 8; I1: (13 * !40) mod nb1
@@ -31,6 +50,15 @@ run: {[]
   / 4. an empty bucket (index range < nb) stays zero
   nb4: 6; I4: (!20) mod 4
   chk["freq leaves unhit buckets 0"; (nb4 # 8: kk.freq[I4; nb4]) ~ cpuFreq[I4; nb4]]
+
+  / 5. kk.group — CSR bucketing via per-bucket atomic cursors. Intra-bucket order
+  / is nondeterministic (atomics race), so the oracle is order-INDEPENDENT: counts
+  / and offsets match CPU, perm is a valid permutation of !n, d@perm is bucketed
+  / (non-decreasing), and each bucket's index SET equals the CPU grouping.
+  grpChk[5;   (13 * !20) mod 5]              / skewed, every bucket hit
+  grpChk[4;   (!12) mod 4]                   / dense, equal buckets
+  grpChk[6;   (!20) mod 4]                   / empty tail buckets (4,5 stay empty)
+  grpChk[8;   (7 * !50) mod 8]               / larger, uneven
 
   `0 0: "kkgrp: ",($ok)," ok, ",($nok)," fail\n"}
 
