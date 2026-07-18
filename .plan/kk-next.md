@@ -8,7 +8,40 @@ that actually bite are repeated per task below.
 ## State of the tree (all green)
 
 `main` is clean. `zig build`, `zig build gpu`, `zig build test`, and the full
-oracle suite all pass (10 rungs + spirv-val 20/20). Everything below is DONE:
+oracle suite all pass (10 rungs + spirv-val 20/20).
+
+### Landed since this handoff was written (2026-07-18)
+
+- **Task A — compile-on-apply caching (DONE).** `kk.compile` split into
+  `kk.plan[fn;args]` (classify + compile ONCE → a reusable plan dict
+  `[kind;pipe;…binding info]`, cached in `kkPlanCache`) and `kk.run[plan;args]`
+  (dispatch fresh args, ZERO re-parse/re-classify). Key = lambda source + #inputs +
+  each placement's signature (type/shape/layout/columns) + `kkScatForceI`. Every path
+  (map/gather/gather-reduce/amend/scatter/planar+interleaved table/dict) split into
+  `kkPlanX`/`kkRunX`. `test/kkc.k` (now 44 checks) asserts a repeat compile leaves
+  `kkPlanMisses` and `#!kkCache` unchanged. Observability: `kkPlanMisses`.
+- **Task B.1 — `kk.group` (DONE).** `kk.group[d; nb]` → CSR: counts (`kk.freq`),
+  exclusive offsets (`kk.sums` − counts), and a permutation `perm` via per-bucket
+  ATOMIC CURSORS (`pos = atomicAdd(cursor[b],1)`; the i32 scatter-add already returns
+  the OLD value — `xLoSadd`'s `old`). Returns the perm placement with `off`/`cnt`
+  sub-placements. `test/kkgrp.k` (now 25 checks) has an order-independent oracle.
+
+### Task B.2 — radix sort — NOT DONE (correctness gate found; read before starting)
+
+LSD radix needs a **STABLE** per-digit counting sort. `kk.group`'s atomic-cursor
+scatter is deliberately NON-stable (threads race for cursor slots — fine for
+grouping SETS, WRONG for a radix pass, which would then not sort). So radix cannot
+just reuse the group scatter. Two viable stable scatters: (a) per-digit-value
+`kk.where` compaction concatenated in digit order (stable, but R=16 whiles/pass —
+heavy); (b) a multi-lane exclusive scan giving each element its stable local rank
+within its digit, then `slot = off[digit]+rank`. Also: digit extraction needs
+`div`/`mod`, which are NOT in the elementwise map subset (`kkEwOps`) — do it in a
+RAW `gpu.kernel` (the integer dialect has `div`/`mod`). Scope the first cut to
+NON-NEGATIVE integer-valued f32 keys (< 2^24); general float sort needs the
+bit-flip key transform, and there are no bitwise/shift ops in the encoder yet
+(only `opBitcast`) — document NaN/negative as out of scope until then.
+
+Everything below is DONE:
 
 - **kk tier-1 + tier-2 compiler**: elementwise, gather, scatter-add, amend,
   reduce/scan/where, in-kernel loops, placed tables (planar + interleaved) and
