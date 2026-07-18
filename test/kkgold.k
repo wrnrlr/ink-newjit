@@ -122,23 +122,27 @@ ck["fragTex"; shader.fragmentTexN[[uv:`v2; out:`v4]; 2; {[uv]
   c0: sample[0; uv]
   c1: sample[1; uv]
   (mix[c0[0];c1[0];0.5]; c0[1]; c1[2]; 1.0)}]]
-ck["vtxPlanes"; shader.vertex[[pos:`v3;nor:`v3]; [vNor:`v3]; {[pos;nor]
+/ Vertex shaders are vertex-PULLED now (shader.vertexPull): geometry rides a stride-N
+/ storage buffer read at N*vid, and uniforms ride a second buffer (uCam/uPan → ub).
+ck["vtxPlanes"; shader.vertexPull[[vNor:`v3]; {[vb;vid]
+  b:6.*vid; px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.5
-  py0: (c45*pos[0])+(s45*pos[2])
-  py2: (c45*pos[2])-(s45*pos[0])
-  px1: (c30*pos[1])-(s30*py2)
-  px2: (s30*pos[1])+(c30*py2)
-  ((sc*py0; sc*px1; 0.5-px2*sc*0.5; 1.0); nor)}]]
-ck["vtxBare"; shader.vertex[[pos:`v3]; ()!(); {[pos] (pos[0];pos[1];pos[2];1.0)}]]
-ck["vtxSword"; shader.vertexU[[pos:`v3;nor:`v3;mat:`v4;lit:`f32]; [wNor:`v3;wMat:`v4;wLit:`f32]; `uCam`uPan; {[pos;nor;mat;lit]
-  ca:uCam[0]; sa:uCam[1]; xca:uCam[2]; xsa:uCam[3]
-  zoom:uPan[0]; cx:uPan[1]; cz:uPan[2]
+  py0: (c45*px)+(s45*pz)
+  py2: (c45*pz)-(s45*px)
+  px1: (c30*py)-(s30*py2)
+  px2: (s30*py)+(c30*py2)
+  ((sc*py0; sc*px1; 0.5-px2*sc*0.5; 1.0); (vb[b+3.];vb[b+4.];vb[b+5.]))}]]
+ck["vtxBare"; shader.vertexPull[()!(); {[vb;vid] b:3.*vid; (vb[b];vb[b+1.];vb[b+2.];1.0)}]]
+ck["vtxSword"; shader.vertexPull[[wNor:`v3;wMat:`v4;wLit:`f32]; {[vb;ub;vid]
+  b:11.*vid; px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]; nx:vb[b+3.]; ny:vb[b+4.]; nz:vb[b+5.]
+  ca:ub[0.]; sa:ub[1.]; xca:ub[2.]; xsa:ub[3.]
+  zoom:ub[4.]; cx:ub[5.]; cz:ub[6.]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.3
-  x1:(ca*pos[0])-(sa*pos[2]); z1:(sa*pos[0])+(ca*pos[2])
-  y2:(xca*pos[1])-(xsa*z1); z2:(xsa*pos[1])+(xca*z1)
+  x1:(ca*px)-(sa*pz); z1:(sa*px)+(ca*pz)
+  y2:(xca*py)-(xsa*z1); z2:(xsa*py)+(xca*z1)
   X:(zoom*x1)-cx; Y:zoom*y2; Z:(zoom*z2)-cz
   py0:(c45*X)+(s45*Z); py2:(c45*Z)-(s45*X)
   px1:(c30*Y)-(s30*py2); px2:(s30*Y)+(c30*py2)
-  nx1:(ca*nor[0])-(sa*nor[2]); nz1:(sa*nor[0])+(ca*nor[2])
-  ny2:(xca*nor[1])-(xsa*nz1); nz2:(xsa*nor[1])+(xca*nz1)
-  ((sc*py0; sc*px1; 0.5-px2*0.001; 1.0); (nx1;ny2;nz2); mat; lit)}]]
+  nx1:(ca*nx)-(sa*nz); nz1:(sa*nx)+(ca*nz)
+  ny2:(xca*ny)-(xsa*nz1); nz2:(xsa*ny)+(xca*nz1)
+  ((sc*py0; sc*px1; 0.5-px2*0.001; 1.0); (nx1;ny2;nz2); (vb[b+6.];vb[b+7.];vb[b+8.];vb[b+9.]); vb[b+10.])}]]

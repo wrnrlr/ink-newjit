@@ -56,13 +56,15 @@ gpuDispatchLoop0: so 2: (`gpuDispatchLoop; 5) / (pipe; bufsA_I; bufsB_I; nThread
 / SOR swaps parity params (a=(state;pR) b=(state;pB)). Result is in whichever the
 / last pass wrote: even reps → a's output, odd reps → b's output.
 gpu.dispatchLoop: {[pipe;bufsA;bufsB;nThreads;reps] gpuDispatchLoop0[pipe; `i$bufsA; `i$bufsB; nThreads; reps]}
-mesh.compile:  so 2: (`gpuMesh;      2)   / (vtx_I; frg_I) → handle : compile vertex+fragment SPIR-V mesh pipeline
-mesh.draw:     so 2: (`gpuDrawMesh;  2)   / (verts_F; handle) → 0 : draw mesh; vertex stride follows the shader's declared inputs
-/ Vertex pulling (kk2 §5): the vertex shader (shader.vertexPull) reads RESIDENT
-/ storage buffers indexed by gl_VertexIndex — no vertex buffer, no per-frame upload.
+/ Vertex pulling (kk2 §5) is the ONE mesh API: the vertex shader (shader.vertexPull)
+/ reads RESIDENT storage buffers indexed by gl_VertexIndex — no vertex-input state.
 / mesh.compilePull builds the pipeline (nbuf storage buffers inferred from the shader);
 / mesh.drawPull binds resident buffer handles (in binding order) and draws `count`
 / vertices straight from the device.  e.g.  mesh.drawPull[p; (Pbuf;Nbuf); 3*nTri]
+/ Per-frame data (uniforms) rides in a storage buffer overwritten with gpu.write; a
+/ dynamic mesh is a resident buffer rewritten each frame. (The old attribute path —
+/ mesh.compile/draw/drawU/upload/drawGeomT + shader.vertex/vertexU — was retired once
+/ every demo moved to pulling; see lib/pbr.k, demo/*.k.)
 mesh.compilePull: so 2: (`gpuMeshPull;  2)   / (vtx_I; frg_I) → handle : vertex-pull pipeline
 gpuDrawPull0:     so 2: (`gpuDrawPull;  3)   / (pipe; bufHandles_I; count) → 0
 gpuDrawPullT0:    so 2: (`gpuDrawPullT; 4)   / (pipe; bufHandles_I; count; texHandles_I) → 0
@@ -71,15 +73,9 @@ mesh.drawPull: {[pipe; bufs; count] gpuDrawPull0[pipe; `i$bufs; count]}
 / gpuTexture handles, in binding order; the vertex shader still pulls geometry (and any
 / per-frame uniforms) from the resident storage buffers in `bufs`.
 mesh.drawPullT: {[pipe; bufs; count; texs] gpuDrawPullT0[pipe; `i$bufs; count; `i$texs]}
-mesh.drawU:    so 2: (`gpuDrawMeshU; 3)   / (verts_F; handle; uni_F) → 0 : draw mesh + per-draw uniform block (8 vec4 slots; see shader.vertexU)
 gpuTexture0:   so 2: (`gpuTexture;  2)   / ((w;h;comp)_I; data_I) → texHandle : upload an image to a sampled GPU texture
-/ Textured draws are retained-only: mesh.upload the geometry to a persistent
-/ buffer once, then mesh.drawGeomT it each frame with only the uniform+textures
-/ (see shader.fragmentTexN; image k = binding k, sample[k;uv]).
-mesh.upload:    so 2: (`gpuUploadMesh; 2)  / (verts_F; meshHandle) → geomHandle : geometry → persistent vertex buffer
-gpuDrawGeomT0: so 2: (`gpuDrawGeomT;  3)  / (geom; uni_F; texHandles_I) → 0 : draw retained geom + uniform + textures
-mesh.drawGeomT: {[geom; uni; texs] gpuDrawGeomT0[geom; uni; texs]}
-/ Upload an image dict (`width`height`comp`data, e.g. from image.read) as a texture.
+/ Upload an image dict (`width`height`comp`data, e.g. from image.read) as a texture,
+/ sampled at @group(1) by a shader.fragmentTexN fragment (image k = binding k).
 texture.upload: {[img] w:img`width; h:img`height; c:img`comp; d:img`data; gpuTexture0[(w;h;c); d]}
 
 / ── Placed arrays: the 9:/8: io-verb targets (doc/design/kk.md §1) ────────────

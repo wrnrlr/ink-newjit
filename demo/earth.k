@@ -8,9 +8,9 @@
 / the maps per pixel, so continents stay sharp however coarse the mesh is.
 /
 / Uses the SPIR-V texture path: gpuTexture uploads each image (lib/gpu.k texture.upload),
-/ shader.fragmentTexN samples them with sample[k;uv] (lib/spirv.k), mesh.drawGeomT binds
+/ shader.fragmentTexN samples them with sample[k;uv] (lib/spirv.k), mesh.drawPullT binds
 / them at @group(1).  The mesh + textures upload ONCE; each frame ships only a
-/ 12-float uniform (orientation + zoom + cloud toggle).
+/ 16-float uniform buffer (orientation + zoom + cloud toggle + sun), pulled by the shader.
 /
 / Controls (self-contained — no camera module):
 /   Left-drag   — spin the globe (it follows the cursor); pitch is clamped so it

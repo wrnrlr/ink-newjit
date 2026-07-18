@@ -10,11 +10,12 @@
 /   mat(4)   material = rgb + roughness
 /   lit(1)   sun factor 0..1  (1 = full sun, 0 = shadowed: ambient + sky-fill only)
 /
-/ Depends on lib/spirv.k (shader.fragment/shader.vertex) and lib/gpu.k (mesh.compile).
-/ Load them first, then:  2: "lib/pbr.k"
+/ Depends on lib/spirv.k (shader.fragment/shader.vertexPull) and lib/gpu.k
+/ (mesh.compilePull). Load them first, then:  2: "lib/pbr.k"
 /
-/ Compile once:  h: PbrPipeline[]        / → mesh pipeline handle
-/ Draw a frame:  mesh.draw[verts; h]      / verts = flat stride-11 float vector
+/ Compile once:  h: mesh.compilePull[pbrVtx; PbrFragment]
+/ Draw a frame:  vb: gpu.buffer verts;  mesh.drawPull[h; ,vb; (#verts) div 11]
+/                (verts = flat stride-11 float vector)
 /
 / A material+lit tail is five floats (rgb rough lit); build one with PbrMat:
 /   grass: PbrMat[0.13; 0.42; 0.07; 0.90; 1.]   / lit grass
