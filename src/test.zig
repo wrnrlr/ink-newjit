@@ -105,6 +105,20 @@ test "parse preserves vector literal values" {
   try t.check("((parse \"127.1 311.7\")`kind)1", "`floats");
   try t.check("((parse \"127.1 311.7\")`value)1", "127.1 311.7");
 }
+test "mixed int/float vector literal promotes" {
+  var t = try Tester.init(); defer t.deinit();
+  // A decimal element after a bare int must promote the whole vector to float,
+  // not leave the float as a stray term (`1 2 3.5` used to signal `!). Interior
+  // negatives re-glue in float mode too.
+  try t.check("1 2 3.5", "1.0 2.0 3.5");
+  try t.check("1 2. 3", "1.0 2.0 3.0");
+  try t.check("1 -2.5 3", "1.0 -2.5 3.0");
+  try t.check("+/ 1 2 3.5", "6.5");
+  // pure-int and float-first stay as they were
+  try t.check("1 2 3", "1 2 3");
+  try t.check("1 2 -3 4", "1 2 -3 4");
+  try t.check("1. 2 3", "1.0 2.0 3.0");
+}
 test "string" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("\"\"", "\"\"");
@@ -282,6 +296,12 @@ test "amend" {
   // `:`-assign fast path: typed scatter (float) and list assign
   try t.check("@[0.0 0.0 0.0; 0 2; :; 1.5 2.5]", "1.5 0.0 2.5");
   try t.check("@[(1;\"ab\";3); 1; :; 9]", "(1;9;3)");
+  // narrowing numeric coercion on assign (bool<int<float): a narrower scalar/vector
+  // widens into the vector's type instead of erroring (was a spurious `!type).
+  try t.check("@[10.0 20.0 30.0; 1; :; 7]", "10.0 7.0 30.0");   // int  → float slot
+  try t.check("@[1.0 2.0; 0 1; :; 3 4]", "3.0 4.0");            // int vec → float vec
+  try t.check("@[5 6 7; 1; :; 1b]", "5 1 7");                   // bool → int slot
+  try t.check("@[0.0 0.0; 1; :; 1b]", "0.0 1.0");               // bool → float slot
 }
 test "splice" {
   var t = try Tester.init(); defer t.deinit();

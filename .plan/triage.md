@@ -604,32 +604,29 @@ would extend the same pattern (loop `memberDecOne`/`loadUniMember` over N member
 Fixed 2026-07-17: widened the glob to `"$name"-snap*.png` (all three spots); `make
 docs-snap` now captures all 8 demos.
 
-## indexed-assign aliasing corruption `L[k]::expr` (found 2026-07-17, bits backend)
-Two related COW/refcount bugs surfaced writing lib/bits.k (a pure-k interpreter that
-mutates a global value array while reading it):
-1. **`L[k]:: expr` where `expr` reads global `L`** corrupts/shrinks `L` (e.g. a length-11
-   list collapses to length 1). Root cause looks like an in-place amend of `L`'s buffer
-   while the outstanding read of `L` (inside `expr`) still aliases it. Full
-   amend-and-reassign `L:: @[L; k; :; expr]` copies first and is SAFE — but only
-   outside a `'` each.
-2. **The same `L:: @[L;k;:;expr]` inside a `'` each still corrupts `L`** (the each
-   appears to hold `L` live across iterations). The identical work driven by explicit
-   tail recursion over the index list is correct. Minimal repro:
-   `L::11#0n; h:{[k]$[k<2;1.+k;L[k-1]]}; {[k]L::@[L;k;:;h k]}'!10` → `#L` becomes 1;
-   the recursive form gives the right 11-element result.
-3. **Amending a typed/null vector slot with an INTEGER value** (`@[11#0n;0;:;0]` or
-   `@[11#0.;0;:;3]`) collapses the list; a FLOAT value works. bits sidesteps all three
-   by using an F-vector value array, coercing every store to float, and sweeping via
-   recursion (bSweep) rather than an each. These are almost certainly one underlying
-   amend/refcount defect in src/primitive/amend.zig worth a proper fix.
+## amend: no numeric coercion on assign `@[Xvec;i;:;y]` (found 2026-07-17) — FIXED
+Assigning a numeric scalar into a typed numeric vector via `@[x;i;:;y]` / `L[i]:v`
+returned `` `!type `` (an error value, whose `#` is 1 — so it read as the vector
+"collapsing to length 1") whenever `y`'s type didn't exactly match the vector's:
+- `@[11#0.; 0; :; 3]` (int into a float vector) → error, not `3. 0. 0. …`
+- `@[3#0; 1; :; 1b]` (bool into an int vector) → error
+This was the ACTUAL root cause of the "bits backend corruption" I first (mis)filed as
+a COW/aliasing bug: the interpreter's bufp/param nodes yield integer slot/index
+values, and storing them into its F-vector `bV` hit exactly this path. There is NO
+separate aliasing defect — pure-float `L[k]:v` / `L::@[L;k;:;v]` reading `L`, in an
+each or not, was always fine. Fixed in `src/primitive/amend.zig`: `Amend4Vec.single`/
+`multiple` now coerce a narrower-or-equal numeric scalar (bool→int→float) via
+`coerceNum` instead of erroring. Widening (float into an int vector, which should
+promote the WHOLE vector to float) is still unhandled — a separate, rarer follow-up.
+lib/bits.k reverted to plain in-place `bV[k]:v` eaches (kkbits 12/12).
 
-## vector literal: a decimal element after a bare int errors (found 2026-07-17)
+## vector literal: a decimal element after a bare int errors (found 2026-07-17) — FIXED
 A numeric vector literal that starts with bare integers and then has an element with a
-decimal point signals `` `! `` instead of promoting to a float vector:
+decimal point signalled `` `! `` instead of promoting to a float vector:
 - `1 2 3.` → `` `! ``  (also `1 2. 3`, `1 2 3.5`)
-- `1. 2 3` → `` `F `` (float FIRST is fine — the whole vector promotes)
-So the lexer, once it has committed to an int vector, chokes on a later `.`-bearing
-element rather than re-promoting the accumulated ints to floats. Workaround: put the
-float first, or write `` `f$1 2 3 `` / all-explicit floats `1. 2. 3.`. Cost a while
-debugging kk.freq (the test data `0 1 1 … 2.` was silently an error value). Lexer in
-src/parser/lexer.zig.
+- `1. 2 3` → `` `F `` (float FIRST was fine — the whole vector promoted)
+The parser's `.int`-run branch (parser.zig) only consumed `.int` tokens, so a later
+`.float` was left as a stray term. Fixed: the int-run now PROMOTES its accumulated
+ints to floats when it meets a decimal element (and re-glues interior negatives like
+`1 -2.5 3`), matching the `.float` branch. Cost a while debugging kk.freq (the test
+data `0 1 1 … 2.` was silently an error value).

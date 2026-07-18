@@ -301,19 +301,40 @@ pub const Parser = struct {
     self.advance();
     switch (tok.tt) {
       .int => {
-        var list = try std.ArrayList(i32).initCapacity(self.al(), 4);
-        try list.append(self.al(), try parseIntLit(tok.slice(self.src)));
+        // Start as an int run; if a decimal element appears anywhere in the run
+        // (`1 2 3.5`, `1 -2.5`), PROMOTE the accumulated ints to floats and finish as
+        // an F vector — matching the .float branch (which already accepts int tokens).
+        var ilist = try std.ArrayList(i32).initCapacity(self.al(), 4);
+        try ilist.append(self.al(), try parseIntLit(tok.slice(self.src)));
+        var flist: std.ArrayList(f32) = .empty;
+        var promoted = false;
         var last = tok.end;
         while (true) {
-          while (self.is(.int)) { try list.append(self.al(), try parseIntLit(self.slice())); last = self.tok.end; self.advance(); }
+          while (self.is(.int) or self.is(.float)) {
+            if (self.is(.float) and !promoted) { try self.promoteInts(&ilist, &flist); promoted = true; }
+            if (promoted) {
+              try flist.append(self.al(), if (self.is(.float)) try parseFloatLit(self.slice()) else @floatFromInt(try parseIntLit(self.slice())));
+            } else try ilist.append(self.al(), try parseIntLit(self.slice()));
+            last = self.tok.end; self.advance();
+          }
+          // interior-negative re-gluing: `1 -2 3`, and now `1 -2.5 3` too.
           if (!self.is(.op) or !eql(u8, self.slice(), "-")) break;
           const ms = self.tok.start; const me = self.tok.end; const nt = self.lex.peekNext();
-          if (nt.tt != .int or nt.start != me or ms <= last) break;
+          if ((nt.tt != .int and nt.tt != .float) or nt.start != me or ms <= last) break;
           self.advance();
-          try list.append(self.al(), -(try parseIntLit(self.slice())));
+          if (self.is(.float) and !promoted) { try self.promoteInts(&ilist, &flist); promoted = true; }
+          if (promoted) {
+            const v: f32 = if (self.is(.float)) try parseFloatLit(self.slice()) else @floatFromInt(try parseIntLit(self.slice()));
+            try flist.append(self.al(), -v);
+          } else try ilist.append(self.al(), -(try parseIntLit(self.slice())));
           last = self.tok.end; self.advance();
         }
-        const items = try list.toOwnedSlice(self.al());
+        if (promoted) {
+          const items = try flist.toOwnedSlice(self.al());
+          if (items.len == 1) { defer self.al().free(items); return self.node(.{ .literal = .{ .f = items[0] } }); }
+          return self.node(.{ .literal = .{ .F = items } });
+        }
+        const items = try ilist.toOwnedSlice(self.al());
         if (items.len == 1) { defer self.al().free(items); return self.node(.{ .literal = .{ .i = items[0] } }); }
         return self.node(.{ .literal = .{ .I = items } });
       },
@@ -575,6 +596,13 @@ pub const Parser = struct {
     return self.node(.{ .cond = .{ .stmts = try stmts.toOwnedSlice(self.al()) } });
   }
 
+  // Promote an int-vector accumulator to floats in place (int run met a decimal
+  // element). Copies every collected i32 into `flist` as f32, then frees `ilist`.
+  fn promoteInts(self: *Parser, ilist: *std.ArrayList(i32), flist: *std.ArrayList(f32)) ParseError!void {
+    try flist.ensureTotalCapacity(self.al(), ilist.items.len + 4);
+    for (ilist.items) |iv| flist.appendAssumeCapacity(@floatFromInt(iv));
+    ilist.deinit(self.al());
+  }
   fn parseIntLit(s: []const u8) ParseError!i32 {
     if (eql(u8, s, "0N") or eql(u8, s, "-0N")) return std.math.minInt(i32);
     if (eql(u8, s, "0W")) return std.math.maxInt(i32);

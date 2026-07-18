@@ -48,6 +48,24 @@ inline fn isAssign(f: V) bool {
     and opmod.isOp2Idx(f.o.idx) and f.o.getOp2() == .@":";
 }
 
+// Numeric widening rank: bool < int < float. A scalar of a narrower-or-equal type
+// coerces losslessly into a typed numeric vector (the k semantics for `@[x;i;:;y]` —
+// e.g. int 3 into a float vector becomes 3.0). This is why `@[1. 2. 3.; 0; :; 3]` and
+// `L[k]:v` with a numeric literal work without a type error.
+inline fn numRank(k: K) ?u8 { return switch (k) { .b => 0, .i => 1, .f => 2, else => null }; }
+// Coerce numeric scalar `b` to the backing type T of atom kind `rt`; null if `b` is
+// not numeric or is WIDER than rt (that case needs a whole-vector promotion, handled
+// in `amend` before dispatch).
+inline fn coerceNum(comptime T: type, comptime rt: K, b: V) ?T {
+  const bt = b.tag();
+  if (bt == rt) return V.unwrap(b, rt);
+  const br = numRank(bt) orelse return null;
+  const tr = comptime numRank(rt) orelse return null;
+  if (br > tr) return null;
+  const fv: f64 = switch (bt) { .b => if (b.b) 1.0 else 0.0, .i => @floatFromInt(b.i), .f => b.f, else => unreachable };
+  return switch (rt) { .b => fv != 0.0, .i => @intFromFloat(fv), .f => @floatCast(fv), else => null };
+}
+
 fn Amend4Vec(comptime k: K) type {
   const rt = k.atom();
   const T = K.backing(k);
@@ -56,8 +74,7 @@ fn Amend4Vec(comptime k: K) type {
       const s = a.slice();
       const i: usize = @intCast(idx);
       if (isAssign(f)) {
-        if (b.tag() != rt) return error.TypeError;
-        s[i] = V.unwrap(b, rt);
+        s[i] = coerceNum(T, rt, b) orelse return error.TypeError;
         return;
       }
       var fc = Call{ .vm = vm };
@@ -74,8 +91,7 @@ fn Amend4Vec(comptime k: K) type {
       if (isAssign(f)) {
         for (ixs, 0..) |raw_i, n| {
           const bv = if (b_is_vec) b.at(n) else b;
-          if (bv.tag() != rt) return error.TypeError;
-          s[@intCast(raw_i)] = V.unwrap(bv, rt);
+          s[@intCast(raw_i)] = coerceNum(T, rt, bv) orelse return error.TypeError;
         }
         return;
       }

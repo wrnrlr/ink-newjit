@@ -116,31 +116,25 @@ bEv: {[k]
     op in `rsum`rmax`ndo`whileL; bLoop k
     !"bits: unimplemented op ",$op]}
 
-/ WORKAROUND (.plan/triage.md): two aliasing traps in the interpreter's hot path.
-/ (1) `L[k]:: expr` corrupts a global L when `expr` reads L (COW: in-place amend of
-/ a buffer still referenced by the outstanding read) — full amend-and-reassign
-/ `L:: @[L;k;:;expr]` copies first, so it is safe. (2) Doing that reassign inside a
-/ `'` each still corrupts L (the each holds L live across iterations); the SAME work
-/ in an explicit recursion is fine. So every node sweep recurses over an index list.
-/ Coerce to float: amending a typed slot (F-vector or null) with an INTEGER value
-/ collapses the list in this VM (see triage), and every compute-kernel value is a
-/ scalar anyway, so bV is an F-vector and stores go through `0. + v`.
-bPut: {[k; v] bV:: @[bV; k; :; 0. + v]}
-bSweep:     {[idxs; i] $[i < # idxs; bSweepStep[idxs; i]; 0]}
-bSweepStep: {[idxs; i] k: idxs i; bPut[k; bEv k]; bSweep[idxs; i + 1]}
+/ bV is an F-vector (every compute-kernel value is a scalar); storing an INTEGER
+/ node value (a buffer slot or thread index) coerces to float — the amend coercion
+/ this once tripped over is fixed in src/primitive/amend.zig, so these are plain
+/ in-place indexed assigns in an each (no amend-reassign / recursion workaround).
+bPut:   {[k; v] bV[k]:: v}
+bSweep: {[idxs] {[j] bV[j]:: bEv j}' idxs; 0}
 
 / store: bBuf[slot][idx] := val. Returns the stored value (set's IR value is vp).
 bSet: {[a]
   slot: xVal a 0
   idx:  `i$ bTrunc bV a 1
-  val:  0. + bV a 2
+  val:  bV a 2
   bBuf:: @[bBuf; slot; :; @[bBuf slot; idx; :; val]]
   val}
 
 / evaluate every DIRECT child node of loop L (xRgn=L) in [L+1, oe), in order.
 / Nested-loop bodies (xRgn=nested) are skipped here and run by bLoop recursively.
 bRegion: {[k; oe] j: (1 + k) + ! oe - 1 + k; j @ & (xRgn j) = k}
-bRun1:   {[k; oe] bSweep[bRegion[k; oe]; 0]}
+bRun1:   {[k; oe] bSweep bRegion[k; oe]}
 
 bLoop: {[k]
   op: xOp k
@@ -173,7 +167,7 @@ bWhileLoop: {[k; sp; cr; ce; br; oe; st]
   bPut[sp; st]
   bRun1[k; ce]                                             / evaluate the cond region [k+1, ce)
   $[(bV cr) > 0.5; bWhileLoop[k; sp; cr; ce; br; oe; bWhileBody[k; ce; oe; br]]; st]}
-bWhileBody: {[k; ce; oe; br] bSweep[bBodyIdx[k; ce; oe]; 0]; bV br}
+bWhileBody: {[k; ce; oe; br] bSweep bBodyIdx[k; ce; oe]; bV br}
 bBodyIdx: {[k; ce; oe] j: ce + ! oe - ce; j @ & (xRgn j) = k}
 
 / ── driver: run one kernel dispatch over `count` threads ──────────────────────
@@ -186,4 +180,4 @@ bits.run: {[fn; nAcc; nBuf; bufs; count]
   bBuf}
 bDrive:  {[d; n] $[d < n; bDriveOne[d; n]; 0]}
 bDriveOne: {[d; n] bThread d; bDrive[d + 1; n]}
-bThread: {[d] bD:: d; bV:: (# xOp) # 0.; bSweep[&0 > xRgn; 0]}
+bThread: {[d] bD:: d; bV:: (# xOp) # 0.; bSweep[&0 > xRgn]}
