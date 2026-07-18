@@ -54,8 +54,9 @@ inline fn isAssign(f: V) bool {
 // `L[k]:v` with a numeric literal work without a type error.
 inline fn numRank(k: K) ?u8 { return switch (k) { .b => 0, .i => 1, .f => 2, else => null }; }
 // Coerce numeric scalar `b` to the backing type T of atom kind `rt`; null if `b` is
-// not numeric or is WIDER than rt (that case needs a whole-vector promotion, handled
-// in `amend` before dispatch).
+// not numeric or is WIDER than rt. A wider value would have to change the vector's
+// type (promote the whole thing), and amend never changes a target's type or shape —
+// so that case stays a `!type error, by design.
 inline fn coerceNum(comptime T: type, comptime rt: K, b: V) ?T {
   const bt = b.tag();
   if (bt == rt) return V.unwrap(b, rt);

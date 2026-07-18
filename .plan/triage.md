@@ -616,9 +616,9 @@ values, and storing them into its F-vector `bV` hit exactly this path. There is 
 separate aliasing defect — pure-float `L[k]:v` / `L::@[L;k;:;v]` reading `L`, in an
 each or not, was always fine. Fixed in `src/primitive/amend.zig`: `Amend4Vec.single`/
 `multiple` now coerce a narrower-or-equal numeric scalar (bool→int→float) via
-`coerceNum` instead of erroring. Widening (float into an int vector, which should
-promote the WHOLE vector to float) is still unhandled — a separate, rarer follow-up.
-lib/bits.k reverted to plain in-place `bV[k]:v` eaches (kkbits 12/12).
+`coerceNum` instead of erroring. Widening (float into an int vector) still errors
+BY DESIGN — amend never changes a target's type or shape, so `@[1 2 3;0;:;1.5]` is a
+`!type, not a promotion. lib/bits.k reverted to plain in-place `bV[k]:v` (kkbits 12/12).
 
 ## vector literal: a decimal element after a bare int errors (found 2026-07-17) — FIXED
 A numeric vector literal that starts with bare integers and then has an element with a
