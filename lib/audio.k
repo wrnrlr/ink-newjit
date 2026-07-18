@@ -51,7 +51,7 @@
   listenerVel: so 2:(`AudioListenerVel; 1) / xyz_F → 1b
   listenerUp:  so 2:(`AudioListenerUp;  1) / xyz_F → 1b
   decode:      so 2:(`AudioDecode;    1)   / "path" → `channels`rate`frames`data
-  encode:      so 2:(`AudioEncode;    1)   / (path;channels;rate;data) → 1b
+  encode:      so 2:(`AudioEncode;    4)   / (path;channels;rate;data) → 1b
   recStart:    so 2:(`AudioRecStart;  1)   / (channels;rate)_I → 1b
   recStop:     so 2:(`AudioRecStop;   1)   / x → 1b
   recInfo:     so 2:(`AudioRecInfo;   1)   / x → (channels;rate;available)_I
@@ -98,7 +98,7 @@
   music: {[path] h: ffi.stream path; ffi.loop[h;1]; ffi.start h; h}
 
   / Save interleaved f32 PCM (as from audio.rec.read / audio.decode`data) to WAV.
-  save: {[path;channels;rate;data] ffi.encode (path; channels; rate; data)}
+  save: {[path;channels;rate;data] ffi.encode[path; channels; rate; data]}
 
 / ── recording (poll audio.rec.read from your loop) ──────────────────────────
 / NB: these are a sibling of audio.ffi, so relative `ffi.` doesn't resolve here —

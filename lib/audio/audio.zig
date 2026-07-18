@@ -262,21 +262,8 @@ export fn AudioRange(h: ?K, v: ?K) callconv(.c) ?K {
   return kb(ia_set_range(kival(h), mn, mx) != 0);
 }
 
-// ── One-argument packed-list entry point ───────────────────────────────────────
-
-// AudioEncode (path; channels; rate; data_F) → 1b.  Packed into one list because
-// the host FFI caps direct arity at 3.
-export fn AudioEncode(arg: ?K) callconv(.c) ?K {
-  if (kn(arg) < 4) return kb(false);
-  const path_k = listGet(arg, 0);
-  defer ku(path_k);
-  const ch_k = listGet(arg, 1);
-  defer ku(ch_k);
-  const rate_k = listGet(arg, 2);
-  defer ku(rate_k);
-  const data_k = listGet(arg, 3);
-  defer ku(data_k);
-
+// AudioEncode (path; channels; rate; data_F) → 1b.  Writes a WAV.
+export fn AudioEncode(path_k: ?K, ch_k: ?K, rate_k: ?K, data_k: ?K) callconv(.c) ?K {
   const p = cpath(path_k) orelse return kb(false);
   const ch = kival(ch_k);
   const rate = kival(rate_k);
@@ -329,7 +316,7 @@ fn initApi(reg: *anyopaque) void {
   reg_fn(r, "AudioVel", @ptrCast(&AudioVel), 2);
   reg_fn(r, "AudioDir", @ptrCast(&AudioDir), 2);
   reg_fn(r, "AudioRange", @ptrCast(&AudioRange), 2);
-  reg_fn(r, "AudioEncode", @ptrCast(&AudioEncode), 1);
+  reg_fn(r, "AudioEncode", @ptrCast(&AudioEncode), 4);
 }
 
 export fn terse_init(reg: *anyopaque) callconv(.c) void { initApi(reg); }

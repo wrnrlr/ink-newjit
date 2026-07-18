@@ -50,12 +50,12 @@ gpu.compileCompute: so 2: (`gpuComputeNew; 2) / (spirv_I; nbind) → pipeHandle 
 gpu.uniform:         so 2: (`gpuUniformNew;  1)   / F → bufHandle : resident UNIFORM buffer (pass a vec4)
 gpu.compileComputeU: so 2: (`gpuComputeNewU; 2)   / (spirv_I; nStorage) → pipe : storage@0..nStorage-1 + uniform@nStorage
 gpu.dispatch:     so 2: (`gpuDispatch;   3)   / (pipeHandle; bufHandles_I; nThreads) → 0 : bind buffers @0..; dispatch; no readback
-gpuDispatchLoop0: so 2: (`gpuDispatchLoop; 3) / (pipe; (nThreads,bufsA,bufsB)_I; reps) → 0 : reps passes in ONE encoder, A on even/B on odd
+gpuDispatchLoop0: so 2: (`gpuDispatchLoop; 5) / (pipe; bufsA_I; bufsB_I; nThreads; reps) → 0 : reps passes in ONE encoder, A on even/B on odd
 / Batched iteration in one submit (no per-step host round-trip). Alternates two
 / bind configs: ping-pong Jacobi swaps buffers (a=(in;out;u) b=(out;in;u)); red-black
 / SOR swaps parity params (a=(state;pR) b=(state;pB)). Result is in whichever the
 / last pass wrote: even reps → a's output, odd reps → b's output.
-gpu.dispatchLoop: {[pipe;bufsA;bufsB;nThreads;reps] gpuDispatchLoop0[pipe; nThreads,bufsA,bufsB; reps]}
+gpu.dispatchLoop: {[pipe;bufsA;bufsB;nThreads;reps] gpuDispatchLoop0[pipe; `i$bufsA; `i$bufsB; nThreads; reps]}
 mesh.compile:  so 2: (`gpuMesh;      2)   / (vtx_I; frg_I) → handle : compile vertex+fragment SPIR-V mesh pipeline
 mesh.draw:     so 2: (`gpuDrawMesh;  2)   / (verts_F; handle) → 0 : draw mesh; vertex stride follows the shader's declared inputs
 / Vertex pulling (kk2 §5): the vertex shader (shader.vertexPull) reads RESIDENT
@@ -65,13 +65,12 @@ mesh.draw:     so 2: (`gpuDrawMesh;  2)   / (verts_F; handle) → 0 : draw mesh;
 / vertices straight from the device.  e.g.  mesh.drawPull[p; (Pbuf;Nbuf); 3*nTri]
 mesh.compilePull: so 2: (`gpuMeshPull;  2)   / (vtx_I; frg_I) → handle : vertex-pull pipeline
 gpuDrawPull0:     so 2: (`gpuDrawPull;  3)   / (pipe; bufHandles_I; count) → 0
-gpuDrawPullT0:    so 2: (`gpuDrawPullT; 3)   / (pipe; bufHandles_I; (count,texHandles)_I) → 0
+gpuDrawPullT0:    so 2: (`gpuDrawPullT; 4)   / (pipe; bufHandles_I; count; texHandles_I) → 0
 mesh.drawPull: {[pipe; bufs; count] gpuDrawPull0[pipe; `i$bufs; count]}
 / A vertex-pulled draw that also samples textures at @group(1) (fragmentTexN). texs =
 / gpuTexture handles, in binding order; the vertex shader still pulls geometry (and any
-/ per-frame uniforms) from the resident storage buffers in `bufs`. The FFI is capped at
-/ arity 3, so count + the texture handles travel packed in one int vector (count first).
-mesh.drawPullT: {[pipe; bufs; count; texs] gpuDrawPullT0[pipe; `i$bufs; (`i$count), `i$texs]}
+/ per-frame uniforms) from the resident storage buffers in `bufs`.
+mesh.drawPullT: {[pipe; bufs; count; texs] gpuDrawPullT0[pipe; `i$bufs; count; `i$texs]}
 mesh.drawU:    so 2: (`gpuDrawMeshU; 3)   / (verts_F; handle; uni_F) → 0 : draw mesh + per-draw uniform block (8 vec4 slots; see shader.vertexU)
 gpuTexture0:   so 2: (`gpuTexture;  2)   / ((w;h;comp)_I; data_I) → texHandle : upload an image to a sampled GPU texture
 / Textured draws are retained-only: mesh.upload the geometry to a persistent

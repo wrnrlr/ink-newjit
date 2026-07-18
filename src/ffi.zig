@@ -364,6 +364,13 @@ export fn k_make_table(n: i32, keys: [*]const [*:0]const u8, vals: [*]const ?*KB
 const FfiFn1 = *const fn (?*KBox) callconv(.c) ?*KBox;
 const FfiFn2 = *const fn (?*KBox, ?*KBox) callconv(.c) ?*KBox;
 const FfiFn3 = *const fn (?*KBox, ?*KBox, ?*KBox) callconv(.c) ?*KBox;
+const FfiFn4 = *const fn (?*KBox, ?*KBox, ?*KBox, ?*KBox) callconv(.c) ?*KBox;
+const FfiFn5 = *const fn (?*KBox, ?*KBox, ?*KBox, ?*KBox, ?*KBox) callconv(.c) ?*KBox;
+const FfiFn6 = *const fn (?*KBox, ?*KBox, ?*KBox, ?*KBox, ?*KBox, ?*KBox) callconv(.c) ?*KBox;
+const FfiFn7 = *const fn (?*KBox, ?*KBox, ?*KBox, ?*KBox, ?*KBox, ?*KBox, ?*KBox) callconv(.c) ?*KBox;
+const FfiFn8 = *const fn (?*KBox, ?*KBox, ?*KBox, ?*KBox, ?*KBox, ?*KBox, ?*KBox, ?*KBox) callconv(.c) ?*KBox;
+
+pub const MAX_FFI_ARITY = 8;
 
 const FfiData = struct {
   fn_ptr: *const anyopaque,
@@ -421,58 +428,55 @@ fn reallocV(v: V, dest: Alloc) V {
   }
 }
 
-fn ffiCall1(data: *anyopaque, x: V) V {
+// Box each borrowed arg (no ref(): the .blank defer skips the rc decrement so a
+// ref() would leak), call the C function of matching arity, then clone the result
+// out of c_alloc into the VM allocator. Shared by every arity (1..8).
+fn ffiCallImpl(data: *anyopaque, args: []const V) V {
   const d: *FfiData = @ptrCast(@alignCast(data));
   const VM = @import("runtime/vm.zig").VM;
   const vm: *VM = @ptrCast(@alignCast(d.vm));
   const prev_vm = current_vm;
   setCurrentVm(d.vm);
   defer current_vm = prev_vm;
-  const f: FfiFn1 = @ptrCast(@alignCast(d.fn_ptr));
-  // No x.ref(): args are borrowed; the .blank defer skips rc decrement so ref() would leak.
-  const bx = box(x) catch return .{ .err = .memory };
-  defer { bx.v = .blank; c_alloc.destroy(bx); }
-  const result = f(bx) orelse return .{ .err = .domain };
+  var boxes: [MAX_FFI_ARITY]?*KBox = .{null} ** MAX_FFI_ARITY;
+  defer for (&boxes) |*b| if (b.*) |bb| { bb.v = .blank; c_alloc.destroy(bb); };
+  for (args, 0..) |a, i| boxes[i] = box(a) catch return .{ .err = .memory };
+  const p = d.fn_ptr;
+  const b = &boxes;
+  const result = switch (args.len) {
+    1 => @as(FfiFn1, @ptrCast(@alignCast(p)))(b[0]),
+    2 => @as(FfiFn2, @ptrCast(@alignCast(p)))(b[0], b[1]),
+    3 => @as(FfiFn3, @ptrCast(@alignCast(p)))(b[0], b[1], b[2]),
+    4 => @as(FfiFn4, @ptrCast(@alignCast(p)))(b[0], b[1], b[2], b[3]),
+    5 => @as(FfiFn5, @ptrCast(@alignCast(p)))(b[0], b[1], b[2], b[3], b[4]),
+    6 => @as(FfiFn6, @ptrCast(@alignCast(p)))(b[0], b[1], b[2], b[3], b[4], b[5]),
+    7 => @as(FfiFn7, @ptrCast(@alignCast(p)))(b[0], b[1], b[2], b[3], b[4], b[5], b[6]),
+    8 => @as(FfiFn8, @ptrCast(@alignCast(p)))(b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]),
+    else => return .{ .err = .rank },
+  } orelse return .{ .err = .domain };
   return reallocV(unbox(result, c_alloc), vm.alloc);
 }
 
-fn ffiCall2(data: *anyopaque, x: V, y: V) V {
-  const d: *FfiData = @ptrCast(@alignCast(data));
-  const VM = @import("runtime/vm.zig").VM;
-  const vm: *VM = @ptrCast(@alignCast(d.vm));
-  const prev_vm = current_vm;
-  setCurrentVm(d.vm);
-  defer current_vm = prev_vm;
-  const f: FfiFn2 = @ptrCast(@alignCast(d.fn_ptr));
-  const bx = box(x) catch return .{ .err = .memory };
-  defer { bx.v = .blank; c_alloc.destroy(bx); }
-  const by = box(y) catch return .{ .err = .memory };
-  defer { by.v = .blank; c_alloc.destroy(by); }
-  const result = f(bx, by) orelse return .{ .err = .domain };
-  return reallocV(unbox(result, c_alloc), vm.alloc);
-}
+fn ffiCall1(d: *anyopaque, a: V) V { return ffiCallImpl(d, &.{a}); }
+fn ffiCall2(d: *anyopaque, a: V, b: V) V { return ffiCallImpl(d, &.{ a, b }); }
+fn ffiCall3(d: *anyopaque, a: V, b: V, c: V) V { return ffiCallImpl(d, &.{ a, b, c }); }
+fn ffiCall4(d: *anyopaque, a: V, b: V, c: V, e: V) V { return ffiCallImpl(d, &.{ a, b, c, e }); }
+fn ffiCall5(d: *anyopaque, a: V, b: V, c: V, e: V, f: V) V { return ffiCallImpl(d, &.{ a, b, c, e, f }); }
+fn ffiCall6(d: *anyopaque, a: V, b: V, c: V, e: V, f: V, g: V) V { return ffiCallImpl(d, &.{ a, b, c, e, f, g }); }
+fn ffiCall7(d: *anyopaque, a: V, b: V, c: V, e: V, f: V, g: V, h: V) V { return ffiCallImpl(d, &.{ a, b, c, e, f, g, h }); }
+fn ffiCall8(d: *anyopaque, a: V, b: V, c: V, e: V, f: V, g: V, h: V, i: V) V { return ffiCallImpl(d, &.{ a, b, c, e, f, g, h, i }); }
 
-fn ffiCall3(data: *anyopaque, x: V, y: V, z: V) V {
-  const d: *FfiData = @ptrCast(@alignCast(data));
-  const VM = @import("runtime/vm.zig").VM;
-  const vm: *VM = @ptrCast(@alignCast(d.vm));
-  const prev_vm = current_vm;
-  setCurrentVm(d.vm);
-  defer current_vm = prev_vm;
-  const f: FfiFn3 = @ptrCast(@alignCast(d.fn_ptr));
-  const bx = box(x) catch return .{ .err = .memory };
-  defer { bx.v = .blank; c_alloc.destroy(bx); }
-  const by = box(y) catch return .{ .err = .memory };
-  defer { by.v = .blank; c_alloc.destroy(by); }
-  const bz = box(z) catch return .{ .err = .memory };
-  defer { bz.v = .blank; c_alloc.destroy(bz); }
-  const result = f(bx, by, bz) orelse return .{ .err = .domain };
-  return reallocV(unbox(result, c_alloc), vm.alloc);
-}
-
+// A vtable exposing calls 1..N (a call with fewer args than the function's arity
+// still dispatches; the extension sees only what it was given).
 const ffi_vtable_1 = ExtVTable{ .name = "ffi1", .deinit_fn = ffiDeinit, .call1_fn = ffiCall1 };
 const ffi_vtable_2 = ExtVTable{ .name = "ffi2", .deinit_fn = ffiDeinit, .call1_fn = ffiCall1, .call2_fn = ffiCall2 };
 const ffi_vtable_3 = ExtVTable{ .name = "ffi3", .deinit_fn = ffiDeinit, .call1_fn = ffiCall1, .call2_fn = ffiCall2, .call3_fn = ffiCall3 };
+const ffi_vtable_4 = ExtVTable{ .name = "ffi4", .deinit_fn = ffiDeinit, .call1_fn = ffiCall1, .call2_fn = ffiCall2, .call3_fn = ffiCall3, .call4_fn = ffiCall4 };
+const ffi_vtable_5 = ExtVTable{ .name = "ffi5", .deinit_fn = ffiDeinit, .call1_fn = ffiCall1, .call2_fn = ffiCall2, .call3_fn = ffiCall3, .call4_fn = ffiCall4, .call5_fn = ffiCall5 };
+const ffi_vtable_6 = ExtVTable{ .name = "ffi6", .deinit_fn = ffiDeinit, .call1_fn = ffiCall1, .call2_fn = ffiCall2, .call3_fn = ffiCall3, .call4_fn = ffiCall4, .call5_fn = ffiCall5, .call6_fn = ffiCall6 };
+const ffi_vtable_7 = ExtVTable{ .name = "ffi7", .deinit_fn = ffiDeinit, .call1_fn = ffiCall1, .call2_fn = ffiCall2, .call3_fn = ffiCall3, .call4_fn = ffiCall4, .call5_fn = ffiCall5, .call6_fn = ffiCall6, .call7_fn = ffiCall7 };
+const ffi_vtable_8 = ExtVTable{ .name = "ffi8", .deinit_fn = ffiDeinit, .call1_fn = ffiCall1, .call2_fn = ffiCall2, .call3_fn = ffiCall3, .call4_fn = ffiCall4, .call5_fn = ffiCall5, .call6_fn = ffiCall6, .call7_fn = ffiCall7, .call8_fn = ffiCall8 };
+const ffi_vtables = [8]*const ExtVTable{ &ffi_vtable_1, &ffi_vtable_2, &ffi_vtable_3, &ffi_vtable_4, &ffi_vtable_5, &ffi_vtable_6, &ffi_vtable_7, &ffi_vtable_8 };
 
 // ── 2: FFI load ───────────────────────────────────────────────────────────────
 
@@ -554,7 +558,8 @@ fn wrapFn(vm_alloc: Alloc, vm: *anyopaque, fn_ptr: *const anyopaque, arity: u8) 
   const data = c_alloc.create(FfiData) catch return .{ .err = .memory };
   data.* = .{ .fn_ptr = fn_ptr, .arity = arity, .vm = vm };
   const obj = vm_alloc.create(ExtObj) catch { c_alloc.destroy(data); return .{ .err = .memory }; };
-  const vtable = if (arity >= 3) &ffi_vtable_3 else if (arity >= 2) &ffi_vtable_2 else &ffi_vtable_1;
+  const n = @min(@max(arity, 1), MAX_FFI_ARITY);
+  const vtable = ffi_vtables[n - 1];
   obj.* = .{ .rc = 1, .type_id = 0, .vtable = vtable, .data = data };
   return .{ .x = obj };
 }

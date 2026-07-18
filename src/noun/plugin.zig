@@ -14,9 +14,15 @@ pub const ExtVTable = struct {
   // call1_fn(data, x)    — monad: f x
   // call2_fn(data, x, y) — dyad:  x f y
   // Returning V{.err = .nyi} falls back to a type error.
+  // Extensions (FFI) may take up to 8 arguments — callN_fn for N=1..8.
   call1_fn:   ?*const fn (data: *anyopaque, x: V) V  = null,
   call2_fn:   ?*const fn (data: *anyopaque, x: V, y: V) V = null,
   call3_fn:   ?*const fn (data: *anyopaque, x: V, y: V, z: V) V = null,
+  call4_fn:   ?*const fn (data: *anyopaque, a: V, b: V, c: V, d: V) V = null,
+  call5_fn:   ?*const fn (data: *anyopaque, a: V, b: V, c: V, d: V, e: V) V = null,
+  call6_fn:   ?*const fn (data: *anyopaque, a: V, b: V, c: V, d: V, e: V, f: V) V = null,
+  call7_fn:   ?*const fn (data: *anyopaque, a: V, b: V, c: V, d: V, e: V, f: V, g: V) V = null,
+  call8_fn:   ?*const fn (data: *anyopaque, a: V, b: V, c: V, d: V, e: V, f: V, g: V, h: V) V = null,
 };
 
 // Heap-allocated wrapper owned by V.x.  The VM manages this struct's lifetime

@@ -49,6 +49,11 @@ pub const Call = struct {
       1 => if (obj.vtable.call1_fn) |f| f(obj.data, args[0]) else V{ .err = .@"type" },
       2 => if (obj.vtable.call2_fn) |f| f(obj.data, args[0], args[1]) else V{ .err = .@"type" },
       3 => if (obj.vtable.call3_fn) |f| f(obj.data, args[0], args[1], args[2]) else V{ .err = .@"type" },
+      4 => if (obj.vtable.call4_fn) |f| f(obj.data, args[0], args[1], args[2], args[3]) else V{ .err = .@"type" },
+      5 => if (obj.vtable.call5_fn) |f| f(obj.data, args[0], args[1], args[2], args[3], args[4]) else V{ .err = .@"type" },
+      6 => if (obj.vtable.call6_fn) |f| f(obj.data, args[0], args[1], args[2], args[3], args[4], args[5]) else V{ .err = .@"type" },
+      7 => if (obj.vtable.call7_fn) |f| f(obj.data, args[0], args[1], args[2], args[3], args[4], args[5], args[6]) else V{ .err = .@"type" },
+      8 => if (obj.vtable.call8_fn) |f| f(obj.data, args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]) else V{ .err = .@"type" },
       else => V{ .err = .rank },
     };
   }

@@ -316,16 +316,16 @@ export fn gpuDispatch(pipe_k: ?K, bufs_k: ?K, nthreads_k: ?K) callconv(.c) ?K {
   return ki(0);
 }
 
-export fn gpuDispatchLoop(pipe_k: ?K, packed_k: ?K, reps_k: ?K) callconv(.c) ?K {
+export fn gpuDispatchLoop(pipe_k: ?K, bufsA_k: ?K, bufsB_k: ?K, nthreads_k: ?K, reps_k: ?K) callconv(.c) ?K {
   const v = g_vk orelse return ki(0);
   const ph = ki_val(pipe_k);
   if (ph <= 0 or ph > g_pipes.items.len) return ki(0);
   const p = g_pipes.items[@intCast(ph - 1)];
   const nbind = p.nbind;
-  const pp = kip(packed_k) orelse return ki(0);
-  const plen: usize = @intCast(kn(packed_k));
-  if (plen < 1 + 2 * nbind) return ki(0);
-  const nthreads = pp[0];
+  const pa = kip(bufsA_k) orelse return ki(0);
+  const pb = kip(bufsB_k) orelse return ki(0);
+  if (kn(bufsA_k) < @as(i32, @intCast(nbind)) or kn(bufsB_k) < @as(i32, @intCast(nbind))) return ki(0);
+  const nthreads = ki_val(nthreads_k);
   if (nthreads <= 0) return ki(0);
   const reps = ki_val(reps_k);
   if (reps <= 0) return ki(0);
@@ -334,8 +334,8 @@ export fn gpuDispatchLoop(pipe_k: ?K, packed_k: ?K, reps_k: ?K) callconv(.c) ?K 
   var bufsB: [vk.MAX_BIND]vk.Buffer = undefined;
   var i: usize = 0;
   while (i < nbind) : (i += 1) {
-    const ha = pp[1 + i];
-    const hb = pp[1 + nbind + i];
+    const ha = pa[i];
+    const hb = pb[i];
     if (ha <= 0 or ha > g_bufs.items.len) return ki(0);
     if (hb <= 0 or hb > g_bufs.items.len) return ki(0);
     bufsA[i] = g_bufs.items[@intCast(ha - 1)];
@@ -485,35 +485,33 @@ export fn gpuMeshPull(vtx_k: ?K, frg_k: ?K) callconv(.c) ?K {
 // gpuDrawPull[pipe; bufHandles_I; count] : record a pull draw — bind the resident
 // storage buffers (by handle, in binding order) and draw `count` vertices.
 export fn gpuDrawPull(pipe_k: ?K, bufs_k: ?K, count_k: ?K) callconv(.c) ?K {
-  return recordPull(pipe_k, bufs_k, ki_val(count_k), &[_]i32{});
+  return recordPull(pipe_k, bufs_k, count_k, null);
 }
 
-// gpuDrawPullT[pipe; bufHandles_I; (count, texHandles…)_I] : a pull draw that also
-// binds textures at @group(1) — a vertex-pulled, textured draw (e.g. demo/earth.k).
-// The FFI is capped at arity 3, so count + the texture handles ride in ONE packed
-// int vector: element 0 is the vertex count, elements 1.. are the texture handles.
-export fn gpuDrawPullT(pipe_k: ?K, bufs_k: ?K, ct_k: ?K) callconv(.c) ?K {
-  const cp = kip(ct_k) orelse return ki(0);
-  const cn: usize = @intCast(@max(kn(ct_k), 0));
-  if (cn == 0) return ki(0);
-  return recordPull(pipe_k, bufs_k, cp[0], cp[1..cn]);
+// gpuDrawPullT[pipe; bufHandles_I; count; texHandles_I] : a pull draw that also binds
+// textures at @group(1) — a vertex-pulled, textured draw (e.g. demo/earth.k).
+export fn gpuDrawPullT(pipe_k: ?K, bufs_k: ?K, count_k: ?K, tex_k: ?K) callconv(.c) ?K {
+  return recordPull(pipe_k, bufs_k, count_k, tex_k);
 }
 
-fn recordPull(pipe_k: ?K, bufs_k: ?K, count: i32, texs: []const i32) ?K {
+fn recordPull(pipe_k: ?K, bufs_k: ?K, count_k: ?K, tex_k: ?K) ?K {
   const ph = ki_val(pipe_k);
   if (ph <= 0 or ph > g_pull_pipes.items.len) return ki(0);
   const nbuf = g_pull_pipes.items[@intCast(ph - 1)].nbuf;
   const bp = kip(bufs_k) orelse return ki(0);
   const ngiven: usize = @intCast(@max(kn(bufs_k), 0));
   if (ngiven < nbuf) return ki(0);
+  const count = ki_val(count_k);
   if (count <= 0) return ki(0);
   var pc: PullCall = .{ .pipe = @intCast(ph - 1), .bufs = [_]i32{0} ** vk.MAX_BIND, .nbuf = nbuf, .count = @intCast(count) };
   var i: usize = 0;
   while (i < nbuf) : (i += 1) pc.bufs[i] = bp[i];
-  const nt: usize = @min(texs.len, MAX_TEX);
-  var j: usize = 0;
-  while (j < nt) : (j += 1) pc.tex[j] = texs[j];
-  pc.ntex = nt;
+  if (kip(tex_k)) |tp| {
+    const nt: usize = @min(@as(usize, @intCast(@max(kn(tex_k), 0))), MAX_TEX);
+    var j: usize = 0;
+    while (j < nt) : (j += 1) pc.tex[j] = tp[j];
+    pc.ntex = nt;
+  }
   g_pull_calls.append(alloc, pc) catch return ki(0);
   return ki(0);
 }
@@ -981,7 +979,7 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuComputeNew", @ptrCast(&gpuComputeNew), 2);
   r.k_register("gpuComputeNewU", @ptrCast(&gpuComputeNewU), 2);
   r.k_register("gpuDispatch", @ptrCast(&gpuDispatch), 3);
-  r.k_register("gpuDispatchLoop", @ptrCast(&gpuDispatchLoop), 3);
+  r.k_register("gpuDispatchLoop", @ptrCast(&gpuDispatchLoop), 5);
   r.k_register("gpuRun", @ptrCast(&gpuRun), 2);
   r.k_register("gpuFill", @ptrCast(&gpuFill), 2);
   r.k_register("gpuTess", @ptrCast(&gpuTess), 1);
@@ -993,7 +991,7 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuDrawMeshU", @ptrCast(&gpuDrawMeshU), 3);
   r.k_register("gpuMeshPull", @ptrCast(&gpuMeshPull), 2);
   r.k_register("gpuDrawPull", @ptrCast(&gpuDrawPull), 3);
-  r.k_register("gpuDrawPullT", @ptrCast(&gpuDrawPullT), 3);
+  r.k_register("gpuDrawPullT", @ptrCast(&gpuDrawPullT), 4);
   r.k_register("gpuDrawGeomT", @ptrCast(&gpuDrawGeomT), 3);
   r.k_register("gpuTexture", @ptrCast(&gpuTexture), 2);
   r.k_register("gpuCaps", @ptrCast(&gpuCaps), 1);
