@@ -531,12 +531,10 @@ pure instruction stencils in `lib/spirv.k`), and a set of higher-level helpers
   pairs separate contours to cut holes).
 
 #### Meshes & 3D
-- `mesh.compile[vtx; frg]` — compile a vertex+fragment SPIR-V pair into a
-  pipeline; the vertex stride is derived from the shader's declared inputs.
-- `mesh.draw[verts; h]`, `mesh.drawU[verts; h; uni]` (per-draw uniform block, 8
-  vec4 slots).
-- `mesh.upload[verts; h]` → persistent geometry buffer; then `mesh.drawGeomT`
-  draws it with uniform+textures without re-uploading.
+3-D meshes render exclusively by VERTEX PULLING — one pipeline API. (The old
+attribute path — `mesh.compile`/`draw`/`drawU`/`upload`/`drawGeomT` with
+`shader.vertex`/`vertexU` — was retired; geometry, per-frame uniforms and dynamic
+meshes all ride in resident storage buffers instead.)
 - `mesh.compilePull[vtx; frg]` / `mesh.drawPull[pipe; bufs; count]` — vertex
   pulling: the vertex shader (`shader.vertexPull`) reads resident storage
   buffers by `gl_VertexIndex`; instancing is an index computation
@@ -573,9 +571,9 @@ pipeline builders above. Types are symbols like `` `f32`v3`v4 ``.
 - **Fragment:** `shader.fragment[ioTypes; fn]`, `shader.fragmentTex[ioTypes; fn]`
   / `shader.fragmentTexN[ioTypes; nTex; fn]` (sampled textures). All paths compile
   through the neutral IR and const-fold + DCE when `xOpt=1` (the default).
-- **Vertex:** `shader.vertex[inTypes; varyTypes; fn]`,
-  `shader.vertexU[…; uniNames; fn]` (with a uniform block),
-  `shader.vertexPull[varyTypes; fn]` (pulled: buffers + `gl_VertexIndex`).
+- **Vertex:** `shader.vertexPull[varyTypes; fn]` — a kernel-shaped
+  `{[buf0;…; vid] (posV4; vary0;…)}`: the last param is `gl_VertexIndex`, every
+  other is a resident storage buffer read at that index (geometry + any uniforms).
 - **Compute:** `shader.kernel[fn]` — the general kernel with the binding table
   INFERRED from the lambda (params fed to `scatterAdd`/`iget`/`iset` are i32
   accumulators and must come first; the LAST param is the thread index; the

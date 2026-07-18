@@ -146,10 +146,10 @@ Available auto-loaded libraries:
 - `lib/gpu.k` — namespaced GPU API (Phase 4): `window.run`; `gpu.fill`, `gpu.tessellate`,
   `gpu.compileSpirv`, `gpu.drawShader`, `gpu.runShader`, `gpu.buffer`, `gpu.read`,
   `gpu.write`, `gpu.dispatch`, `gpu.compileCompute`, `gpu.solid`, `gpu.kernel`;
-  `mesh.compile`, `mesh.draw`/`drawU`/`drawGeomT`, `mesh.upload`, `mesh.compilePull`/`drawPull`;
+  `mesh.compilePull`/`drawPull`/`drawPullT` (the one mesh API — vertex pulling);
   `texture.upload`
 - `lib/dye.k` — shader compiler (loads `lib/spirv.k` encoder): `shader.fragment`/`Tex`/
-  `TexN`, `shader.vertex`/`vertexU`, `shader.compute`/`compute2`, `shader.stencil`/`U`/`IP`,
+  `TexN`, `shader.vertexPull`, `shader.compute`/`compute2`, `shader.stencil`/`U`/`IP`,
   `shader.scatter`. Every path compiles through the neutral IR. See `doc/design/dye.md`.
 - `lib/bits.k` — the CPU backend for the neutral IR: `bits.run[fn;nAcc;nBuf;bufs;count]`
   interprets a kernel lambda on the CPU (cross-backend oracle, `test/kkbits.k`).
