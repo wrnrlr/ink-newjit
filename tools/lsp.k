@@ -326,7 +326,11 @@ initResult:(`capabilities`serverInfo)!(caps;(`name`version)!("ink";"0.1.0"))
 
 / NB: bind side-effecting helper results to a local (u:) — a discarded
 / user-lambda call is DCE'd (its `::` global mutation would silently vanish).
-wf0:{[wf] $[0<#wf;(*wf)`uri;0]}
+/ First workspace folder's uri. `workspaceFolders` is a JSON array of objects, which
+/ json.parse columnarises into a `uri`/`name`-keyed dict — so read the `uri` column
+/ (or map when it stays a plain list) and take the first, rather than `(*wf)`uri`
+/ (which would index a column list by a symbol → error).  See chText.
+wf0:{[wf] u:$[`m=@wf;wf`uri;`M=@wf;wf`uri;{x`uri}'wf]; $[0<#u;*u;0]}
 wfUri:{[p] $[hasKey[p;`workspaceFolders];wf0 p`workspaceFolders;0]}
 doIndex:{[path] wroot::path; z:buildIndex path}
 initRoot:{[req]
