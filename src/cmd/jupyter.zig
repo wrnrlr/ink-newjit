@@ -728,16 +728,7 @@ fn closeConn(gpa: Alloc, sock: *Socket, ci: usize) void {
 // ── kernelspec installation ─────────────────────────────────────────────────
 // `ink jupyter install` writes a kernelspec under the user's Jupyter data dir
 // so editors (Zed, JupyterLab, …) can discover the ink kernel.
-fn selfExePath(buf: *[4096]u8) ![]const u8 {
-  if (builtin.os.tag == .macos) {
-    var size: u32 = buf.len;
-    if (std.c._NSGetExecutablePath(buf, &size) != 0) return error.PathTooLong;
-    return std.mem.sliceTo(@as([*:0]const u8, @ptrCast(buf)), 0);
-  }
-  const n = std.c.readlink("/proc/self/exe", buf, buf.len);
-  if (n <= 0) return error.NoExePath;
-  return buf[0..@intCast(n)];
-}
+const selfExePath = @import("../util.zig").selfExePath;
 
 pub fn install(gpa: Alloc) !void {
   const io = std.Io.Threaded.global_single_threaded.io();

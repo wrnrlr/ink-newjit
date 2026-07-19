@@ -3,27 +3,10 @@ const V = @import("../../noun/value.zig").V;
 const VM = @import("../../runtime/vm.zig").VM;
 const TerseFormatter = @import("../../noun/format.zig").TerseFormatter;
 const MockWriter = @import("../../util.zig").MockWriter;
+const h = @import("helper.zig");
 
 // TODO maybe we can jump to the precize type directly
-pub const Format = struct {
-  pub const op = .@"$";
-  _b: VM.Monad = fmt,
-  _i: VM.Monad = fmt,
-  _f: VM.Monad = fmt,
-  _s: VM.Monad = fmt,
-  _c: VM.Monad = fmt,
-  _o: VM.Monad = fmt,
-  _p: VM.Monad = fmt,
-  _x: VM.Monad = fmt,
-  _B: VM.Monad = fmt,
-  _I: VM.Monad = fmt,
-  _F: VM.Monad = fmt,
-  _S: VM.Monad = fmt,
-  _C: VM.Monad = fmt,
-  _L: VM.Monad = fmt,
-  _m: VM.Monad = fmt,
-  _M: VM.Monad = fmt,
-};
+pub const Format = h._Y(.@"$", &.{ .b, .i, .f, .s, .c, .o, .p, .x, .B, .I, .F, .S, .C, .L, .m, .M }, fmt);
 
 // TODO: Move TerseFormatter instance to VM
 fn fmt(vm: *VM, x: V) V {

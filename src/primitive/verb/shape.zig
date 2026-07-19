@@ -1,7 +1,9 @@
 const std = @import("std");
+const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
+const h = @import("helper.zig");
 
 // %x — Shape (monadic %; the dyad stays divide). The array-language shape verb
 // (APL rho, J $): the rectangular extent of x as an int vector.
@@ -16,24 +18,11 @@ const VM = @import("../../runtime/vm.zig").VM;
 // the result is the maximal uniform prefix of the dimensions. Placed arrays
 // (lib/gpu.k descriptors) carry the same vector in their `s field, recorded by
 // gpu.hold via this verb — see doc/design/kk2.md §8.
-pub const Shape = struct {
-  pub const op = .@"%";
-  _b: VM.Monad = shapeAtom,
-  _i: VM.Monad = shapeAtom,
-  _f: VM.Monad = shapeAtom,
-  _s: VM.Monad = shapeAtom,
-  _c: VM.Monad = shapeAtom,
-  _d: VM.Monad = shapeAtom,
-  _h: VM.Monad = shapeAtom,
-  _B: VM.Monad = shapeVec,
-  _I: VM.Monad = shapeVec,
-  _F: VM.Monad = shapeVec,
-  _S: VM.Monad = shapeVec,
-  _C: VM.Monad = shapeVec,
-  _D: VM.Monad = shapeVec,
-  _H: VM.Monad = shapeVec,
-  _L: VM.Monad = shapeList,
-};
+pub const Shape = h.monadGroups(.@"%", .{
+  .{ &[_]K{ .b, .i, .f, .s, .c, .d, .h }, shapeAtom },
+  .{ &[_]K{ .B, .I, .F, .S, .C, .D, .H }, shapeVec },
+  .{ &[_]K{.L}, shapeList },
+});
 
 fn wrapDims(vm: *VM, ds: []const i32) V {
   const out = N(i32).init(vm.alloc, ds.len) catch return V{ .err = .memory };

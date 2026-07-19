@@ -64,6 +64,25 @@ pub fn _Y(comptime op: Op1, comptime ks: []const K, comptime f: VM.Monad) type {
   return OpStruct(Op1, op, VM.Monad, entries);
 }
 
+/// Like `_Y`, but each type's handler is produced by `gen(xk)` — folds a
+/// hand-written `_b: g(.b), _i: g(.i), …` field list into one call.
+pub fn _G(comptime op: Op1, comptime ks: []const K, comptime gen: fn (comptime K) VM.Monad) type {
+  var entries: []const MonadEntry = &.{};
+  for (ks) |xk| entries = entries ++ .{MonadEntry{ .name = "_" ++ @tagName(xk), .fun = gen(xk) }};
+  return OpStruct(Op1, op, VM.Monad, entries);
+}
+
+/// Monad table from grouped type-lists that share a handler. Each `group` is a
+/// `.{ &.{types…}, fn }` tuple — folds Pattern-A structs where atoms/vecs/list
+/// each map to one function (e.g. shape's shapeAtom/shapeVec/shapeList).
+pub fn monadGroups(comptime op: Op1, comptime groups: anytype) type {
+  var entries: []const MonadEntry = &.{};
+  inline for (groups) |g| {
+    for (g[0]) |xk| entries = entries ++ .{MonadEntry{ .name = "_" ++ @tagName(xk), .fun = g[1] }};
+  }
+  return OpStruct(Op1, op, VM.Monad, entries);
+}
+
 pub fn makeMonad(
   comptime operator: @import("../../noun/operator.zig").Op1,
   comptime CastType: fn (type) type,

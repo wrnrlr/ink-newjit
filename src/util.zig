@@ -1,7 +1,22 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Alloc = std.mem.Allocator;
 const V = @import("noun/value.zig").V;
 const VM = @import("runtime/vm.zig").VM;
+
+// Path to the running executable.  May be relative; callers open it via cwd().
+pub fn selfExePath(buf: *[4096]u8) ![]const u8 {
+  if (builtin.os.tag == .macos) {
+    var size: u32 = buf.len;
+    if (std.c._NSGetExecutablePath(buf, &size) != 0) return error.PathTooLong;
+    return std.mem.sliceTo(@as([*:0]const u8, @ptrCast(buf)), 0);
+  } else if (builtin.os.tag == .linux) {
+    const n = std.c.readlink("/proc/self/exe", buf, buf.len);
+    if (n <= 0) return error.NoExePath;
+    return buf[0..@intCast(n)];
+  }
+  return error.Unsupported;
+}
 
 pub fn clamp(x: anytype, min_val: @TypeOf(x), max_val: @TypeOf(x)) @TypeOf(x) {
   std.debug.assert(min_val <= max_val);

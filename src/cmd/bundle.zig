@@ -22,19 +22,7 @@ const TRAILER = 16;       // u64 little-endian archive length + MAGIC
 const MAX_BIN = 256 * 1024 * 1024;
 const MAX_K = 10 * 1024 * 1024;
 
-// Path to the running executable.  May be relative; callers open it via cwd().
-fn selfExePath(buf: *[4096]u8) ![]const u8 {
-  if (builtin.os.tag == .macos) {
-    var size: u32 = buf.len;
-    if (std.c._NSGetExecutablePath(buf, &size) != 0) return error.PathTooLong;
-    return std.mem.sliceTo(@as([*:0]const u8, @ptrCast(buf)), 0);
-  } else if (builtin.os.tag == .linux) {
-    const n = std.c.readlink("/proc/self/exe", buf, buf.len);
-    if (n <= 0) return error.NoExePath;
-    return buf[0..@intCast(n)];
-  }
-  return error.Unsupported;
-}
+const selfExePath = @import("../util.zig").selfExePath;
 
 /// A decoded bundle: the main script plus its embedded modules (path → content).
 pub const Bundle = struct {
