@@ -630,3 +630,11 @@ The parser's `.int`-run branch (parser.zig) only consumed `.int` tokens, so a la
 ints to floats when it meets a decimal element (and re-glues interior negatives like
 `1 -2.5 3`), matching the `.float` branch. Cost a while debugging kk.freq (the test
 data `0 1 1 … 2.` was silently an error value).
+
+## converge `/` with a NAMED function silently no-ops (found 2026-07-18)
+`f: {...}; f/ ,seed` — converge over a *named* lambda does not iterate: it returned
+the argument (or something degenerate) instead of the fixed point, with no error.
+The inline form `{...}/ ,seed` works. Known cousin of the "`f ' xs` over a bare name
+errors" gotcha (AGENT.md), but here it *silently returns wrong data* rather than `!`.
+Hit in demo/geometry.k (`orbitR/ ,seed` → 1-element "orbit"); workaround: wrap the
+name, `{orbitR x}/` — or inline the lambda.

@@ -354,10 +354,10 @@ The IO system is organized around file descriptors (filename, port number, etc.)
 - `` 1:x `` **ReadBytes** 
 - `` 1:`stdin `` reads up to 64 KiB of available bytes from stdin (blocks for ≥1 byte); returns `""` at EOF. Partial by design — frame/buffer in k. For byte-stream protocols (LSP/Jupyter).
 - `` x 1: y `` **Write bytes**
-- `` `stdout 1: y `` / `` `stderr 1: y `` write raw bytes with **no** trailing newline and flush (unlike `` `0 0:y `` which appends `\n`).
+- `` `stdout 1: y `` / `` `stderr 1: y `` write raw bytes with **no** trailing newline and flush.
 - Writing to a path that doesn't exist **creates** the file (`` "new.txt" 1: bytes ``); the same holds for `` x 0: y ``. (Reads still require the file to exist.)
 - `` 2: y `` **LoadCode** - used for importing other files
-- `` 9: x `` **Place** — upload x to the GPU; returns a placed-array descriptor dict `[gpu:handle;t;n;s]` (`s` = `%x`, the shape; nested rectangular input flattens for upload). A TABLE places as a structured buffer (`gpu.holdT`, kk2 §2.5): PLANAR by default (one buffer per column) or INTERLEAVED (`gpu.tblLay:`il` / auto when `#cols+1 > MAX_BIND` — one row-major buffer, stride nc, so an n-column table costs 2 bindings not n+1; the layout that fits the cloth edge kernel). A DICT places as a named group of DIFFERING-length buffers (`gpu.holdD` — ragged, e.g. a CSR `[data:…;off:…]`), each accessed by key. `8:` reassembles either. The device is an io channel: work recorded on placed arrays only submits at the `8:` sync point. Requires `lib/gpu.k` (else `!io`). NB `f 9: x` after a NAME parses the verb as dyadic — write `f[9: x]`. See `doc/design/kk.md` §1.
+- `` 9: x `` **Place** — upload x to the GPU; returns a placed-array descriptor dict `[gpu:handle;t;n;s]`.
 - `` d 9: x `` **PlaceInto** — overwrite placement `d`'s buffer in place (no realloc); returns `d`
 - `` 8: d `` **Fetch** — sync + read a placed array back to the host, reshaped to its `s`; a `tbl` descriptor reads every column and rebuilds the table
 - `` n 8: d `` **FetchN** — first n elements (trims the ×64 dispatch padding)

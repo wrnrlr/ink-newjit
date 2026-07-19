@@ -48,7 +48,7 @@ det:   {+/x[0]*cross[x 1;x 2]}          / +1 for a rotation, -1 for a reflection
 
 / ── §1  the Coxeter diagram → three mirror normals ────────────────────
 / Unit normals with n₁·n₂ = -cos(π/p), n₂·n₃ = -cos(π/q), n₁·n₃ = 0.
-mirrors: {[p;q]
+coxeter: {[p;q]
   a:cos PI%p;s:sin PI%p;b:(-cos PI%q)%s
   ((1. 0. 0.); ((-a);s;0.); (0.;b;sqrt[1.-b*b]))}
 
@@ -66,14 +66,16 @@ corners: {[N] (cross[N 1;N 2]; cross[N 2;N 0]; cross[N 0;N 1])}
 / parent scope, k idiom — so the expander/key travel as data).  Values
 / stay EXACT throughout; rounding is only the key — rounding the elements
 / feeds error back through the maps and the closure never settles.
-/ The loop state is a dict so each field reads by name.  `expand` and
-/ `key` ride along unchanged; `seen` accumulates, `frontier` is the newly
-/ found elements to grow next round.
-bfcStep: {[st]
-  expand:   st`expand                   / frontier → candidate elements
-  key:      st`key                      / dedup normaliser (how deep to round)
-  seen:     st`seen
-  frontier: st`frontier
+/ The loop state is a `search`: a dict bundling the expansion rule, the
+/ dedup key, the `seen` (explored) set and the `frontier` still to grow —
+/ the textbook quadruple, the way a `particle` bundles position+velocity.
+/ `expand` and `key` ride along unchanged; `seen` accumulates, `frontier`
+/ is the newly found elements to grow next round.
+bfc.step: {[search]
+  expand:   search`expand   / frontier → candidate elements
+  key:      search`key      / dedup normaliser (how deep to round)
+  seen:     search`seen     / everything found so far (explored set)
+  frontier: search`frontier / the newest elements, still to grow
   cand: expand frontier
   ra:   key seen
   rc:   key cand
@@ -82,8 +84,8 @@ bfcStep: {[st]
   nw:   cand@rc?k2                       / one exact representative each
   [expand:expand; key:key; seen:seen,nw; frontier:nw]}
 bfc: {[expand;key;seed]                  / breadth-first closure
-  s0:  [expand:expand; key:key; seen:,seed; frontier:,seed]
-  ({0<#x`frontier}bfcStep/s0)`seen}
+  search: [expand:expand; key:key; seen:,seed; frontier:,seed]
+  ({0<#x`frontier}bfc.step/search)`seen}
 
 / §2a  the reflection group: expand = frontier · the 3 generator matrices.
 / expandG[gens] is a PARTIAL that carries its generators, so `bfc` needs
@@ -95,7 +97,7 @@ groupOf: {[N] bfc[expandG[rmat' N]; rnd''; id3]}
 / Same closure, one-level round; expandO[N] carries the mirror set.
 expandO: {[N;fr] ,/ N {refl[x;y]}/:\: fr}
 orbit:   {[N;seed] rnd' bfc[expandO[N]; rnd'; seed]}
-wythoff: {[p;q;t] N:mirrors[p;q]; orbit[N; nrm[+/ t*corners N]]}
+wythoff: {[p;q;t] N:coxeter[p;q]; orbit[N; nrm[+/ t*corners N]]}
 
 / ── §4  the 1-skeleton, from nothing but distance ────────────────────
 / Vertices come from the orbit; an edge is any vertex pair at the

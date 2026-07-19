@@ -133,14 +133,11 @@ earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v3;wSun:`v3]; {[vb;ub;vid]
 / night city lights); the specular mask gates an ocean sun-glint; clouds (white)
 / overlay both, lit by the sun and toggled by wUvF.z.  Output is clamped so the
 / glint/lights can't blow out to a white seam.
-earthFrag: shader.fragmentTexN[[wNor:`v3; wTan:`v3; wUvF:`v3; wSun:`v3; out:`v4]; 5; {[wNor;wTan;wUvF;wSun]
+earthFrag:shader.fragmentTexN[[wNor:`v3;wTan:`v3;wUvF:`v3;wSun:`v3;out:`v4]; 5; {[wNor;wTan;wUvF;wSun]
   uv:    (wUvF[0]; wUvF[1])
   flag:  wUvF[2]
-  day:   sample[0; uv]
-  night: sample[1; uv]
-  cloud: sample[2; uv]
-  specM: sample[3; uv]
-  nmap:  sample[4; uv]
+  day:sample[0;uv];night:sample[1;uv];cloud:sample[2;uv];
+  specM:sample[3;uv];nmap:sample[4;uv];
   / bump: decode tangent-space normal, transform to world with the T,B,N frame
   N0: normalize wNor
   T:  normalize wTan
