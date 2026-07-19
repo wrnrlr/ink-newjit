@@ -1,47 +1,5 @@
 # Issues
 
-## 1. Integer parsing/cast overflow returns `0N`
-
-```k-repl
- `I$"10000000000"
-0N
-```
-
-`I` is backed by `i32` (`src/noun/class.zig`), so any value above
-`maxInt(i32)` overflows on parse/cast and yields `0N`. Not a discrete bug — a
-consequence of the 32-bit integer width. The real fix is widening integers to
-`i64`, a large change touching the whole `i`/`I` backing type. Documented until
-then.
-
----
-
-## 2. Long for-each is slow at extreme sizes
-
-```
-  \t {x*3}'!100000000
-```
-
-Not a crash. The per-element `'` loop is interpreted (not vectorized):
-`{x*3}'!1e7` takes ~4.4s / 245 MB in Debug, so `!1e8` extrapolates to ~44s /
-~2.4 GB and chokes `rlwrap`'s output buffering. Fixable by vectorizing
-scalar-arithmetic lambdas under each, otherwise just a cost to be aware of.
-
----
-
-## 3. Font: eager materialization is slow for huge multi-face CFF (Debug)
-
-`ReadFont` materializes every table for every face up front, including the full
-per-glyph `glyf` outline list and CFF `charStrings` (raw charstring bytes per
-glyph). For a 10-face CJK CFF collection (`NotoSansCJK-Regular.ttc`, ~65k glyphs
-× 10 faces) that is ~655k string allocations → ~47s in Debug (`test/font.k`'s
-ttc assertion alone dominates the suite). Release is far faster (c_allocator).
-Not a correctness bug — a consequence of the "read everything into k" design.
-If it becomes painful, make `glyf`/`charStrings` lazy (return a thunk or keep
-the file buffer + offsets and materialize a glyph on demand). The ttc test
-could also point at a lighter collection.
-
----
-
 ## 4. Slab free-size fragility — `Rc` header must stay 16 bytes (design note)
 
 Confirmed sound as built. The epoch stamp added for ECS change-detection was
@@ -70,7 +28,17 @@ header change doesn't rediscover this the hard way.
 
 ---
 
-## 5. Concatenating a typed vector with `()` upcasts it to a boxed `` `L ``
+## 5. Concatenating a typed vector with `()` upcasts it to a boxed `` `L `` — FIXED
+
+**Fixed** (`src/primitive/verb/concat.zig`): the right-empty form `x,()` is now
+identity — a typed vector keeps its type (`` `a`b,() `` → `` `S ``) and an atom
+enlists to its typed 1-vector (`1,()` → `,1` as `` `I ``), matching ngn/k. Dict
+keys/env merges built with `(k,())!(v,())` index correctly again. Scope note: only
+the *right-empty* form is special-cased; the *left-empty* `(),x` keeps its old
+"box into a general list" behaviour — the GPU shader compiler's word-list assembly
+(`lib/dye.k`, `,/(hdr;…)`) relies on `()` on the left forcing a general list, and
+changing it regressed the whole `kk.compile` path. The reported cases (all
+right-empty) are covered.
 
 ```k-repl
  (`a`b),()
@@ -102,99 +70,44 @@ already noted for `lib/recs.k`.
 
 ---
 
-## 6. List *literal* caps at 255 elements (`MakeList` count is `u8`)
+## 6. List *literal* caps at 255 elements (`MakeList` count is `u8`) — FIXED
 
-A list literal / collection passed in one expression (e.g. `+/(a0;a1;…;a999)`)
-lowers to a `MakeList` whose element-count arg is a single byte, so >255 elements
-panic at compile (`compiler.zig` `lowerInst`, `@intCast(inst.arg1)` to `u8`).
-Surfaced while stress-testing the (now-fixed) global limit. Same shape as the old
-256-global issue: widen the `MakeList` count if it ever bites in practice (build the
-list incrementally / via `,/` over chunks as a workaround). Low priority — literals
-that large are rare.
+**Fixed**: the `MakeList` count is now a `u16` (opcode + 2 bytes), so a list literal
+can hold up to the VM stack depth (2048) instead of panicking above 255. The count
+is written/read in FOUR places that must stay in lockstep — `compiler.zig`
+(`lowerInst` write16 + `instSize` → 3), `vm.zig` `doMakeList` (`read16`), `tape.zig`
+`instrSize` (→ 3, used by `buildBlocks`), and `disasm.zig` (`readU16`). Missing the
+`tape.zig`/`buildBlocks` one desyncs basic-block boundaries and corrupts every chunk
+with control flow (invalid-enum panic) — the size decoder there is independent of the
+compiler's.
 
 ---
 
-## 7. `walk.k` value-iteration amend returns `!type` (pre-existing)
+## 7. `walk.k` value-iteration amend returns `!type` — NOT A BUG (triage repro error)
 
-`test/walk.k` section 2 (the plain N×N relaxation) errors:
+The repro used `+/:` (each-**right**) which builds `W` as a `(#I, 4)` matrix, so
+`+/x@W` reduces over the 64 outer rows → a length-4 vector, and the amend
+`@[x;I(64);:;values(1)]` is a genuine length mismatch (`!type`). `test/walk.k`
+itself uses `+\:` (each-**left**, line 21) → `W` is `(4, #I)`, so `+/x@W` sums the
+4 neighbour rows → a length-64 vector matching `#I`, and the amend works. Verified:
+`W:((-N),N,1,-1)+\:I` runs the whole relaxation cleanly. The amend path is fine.
 
 ```k
-N:100;(r;c):1+!2#N-2;I:c+N*r;W:((-N),N,1,-1)+/:I
+N:100;(r;c):1+!2#N-2;I:c+N*r;W:((-N),N,1,-1)+\:I   / +\: not +/:
 f:{@[x;I;:;1.+.25*+/x@W]}
-f (N*N)#0.0        / → !type
+f (N*N)#0.0        / ok
 ```
-
-`W` builds fine (`#W` ok); the fault is inside `f` — the amend
-`@[x;I;:;1.+.25*+/x@W]` (index-list gather `x@W`, reduce, then amend-assign back
-at indices `I`). Present in both the scalar and SIMD builds, so unrelated to the
-SIMD kernels. Sections 1 (random walk) and 3 (D4-symmetric iteration) run fine.
-Not yet triaged — likely the `@[x;idxvec;:;computed-vec]` amend path or the
-`x@W`/`+/:` gather over a matrix of indices.
 
 ---
 
-## 8. `` `~ `` (and other op-glyph symbols) glue to a following backtick — Match needs spaces — FIXED
+## 10. Namespace member forward-reference resolves to blank under script eval — RESOLVED
 
-**FIXED**: the backtick-symbol lexer no longer consumes operator glyphs. After a
-`` ` `` only alphanumerics and dots join the symbol; an operator glyph is its own
-verb. So `` `~ `` is the null symbol `` ` `` followed by the Match verb (a
-projection), `` `~` `` is a Match of two null symbols (→ `1b`), and `` `=` `` → `1b`,
-matching ngn/k. To NAME a symbol after an operator, quote it: `` `"+" ``, `` `"<=" ``.
-Op-glyph symbols like `` `+ `` / `` `<= `` are gone — every k source that compared
-CST op values (`lib/dye.k`, `test/spirv.k`, `tools/lsp.k`) was migrated to the
-quoted form. Original report below.
-
-```k-repl
- `~`          / → `~`   (the SYMBOL "~", then a null symbol — NOT a match)
- ` ~ `        / → 1b    (Match of two null symbols, as intended)
-```
-
-The lexer greedily consumes op-chars into a backtick symbol (`` `<= `` is the
-symbol `<=`, by design), so `` `~` `` reads as `` `~ `` (symbol "~") followed by
-`` ` `` (null symbol), i.e. a juxtaposition/index — never the dyadic Match verb
-`~` between two `` ` `` operands. To use a verb glyph as a verb next to a symbol
-literal, surround it with spaces: `` ` ~ ` ``, `` ` = ` ``, etc. Surprising for
-the common `x~y` idiom when `x`/`y` are backtick symbols; the greedy-symbol rule
-is otherwise intentional (see AGENT.md "Multi-char operator symbols"). Cost real
-time while writing `lib`/`tools/lsp.k` (a `` `~w `` blank-check silently misread).
-
----
-
-## 9. Special-symbol builtins apply by juxtaposition / brackets, not `@` — FIXED
-
-**FIXED**: `marshal.zig`'s Unmarshal handlers register into `@`'s row for the
-byte-ish operand types (`_s_C`/`_s_B`/`_s_s`/`_s_i`) but now delegate any non-`bin`
-symbol back to `syms.apply`, so `@` routes all symbol-applies. `` `dir@"lib" ``,
-`` `argv@0 ``, `` `asin@0.5 ``, `` `abs@3 `` all work. Original report below.
-
-```k-repl
- `dir "lib"     / → recursive file list (works)
- `dir["lib"]    / → same (works)
- `dir@"lib"     / → !  (does NOT route to the builtin)
- `argv@0        / → (blank)  — same problem
- `asin@0.5      / → 0.523…   — but THIS one works via @
-```
-
-A bare `` `sym `` (e.g. `` `argv ``, `` `env ``, `` `dir ``, `` `x ``) is a
-special-form builtin (`src/runtime/syms.zig`). Applying it with juxtaposition
-(`` `dir p ``) or brackets (`` `dir[p] ``) routes to `syms.apply`; applying it
-with `@` does **not** for these (even though `Apply`'s `_s_*` cases point at
-`applySymFn`). Only the inverse-trig helpers (`` `asin@x ``, `` `atan2@(y;x) ``)
-work through `@`, which is inconsistent with how they're documented. Either `@`
-should route all symbol-applies, or the trig docs should show juxtaposition.
-
----
-
-## 10. Namespace member forward-reference resolves to blank under script eval
-
-Inside a `\d ns` block, a member that references another member defined *later*
-in the same file compiles to a blank when the file is evaluated statement-by-
-statement (`ink file.k`, evalStream) — the call silently no-ops (no reply / wrong
-value). The same file loaded via the autoloader (`vm.load`, whole-file compile)
-resolves the forward ref fine. Order definitions so every member precedes its
-first use, or the compiler should defer global-name resolution to call time.
-(Hit in `tools/lsp.k`: `onDef` → `defBuiltin` defined later → definition-on-
-operator returned nothing until reordered.)
+**Resolved**: `evalStream` (`src/cmd/repl.zig`) now calls
+`compiler.prescanGlobals` over the whole file before compiling statement-by-
+statement, pre-registering every qualified top-level target. A member that
+references another member defined *later* in the same `\d ns` block resolves
+correctly under both `ink file.k` and the autoloader now. Verified with a
+forward-ref namespace file (`ns.foo` → `bar` defined below → 105).
 
 ---
 
@@ -209,7 +122,13 @@ scratch for `parse`'d chunks isn't freed. Low priority.
 
 ---
 
-## 12. Raw byte write (`1:`) rejects a single-char atom
+## 12. Raw byte write (`1:`) rejects a single-char atom — FIXED
+
+**Fixed** (`src/primitive/verb/io.zig`): `WriteBytes` now has `_s_c`/`_C_c`/`_i_c`
+entries and an `ybytes` helper that treats a `c` char atom as a 1-byte write.
+`` `stdout 1: "a" `` writes the byte; the `,"a"` enlist workaround is no longer
+needed. Applies to stdio handles, files, and sockets.
+
 
 ```k-repl
  `stdout 1: "ab"      / writes the 2 bytes
@@ -227,33 +146,17 @@ Workaround: enlist with `,`.
 
 ---
 
-## 13. `2:"file"; expr` on one line panics (stack underflow) — FIXED
+## 14. A keyword-verb param name is silently mishandled (dropped / mis-parsed) — FIXED
 
-**FIXED** (with the nested-`2:` bug): a `2:` executed while another file/statement is
-running now evals on its own re-entrant frame (`VM.evalNested`) instead of `interpret`
-resetting the caller's stack. `2:"f"; expr`, `r:2:"f"`, and dye.k self-loading spirv.k
-all work now. Original report below.
+**Fixed** (`src/parser/parser.zig`, `parseArgList`): a parameter named after one of
+the four remaining keyword verbs (`in has mod div`) now raises a clean
+`!parse_error: UnexpectedToken` instead of silently dropping/mis-parsing. The lexer
+always tokenises these as verbs, so full shadowing would need scope-aware lexing (a
+much deeper change); rejecting loudly kills the silent-miscompile. The removed
+math/monadic names (`count first last sqrt parse …`) are now prelude *identifiers*,
+so they are fine as param names — only the 4 genuine keyword verbs are rejected.
+Workaround unchanged: use `cnt`, `src`, `elem`, …
 
-```k
- 2:"lib/regex.k"; regex.test[regex.compile["x"];"x"]   / → panic: integer overflow in vm.pop
- 2:"lib/regex.k"                                        / fine (alone)
-```
-```k
- 2:"lib/regex.k"
- regex.test[regex.compile["x"];"x"]                     / fine (newline-separated)
-```
-
-A `2:` load followed by `;` and another statement on the **same line** panics
-(`src/runtime/vm.zig:738` `pop`, `stack_len -= 1` underflow) — the load's result
-isn't balanced on the stack when the next statement is compiled in the same
-chunk. Newline-separating the statements, or loading alone, works. Pre-existing
-(reproduces reading from disk, unrelated to the embedded-module overlay);
-surfaced while testing embedded `2:"lib/x.k"` loads. Same family as the earlier
-nested-`2:` / `z:2:"f"` issues.
-
----
-
-## 14. A keyword-verb param name is silently mishandled (dropped / mis-parsed)
 
 ```k-repl
  {[count;buf] count,buf}[100;3]      / → a DICT (`!), not `100 3`
@@ -274,25 +177,31 @@ lookup. Workaround: never name a param after a keyword verb (use `cnt`, `src`, �
 
 ---
 
-## 15. `f +x` (function juxtaposed with a monadic-verb-prefixed arg) parses `+` as dyadic
+## 15. `f +x` (function juxtaposed with a monadic-verb-prefixed arg) parses `+` as dyadic — NOT A BUG
+
+**Not a bug** — this is standard k parsing and ngn/k agrees: a verb glyph between
+two nouns is dyadic, so `f +x` is `f + x` (add), not `f (+x)`. ngn/k gives the
+same `'type` on `f +(2 2#1 2 3 4)`. (`f -3` works in both because `-3` with a
+leading space is a negative literal, so `f` applies to `-3`.) The idiom is to
+parenthesise a monadic operand: `f (+x)`, `f (-x)`, `f (|x)` — or bind it to a
+temp first. Left as a documented gotcha (already in AGENT.md), not a fix.
 
 ```k-repl
  tcol:+(nTris;3)#triIds; av:triArea tcol     / correct: av = per-triangle areas
- av:triArea +(nTris;3)#triIds                / WRONG: parses as (triArea + reshape)
+ av:triArea +(nTris;3)#triIds                / dyadic add (as in ngn/k) — use f (+x)
 ```
-
-`triArea +x` is read as the dyadic add `triArea + x` (function plus matrix), not
-`triArea (+x)` (apply `triArea` to the transpose `+x`). The result silently
-collapses (adding a lambda to a matrix yields a 1-element/garbage value), so a
-downstream table/`#` looks fine structurally but has 1 row. Any `f <op>x` where
-`<op>` is meant monadically (`+`transpose, `-`negate, `|`…) next to an applied
-function hits this; parenthesise the operand (`f (+x)`) or bind it to a temp
-first. Cost time in `demo/clothbench.k`'s CPU cloth setup (areas → inverse masses
-collapsed → empty constraint tables → the whole solver silently did nothing).
 
 ---
 
-## 16. Indexed-amend `x[i]:v` inside a lambda breaks the global (needs `::` / `@[]`)
+## 16. Indexed-amend `x[i]:v` inside a lambda breaks the global (needs `::` / `@[]`) — RESOLVED
+
+**Resolved**: the collapse is gone. Inside a lambda, `gIm[0 19]::0.` (deep-indexed
+`::`) now correctly amends the global in place at a multi-element index list
+(`#gIm` stays 400, indices 0 & 19 zeroed), and the single-colon `gIm[0 19]:0.` no
+longer clobbers the global to size 1 — it just makes a local copy, which is the
+expected k semantics (use `::` to write the global). The `x::@[x;idx;:;v]` form
+also works. Verified with the corner-mass pinning repro.
+
 
 ```k-repl
  gIm::(400)#1.
@@ -312,63 +221,33 @@ in lambdas" note, but specific to the *indexed* amend with a list index.
 
 ---
 
-## 17. `` `c$-1 `` panics instead of erroring (cast to char from a negative int)
+## 17. `` `c$-1 `` panics instead of erroring (cast to char from a negative int) — FIXED
 
-`` `c$<neg> `` (and `` `c$<neg vector> ``) reaches `numCast(i32, u8, v)` →
-`@intCast`, which panics ("integer does not fit in destination type") in a Debug
-build for any value outside `0..255`; in ReleaseFast it silently wraps/UB.
-Present on `main` (was `.{ .c = @intCast(y.i) }` in `castInt`). Fix sketch:
-clamp/mask like the u32→u8 path (`@truncate`), or return `.{ .err = .domain }`
-for out-of-range. Applies to both the scalar and vector char casts in
-`src/primitive/verb/cast.zig`.
+**Fixed** (`src/primitive/verb/cast.zig`, `numCast` i32→u8 arm): now
+`@truncate(@as(u32, @bitCast(v)))` — an out-of-range or negative int wraps into the
+byte (`` `c$-1 `` → char 0xff) like the u32→c path, instead of panicking. Applies to
+both the scalar and vector char casts (both route through `numCast`).
 
 ---
 
-## 18. Find (`?`) over a boolean-vector left operand returns empty
+## 18. Find (`?`) over a boolean-vector left operand returns empty — FIXED
+
+**Fixed** (`src/primitive/verb/find.zig`): the `Find` struct had no `_B_*` entries
+(bool-vector left) and no `_I_b`/`_I_B`/`_F_b`/`_F_B` entries (bool right against an
+int/float vector), so those combinations hit the type-error fallback. Added a
+`findBool` kernel that coerces the bool operand(s) to the shared numeric family
+(bools are 0/1; float when the other side is float) and routes to the int/float find
+kernels. Now `010b?1b`, `010b?1`, `0 1 0?1b`, `0. 1. 0.?1b` all find at the right
+index.
+
+Note: the triage's `0 1 0b` is actually an int vector — a space-separated mixed
+literal promotes to `` `I `` — the real `B` literal is `010b` (no spaces). Both the
+`B`-left and bool-right-against-`I/F` paths are covered now.
 
 ```k-repl
- 0 1 0b ? 1b     / expected: 1  →  actual: (empty)
- 0 1 0b ? 1      / expected: 1  →  actual: (empty)
- 0 1 0  ? 1b     / 1   (int left operand works)
- 0 1 0  ? 1      / 1
+ 010b ? 1b        / 1
+ 0 1 0 ? 1b       / 1  (int left, bool right)
 ```
-
-`x?y` (Find) yields an empty result whenever `x` is a boolean vector (`` `B ``),
-regardless of the right operand's type. An int-vector left operand works, so the
-bug is specific to the `B` code path in Find (`src/primitive/verb/`). Worked
-around in `lib/dye.k` `constId` by using Where (`&mask`) instead of `mask?1b`.
-
----
-
-## `@`(symbol, int-scalar) mis-dispatches to the `2:` loader — FIXED
-
-**FIXED**: `marshal.zig`'s Unmarshal handlers (which register into `@`'s row for
-C/B/s/i operands to support `` `bin@bytes ``) now delegate non-`bin` symbols back to
-`syms.apply` (symbol-application), and `unmarshal_s_i` checks the symbol before
-`getFileText`. So `` `abs@4 ``→4, `` `sin@0 ``→0.0, `` `foo@4 ``→!type (no panic).
-Original report below.
-
-Applying a symbol to an **integer scalar** via `@` panics instead of running the
-symbol function:
-
-```
-`abs@4     / panic: index out of bounds: index 4, len 2  (→ unmarshal_s_i / 2: load)
-`foo@3     / same panic — NOT math-specific; any symbol@int-scalar
-`sin@2     / panic
-`sin@2.0   / 0.9092974   (float arg is fine)
-`sin@(2 3) / works        (vector arg is fine)
-```
-
-Root cause: `dispatch2(.@, s, i)` lands on the `2:` (Marshal) handler
-`unmarshal_s_i` (marshal.zig:72), which does `getFileText(@intCast(y.i))` — using
-the integer *value* as a file id. Only the `(symbol, int-scalar)` type pair is
-affected; `(symbol, float)` and `(symbol, vector)` route correctly to `applySymFn`.
-
-Impact: none on current code (nothing wrote `` `sym@int ``). Surfaced while wiring
-lib/prelude.k (Phase 1); worked around there by applying math symbols via
-JUXTAPOSITION (`` `sin x ``, which routes Call.apply → syms.apply, bypassing the
-`@`-dyad table) instead of the `` `sin@ `` projection. Fixing the dispatch table
-would let the projection form work too.
 
 ---
 
@@ -412,38 +291,6 @@ of the in-memory parse reuses `std.zip`'s `align(1)` extern struct layouts
 (`CentralDirectoryFileHeader`, `LocalFileHeader`), which are fine. Revisit if a
 future Zig fixes `findBuffer` (either the declared error set gains `EndOfStream`
 or the body stops returning it) — the workaround can then be dropped.
-
----
-
-## 21. Converge over a derived verb misapplies as a seeded fold (`,//x`) — FIXED
-
-```k-repl
- ,/,/((1 2;3 4);(5 6;7 8))       / 1 2 3 4 5 6 7 8      — two razes, correct
- {,/x}/((1 2;3 4);(5 6;7 8))     / 1 2 3 4 5 6 7 8      — lambda converge, correct
- ,//((1 2;3 4);(5 6;7 8))        / (1 2;3 4;5;6;7;8)    — WRONG
- (,/)/((1 2;3 4);(5 6;7 8))      / (1 2;3 4;5;6;7;8)    — WRONG (same)
-```
-
-`f/x` where `f` is itself a *derived* verb (`,/`) does not run monadic converge.
-The wrong output is exactly `x[0] ,/ x[1]` — a **seeded fold** (`x f/ y` with
-`x[0]` as the seed and the remaining elements folded through dyadic `,/`) — so
-the valence resolution for a derived-verb operand under `/` picks the
-seeded-fold form instead of converge. A 1-param lambda operand (`{,/x}/`)
-resolves correctly, which is the workaround used by `gpu.hold`'s flatten
-(`{$[`L~@x;,/x;x]}/x`, lib/gpu.k). Likely home: `runtime/call.zig` /
-`primitive/derived.zig` valence choice when the base of a derived verb is
-itself derived. Found 2026-07-15 while adding shape recording to `9:`.
-
-**Fixed 2026-07-16** in `primitive/derived.zig`: the monadic `/`/`\` valence
-check (`derived2`) used `x.arity()==1`, but a derived over/scan verb (`,/`)
-reports its dyadic *base* arity (2) while being monadically applicable. Added
-`foldsAsMonad` — a `/`- or `\`-derived operand now reads as monadic converge,
-not a seeded fold. Unit tests in `test.zig` ("converge over a derived verb").
-`gpu.hold`'s flatten workaround simplified to `gpu.flat: {[x] $[`L~@x;,//x;x]}`
-(the guard is now just the top-level list check; the per-step guard the lambda
-needed is gone). The only behavioural delta from the old spelling is on inputs
-that raze down to an *empty* vector (`(!0;!0)`→blank vs `!0`) — not a real GPU
-upload, and gpu.hold's top-level `` `L~@x `` guard keeps `gpu.hold !0` safe.
 
 ---
 
@@ -598,43 +445,13 @@ Dawn validation errors; 85/85 golden still pass. Scope: one uniform `vec4` on th
 element-wise path; multi-member structs or uniforms on stencil/scatter kernels
 would extend the same pattern (loop `memberDecOne`/`loadUniMember` over N members).
 
-## snap.sh glob mismatch (pre-existing, found 2026-07-17) — FIXED
-`public/snap.sh` collected `"$name"-snap-*.png` but `ink -snap t` writes `$name-snap.png`
-(no index suffix) for a single capture time — every demo was "skipped (no frame captured)".
-Fixed 2026-07-17: widened the glob to `"$name"-snap*.png` (all three spots); `make
-docs-snap` now captures all 8 demos.
+## converge `/` with a NAMED function silently no-ops (found 2026-07-18) — RESOLVED
+**Resolved**: converge over a named lambda now iterates to the fixed point.
+Verified `f:{$[x<10;x+1;x]}; f/ 0` → 10 (same as the inline `{…}/ 0`). No longer
+returns the argument degenerately.
 
-## amend: no numeric coercion on assign `@[Xvec;i;:;y]` (found 2026-07-17) — FIXED
-Assigning a numeric scalar into a typed numeric vector via `@[x;i;:;y]` / `L[i]:v`
-returned `` `!type `` (an error value, whose `#` is 1 — so it read as the vector
-"collapsing to length 1") whenever `y`'s type didn't exactly match the vector's:
-- `@[11#0.; 0; :; 3]` (int into a float vector) → error, not `3. 0. 0. …`
-- `@[3#0; 1; :; 1b]` (bool into an int vector) → error
-This was the ACTUAL root cause of the "bits backend corruption" I first (mis)filed as
-a COW/aliasing bug: the interpreter's bufp/param nodes yield integer slot/index
-values, and storing them into its F-vector `bV` hit exactly this path. There is NO
-separate aliasing defect — pure-float `L[k]:v` / `L::@[L;k;:;v]` reading `L`, in an
-each or not, was always fine. Fixed in `src/primitive/amend.zig`: `Amend4Vec.single`/
-`multiple` now coerce a narrower-or-equal numeric scalar (bool→int→float) via
-`coerceNum` instead of erroring. Widening (float into an int vector) still errors
-BY DESIGN — amend never changes a target's type or shape, so `@[1 2 3;0;:;1.5]` is a
-`!type, not a promotion. lib/bits.k reverted to plain in-place `bV[k]:v` (kkbits 12/12).
-
-## vector literal: a decimal element after a bare int errors (found 2026-07-17) — FIXED
-A numeric vector literal that starts with bare integers and then has an element with a
-decimal point signalled `` `! `` instead of promoting to a float vector:
-- `1 2 3.` → `` `! ``  (also `1 2. 3`, `1 2 3.5`)
-- `1. 2 3` → `` `F `` (float FIRST was fine — the whole vector promoted)
-The parser's `.int`-run branch (parser.zig) only consumed `.int` tokens, so a later
-`.float` was left as a stray term. Fixed: the int-run now PROMOTES its accumulated
-ints to floats when it meets a decimal element (and re-glues interior negatives like
-`1 -2.5 3`), matching the `.float` branch. Cost a while debugging kk.freq (the test
-data `0 1 1 … 2.` was silently an error value).
-
-## converge `/` with a NAMED function silently no-ops (found 2026-07-18)
-`f: {...}; f/ ,seed` — converge over a *named* lambda does not iterate: it returned
-the argument (or something degenerate) instead of the fixed point, with no error.
-The inline form `{...}/ ,seed` works. Known cousin of the "`f ' xs` over a bare name
-errors" gotcha (AGENT.md), but here it *silently returns wrong data* rather than `!`.
-Hit in demo/geometry.k (`orbitR/ ,seed` → 1-element "orbit"); workaround: wrap the
-name, `{orbitR x}/` — or inline the lambda.
+## char-base join adverb crashes on a general-list arg (found 2026-07-19) — FIXED
+**Fixed** (`src/primitive/adverb/join.zig`): the char-separator join (`sep/parts`)
+now validates that every part is a `c`/`C` char atom/vector up front and returns
+`!type` for a non-string element (e.g. a boxed general list), instead of
+dereferencing `p.c` on a `.L` value and panicking. `test/kkc.k` runs clean (44/44).

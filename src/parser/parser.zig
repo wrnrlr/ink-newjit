@@ -487,6 +487,10 @@ pub const Parser = struct {
         if (awaiting) try args.append(self.al(), .{ .is_some = false, .value = "", .start = self.tok.start, .end = self.tok.start });
         awaiting = true; self.advance(); continue;
       }
+      // A keyword verb (`in has mod div`) cannot be a parameter name: the lexer
+      // always tokenises it as a verb, so the body reference would rebind to the
+      // verb (silent miscompile). Reject it loudly instead. (triage #14)
+      if (self.is(.keyword) and awaiting) return error.UnexpectedToken;
       if (self.is(.iden) and awaiting) {
         try args.append(self.al(), .{ .is_some = true, .value = self.slice(), .start = self.tok.start, .end = self.tok.end });
         awaiting = false;

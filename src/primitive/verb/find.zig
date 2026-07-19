@@ -22,6 +22,9 @@ pub const Find = struct {
   _I_i: VM.Dyad = intFindScalar(i32, .I, .i),
   _I_I: VM.Dyad = intFindVec(i32, .I, .I),
   _I_L: VM.Dyad = intFindList(i32, .I, .i),
+  // bool right operand against an int vector coerces to int (triage #18)
+  _I_b: VM.Dyad = findBool,
+  _I_B: VM.Dyad = findBool,
 
   _S_s: VM.Dyad = intFindScalar(u32, .S, .s),
   _S_S: VM.Dyad = intFindVec(u32, .S, .S),
@@ -38,7 +41,19 @@ pub const Find = struct {
   _F_f: VM.Dyad = findF_f,
   _F_F: VM.Dyad = findF_F,
   _F_L: VM.Dyad = findF_L,
+  _F_b: VM.Dyad = findBool,
+  _F_B: VM.Dyad = findBool,
   
+  // Boolean-vector left operand: coerce bool to the other side's numeric family
+  // (bools are 0/1) and reuse the int/float find kernels. (triage #18)
+  _B_b: VM.Dyad = findBool,
+  _B_i: VM.Dyad = findBool,
+  _B_I: VM.Dyad = findBool,
+  _B_B: VM.Dyad = findBool,
+  _B_f: VM.Dyad = findBool,
+  _B_F: VM.Dyad = findBool,
+  _B_L: VM.Dyad = findBool,
+
   _L_i: VM.Dyad = findFallback,
   _L_I: VM.Dyad = findFallback,
   _L_f: VM.Dyad = findFallback,
@@ -196,6 +211,49 @@ fn findF_L(vm: *VM, x: V, y: V) V {
   for (y.L.slice(), res.slice()) |yv, *r|
     r.* = switch (yv) { .f => |v| map.get(@bitCast(v)) orelse miss, else => miss };
   return .{ .I = res };
+}
+
+// A bool operand (atom/vector) coerces to int, or to float when the other side
+// is float — bools are numeric 0/1. Non-bool values pass through unchanged.
+fn coerceBool(vm: *VM, v: V, want_float: bool) V {
+  switch (v) {
+    .b => return if (want_float) V{ .f = if (v.b) 1.0 else 0.0 } else V{ .i = @intFromBool(v.b) },
+    .B => {
+      const s = v.B.slice();
+      if (want_float) {
+        const r = N(f32).init(vm.alloc, s.len) catch return V{ .err = .memory };
+        for (s, r.slice()) |b, *o| o.* = if (b) 1.0 else 0.0;
+        return .{ .F = r };
+      }
+      const r = N(i32).init(vm.alloc, s.len) catch return V{ .err = .memory };
+      for (s, r.slice()) |b, *o| o.* = @intFromBool(b);
+      return .{ .I = r };
+    },
+    else => return v.ref(),
+  }
+}
+
+// Find where at least one operand is bool: coerce the bool side(s) to the shared
+// numeric family, then route to the int/float kernels. (triage #18)
+fn findBool(vm: *VM, x: V, y: V) V {
+  const want_float = x == .f or x == .F or y == .f or y == .F;
+  const xc = coerceBool(vm, x, want_float);
+  defer xc.deinit(vm.alloc);
+  const yc = coerceBool(vm, y, want_float);
+  defer yc.deinit(vm.alloc);
+  if (xc == .I) return switch (yc) {
+    .i => intFindScalar(i32, .I, .i)(vm, xc, yc),
+    .I => intFindVec(i32, .I, .I)(vm, xc, yc),
+    .L => intFindList(i32, .I, .i)(vm, xc, yc),
+    else => findFallback(vm, xc, yc),
+  };
+  if (xc == .F) return switch (yc) {
+    .f => findF_f(vm, xc, yc),
+    .F => findF_F(vm, xc, yc),
+    .L => findF_L(vm, xc, yc),
+    else => findFallback(vm, xc, yc),
+  };
+  return findFallback(vm, xc, yc);
 }
 
 // Fallback for heterogeneous lists and other types — O(n×m)

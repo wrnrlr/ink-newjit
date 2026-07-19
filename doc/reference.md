@@ -297,7 +297,7 @@ while assigment of globals in a lambda happen with a double colon `::`
 
 ### List Verbs `,`
 - `,x` **Enlist** - wrap x in a list
-- `x,y` **Join** - join atoms/lists; merge dictionaries (right-side wins)
+- `x,y` **Join** - join atoms/lists; merge dictionaries (right-side wins). `x,()` (empty list on the right) is identity and preserves x's type — a typed vector stays typed (`` `a`b,() `` → `` `S ``), an atom enlists to its typed 1-vector (`1,()` → `,1`). (The left form `(),x` still boxes into a general list `` `L ``.)
 
 ### Mappping Verbs `+!#_`
 - `+d` **Pivot** - table to dict-of-lists and vice versa. `` +[[]n:`b`c;i:2 3] `` → `` [n:`b`c;i:2 3] ``
@@ -353,7 +353,7 @@ The IO system is organized around file descriptors (filename, port number, etc.)
 - `` x 0:y `` **Write line** - write text. `` `0 0:"Hi" ``
 - `` 1:x `` **ReadBytes** 
 - `` 1:`stdin `` reads up to 64 KiB of available bytes from stdin (blocks for ≥1 byte); returns `""` at EOF. Partial by design — frame/buffer in k. For byte-stream protocols (LSP/Jupyter).
-- `` x 1: y `` **Write bytes**
+- `` x 1: y `` **Write bytes** — `y` is a `` `C `` char vector or a single `c` char atom (a 1-byte write; `` `stdout 1: "a" `` works without enlisting).
 - `` `stdout 1: y `` / `` `stderr 1: y `` write raw bytes with **no** trailing newline and flush.
 - Writing to a path that doesn't exist **creates** the file (`` "new.txt" 1: bytes ``); the same holds for `` x 0: y ``. (Reads still require the file to exist.)
 - `` 2: y `` **LoadCode** - used for importing other files

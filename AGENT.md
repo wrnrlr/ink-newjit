@@ -160,6 +160,8 @@ Available auto-loaded libraries:
 
 ## Language gotchas
 - **No underscores in names:** `_` is always Drop/WeedOut. `foo_bar` parses as `foo _ bar`. Use camelCase.
+- **Keyword-verb param names are rejected:** a lambda parameter named after one of the four keyword verbs (`in has mod div`) now raises `!parse_error: UnexpectedToken` (the lexer always reads them as verbs). The removed math/monadic names (`count first last sqrt parse …`) are prelude identifiers and are fine as params — only those 4 are rejected. Use `cnt`, `src`, `elem`, ….
+- **`x,()` is identity; `(),x` still boxes:** appending the empty list on the *right* preserves the operand's type (`` `a`b,() `` → `` `S ``, `1,()` → `,1` int-vec), so dict keys / env merges built with `(k,())!(v,())` index correctly. The *left*-empty form `(),x` still boxes into a general list (`` `L ``) — an intentional idiom the GPU shader compiler relies on; use `!0` (empty `` `I ``) as an empty numeric seed, not `()`.
 - **Newlines in list literals:** a newline inside `(a;b;\n c)` injects a null element. Keep list literals on one line.
 - **Fold over empty list:** `,/()` returns a unit value, not an empty list. Use `$[#x;,/x;!0]`.
 - **Operator-glyph symbols are quoted:** a backtick symbol joins only alphanumerics and dots, never operator glyphs. `` `~ `` is the null symbol `` ` `` then the Match verb (a projection); `` `~` `` is Match of two null symbols (`1b`); `` `<abc `` is null-symbol `` ` `` then `<` then `abc`. To name a symbol after an operator, quote it: `` `"+" ``, `` `"<=" ``, `` `"," ``.

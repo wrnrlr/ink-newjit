@@ -27,9 +27,26 @@ fn listKernel(comptime xk: K, comptime yk: K) VM.Dyad {
         dst[0] = y.ref();
       }
     }
+    // `x,()` is identity: an atom enlists to its typed 1-vector, a typed vector
+    // is returned as-is — so an empty `()` no longer boxes a typed operand to
+    // `.L` (which broke dict-key lookups and env merges). (triage #5)
+    // Only the right-empty form is special-cased; the left-empty `(),x` keeps its
+    // long-standing "box into a general list" behaviour, an idiom the GPU shader
+    // compiler (lib/dye.k word-list assembly) relies on.
+    inline fn identity(comptime k: K, vm: *VM, v: V) V {
+      if (comptime k.isAtom()) {
+        const ck = comptime k.container();
+        const T = comptime K.backing(ck);
+        const r = N(T).init(vm.alloc, 1) catch return V{ .err = .memory };
+        r.slice()[0] = v.unwrap(k);
+        return V.wrap(ck, r);
+      }
+      return v.ref();
+    }
     fn f(vm: *VM, x: V, y: V) V {
       const xl: usize = x.len();
       const yl: usize = y.len();
+      if (comptime yk == .L and xk != .L) { if (yl == 0) return identity(xk, vm, x); }
       // In-place append when x is a general list we own exclusively.
       if (comptime xk == .L) {
         const xn = x.L;

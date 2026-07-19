@@ -685,7 +685,7 @@ pub const VM = struct {
   }
   
   fn doMakeList(vm: *VM) !void {
-    const argc = vm.readByte();
+    const argc = vm.read16();
     const start = vm.stack_len - argc;
     const values = vm.stack[start..vm.stack_len];
     const list_val = try V.Values(vm.alloc, values);

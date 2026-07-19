@@ -1369,11 +1369,12 @@ pub const Compiler = struct {
         }
         return 3;
       },
-      // Global indices are u16 (opcode + 2 bytes); local/list-assign-count args stay u8.
-      .Global, .AssignGlobal => return 3,
+      // Global indices and list-literal counts are u16 (opcode + 2 bytes);
+      // local/list-assign-count args stay u8.
+      .Global, .AssignGlobal, .MakeList => return 3,
       .Local, .AssignLocal,
       .Call, .TailCall, .Apply1, .Apply2, .Apply3, .Apply4, .Apply,
-      .MakeList, .Derive,
+      .Derive,
       .ListAssignLocal, .ListAssignGlobal => return 2,
       .Drop => {
         if (inst.inputs.len > 0 and inst.inputs[0] != ir.NO_VALUE and !self.scope.ir.get(inst.inputs[0]).is_dead) return 1;
@@ -1425,13 +1426,15 @@ pub const Compiler = struct {
 
     try chunk.writeOp(effective_op);
     switch (effective_op) {
-      // Global indices are u16; everything else here (local slots, arg counts,
-      // adverb ids, list-assign target counts) stays a single byte.
-      .Global, .AssignGlobal => {
+      // Global indices and list-literal counts are u16; a list literal can hold
+      // up to the VM stack depth (>255), so its count must not truncate. (triage #6)
+      // Everything else here (local slots, arg counts, adverb ids, list-assign
+      // target counts) stays a single byte.
+      .Global, .AssignGlobal, .MakeList => {
         try chunk.write16(@as(u16, @intCast(inst.arg1)));
       },
       .Local, .LocalLast, .AssignLocal, .Call, .TailCall, .Apply1, .Apply2, .Apply3, .Apply4, .Apply,
-      .MakeList, .Derive, .ListAssignLocal, .ListAssignGlobal => {
+      .Derive, .ListAssignLocal, .ListAssignGlobal => {
         try chunk.write(@as(u8, @intCast(inst.arg1)));
       },
       .Drop => {},

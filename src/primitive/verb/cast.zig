@@ -45,7 +45,7 @@ inline fn numCast(comptime From: type, comptime To: type, v: From) To {
   if (From == To) return v;
   return switch (To) {
     u8 => switch (From) {                 // → c
-      i32 => @intCast(v),
+      i32 => @truncate(@as(u32, @bitCast(v))),  // wrap out-of-range (incl. neg) like u32→c
       u32 => @truncate(v),
       f32, f64, f16 => @intFromFloat(v),
       else => @compileError("no cast " ++ @typeName(From) ++ "→c"),

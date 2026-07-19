@@ -13,6 +13,14 @@ pub fn join(vm: *VM, sep: V, parts: V) V {
   const n = parts.len();
   if (n == 0) return V.Chars(vm.alloc, "") catch return V{ .err = .memory };
 
+  // Every part must be a char atom/vector; a non-string element (e.g. a boxed
+  // general list) is a type error, not a crash (triage: char-base join adverb).
+  for (0..n) |i| {
+    const p = parts.at(i);
+    defer p.deinit(vm.alloc);
+    if (p != .c and p != .C) return .{ .err = .type };
+  }
+
   // Calculate total length
   var total: usize = 0;
   for (0..n) |i| {

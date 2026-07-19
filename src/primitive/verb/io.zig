@@ -200,10 +200,17 @@ pub const ReadBytes = struct {
 // WriteBytes  1: (dyad)
 // ---------------------------------------------------------------------------
 
+// A raw write accepts either a `C` char vector or a single `c` char atom (a
+// 1-byte write); `one` backs the atom's transient byte slice. (triage #12)
+fn ybytes(y: V, one: *[1]u8) []const u8 {
+  if (y == .c) { one[0] = y.c; return one[0..1]; }
+  return y.C.slice();
+}
 fn writeBytesBySymbol(vm: *VM, x: V, y: V) V {
   const name = vm.getSymbol(x.s);
-  if (std.mem.eql(u8, name, "stdout")) return writeStdRaw(vm, true, y.C.slice());
-  if (std.mem.eql(u8, name, "stderr")) return writeStdRaw(vm, false, y.C.slice());
+  var one: [1]u8 = undefined;
+  if (std.mem.eql(u8, name, "stdout")) return writeStdRaw(vm, true, ybytes(y, &one));
+  if (std.mem.eql(u8, name, "stderr")) return writeStdRaw(vm, false, ybytes(y, &one));
   const id = vm.mapFileW(name) catch return V{ .err = .io };
   return writeBytesByHandle(vm, V{ .i = @intCast(id) }, y);
 }
@@ -213,8 +220,10 @@ fn writeBytesByChars(vm: *VM, x: V, y: V) V {
 }
 fn writeBytesByHandle(vm: *VM, x: V, y: V) V {
   const id: u32 = @intCast(@abs(x.i));
-  if (Conns.isConn(id)) return writeSocketBytes(vm, id, y.C.slice());
-  writeFile(vm, id, y.C.slice()) catch return V{ .err = .io };
+  var one: [1]u8 = undefined;
+  const bytes = ybytes(y, &one);
+  if (Conns.isConn(id)) return writeSocketBytes(vm, id, bytes);
+  writeFile(vm, id, bytes) catch return V{ .err = .io };
   return .blank;
 }
 
@@ -223,6 +232,9 @@ pub const WriteBytes = struct {
   _s_C: VM.Dyad = writeBytesBySymbol,
   _C_C: VM.Dyad = writeBytesByChars,
   _i_C: VM.Dyad = writeBytesByHandle,
+  _s_c: VM.Dyad = writeBytesBySymbol,
+  _C_c: VM.Dyad = writeBytesByChars,
+  _i_c: VM.Dyad = writeBytesByHandle,
 };
 
 // ---------------------------------------------------------------------------

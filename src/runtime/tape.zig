@@ -178,7 +178,7 @@ pub const Chunk = struct {
     return switch (op) {
       .Nop, .Gap, .Drop, .Return, .Command => 1,
       .Const, .Int, .Jump, .JumpFalse, .JumpTrue, .MakePartial, .ReduceZip, .FusedMap => 3,
-      .Global, .AssignGlobal => 3,                            // opcode + u16 global index
+      .Global, .AssignGlobal, .MakeList => 3,                 // opcode + u16 index/count
       .ListAssignGlobal => 2 + 2 * @as(usize, code[ip + 1]),  // count byte + n u16 indices
       .ListAssignLocal => 2 + @as(usize, code[ip + 1]),       // count byte + n u8 indices
       else => 2,
