@@ -337,7 +337,14 @@ initRoot:{[req]
 onInit:{[req] z:buildHelp 0; r:initRoot req; reply[req`id;initResult]}
 diag:{[uri] notify["textDocument/publishDiagnostics";(`uri`diagnostics)!(uri;!0)]}
 onOpen:{[req] td:(req`params)`textDocument; u:setDoc[td`uri;td`text]; diag td`uri}
-onChange:{[req] p:req`params; uri:(p`textDocument)`uri; ch:p`contentChanges; u:setDoc[uri;(*|ch)`text]; diag uri}
+/ The full text of the latest change. `contentChanges` is a JSON array of objects,
+/ which json.parse COLUMNARISES into a single `text`-keyed dict (`m`) — so `(*|ch)`text`
+/ would index the text COLUMN (a list) by a symbol and yield an `!type` error, which
+/ then poisons the doc store and crashes the next parse/split. Handle both shapes:
+/ a columnarised dict → last of its `text` column; a plain list of change dicts →
+/ the last change's `text`. (Sync is full — textDocumentSync:1 — so there is one change.)
+chText:{[ch] $[`m=@ch;*|ch`text;(*|ch)`text]}
+onChange:{[req] p:req`params; uri:(p`textDocument)`uri; u:setDoc[uri;chText p`contentChanges]; diag uri}
 onClose:{[req] dropDoc pUri req}
 onDocSym:{[req] reply[req`id; docSym getDoc pUri req]}
 

@@ -285,7 +285,13 @@ fn pickDictSym(m: Dict, s: u32) V {
   const vals = m.bv();
   if (keys.tag() == .S) {
     for (keys.S.slice(), 0..) |k, idx| if (k == s) return vals.at(idx);
-  } else if (keys.tag() == .s and keys.s == s) return vals.at(0);
+  } else if (keys.tag() == .s and keys.s == s) {
+    // Single-key dict: the key is a scalar symbol and the lone value is stored
+    // UNWRAPPED (not a 1-element list), so return the whole value. `vals.at(0)`
+    // would index INTO a collection value (dict → its first field, vector → its
+    // first element) — the long-standing single-key-dict indexing bug.
+    return vals.ref();
+  }
   return .blank;
 }
 
@@ -296,6 +302,9 @@ fn pickDictSym(m: Dict, s: u32) V {
 fn pickDictKey(alloc: Alloc, m: Dict, key: V) V {
   const keys = m.av();
   const vals = m.bv();
+  // Single-key dict (scalar key): the value is stored unwrapped — return it whole
+  // rather than indexing into it (see pickDictSym).
+  if (keys.isAtom()) return if (keys.eq(key)) vals.ref() else .blank;
   for (0..keys.len()) |idx| {
     const k = keys.at(idx);
     defer k.deinit(alloc);

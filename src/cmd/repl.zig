@@ -170,7 +170,13 @@ pub const Repl = struct {
       return true;
     };
     if (node.* != .terse) { self.vm.parser.?.free(node); return false; }
-  
+
+    // Order-independent defs: a script is compiled statement-by-statement below, so
+    // pre-register every qualified top-level target across the WHOLE file first —
+    // a reference to `group.expand` (or bare `expand` inside `group`) then resolves
+    // even when its definition appears later in the file.
+    self.vm.compiler.prescanGlobals(node.terse.stmts) catch {};
+
     const StmtInfo = struct { is_blank: bool, source: []const u8 };
     const stmt_infos = try self.alloc.alloc(StmtInfo, node.terse.stmts.len);
     defer self.alloc.free(stmt_infos);

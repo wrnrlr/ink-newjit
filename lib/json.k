@@ -27,9 +27,11 @@ esc:  {[s] $[0=#s;s;,/({ec x}'s)]}
 jstr: {[c] "\"",(esc c),"\""}
 gen: {[x] t:@x;
   $[x~`null; "null"
-   / values via `x@!x` (index the dict by its own keys) — arity-correct for any
-   / key count and, unlike `. x`, never unwraps a single-key dict's lone value.
-   ;t=`m; $[0=#x;"{}";"{",(","/((!x){[ky;vl](jstr(1_$ky)),":",gen vl}'(x@!x))),"}"]
+   / Map over the keys and look each value up individually (`d@ky`) rather than
+   / zipping keys against a values LIST: a single-key dict's key is a scalar sym
+   / and its lone value is stored unwrapped, so `each` over `!x` yields the one
+   / (key;value) pair correctly for any key count.
+   ;t=`m; $[0=#x;"{}";"{",(","/({[d;ky](jstr(1_$ky)),":",gen d@ky}[x]'!x)),"}"]
    ;t=`C; jstr x
    ;t=`c; jstr(,x)
    ;t=`s; jstr(1_$x)
