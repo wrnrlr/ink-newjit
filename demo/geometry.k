@@ -57,45 +57,45 @@ mirrors: {[p;q]
 / only ring i is lit.  A weighted sum lands the seed anywhere inside.
 corners: {[N] (cross[N 1;N 2]; cross[N 2;N 0]; cross[N 0;N 1])}
 
-/ ── §2  the group itself, by closure of its generators ────────────────
-/ Breadth-first closure: start at the identity, keep multiplying the
-/ frontier by the 3 reflection matrices until nothing new appears.
-/ Matrices stay EXACT (products of orthogonal maps barely drift);
-/ rounding is only the dedup key — rounding the elements diverges.
-stepG: {[st]
-  G: st 0                              / generators, carried in the state
-  c: ,/ (st 2) {mm[x;y]}/:\: G         / frontier · every generator
-  ra: rnd'' st 1
-  rc: rnd'' c
-  k1: ?rc
-  k2: k1@&(#ra)=ra?k1                   / keys not seen before
-  nw: c@rc?k2                           / one exact representative each
-  (G; (st 1),nw; nw)}
+/ ── §2  one breadth-first closure, used twice ────────────────────────
+/ The symmetry group and the Wythoff orbit are the SAME algorithm: from
+/ a seed, keep applying a fixed set of maps to the frontier until nothing
+/ new appears.  Only two things vary between them — how the frontier is
+/ EXPANDED, and how deep values are rounded for the dedup key — so both
+/ are passed in and carried through the loop state (lambdas don't capture
+/ parent scope, k idiom — so the expander/key travel as data).  Values
+/ stay EXACT throughout; rounding is only the key — rounding the elements
+/ feeds error back through the maps and the closure never settles.
+/ The loop state is a dict so each field reads by name.  `expand` and
+/ `key` ride along unchanged; `seen` accumulates, `frontier` is the newly
+/ found elements to grow next round.
+bfcStep: {[st]
+  expand:   st`expand                   / frontier → candidate elements
+  key:      st`key                      / dedup normaliser (how deep to round)
+  seen:     st`seen
+  frontier: st`frontier
+  cand: expand frontier
+  ra:   key seen
+  rc:   key cand
+  k1:   ?rc
+  k2:   k1@&(#ra)=ra?k1                  / keys not seen before
+  nw:   cand@rc?k2                       / one exact representative each
+  [expand:expand; key:key; seen:seen,nw; frontier:nw]}
+bfc: {[expand;key;seed]                  / breadth-first closure
+  s0:  [expand:expand; key:key; seen:,seed; frontier:,seed]
+  ({0<#x`frontier}bfcStep/s0)`seen}
 
-groupOf: {[N]
-  fin: {0<#x 2}{stepG x}/ (rmat' N; ,id3; ,id3)
-  fin 1}
+/ §2a  the reflection group: expand = frontier · the 3 generator matrices.
+/ expandG[gens] is a PARTIAL that carries its generators, so `bfc` needs
+/ no special-casing — just a different expander and a deeper round (rnd'').
+expandG: {[G;fr] ,/ fr {mm[x;y]}/:\: G}
+groupOf: {[N] bfc[expandG[rmat' N]; rnd''; id3]}
 
-/ ── §3  Wythoff's construction: orbit of a seed under the mirrors ─────
-/ Same closure, but reflecting a POINT.  The mirror set N is threaded
-/ through the loop state (lambdas don't capture parent scope — k idiom).
-stepO: {[st]
-  N: st 0
-  c: ,/ N {refl[x;y]}/:\: st 2
-  ra: rnd' st 1
-  rc: rnd' c
-  k1: ?rc
-  k2: k1@&(#ra)=ra?k1
-  nw: c@rc?k2
-  (N; (st 1),nw; nw)}
-
-orbit:{[N;seed]
-  fin:{0<#x 2}{stepO x}/(N;,seed;,seed)
-  rnd'fin 1}
-
-/ wythoff[p;q;t]
-wythoff:{[p;q;t] N:mirrors[p;q];
-  orbit[N; nrm[+/ t*corners N]]}
+/ ── §3  Wythoff's construction: reflect the seed in every mirror ──────
+/ Same closure, one-level round; expandO[N] carries the mirror set.
+expandO: {[N;fr] ,/ N {refl[x;y]}/:\: fr}
+orbit:   {[N;seed] rnd' bfc[expandO[N]; rnd'; seed]}
+wythoff: {[p;q;t] N:mirrors[p;q]; orbit[N; nrm[+/ t*corners N]]}
 
 / ── §4  the 1-skeleton, from nothing but distance ────────────────────
 / Vertices come from the orbit; an edge is any vertex pair at the
