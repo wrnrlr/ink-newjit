@@ -42,12 +42,14 @@ gpu.buffer:    so 2: (`gpuBufferNew;  1)   / F → bufHandle : alloc+upload a re
 gpu.write:  so 2: (`gpuBufferWrite;2)   / (bufHandle; F) → 0 : overwrite a resident buffer
 gpu.read:   so 2: (`gpuBufferRead; 1)   / bufHandle → F : read a resident buffer back to host
 gpu.readI:  so 2: (`gpuBufferReadI;1)   / bufHandle → I : read a resident buffer back as ints (atomic accumulators)
+gpu.free:   so 2: (`gpuBufferFree; 1)   / bufHandle → 0 : release a resident buffer eagerly (slot reused). No-op on an invalid/already-freed handle.
 gpu.compileCompute: so 2: (`gpuComputeNew; 2) / (spirv_I; nbind) → pipeHandle : compile+cache a compute pipeline
 / Uniform buffers in compute (true UBO for constants, not a storage buffer):
 /   p: gpu.compileComputeU[shader.computeU[{[x;u] (x*u[0])+u[1]}]; 2]  / storage@0,1 + uniform@2
 /   u: gpu.uniform[3. 1. 0. 0.]                                        / a vec4 (scale;bias;…)
 /   gpu.dispatch[p; (inBuf;outBuf;u); n]                              / u bound at binding 2
 gpu.uniform:         so 2: (`gpuUniformNew;  1)   / F → bufHandle : resident UNIFORM buffer (pass a vec4)
+gpu.uniformI:        so 2: (`gpuUniformNewI; 1)   / I → bufHandle : resident UNIFORM buffer of raw i32 words (shader bitcasts f32-lane→i32; exact counts to 2^31, no f32 2^24 cliff)
 gpu.compileComputeU: so 2: (`gpuComputeNewU; 2)   / (spirv_I; nStorage) → pipe : storage@0..nStorage-1 + uniform@nStorage
 gpu.dispatch:     so 2: (`gpuDispatch;   3)   / (pipeHandle; bufHandles_I; nThreads) → 0 : bind buffers @0..; dispatch; no readback
 gpuDispatchLoop0: so 2: (`gpuDispatchLoop; 5) / (pipe; bufsA_I; bufsB_I; nThreads; reps) → 0 : reps passes in ONE encoder, A on even/B on odd
@@ -124,6 +126,10 @@ gpu.fetchTP:  {[d] + (d`cols) ! (d`n) #' gpu.read' d`hand}
 gpu.fetchTI:  {[d] + (d`cols) ! + (d`n; d`nc) # gpu.read[d`hand]}
 gpu.fetchA:   {[d] r: (d`n) # $[(d`t)~`i; gpu.readI d`gpu; gpu.read d`gpu]; $[1 < #d`s; (d`s)#r; r]}
 gpu.fetch:    {[d] $[(d`t)~`tbl; gpu.fetchT d; (d`t)~`dict; gpu.fetchD d; gpu.fetchA d]}
+/ gpu.drop d — free every resident buffer a placement descriptor owns (eager resident-buffer release):
+/ a table/dict places one buffer per column/key (the `hand list); a plain placement one
+/ buffer (`gpu). After a drop the descriptor is dead — don't 8: it. Returns 0.
+gpu.drop:     {[d] $[`hand in !d; gpu.free' d`hand; `gpu in !d; gpu.free d`gpu; 0]; 0}
 / Place a k table as a STRUCTURED buffer (kk2 §2.5). Layout is a SCHEDULE choice
 / (Tiramisu L3), not semantics — the kernel source is identical either way:
 /   planar (default):    one resident buffer per column, coalesced per-column reads.

@@ -99,6 +99,20 @@ demo: {[]
   chke["converge == fixed-count fixpoint"; cv; ref]
   chkb["converge stopped early (< maxIter)"; (CVlast 0) < 12000]
 
+  / count-exactness past the f32 2^24 cliff: the reduce/scan uniform
+  / ships counts as raw i32 bits (gpu.uniformI + shader bitcast), so a length that f32
+  / cannot represent still folds every element. N=2^24+51 rounds under f32 (`i$`f$N≠N),
+  / and a spike at the LAST index is only found if the count is exact. Both paths.
+  BN: (2*8388608) + 51
+  chkb["2^24+51 rounds under f32 (test is live)"; ~ BN = `i$ `f$ BN]
+  bv: BN # 1.; bv[BN-1]: 9.
+  bd: 9: bv
+  chke["kk.max past 2^24 (subgroup)"; kk.max bd; 9.]
+  kkRedForceFb:: 1
+  chke["kk.max past 2^24 (fallback)"; kk.max bd; 9.]
+  kkRedForceFb:: 0
+  gpu.drop bd
+
   `0 0: "kkred: ",($ok)," ok, ",($nok)," fail\n"
   0}
 

@@ -389,6 +389,107 @@ cbCfg:: 0
 cbStep: {[x;w] ConformerBlock[x; w; cbCfg]}   / top-level dyad (lambdas can't close over cfg)
 Encoder: {[X; Ws; cfg] cbCfg:: cfg; X cbStep/ Ws}
 
+/ ── Resident encoder (resident weights + activations): keep weights AND activations on-device ──
+/ The host composites above upload every weight and read back the activation between
+/ each of the ~17 conformer blocks — so a stacked encoder re-uploads all weights and
+/ round-trips the [T,D] activation once PER layer. The resident forms below take the
+/ INPUT as a buffer handle, resident WEIGHT handles (uploaded ONCE via nnHold), and
+/ return an OUTPUT handle — no host round-trip between blocks. Each frees its own
+/ scratch with gpu.free (kk2 §1), so memory stays bounded across a deep stack. The
+/ kernels and dispatch sizes are IDENTICAL to the host path, so EncoderR is bit-for-
+/ bit equal to Encoder (host round-trips are lossless f32 copies — the oracle).
+nnHold:   {[arrs] gpu.buffer' arrs}                / list of host arrays → resident handles
+nnHoldWs: {[Ws] nnHold' Ws}                        / per-layer weight lists → handle lists
+
+/ Resident FFN block (macaron half-step). WB = (W1;B1;W2;B2;GAM;BET) handles; returns bo.
+FfnBlockRB: {[bx; WB; cfg]
+  M:cfg 0; D:cfg 1; Dff:cfg 2; eps:cfg 3
+  bw1:WB 0; bb1:WB 1; bw2:WB 2; bb2:WB 3; bgm:WB 4; bbt:WB 5
+  h0:gpu.buffer[(nnPad[M*D])#0.]; bm:gpu.buffer[(nnPad M)#0.]; br:gpu.buffer[(nnPad M)#0.]
+  h1:gpu.buffer[(nnPad[M*Dff])#0.]; h2:gpu.buffer[(nnPad[M*Dff])#0.]; h3:gpu.buffer[(nnPad[M*D])#0.]
+  bo:gpu.buffer[(nnPad[M*D])#0.]
+  LayerNormR[h0; bx; bgm; bbt; bm; br; (M;D;eps)]
+  LinearR[h1; h0; bw1; bb1; M; D; Dff]
+  SiluR[h2; h1; M*Dff]
+  LinearR[h3; h2; bw2; bb2; M; Dff; D]
+  AddScaledR[bo; bx; h3; 0.5; M*D]
+  gpu.free'(h0;bm;br;h1;h2;h3)
+  bo}
+
+/ Resident rel-pos MHSA. WB = 11 handles (Wq;Bq;Wk;Bk;Wv;Bv;Wo;Bo; Wpos; u; v); returns bo.
+MhsaRelRB: {[bx; WB; cfg]
+  T:cfg 0; D:cfg 1; H:cfg 2
+  dh: D div H; scale: 1. % sqrt 0.+dh
+  bwq:WB 0; bbq:WB 1; bwk:WB 2; bbk:WB 3; bwv:WB 4; bbv:WB 5; bwo:WB 6; bbo:WB 7
+  bwp:WB 8; bu:WB 9; bv:WB 10
+  bq:gpu.buffer[(nnPad[T*D])#0.];  LinearR[bq;bx;bwq;bbq;T;D;D]
+  bk:gpu.buffer[(nnPad[T*D])#0.];  LinearR[bk;bx;bwk;bbk;T;D;D]
+  bvv:gpu.buffer[(nnPad[T*D])#0.]; LinearR[bvv;bx;bwv;bbv;T;D;D]
+  np: (2*T)-1
+  bz:gpu.buffer[D#0.]
+  bpe0:gpu.buffer[nnPosEmb[T;D]]
+  bpe:gpu.buffer[(nnPad[np*D])#0.]; LinearR[bpe;bpe0;bwp;bz;np;D;D]
+  bs:gpu.buffer[(nnPad[H*T*T])#0.]; AttnScoresRelR[bs;bq;bk;bu;bv;bpe;(T;D;dh;scale)]
+  bsm:gpu.buffer[(nnPad[H*T*T])#0.]; bmx:gpu.buffer[(nnPad[H*T])#0.]; bsu:gpu.buffer[(nnPad[H*T])#0.]
+  SoftmaxR[bsm;bs;bmx;bsu;H*T;T]
+  bc:gpu.buffer[(nnPad[T*D])#0.]; AttnCtxR[bc;bsm;bvv;T;D;dh]
+  bo:gpu.buffer[(nnPad[T*D])#0.]; LinearR[bo;bc;bwo;bbo;T;D;D]
+  gpu.free'(bq;bk;bvv;bz;bpe0;bpe;bs;bsm;bmx;bsu;bc)
+  bo}
+
+/ Resident conv module (residual included). WB = 10 handles (lnG;lnB;Wpw1;Bpw1;Wdw;Bdw;caA;caB;Wpw2;Bpw2).
+ConvModuleRB: {[bx; WB; cfg]
+  T:cfg 0; D:cfg 1; ks:cfg 2; eps:cfg 3
+  pad: (ks-1) div 2
+  blnG:WB 0; blnB:WB 1; bwp1:WB 2; bbp1:WB 3; bwdw:WB 4; bbdw:WB 5; bcaA:WB 6; bcaB:WB 7; bwp2:WB 8; bbp2:WB 9
+  h0:gpu.buffer[(nnPad[T*D])#0.]; bm:gpu.buffer[(nnPad T)#0.]; br:gpu.buffer[(nnPad T)#0.]
+  h1:gpu.buffer[(nnPad[T*2*D])#0.]
+  h2:gpu.buffer[(nnPad[T*D])#0.]; h3:gpu.buffer[(nnPad[T*D])#0.]
+  h4:gpu.buffer[(nnPad[T*D])#0.]; h5:gpu.buffer[(nnPad[T*D])#0.]; h6:gpu.buffer[(nnPad[T*D])#0.]
+  bo:gpu.buffer[(nnPad[T*D])#0.]
+  LayerNormR[h0; bx; blnG; blnB; bm; br; (T;D;eps)]
+  LinearR[h1; h0; bwp1; bbp1; T; D; 2*D]
+  GluR[h2; h1; T; D]
+  DwConvR[h3; h2; bwdw; bbdw; T; D; ks; pad]
+  ChanAffineR[h4; h3; bcaA; bcaB; T; D]
+  SiluR[h5; h4; T*D]
+  LinearR[h6; h5; bwp2; bbp2; T; D; D]
+  AddScaledR[bo; bx; h6; 1.; T*D]
+  gpu.free'(h0;bm;br;h1;h2;h3;h4;h5;h6)
+  bo}
+
+/ Resident conformer block: bx handle + WB (37 resident weight handles) → bo handle.
+ConformerBlockRB: {[bx; WB; cfg]
+  T:cfg 0; D:cfg 1; H:cfg 2; Dff:cfg 3; ks:cfg 4; eps:cfg 5
+  fc: (T;D;Dff;eps)
+  b1: FfnBlockRB[bx; (WB 2;WB 3;WB 4;WB 5;WB 0;WB 1); fc]
+  / attn LayerNorm(x1) resident
+  bln:gpu.buffer[(nnPad[T*D])#0.]; am:gpu.buffer[(nnPad T)#0.]; ar:gpu.buffer[(nnPad T)#0.]
+  LayerNormR[bln; b1; WB 6; WB 7; am; ar; (T;D;eps)]
+  batt: MhsaRelRB[bln; WB@8+!11; (T;D;H)]
+  bx2:gpu.buffer[(nnPad[T*D])#0.]; AddScaledR[bx2; b1; batt; 1.; T*D]
+  bx3: ConvModuleRB[bx2; WB@19+!10; (T;D;ks;eps)]
+  bx4: FfnBlockRB[bx3; (WB 31;WB 32;WB 33;WB 34;WB 29;WB 30); fc]
+  bo:gpu.buffer[(nnPad[T*D])#0.]; bfm:gpu.buffer[(nnPad T)#0.]; bfr:gpu.buffer[(nnPad T)#0.]
+  LayerNormR[bo; bx4; WB 35; WB 36; bfm; bfr; (T;D;eps)]
+  gpu.free'(b1;bln;am;ar;batt;bx2;bx3;bx4;bfm;bfr)
+  bo}
+
+/ Resident block step: produce bo, free the (owned) input handle. cbwB set by EncoderR.
+cbStepRB: {[bx;wb] bo: ConformerBlockRB[bx; wb; cbCfg]; gpu.free bx; bo}
+/ EncoderR[X; Ws; cfg] — resident conformer stack. Uploads all weights ONCE, keeps the
+/ activation resident across layers, reads back the final [T,D] and frees everything.
+/ Bit-identical to Encoder (same kernels; only the host round-trips are removed).
+EncoderR: {[X; Ws; cfg]
+  cbCfg:: cfg
+  WB: nnHoldWs Ws
+  bx: gpu.buffer[X]
+  bo: bx cbStepRB/ WB
+  r: ((cfg 0)*(cfg 1)) # gpu.read bo
+  gpu.free bo
+  gpu.free' ,/ WB
+  r}
+
 / ── Log-mel featurizer  (audio samples → log-mel spectrogram) ────────────────
 / STFT power via one kernel (framing folded in), mel projection = a GEMM, then log.
 / The Hann window / DFT basis / mel filterbank are precomputed host-side below; in a

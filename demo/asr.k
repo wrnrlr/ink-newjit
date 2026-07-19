@@ -67,7 +67,7 @@ runAsr:{[buf]
   mel: featNorm[LogMel[buf; CRb; CIb; MELFBb; (HOP;WINL;NFREQ;NMELS;nfr;MELEPS)]; nfr; NMELS]
   Tp:  nnSub2 nnSub2 nnSub2 nfr
   sub: ConvSubsample[mel; SUB; (nfr; NMELS; SUBC; Dm)]
-  enc: Encoder[sub; ENC; (Tp; Dm; Hh; Dff; KS; EPS)]
+  enc: EncoderR[sub; ENC; (Tp; Dm; Hh; Dff; KS; EPS)]   / resident: weights + activations stay on-device across all NLAYERS blocks
   ids: TdtGreedy[enc; DEC; (Tp; Dm; EMBD; PREDH; JOINTH; VOCABN; DUR; MAXSYM)]
   nnDetok[VOCAB; ids]}
 transcribe:{[buf]

@@ -105,6 +105,12 @@ demo:{[]
   `0 0:"3 layers #out="; `0 0:$#Eg; `0 0:"  maxerr -> "; `0 0:$(|/abs Eg-Ec); `0 0:"\n"
   `0 0:"encoder out[0..7] -> "; `0 0:$8#Eg; `0 0:"\n"
   `0 0:"all finite (|/|.|<1e9) -> "; `0 0:$(1e9 > |/abs Eg); `0 0:"\n"
+
+  / Resident encoder (weights + activations stay on-device): must be BIT-IDENTICAL to
+  / the host Encoder (same kernels; only host round-trips removed) and match the CPU ref.
+  Er: EncoderR[X0; Ws; CFG]
+  `0 0:"resident vs host  bit-identical -> "; `0 0:$[Eg~Er; "PASS"; "FAIL"]; `0 0:"\n"
+  `0 0:"resident vs CPU   maxerr -> "; `0 0:$(|/abs Er-Ec); `0 0:"\n"
   0}
 gDone::0
 go::{[] gDone::1; demo[]}

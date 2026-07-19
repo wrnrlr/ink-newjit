@@ -110,22 +110,27 @@ var g_vk: ?*vk.Vk = null;
 const alloc = std.heap.c_allocator;
 
 var g_bufs: std.ArrayList(vk.Buffer) = .empty;      // 1-based handles
+var g_bfree: std.ArrayList(usize) = .empty;         // reusable freed slot indices (0-based)
 var g_pipes: std.ArrayList(vk.Pipeline) = .empty;
 
+// A freed slot is tombstoned with size==0 (createBuffer clamps live buffers to >=4),
+// so resetRegistries skips it and a double gpu.free is a no-op. Its index goes on
+// g_bfree so the next gpuBufferNew reuses it — placement churn (kk.compile output
+// buffers, nn residency) stays bounded instead of growing the registry unboundedly.
 fn resetRegistries() void {
   const v = g_vk.?;
   v.sync(); // finish any in-flight dispatch before freeing its buffers
-  for (g_bufs.items) |b| v.destroyBuffer(b);
+  for (g_bufs.items) |b| { if (b.size != 0) v.destroyBuffer(b); }
   for (g_pipes.items) |p| v.destroyPipeline(p);
   if (g_fbuf) |b| v.destroyBuffer(b);
   for (g_spirv_pipes.items) |fp| v.destroyFillShaderPipe(fp);
   for (g_textures.items) |t| v.destroyTexture(t);
   for (g_pull_pipes.items) |pp| v.destroyPullPipeline(pp);
-  g_bufs.deinit(alloc); g_pipes.deinit(alloc);
+  g_bufs.deinit(alloc); g_bfree.deinit(alloc); g_pipes.deinit(alloc);
   g_fill_verts.deinit(alloc); g_fill_calls.deinit(alloc); g_spirv_pipes.deinit(alloc);
   g_textures.deinit(alloc);
   g_pull_pipes.deinit(alloc); g_pull_calls.deinit(alloc);
-  g_bufs = .empty; g_pipes = .empty;
+  g_bufs = .empty; g_bfree = .empty; g_pipes = .empty;
   g_fill_verts = .empty; g_fill_calls = .empty; g_fbuf = null; g_fbuf_cap = 0; g_spirv_pipes = .empty;
   g_textures = .empty;
   g_pull_pipes = .empty; g_pull_calls = .empty;
@@ -220,11 +225,49 @@ fn newBuffer(data_k: ?K, uniform: bool) ?K {
   const sz: u64 = if (uniform) (raw + 15) & ~@as(u64, 15) else raw; // UBOs need 16-byte size
   const b = v.createBuffer(sz, uniform) catch return ki(0);
   v.write(b, std.mem.sliceAsBytes(fp[0..nn]));
+  if (g_bfree.pop()) |idx| { g_bufs.items[idx] = b; return ki(@intCast(idx + 1)); }
   g_bufs.append(alloc, b) catch { v.destroyBuffer(b); return ki(0); };
   return ki(@intCast(g_bufs.items.len));
 }
 export fn gpuBufferNew(data_k: ?K) callconv(.c) ?K { return newBuffer(data_k, false); }
 export fn gpuUniformNew(data_k: ?K) callconv(.c) ?K { return newBuffer(data_k, true); }
+
+// Uniform buffer of raw i32 words (exact i32 counts past the f32 2^24 cliff): the reduce/scan/compact kernels
+// carry only integer COUNTS in their uniform, so shipping the exact i32 bit pattern
+// (shader bitcasts f32-lane → i32) is exact to 2^31 instead of the f32 f2s 2^24 cliff.
+fn newBufferI(data_k: ?K, uniform: bool) ?K {
+  const v = g_vk orelse return ki(0);
+  const ip = kip(data_k) orelse return ki(0);
+  const n = kn(data_k);
+  if (n <= 0) return ki(0);
+  const nn: usize = @intCast(n);
+  const raw: u64 = nn * @sizeOf(i32);
+  const sz: u64 = if (uniform) (raw + 15) & ~@as(u64, 15) else raw;
+  const b = v.createBuffer(sz, uniform) catch return ki(0);
+  v.write(b, std.mem.sliceAsBytes(ip[0..nn]));
+  if (g_bfree.pop()) |idx| { g_bufs.items[idx] = b; return ki(@intCast(idx + 1)); }
+  g_bufs.append(alloc, b) catch { v.destroyBuffer(b); return ki(0); };
+  return ki(@intCast(g_bufs.items.len));
+}
+export fn gpuUniformNewI(data_k: ?K) callconv(.c) ?K { return newBufferI(data_k, true); }
+
+// gpu.free[h] — release a resident buffer eagerly (before device teardown). Tombstones
+// the slot (size=0) and puts its index on the free-list for reuse. Freeing an invalid or
+// already-freed handle is a no-op (0). Frees are host-synced so no in-flight dispatch can
+// still be reading the buffer.
+export fn gpuBufferFree(h_k: ?K) callconv(.c) ?K {
+  const v = g_vk orelse return ki(0);
+  const h = ki_val(h_k);
+  if (h <= 0 or h > g_bufs.items.len) return ki(0);
+  const idx: usize = @intCast(h - 1);
+  const b = g_bufs.items[idx];
+  if (b.size == 0) return ki(0); // already freed
+  v.sync();
+  v.destroyBuffer(b);
+  g_bufs.items[idx].size = 0; // tombstone
+  g_bfree.append(alloc, idx) catch {};
+  return ki(0);
+}
 
 export fn gpuBufferWrite(h_k: ?K, data_k: ?K) callconv(.c) ?K {
   const v = g_vk orelse return ki(0);
@@ -236,6 +279,7 @@ export fn gpuBufferWrite(h_k: ?K, data_k: ?K) callconv(.c) ?K {
   v.sync(); // finish recorded work touching this buffer before host overwrites it
   var nn: usize = @intCast(n);
   const b = g_bufs.items[@intCast(h - 1)];
+  if (b.size == 0) return ki(0); // freed slot
   const cap: usize = @intCast(b.size / @sizeOf(f32));
   if (nn > cap) nn = cap;
   v.write(b, std.mem.sliceAsBytes(fp[0..nn]));
@@ -248,6 +292,7 @@ export fn gpuBufferRead(h_k: ?K) callconv(.c) ?K {
   if (h <= 0 or h > g_bufs.items.len) return ki(0);
   v.sync(); // ensure prior async dispatches completed before reading mapped memory
   const b = g_bufs.items[@intCast(h - 1)];
+  if (b.size == 0) return ki(0); // freed slot
   const n: usize = @intCast(b.size / @sizeOf(f32));
   return floatsOut(b.mapped[0..b.size], n);
 }
@@ -258,6 +303,7 @@ export fn gpuBufferReadI(h_k: ?K) callconv(.c) ?K {
   if (h <= 0 or h > g_bufs.items.len) return ki(0);
   v.sync();
   const b = g_bufs.items[@intCast(h - 1)];
+  if (b.size == 0) return ki(0); // freed slot
   const n: usize = @intCast(b.size / @sizeOf(i32));
   const out = KI(@intCast(n)) orelse return ki(0);
   const op = g_api.?.kip(out) orelse { ku(out); return ki(0); };
@@ -771,9 +817,11 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuCompute2", @ptrCast(&gpuCompute2), 3);
   r.k_register("gpuBufferNew", @ptrCast(&gpuBufferNew), 1);
   r.k_register("gpuUniformNew", @ptrCast(&gpuUniformNew), 1);
+  r.k_register("gpuUniformNewI", @ptrCast(&gpuUniformNewI), 1);
   r.k_register("gpuBufferWrite", @ptrCast(&gpuBufferWrite), 2);
   r.k_register("gpuBufferRead", @ptrCast(&gpuBufferRead), 1);
   r.k_register("gpuBufferReadI", @ptrCast(&gpuBufferReadI), 1);
+  r.k_register("gpuBufferFree", @ptrCast(&gpuBufferFree), 1);
   r.k_register("gpuComputeNew", @ptrCast(&gpuComputeNew), 2);
   r.k_register("gpuComputeNewU", @ptrCast(&gpuComputeNewU), 2);
   r.k_register("gpuDispatch", @ptrCast(&gpuDispatch), 3);

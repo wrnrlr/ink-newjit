@@ -626,3 +626,41 @@ float path, now commented in clothgpu.k).
 6. §4 bits v1 via generated nn references (cross-backend oracle forever)
 7. §7 float atomics (device-enable now landed), §6 subgroup fast path,
    §3 i32 indices, tier 2 scans/compaction
+
+## 10. Post-phase-2 hardening (2026-07-19)
+
+Three follow-ups from an architecture review — resident-buffer lifetime, encoder
+residency, and the reduce/scan count cliff. Each is additive and oracle-guarded.
+
+- **Resident-buffer lifetime.** `gpu.free[h]` (gpu_vk.zig `gpuBufferFree`) releases a
+  resident buffer eagerly instead of waiting for device teardown: it tombstones the
+  slot (`size=0`, so `resetRegistries` skips it and a double-free is a no-op) and puts
+  the index on a free-list `g_bfree` that the next `gpuBufferNew` reuses — so placement
+  churn (kk.compile output buffers, per-layer nn scratch, `kk.converge`'s per-batch |Δ|
+  compiles) stays **bounded** instead of growing the registry unboundedly. `gpu.drop d`
+  (lib/gpu.k) frees every buffer a placement descriptor owns (plain `gpu`, or a table/
+  dict's `hand` list). Read/write/readI guard the tombstone.
+- **Resident encoder (`EncoderR`, lib/nn.k).** The host composites (`FfnBlock`/
+  `ConvModule`/`MhsaRel`/`ConformerBlock`) upload every weight and read the [T,D]
+  activation back to the host between each conformer block — so a stacked encoder
+  re-uploaded all weights and round-tripped once *per layer*. `EncoderR` uploads the
+  weights ONCE (`nnHold`), keeps the activation resident across all blocks
+  (`FfnBlockRB`/`MhsaRelRB`/`ConvModuleRB`/`ConformerBlockRB`), and frees each block's
+  scratch with `gpu.free`. Same kernels + dispatch sizes as the host path, so it is
+  **bit-identical** to `Encoder` (host round-trips are lossless f32 copies) — the
+  oracle. `test/conformer.k` asserts `EncoderR ~ Encoder` and matches the CPU ref
+  (maxerr 3.3e-7); `demo/asr.k` now drives the encoder through `EncoderR`.
+- **Reduce/scan/compact count exactness.** These kernels carried their integer counts
+  (`n`, stride, chunk, total) in an f32 uniform and `f2s`'d them — silently wrong past
+  2^24. They now ship the raw i32 bits via `gpu.uniformI` (gpu_vk.zig `gpuUniformNewI`)
+  and `opBitcast` the f32 lane back to i32 in the shader (compReduce/compReduceSg/
+  compScanBlock/compAddOffset/compCompact) — **exact to 2^31**. `test/kkred.k` guards it
+  with a `kk.max` over 2^24+51 elements (a count f32 rounds) whose max sits at the last
+  index — found only if the count is exact — on both the subgroup and fallback paths.
+  Small-n reductions stay bit-identical (kkred 33/33), and none of these kernels are in
+  the kkgold byte-oracle so no dumps moved.
+
+Still open from the review (larger increments, deferred): workgroup shared memory +
+tiled/f16 GEMM (the ML throughput tier); i32 index *buffers* for gather/scatter (the
+count-uniform cliff is fixed here, but placement index vectors still upload as f32);
+offscreen render targets + fragment-stage loops.

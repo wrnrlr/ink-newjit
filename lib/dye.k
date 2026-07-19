@@ -645,9 +645,11 @@ compReduce: {[op]
   nF:  newId[]; emitBuf opXtract[Tf32; nF;  uv; 0]
   tF:  newId[]; emitBuf opXtract[Tf32; tF;  uv; 1]
   kmF: newId[]; emitBuf opXtract[Tf32; kmF; uv; 2]
-  nI:  newId[]; emitBuf opF2s[Ti32; nI;  nF]
-  tI:  newId[]; emitBuf opF2s[Ti32; tI;  tF]
-  kmI: newId[]; emitBuf opF2s[Ti32; kmI; kmF]
+  / uniform via gpu.uniformI: the lanes are raw i32 bits, so bitcast (not f2s) recovers
+  / the exact count — exact to 2^31 instead of the f32 f2s 2^24 cliff.
+  nI:  newId[]; emitBuf opBitcast[Ti32; nI;  nF]
+  tI:  newId[]; emitBuf opBitcast[Ti32; tI;  tF]
+  kmI: newId[]; emitBuf opBitcast[Ti32; kmI; kmF]
   gx:  kGidX[]
   d:   kGidI[gx]                                / thread index (i32)
   seed: redSeed op
@@ -681,9 +683,10 @@ compReduceSg: {[op; S]
   nF:  newId[]; emitBuf opXtract[Tf32; nF;  uv; 0]
   tF:  newId[]; emitBuf opXtract[Tf32; tF;  uv; 1]
   kmF: newId[]; emitBuf opXtract[Tf32; kmF; uv; 2]
-  nI:  newId[]; emitBuf opF2s[Ti32; nI;  nF]
-  tI:  newId[]; emitBuf opF2s[Ti32; tI;  tF]
-  kmI: newId[]; emitBuf opF2s[Ti32; kmI; kmF]
+  / uniform i32 bits → bitcast (exact counts to 2^31; exact past 2^24)
+  nI:  newId[]; emitBuf opBitcast[Ti32; nI;  nF]
+  tI:  newId[]; emitBuf opBitcast[Ti32; tI;  tF]
+  kmI: newId[]; emitBuf opBitcast[Ti32; kmI; kmF]
   gx:  kGidX[]; d: kGidI[gx]
   seed: redSeed op
   L: loopOpen[kmI; seed; `f32]
@@ -728,8 +731,8 @@ compScanBlock: {[op]
   uv: (loadUniMember AKuniKi) 0
   nF:  newId[]; emitBuf opXtract[Tf32; nF;  uv; 0]
   ckF: newId[]; emitBuf opXtract[Tf32; ckF; uv; 1]
-  nI:  newId[]; emitBuf opF2s[Ti32; nI;  nF]
-  ckI: newId[]; emitBuf opF2s[Ti32; ckI; ckF]
+  nI:  newId[]; emitBuf opBitcast[Ti32; nI;  nF]      / uniform i32 bits (exact i32 counts, no f32 2^24 cliff)
+  ckI: newId[]; emitBuf opBitcast[Ti32; ckI; ckF]
   gx:  kGidX[]; d: kGidI[gx]
   base: newId[]; emitBuf opImul[Ti32; base; d; ckI]
   seed: redSeed op
@@ -770,7 +773,7 @@ compAddOffset: {[op]
   ids: kAlloc[0; 2; 1; 1]                           / out@0 (in place), blockOffset@1, uniform@2
   uv: (loadUniMember AKuniKi) 0
   ckF: newId[]; emitBuf opXtract[Tf32; ckF; uv; 0]
-  ckI: newId[]; emitBuf opF2s[Ti32; ckI; ckF]
+  ckI: newId[]; emitBuf opBitcast[Ti32; ckI; ckF]     / uniform i32 bits (exact i32 counts, no f32 2^24 cliff)
   gx:  kGidX[]; d: kGidI[gx]
   base: newId[]; emitBuf opImul[Ti32; base; d; ckI]
   po:  newId[]; emitBuf opAccChain[AKpf32; po; ids 1; AKz; d]
@@ -797,8 +800,8 @@ compCompact: {[]
   uv: (loadUniMember AKuniKi) 0
   nF:  newId[]; emitBuf opXtract[Tf32; nF;  uv; 0]
   tF:  newId[]; emitBuf opXtract[Tf32; tF;  uv; 1]
-  nI:  newId[]; emitBuf opF2s[Ti32; nI; nF]
-  tI:  newId[]; emitBuf opF2s[Ti32; tI; tF]         / total (= sentinel out index)
+  nI:  newId[]; emitBuf opBitcast[Ti32; nI; nF]     / uniform i32 bits (exact i32 counts, no f32 2^24 cliff)
+  tI:  newId[]; emitBuf opBitcast[Ti32; tI; tF]     / total (= sentinel out index)
   gx:  kGidX[]; i: kGidI[gx]; iF: kGidF[gx]
   g:   newId[]; emitBuf opSLT[Tbool; g; i; nI]       / i < n
   si:  newId[]; emitBuf opSel[Ti32; si; g; i; RCi0]  / clamp OOB load index
