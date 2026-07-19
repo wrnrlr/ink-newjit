@@ -37,6 +37,7 @@ PI: 3.14159265
 / NB: the prelude math names (sqrt nrm …) are NOUNS — an op-glyph right
 / after one is dyadic, so `sqrt +/x*x` parses as a seeded fold.  Always
 / bracket: sqrt[…], nrm[…]  (see AGENT.md "seeded-fold" trap).
+sqr:   {x*x}
 rnd:   {(_ 0.5+x*1e3)%1e3}              / snap to 1e-3 grid → float-safe ~ match
 nrm:   {x%sqrt[+/x*x]}                  / unit vector
 cross: {((x[1]*y 2)-x[2]*y 1;(x[2]*y 0)-x[0]*y 2;(x[0]*y 1)-x[1]*y 0)}
@@ -48,7 +49,7 @@ det:   {+/x[0]*cross[x 1;x 2]}          / +1 for a rotation, -1 for a reflection
 
 / ── §1  the Coxeter diagram → three mirror normals ────────────────────
 / Unit normals with n₁·n₂ = -cos(π/p), n₂·n₃ = -cos(π/q), n₁·n₃ = 0.
-coxeter: {[p;q]
+mirrors: {[p;q]
   a:cos PI%p;s:sin PI%p;b:(-cos PI%q)%s
   ((1. 0. 0.); ((-a);s;0.); (0.;b;sqrt[1.-b*b]))}
 
@@ -88,29 +89,28 @@ bfc: {[expand;key;seed]                  / breadth-first closure
   ({0<#x`frontier}bfc.step/search)`seen}
 
 / §2a  the reflection group: expand = frontier · the 3 generator matrices.
-/ expandG[gens] is a PARTIAL that carries its generators, so `bfc` needs
+/ group.expand[gens] is a PARTIAL carrying its generators, so `bfc` needs
 / no special-casing — just a different expander and a deeper round (rnd'').
-expandG: {[G;fr] ,/ fr {mm[x;y]}/:\: G}
-groupOf: {[N] bfc[expandG[rmat' N]; rnd''; id3]}
+group.expand: {[G;fr] ,/ fr {mm[x;y]}/:\: G}
+group:        {[N] bfc[group.expand[rmat' N]; rnd''; id3]}
 
 / ── §3  Wythoff's construction: reflect the seed in every mirror ──────
-/ Same closure, one-level round; expandO[N] carries the mirror set.
-expandO: {[N;fr] ,/ N {refl[x;y]}/:\: fr}
-orbit:   {[N;seed] rnd' bfc[expandO[N]; rnd'; seed]}
-wythoff: {[p;q;t] N:coxeter[p;q]; orbit[N; nrm[+/ t*corners N]]}
+/ Same closure, one-level round; orbit.expand[N] carries the mirror set.
+orbit.expand: {[N;fr] ,/ N {refl[x;y]}/:\: fr}
+orbit:        {[N;seed] rnd' bfc[orbit.expand[N]; rnd'; seed]}
+wythoff:      {[p;q;t] N:mirrors[p;q]; orbit[N; nrm[+/ t*corners N]]}
 
 / ── §4  the 1-skeleton, from nothing but distance ────────────────────
 / Vertices come from the orbit; an edge is any vertex pair at the
 / MINIMUM nonzero distance; faces follow from Euler V-E+F = 2.  This is
 / Steinitz's viewpoint — the graph alone fixes the polyhedron.
-sqr:     {x*x}
-adjOf:   {d: x {+/sqr x-y}/:\: x; m: &/,/{x@&x>1e-6}'d; 1e-3>sqr d-m}
-edgesOf: {i: &,/ x&(!#x)<\:!#x; #i}     / count of pairs i<j that are adjacent
+adj:   {d: x {+/sqr x-y}/:\: x; m: &/,/{x@&x>1e-6}'d; 1e-3>sqr d-m}   / vertices → boolean adjacency
+edges: {&,/ x&(!#x)<\:!#x}       / adjacency → count of pairs i<j that touch
 
 / ── run: group orders + orbit–stabiliser ─────────────────────────────
 `0 0: "reflection groups from the diagram [p,q]:"
 grp: {[nm;p;q]
-  G: groupOf mirrors[p;q]
+  G: group mirrors[p;q]
   `0 0: nm,"  |G|=",($#G),"  rotations=",$+/0<{det x}'G}
 grp["A3 [3,3] tetrahedral";3;3]
 grp["B3 [4,3] octahedral ";4;3]
@@ -125,7 +125,7 @@ grp["H3 [5,3] icosahedral";5;3]
 / ── census: name, (p,q,ring), V, E, F, Euler ─────────────────────────
 census: {[nm;p;q;t]
   V: wythoff[p;q;t]
-  e: edgesOf adjOf V
+  e: # edges adj V
   f: 2+e-#V
   ring: ,/$_ t
   `0 0: nm," [",($p),",",($q),"] ",ring,"  V=",($#V)," E=",($e)," F=",($f)," χ=",$((#V)+f)-e}
