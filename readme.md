@@ -65,8 +65,8 @@ Depend on ink from another flake:
 ```
 
 The Nix package is the **core** language (no native extensions). The GPU
-extension is macOS-arm64 only and links system GLFW + Dawn, so it stays a
-host build (`make build`). `nix develop` provides GLFW on Darwin for that.
+extension is macOS-arm64 only and links system GLFW + Vulkan (MoltenVK), so it
+stays a host build (`make build`). `nix develop` provides GLFW on Darwin for that.
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`, which cross-builds
 every platform and publishes per-platform archives + `SHA256SUMS.txt` to a

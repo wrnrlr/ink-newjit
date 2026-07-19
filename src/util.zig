@@ -3,21 +3,12 @@ const Alloc = std.mem.Allocator;
 const V = @import("noun/value.zig").V;
 const VM = @import("runtime/vm.zig").VM;
 
-pub const DEBUG = false;
-
 pub fn clamp(x: anytype, min_val: @TypeOf(x), max_val: @TypeOf(x)) @TypeOf(x) {
   std.debug.assert(min_val <= max_val);
   return @min(@max(x, min_val), max_val);
 }
 
 pub const ApplyFn = *const fn (*VM, V, []const V) V;
-
-pub fn EnumFieldMap(comptime T: type) std.StaticStringMap(T) {
-  const fields = @typeInfo(T).@"enum".fields;
-  var kvs: [fields.len]struct { []const u8, T } = undefined;
-  for (fields, 0..) |f, i| kvs[i] = .{ f.name, @field(T, f.name) };
-  return std.StaticStringMap(T).initComptime(kvs);
-}
 
 pub const MockWriter = struct {
   buffer: std.ArrayList(u8),

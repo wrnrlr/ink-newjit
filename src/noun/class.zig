@@ -45,16 +45,11 @@ pub const K = enum(u8) {
   };
 
   pub inline fn serCode(k: K) u8 { return @intCast(k.code()); }
-  pub fn isFloat(k: K) bool { return switch (k) { .f, .F, .d, .D, .h, .H => true, else => false }; }
-  pub fn isMap(k: K) bool { return k == .m or k == .M; }
   pub inline fn container(comptime k: K) K { return @enumFromInt(@intFromEnum(k) | VEC_BIT); }
   pub inline fn atom(comptime k: K) K { return @enumFromInt(@intFromEnum(k) & ~@as(u8, VEC_BIT)); }
   pub fn isAtom(k: K) bool { return switch (k) { .b, .i, .f, .n, .s, .c, .d, .h => true, else => false }; }
   pub fn isVec(k: K)    bool { return @intFromEnum(k) & VEC_BIT != 0; }
 
-  pub fn isNumeric(k: K) bool {
-    return switch (k) { .b, .B, .i, .I, .f, .F, .n, .N, .d, .D, .h, .H => true, else => false };
-  }
   pub inline fn code(k: K) usize { return code_table[@intFromEnum(k)]; }
   pub fn fromCode(c: u8) ?K {
     return if (c < serial_order.len) serial_order[c] else null;

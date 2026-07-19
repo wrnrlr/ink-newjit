@@ -48,7 +48,6 @@ pub const V = union(K) {
   pub fn isVec(v: V) bool { return v.tag().isVec(); }
   pub fn isDict(v: V) bool { return switch (v.tag()) { .m, .M => true, else => false }; }
   pub fn isLambda(v: V) bool { return v == .o and v.o.isLambda(); }
-  pub fn isPartial(v: V) bool { return v == .p; }
   pub fn asPartial(v: V) *Partial { return v.p; }
   pub fn Ints(alloc: Alloc, x: []const i32) !V { return .{ .I = try N(i32).n1(alloc, x) }; }
   pub fn Floats(alloc: Alloc, x: []const f32) !V { return .{ .F = try N(f32).n1(alloc, x) }; }

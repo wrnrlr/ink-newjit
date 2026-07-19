@@ -110,7 +110,6 @@ export fn k_register(name: [*:0]const u8, fnptr: *const anyopaque, arity: u8) ca
 threadlocal var current_vm: ?*anyopaque = null;
 
 pub fn setCurrentVm(vm: *anyopaque) void  { current_vm = vm; }
-pub fn clearCurrentVm() void             { current_vm = null; }
 pub fn getCurrentVm() ?*anyopaque        { return current_vm; }
 pub fn restoreVm(prev: ?*anyopaque) void { current_vm = prev; }
 

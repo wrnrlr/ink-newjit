@@ -118,7 +118,6 @@ const at = h.arithmetic_types;
 pub fn _B(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Upcast1, h.Bool1,   F, &at); }
 pub fn _N(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Upcast1, h.Upcast1, F, &at); }
 pub fn _F(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Float1,  h.Float1,  F, &at); }
-pub fn _Yf(comptime op: Op1, comptime F: type) type { return h.makeMonad(op, h.Float1, h.Int1,   F, &at); }
 pub fn _X1(comptime op: Op1, comptime Impl: type) type { return h._X(Op1, op, Impl); }
 
 // Dyad helpers (op: Op2)

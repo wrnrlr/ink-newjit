@@ -11,10 +11,8 @@ const Dict = @import("../../noun/dict.zig").Dict;
 pub const Attr = std.builtin.Type.StructField.Attributes;
 
 pub const all_types = [_]K{ .blank, .err, .b, .i, .f, .n, .d, .h, .s, .c, .m, .B, .I, .F, .N, .D, .H, .S, .C, .M, .L, .x };
-pub const numeric_types = [_]K{ .b, .i, .f, .B, .I, .F };
 pub const arithmetic_types = [_]K{ .b, .i, .f, .B, .I, .F }; //, .L, .m, .M };
 pub const integer_types = [_]K{ .i, .I };
-pub const cut_types = [_]K{ .b, .i, .f, .B, .I, .F };
 
 /// Wrap a hand-written handler struct (one that already contains _* fields
 /// with default MonadFn/DyadFn values) by injecting the `op` field so the

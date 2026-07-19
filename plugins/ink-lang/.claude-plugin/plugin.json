@@ -1,0 +1,9 @@
+{
+  "name": "ink-lang",
+  "description": "Write and run programs in Ink, a k-family array programming language (like ngn/k and k9). Teaches Claude the language, its parsing gotchas, the standard libraries (json, http, csv, crypto, audio, gpu, llm, ...) and the GPU shader/compute dialect.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Werner Alman",
+    "email": "werner@alman.ax"
+  }
+}

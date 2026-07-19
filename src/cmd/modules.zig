@@ -54,13 +54,6 @@ pub const ModuleLoader = struct {
     }
   }
 
-  /// The module name of a path: `lib/json/json.k` → `json`.
-  fn stemOf(path: []const u8) []const u8 {
-    const start = if (std.mem.lastIndexOfScalar(u8, path, '/')) |s| s + 1 else 0;
-    const name = path[start..];
-    return if (std.mem.endsWith(u8, name, ".k")) name[0 .. name.len - 2] else name;
-  }
-
   // Record `ident → path` in the index (skip if already present). Both slices
   // are duped and owned by self.alloc.
   fn addEntry(self: *ModuleLoader, ident: []const u8, path: []const u8) !void {

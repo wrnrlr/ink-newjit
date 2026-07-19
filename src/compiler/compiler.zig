@@ -1219,12 +1219,6 @@ pub const Compiler = struct {
     const dot = std.mem.indexOfScalar(u8, name, '.') orelse return null;
     return name[0..dot];
   }
-  // The short member name of a qualified name (`ns.member` → `member`).
-  fn memberOf(name: []const u8) []const u8 {
-    const dot = std.mem.indexOfScalar(u8, name, '.') orelse return name;
-    return name[dot + 1 ..];
-  }
-
   // Intern `s` and return the pool-owned (stable, deduped) slice.
   fn interned(self: *Compiler, s: []const u8) ![]const u8 {
     return self.symbols.get(try self.symbols.intern(s));

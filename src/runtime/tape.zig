@@ -198,10 +198,6 @@ pub const Chunk = struct {
     try self.write(@as(u8, @intCast((val >> 8) & 0xff)));
   }
 
-  pub fn writeAt(self: *Chunk, idx: usize, byte: u8) void {
-    self.code.items[idx] = byte;
-  }
-
   pub fn addConstant(self: *Chunk, v: V) !u16 {
     const index = @as(u16, @intCast(self.constants.items.len));
     try self.constants.append(self.alloc, v);

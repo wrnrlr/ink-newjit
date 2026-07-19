@@ -8,7 +8,6 @@ pub const Io = []const u8;
 pub const Adverb = []const u8;
 pub const Symbol = []const u8;
 pub const Symbols = []Symbol;
-pub const Strings = []const u8;
 pub const Text = []const u8;
 
 pub const Literal = union(enum) {
@@ -31,7 +30,6 @@ pub const Terse = struct { stmts: []Stmt };
 pub const Right = struct { clause: *Node };
 pub const Defer = struct { adjunct: *Node };
 pub const Bind = struct { v: *Node, f: ?Op, a: ?*Node };
-pub const Pending = struct { v: *Node, f: ?Op, a: *Node };
 pub const Transit = struct { a: *Node, v: *Node, b: *Node };
 pub const Intrans = struct { a: *Node, v: *Node, z: ?*Node };
 pub const Apposit = struct { f: *Node, a: *Node };
@@ -93,8 +91,6 @@ pub const Node = union(NodeType) {
   command: Command,
   monad: VerbMonad,
   adverb_val: Adverb,
-
-  fn nodeType(n:Node) NodeType { return n.*; }
 
   pub fn format(self: Node, w: anytype) !void {
     var writer = w;

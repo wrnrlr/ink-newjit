@@ -74,11 +74,6 @@ pub const ExtRegistry = struct {
     return id;
   }
 
-  pub fn vtableFor(reg: *const ExtRegistry, type_id: u32) ?*const ExtVTable {
-    if (type_id >= reg.types.items.len) return null;
-    return &reg.types.items[type_id];
-  }
-
   // dlopen `path` and call its `terse_init(*anyopaque)` entry point.
   // The extension receives a *ExtRegistry cast to *anyopaque to avoid
   // requiring the extension to import ext.zig types.

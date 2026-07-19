@@ -433,12 +433,6 @@ pub fn netConnect(vm: *VM, host: []const u8, port: u16) V {
   return V{ .i = @intCast(id) };
 }
 
-/// Close a connection handle.
-pub fn netClose(vm: *VM, id: u32) V {
-  vm.conns.remove(id);
-  return .blank;
-}
-
 /// Parse "host:port" string.  Returns null on bad format.
 fn parseHostPort(s: []const u8) ?struct { host: []const u8, port: u16 } {
   const colon = std.mem.lastIndexOfScalar(u8, s, ':') orelse return null;
@@ -449,12 +443,6 @@ fn parseHostPort(s: []const u8) ?struct { host: []const u8, port: u16 } {
 // ---------------------------------------------------------------------------
 // Socket read / write helpers (used by the 0: and 1: handlers above)
 // ---------------------------------------------------------------------------
-
-/// Receive one newline-terminated message from a connected socket.
-/// Public so that serve.zig can use it for event-loop dispatch.
-pub fn readConnLine(vm: *VM, id: u32) V {
-  return readSocketLine(vm, id);
-}
 
 /// Receive one binary IPC message (4-byte LE length prefix + binary payload).
 /// Used by `2: handle` and the event loop in serve.zig.
@@ -542,12 +530,6 @@ fn writeSocketLine(vm: *VM, id: u32, y: V) V {
 
 /// Send raw bytes (+ trailing newline) to a socket.
 fn writeSocketBytes(vm: *VM, id: u32, data: []const u8) V {
-  return writeSocketRaw(vm, id, data);
-}
-
-/// Send raw bytes (+ trailing newline) to a connected socket.
-/// Public so that serve.zig can send handler replies.
-pub fn writeConnRaw(vm: *VM, id: u32, data: []const u8) V {
   return writeSocketRaw(vm, id, data);
 }
 

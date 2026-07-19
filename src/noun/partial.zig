@@ -25,7 +25,4 @@ pub const Partial = struct {
 
   pub fn filledCount(p: *const Partial) u8 { return @popCount(p.fill); }
   pub fn remaining(p: *const Partial) u8 { return p.arity - p.filledCount(); }
-  pub fn isFull(p: *const Partial) bool { return p.filledCount() >= p.arity; }
-
-  pub fn filledSlice(p: *const Partial) []const V { return p.args[0..p.arity]; }
 };

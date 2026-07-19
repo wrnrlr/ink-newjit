@@ -8,17 +8,17 @@
 //!     - the FusedMap KOp micro-ISA (tape.zig): `sqr sqrt exp log sin cos` fuse
 //!   GPU today (lib/dye.k): the `mathFns1`/`mathFns` name lists + lib/spirv.k op*.
 //!
-//! Every intrinsic is addressed by its *symbol name* (`sin, `atan2, …). The plan
-//! (doc/design/dye.md, Phase 1) is to remove the grammar keywords and instead bind
-//! ink names to these symbols in a prelude (lib/prelude.k for the CPU, the GPU
-//! builtins in lib/dye.k), then have the peephole/optimizer recognise the intrinsic
-//! symbol and lower it to the matching Op1/Op2/KOp (CPU) or SPIR-V op* (GPU). That
-//! is a monomorphic call-site optimization: a call to a *known* intrinsic symbol is
-//! inlined to an opcode.
+//! Every intrinsic is addressed by its *symbol name* (`sin, `atan2, …). Phase 1
+//! (doc/design/dye.md) already removed the grammar keywords and rebound the ink
+//! names to these symbols in a prelude (lib/prelude.k for the CPU, the GPU
+//! builtins in lib/dye.k). The remaining step is for the peephole/optimizer to
+//! recognise a *known* intrinsic symbol at a call site and lower it to the
+//! matching Op1/Op2/KOp (CPU) or SPIR-V op* (GPU) — a monomorphic call-site
+//! optimization that inlines the call to an opcode.
 //!
-//! For now this table is DATA ONLY — nothing consumes it yet. A parity test in
-//! src/test.zig asserts it stays faithful to the existing Op1/Op2 enums, so Phase 1
-//! can flip the lexer/syms/fuse machinery over to it without drift.
+//! This table is the source of truth; today only a parity test in src/test.zig
+//! consumes it, asserting it stays faithful to the existing Op1/Op2 enums so the
+//! lowering machinery can be flipped over to it later without drift.
 
 const std = @import("std");
 const Op1 = @import("../noun/operator.zig").Op1;

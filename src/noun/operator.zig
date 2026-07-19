@@ -165,20 +165,16 @@ pub const Fn = packed struct(u64) {
   idx:   u24,
   extra: u32,
 
-  pub fn isCallable(self: Fn) bool { return self.kind == .callable; }
   pub fn isLambda(self: Fn) bool { return self.kind == .callable and isLambdaIdx(self.idx); }
   pub fn isBuiltinFn(self: Fn) bool { return self.kind == .callable and isBuiltinIdx(self.idx); }
-  pub fn isOp1(self: Fn) bool { return self.kind == .callable and isOp1Idx(self.idx); }
   pub fn isOp2(self: Fn) bool { return self.kind == .callable and isOp2Idx(self.idx); }
 
   pub fn getOp1(self: Fn) Op1       { return op1OfIdx(self.idx); }
   pub fn getOp2(self: Fn) Op2       { return op2OfIdx(self.idx); }
   pub fn getOp3(self: Fn) Op3       { return op3OfIdx(self.idx); }
-  pub fn getOp4(self: Fn) Op4       { return op4OfIdx(self.idx); }
   pub fn getAdverbOfIdx(self: Fn) Adverb { return adverbOfIdx(self.idx); }
   /// For .derived: the adverb stored in `extra`.
   pub fn getAdverb(self: Fn) Adverb { return @enumFromInt(@as(u8, @truncate(self.extra))); }
-  pub fn getLambdaIdx(self: Fn) u24 { return lambdaIdxOf(self.idx); }
 
   fn callable(idx: u32, fn_arity: u8) Fn {
     return .{ .kind = .callable, .arity = @intCast(fn_arity), .idx = @intCast(idx), .extra = 0 };

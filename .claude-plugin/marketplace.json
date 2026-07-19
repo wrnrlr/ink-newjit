@@ -1,0 +1,14 @@
+{
+  "name": "ink",
+  "owner": {
+    "name": "Werner Alman",
+    "email": "werner@alman.ax"
+  },
+  "plugins": [
+    {
+      "name": "ink-lang",
+      "source": "./plugins/ink-lang",
+      "description": "Write and run programs in Ink, a k-family array programming language — language skill with full reference, gotchas, libraries, and GPU compute docs"
+    }
+  ]
+}

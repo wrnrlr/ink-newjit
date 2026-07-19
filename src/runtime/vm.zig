@@ -65,12 +65,9 @@ pub const VM = struct {
 
   pub const Monad = *const fn (*VM, V) V;
   pub const Dyad = *const fn (*VM, V, V) V;
-  pub const TriadFn = *const fn (*VM, V, V, V) V;
-  pub const TetradFn = *const fn (*VM, V, V, V, V) V;
 
   pub fn aList(vm:VM) !V { return .{.L = try N(V).init(vm.alloc, 0)}; }
-  pub fn aVec(vm:VM,k:K,n:usize) !V { return V.wrap(k.container(), try N(k.backing()).init(vm.alloc, n)); }
-  
+
   pub fn create(alloc: Alloc) !*VM {
     const vm = try alloc.create(VM);
     const parser = try alloc.create(Parser);
