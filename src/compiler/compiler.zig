@@ -75,6 +75,13 @@ pub const Compiler = struct {
   // namespace (interned, stable; null = global scope) and persists across
   // separate compiles (REPL lines) since the Compiler outlives them.
   namespace: ?[]const u8 = null,
+  // Implicit function namespace. While compiling a lambda BOUND to name `F`, this
+  // is set to `F` (its fully-qualified assign name), so a bare reference in the
+  // body resolves to the member `F.that` when such a global exists — e.g. inside
+  // `group` a bare `expand` reaches `group.expand`. Distinct from `\d`: it affects
+  // REFERENCE resolution only (never assignment), and only captures a name when the
+  // qualified member actually exists, so it never shadows an unrelated global.
+  fn_namespace: ?[]const u8 = null,
   namespaces: std.StringHashMap(NsPolicy),
   // Fully-qualified names (`ns.member`, interned) declared private by their
   // namespace's policy. Referenced from outside their namespace → compile error.
@@ -151,7 +158,10 @@ pub const Compiler = struct {
     // Pre-register the namespace members assigned in this compilation unit so
     // forward/self/mutual references (recursion inside `\d ns`) resolve to the
     // member rather than falling back to a blank global. See prescanMembers.
-    if (node.* == .terse) try self.prescanMembers(node.terse.stmts);
+    if (node.* == .terse) {
+      try self.prescanMembers(node.terse.stmts);
+      try self.prescanGlobals(node.terse.stmts);
+    }
     const root_id = try self.compileNode(node, is_tail);
     if (self.scope.parent == null) {
       try self.runOptimizer(&self.scope.ir, root_id);
@@ -252,6 +262,52 @@ pub const Compiler = struct {
         }
       };
     }
+  }
+
+  // Whole-file prescan: pre-register a global slot for every top-level assignment
+  // target that is *qualified* (a dotted name, or a bare name inside `\d ns`),
+  // tracking `\d` across the statement list. Scripts compile statement-by-statement
+  // (repl.evalStream), so the per-unit prescanMembers only ever sees one statement;
+  // running this over the WHOLE parsed file first makes a qualified reference that
+  // precedes its definition resolve to the right member — the basis for both
+  // order-independent defs and implicit-function-namespace lookup (fn_namespace).
+  pub fn prescanGlobals(self: *Compiler, stmts: []ast.Stmt) !void {
+    var ns: ?[]const u8 = self.namespace;
+    for (stmts) |stmt| {
+      switch (stmt.node.*) {
+        .command => |cmd| {
+          if (std.mem.eql(u8, cmd.verb, "d")) {
+            const t = std.mem.trim(u8, cmd.args, " \t");
+            if (t.len == 0) ns = null else {
+              var it = std.mem.tokenizeAny(u8, t, " \t");
+              ns = try self.interned(it.next().?);
+            }
+          }
+        },
+        .bind => |b| try self.prescanGlobalTarget(b.v, ns),
+        .pending => |p| try self.prescanGlobalTarget(p.v, ns),
+        else => {},
+      }
+    }
+  }
+
+  fn prescanGlobalTarget(self: *Compiler, v: *ast.Node, ns: ?[]const u8) !void {
+    if (v.* == .literal and v.literal == .@"var") {
+      try self.prescanQualified(v.literal.@"var", ns);
+    } else if (v.* == .list) {
+      if (v.list.seq) |seq| for (seq) |item| {
+        if (item.* == .literal and item.literal == .@"var")
+          try self.prescanQualified(item.literal.@"var", ns);
+      };
+    }
+  }
+
+  // Register the slot only for a name that resolves to a qualified member (dotted,
+  // or bare inside a namespace). Plain global names already resolve lazily on first
+  // reference, so pre-registering them would change nothing — skip to stay minimal.
+  fn prescanQualified(self: *Compiler, name: []const u8, ns: ?[]const u8) !void {
+    if (nsOf(name) != null) { _ = try self.getOrAddGlobal(try self.interned(name)); return; }
+    if (ns) |n| { _ = try self.getOrAddGlobal(try self.qualify(n, name)); }
   }
 
   fn compileNode(self: *Compiler, node: *ast.Node, is_tail: bool) anyerror!ir.ValueId {
@@ -421,7 +477,7 @@ pub const Compiler = struct {
     // shadowed, so this needs no scope analysis. See src/primitive/intrinsic.zig.
     if (n == 1 and ap.f.* == .literal and ap.f.literal == .@"var") {
       const nm = ap.f.literal.@"var";
-      if (!self.isLocalName(nm)) if (self.intrinsic_alias.get(nm)) |o1| {
+      if (!self.isLocalName(nm) and !self.hasFnMember(nm)) if (self.intrinsic_alias.get(nm)) |o1| {
         const a = try self.compileNode(seq[0], false);
         return try self.emitOpWithArg(.Apply1, @intFromEnum(o1), &.{a});
       };
@@ -611,6 +667,21 @@ pub const Compiler = struct {
       var right_node = ast.Node{ .right = .{ .clause = &apply_node } };
       const write_a: *ast.Node = if (is_global) &right_node else &apply_node;
       return try self.compileBind(.{ .v = base_node, .f = null, .a = write_a });
+    }
+
+    // Implicit function namespace: binding a lambda to name `F` scopes bare
+    // references in its body to the sub-namespace `F` (see fn_namespace). Set it
+    // around the RHS compile so it is live when the lambda's deferred name patches
+    // resolve (compileLambda end). Restored on return; never affects assignment.
+    const saved_fn_ns = self.fn_namespace;
+    defer self.fn_namespace = saved_fn_ns;
+    if (b.v.* == .literal and b.v.literal == .@"var") {
+      if (b.a) |rhs0| {
+        const lam = if (rhs0.* == .right) rhs0.right.clause else rhs0;
+        const is_colon = b.f == null or std.mem.eql(u8, b.f.?, ":");
+        if (lam.* == .lambda and is_colon)
+          self.fn_namespace = try self.qualifiedAssignName(b.v.literal.@"var");
+      }
     }
 
     const rhs_id: ir.ValueId = if (b.a) |rhs| blk: {
@@ -868,7 +939,7 @@ pub const Compiler = struct {
     // same name. See intrinsic_alias.
     if (ap.f.* == .literal and ap.f.literal == .@"var") {
       const nm = ap.f.literal.@"var";
-      if (!self.isLocalName(nm)) if (self.intrinsic_alias.get(nm)) |o1| {
+      if (!self.isLocalName(nm) and !self.hasFnMember(nm)) if (self.intrinsic_alias.get(nm)) |o1| {
         const a = try self.compileNode(ap.a, false);
         return try self.emitOpWithArg(.Apply1, @intFromEnum(o1), &.{a});
       };
@@ -1213,11 +1284,36 @@ pub const Compiler = struct {
       if (!inside and self.private_members.contains(name)) return error.PrivateName;
       return self.getOrAddGlobal(name);
     }
+    // Implicit function namespace (innermost): a bare `expand` inside `group`
+    // resolves to `group.expand` when that member exists, else falls through.
+    if (self.fn_namespace) |fns| {
+      const q = try self.qualify(fns, name);
+      if (self.globals.contains(q)) return self.getOrAddGlobal(q);
+    }
     if (self.namespace) |ns| {
       const q = try self.qualify(ns, name);
       if (self.globals.contains(q)) return self.getOrAddGlobal(q);
     }
     return self.getOrAddGlobal(name);
+  }
+
+  // The fully-qualified global key an assignment to `name` would target: a dotted
+  // name as-is, a bare name qualified by the active `\d` namespace, else bare.
+  // Used to seed `fn_namespace` when binding a lambda to a name.
+  fn qualifiedAssignName(self: *Compiler, name: []const u8) ![]const u8 {
+    if (nsOf(name) != null) return self.interned(name);
+    if (self.namespace) |ns| return self.qualify(ns, name);
+    return self.interned(name);
+  }
+
+  // True if bare `name` names a member of the active implicit function namespace
+  // (`fn_namespace.name` exists as a global). Used to let such a member shadow a
+  // prelude intrinsic-alias fast-path within its own function body.
+  fn hasFnMember(self: *Compiler, name: []const u8) bool {
+    if (nsOf(name) != null) return false;
+    const fns = self.fn_namespace orelse return false;
+    const q = self.qualify(fns, name) catch return false;
+    return self.globals.contains(q);
   }
 
   // Resolve an *assignment* target to a global slot. A bare name inside a
