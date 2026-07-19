@@ -100,7 +100,7 @@ demo: {[]
   chkb["converge stopped early (< maxIter)"; (CVlast 0) < 12000]
 
   / count-exactness past the f32 2^24 cliff: the reduce/scan uniform
-  / ships counts as raw i32 bits (gpu.uniformI + shader bitcast), so a length that f32
+  / ships counts as raw i32 bits (gpu.uniform on an int vector + shader bitcast), so a length that f32
   / cannot represent still folds every element. N=2^24+51 rounds under f32 (`i$`f$N≠N),
   / and a spike at the LAST index is only found if the count is exact. Both paths.
   BN: (2*8388608) + 51

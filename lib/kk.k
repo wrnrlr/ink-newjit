@@ -383,10 +383,10 @@ kkReduceFb: {[op; d]
   P: kkRedP
   km: 1 | `i$ (n + P - 1) div P
   part: gpu.buffer[P # 0.]
-  u1: gpu.uniformI[(`i$n; `i$P; `i$km; 0)]       / i32 counts (exact to 2^31; exact past 2^24)
+  u1: gpu.uniform[(`i$n; `i$P; `i$km; 0)]       / i32 counts (exact to 2^31; exact past 2^24)
   gpu.dispatch[pipe; (d`gpu; part; u1); P]
   res: gpu.buffer[64 # 0.]
-  u2: gpu.uniformI[(`i$P; 1; `i$P; 0)]
+  u2: gpu.uniform[(`i$P; 1; `i$P; 0)]
   gpu.dispatch[pipe; (part; res; u2); 1]
   *gpu.read res}
 / Subgroup fast path (§6): stage 1 dispatches G workgroups × S (subgroup) lanes and
@@ -402,11 +402,11 @@ kkReduceSg: {[op; d; S]
   T1: G*S                                  / stage-1 total threads (grid-stride span)
   km1: 1 | `i$ (n + T1 - 1) div T1
   part: gpu.buffer[G # 0.]
-  u1: gpu.uniformI[(`i$n; `i$T1; `i$km1; 0)]     / i32 counts (exact to 2^31; exact past 2^24)
+  u1: gpu.uniform[(`i$n; `i$T1; `i$km1; 0)]     / i32 counts (exact to 2^31; exact past 2^24)
   gpu.dispatch[pipe; (d`gpu; part; u1); T1]     / T1 threads, LocalSize S → G workgroups
   res: gpu.buffer[64 # 0.]
   km2: 1 | `i$ (G + S - 1) div S
-  u2: gpu.uniformI[(`i$G; `i$S; `i$km2; 0)]
+  u2: gpu.uniform[(`i$G; `i$S; `i$km2; 0)]
   gpu.dispatch[pipe; (part; res; u2); S]        / S threads → one workgroup → scalar
   *gpu.read res}
 / Cache the device caps once (needs a live device — queried on first reduce).
@@ -443,10 +443,10 @@ kk.scan: {[op; d]
   ob: gpu.buffer[m # 0.]
   bt: gpu.buffer[P # 0.]
   bo: gpu.buffer[P # 0.]
-  u1: gpu.uniformI[(`i$n; `i$ck; 0; 0)]          / i32 counts (exact to 2^31; exact past 2^24)
+  u1: gpu.uniform[(`i$n; `i$ck; 0; 0)]          / i32 counts (exact to 2^31; exact past 2^24)
   gpu.dispatch[pB; (d`gpu; ob; bt; u1); P]
   gpu.dispatch[pP; (bt; bo); P]
-  u2: gpu.uniformI[(`i$ck; 0; 0; 0)]
+  u2: gpu.uniform[(`i$ck; 0; 0; 0)]
   gpu.dispatch[pA; (ob; bo; u2); P]
   [gpu: ob; t: `f; n: n; s: d`s]}
 kk.sums:  {[d] kk.scan[`sum; d]}
@@ -466,7 +466,7 @@ kk.where: {[d]
   total: `i$ kk.sum d                            / count of trues (syncs → incl is final)
   pipe: $[`compact in !kkCache; kkCache `compact; kkWhereMiss[`compact]]
   ob: gpu.buffer[(total + 64) # 0.]              / true-count elements + sentinel slack
-  u:  gpu.uniformI[(`i$n; `i$total; 0; 0)]        / i32 counts (exact to 2^31; exact past 2^24)
+  u:  gpu.uniform[(`i$n; `i$total; 0; 0)]        / i32 counts (exact to 2^31; exact past 2^24)
   gpu.dispatch[pipe; (d`gpu; incl`gpu; ob; u); n]
   [gpu: ob; t: `f; n: total; s: ,total]}
 

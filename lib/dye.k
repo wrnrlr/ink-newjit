@@ -645,7 +645,7 @@ compReduce: {[op]
   nF:  newId[]; emitBuf opXtract[Tf32; nF;  uv; 0]
   tF:  newId[]; emitBuf opXtract[Tf32; tF;  uv; 1]
   kmF: newId[]; emitBuf opXtract[Tf32; kmF; uv; 2]
-  / uniform via gpu.uniformI: the lanes are raw i32 bits, so bitcast (not f2s) recovers
+  / uniform via gpu.uniform on an INT vector: the lanes are raw i32 bits, so bitcast (not f2s) recovers
   / the exact count — exact to 2^31 instead of the f32 f2s 2^24 cliff.
   nI:  newId[]; emitBuf opBitcast[Ti32; nI;  nF]
   tI:  newId[]; emitBuf opBitcast[Ti32; tI;  tF]

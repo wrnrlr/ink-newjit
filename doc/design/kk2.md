@@ -652,7 +652,7 @@ residency, and the reduce/scan count cliff. Each is additive and oracle-guarded.
   (maxerr 3.3e-7); `demo/asr.k` now drives the encoder through `EncoderR`.
 - **Reduce/scan/compact count exactness.** These kernels carried their integer counts
   (`n`, stride, chunk, total) in an f32 uniform and `f2s`'d them — silently wrong past
-  2^24. They now ship the raw i32 bits via `gpu.uniformI` (gpu_vk.zig `gpuUniformNewI`)
+  2^24. They now ship the raw i32 bits via `gpu.uniform` on an int vector (gpu_vk.zig `gpuUniformNewI`)
   and `opBitcast` the f32 lane back to i32 in the shader (compReduce/compReduceSg/
   compScanBlock/compAddOffset/compCompact) — **exact to 2^31**. `test/kkred.k` guards it
   with a `kk.max` over 2^24+51 elements (a count f32 rounds) whose max sits at the last

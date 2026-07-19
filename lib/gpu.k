@@ -48,8 +48,13 @@ gpu.compileCompute: so 2: (`gpuComputeNew; 2) / (spirv_I; nbind) → pipeHandle 
 /   p: gpu.compileComputeU[shader.computeU[{[x;u] (x*u[0])+u[1]}]; 2]  / storage@0,1 + uniform@2
 /   u: gpu.uniform[3. 1. 0. 0.]                                        / a vec4 (scale;bias;…)
 /   gpu.dispatch[p; (inBuf;outBuf;u); n]                              / u bound at binding 2
-gpu.uniform:         so 2: (`gpuUniformNew;  1)   / F → bufHandle : resident UNIFORM buffer (pass a vec4)
-gpu.uniformI:        so 2: (`gpuUniformNewI; 1)   / I → bufHandle : resident UNIFORM buffer of raw i32 words (shader bitcasts f32-lane→i32; exact counts to 2^31, no f32 2^24 cliff)
+gpuUniformF:         so 2: (`gpuUniformNew;  1)   / F → bufHandle : resident UNIFORM buffer of f32 words
+gpuUniformI:         so 2: (`gpuUniformNewI; 1)   / I → bufHandle : resident UNIFORM buffer of raw i32 words
+/ gpu.uniform — resident UNIFORM buffer (a vec4). Polysemic on the argument type:
+/ a FLOAT vector uploads f32 words (the usual scale/bias UBO); an INT vector uploads
+/ raw i32 words, which a shader reads as an f32 lane then OpBitcasts back to i32 — so
+/ integer counts (reduce/scan/compact) stay exact to 2^31, past the f32 f2s 2^24 cliff.
+gpu.uniform: {[x] $[`I ~ @x; gpuUniformI x; gpuUniformF x]}
 gpu.compileComputeU: so 2: (`gpuComputeNewU; 2)   / (spirv_I; nStorage) → pipe : storage@0..nStorage-1 + uniform@nStorage
 gpu.dispatch:     so 2: (`gpuDispatch;   3)   / (pipeHandle; bufHandles_I; nThreads) → 0 : bind buffers @0..; dispatch; no readback
 gpuDispatchLoop0: so 2: (`gpuDispatchLoop; 5) / (pipe; bufsA_I; bufsB_I; nThreads; reps) → 0 : reps passes in ONE encoder, A on even/B on odd
