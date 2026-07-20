@@ -537,6 +537,23 @@ export fn gpuTexture(whc_k: ?K, data_k: ?K) callconv(.c) ?K {
   return ki(@intCast(g_textures.items.len));
 }
 
+// gpuTextureF[(w;h)_I; data_F] -> handle : upload w*h*4 f32 (RGBA/texel) as a
+// NEAREST-sampled R32G32B32A32_SFLOAT data texture (exact per-texel reads).
+export fn gpuTextureF(wh_k: ?K, data_k: ?K) callconv(.c) ?K {
+  const v = g_vk orelse return ki(0);
+  const wp = kip(wh_k) orelse return ki(0);
+  if (kn(wh_k) < 2) return ki(0);
+  const w = wp[0]; const h = wp[1];
+  if (w <= 0 or h <= 0) return ki(0);
+  const dp = kfp(data_k) orelse return ki(0);
+  const wu: usize = @intCast(w); const hu: usize = @intCast(h);
+  const need = wu * hu * 4;
+  if (kn(data_k) < @as(i32, @intCast(need))) return ki(0);
+  const t = v.createTextureF(@intCast(w), @intCast(h), dp[0..need]) catch return ki(0);
+  g_textures.append(alloc, t) catch { v.destroyTexture(t); return ki(0); };
+  return ki(@intCast(g_textures.items.len));
+}
+
 fn resetFrameMeshes() void {
   g_fill_verts.clearRetainingCapacity();
   g_fill_calls.clearRetainingCapacity();
@@ -835,6 +852,7 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuDrawPull", @ptrCast(&gpuDrawPull), 3);
   r.k_register("gpuDrawPullT", @ptrCast(&gpuDrawPullT), 4);
   r.k_register("gpuTexture", @ptrCast(&gpuTexture), 2);
+  r.k_register("gpuTextureF", @ptrCast(&gpuTextureF), 2);
   r.k_register("gpuCaps", @ptrCast(&gpuCaps), 1);
 }
 

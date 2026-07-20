@@ -23,6 +23,7 @@
 / Lambdas can have local bindings: {[uv] d: sqrt[...]; (d;d;d;1.0)}
 shader.fragment: {[ioTypes; fn]
   Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::(); Xidx::0
+  RCi0::0; RCi1::0; RCf0::0; RCfNeg::0     / reset loop consts; xLowerC allocates on demand
   TexVars:: ()                      / no texture section (see shader.fragmentTexN)
 
   lam: lamOf fn
@@ -58,6 +59,7 @@ shader.fragment: {[ioTypes; fn]
 / a list of texture handles.  Interpolate the UV(s) as v2 vertex varyings.
 shader.fragmentTexN: {[ioTypes; nTex; fn]
   Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::(); Xidx::0
+  RCi0::0; RCi1::0; RCf0::0; RCfNeg::0     / reset loop consts; xLowerC allocates on demand
 
   lam: lamOf fn
   argNames: lamArgs lam
@@ -106,6 +108,7 @@ vpBufDec: {[p] (0x00040047; p 0; 34; 0),(0x00040047; p 0; 33; p 1)}   / Descript
 vpBufVar: {[id] (0x0004003B; VPpbufs; id; 12)}                         / OpVariable StorageBuffer
 shader.vertexPull: {[varyTypes; fn]
   Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::(); Xidx::0
+  RCi0::0; RCi1::0; RCf0::0; RCfNeg::0     / reset loop consts; xLowerC allocates on demand
   lam: lamOf fn; argNames: lamArgs lam
   nBuf:    (#argNames)-1
   bufNames: -1 _ argNames
@@ -768,7 +771,7 @@ shader.reduceSg: compReduceSg
 / offset back into its elements. out is padded to P*chunk so the in-loop stores
 / never go OOB and never race (chunks are disjoint). op ∈ sum`max`min`prod picks the
 / identity+combine (shared with shader.reduce). Verified vs CPU +\ / |\ (test/kkred).
-compScanBlock: {[op]
+shader.scanBlock: {[op]
   ids: kAlloc[0; 3; 1; 1]                        / in@0, out@1, blockTotal@2, uniform@3
   uv: (loadUniMember AKuniKi) 0
   nF:  newId[]; emitBuf opXtract[Tf32; nF;  uv; 0]
@@ -793,10 +796,10 @@ compScanBlock: {[op]
   p3:  newId[]; emitBuf opAccChain[AKpf32; p3; ids 2; AKz; d]
   emitBuf opStore[p3; sPhi]                        / blockTotal[d] = chunk total
   kAsm[]}
-shader.scanBlock: compScanBlock
+
 / Per-thread exclusive scan of the P block totals (dispatch P = a multiple of wg so
 / d ∈ [0,P), no overflow threads): thread d loops d times summing totals[0..d-1].
-compScanPartials: {[op]
+shader.scanPartials: {[op]
   ids: kAlloc[0; 2; 0; 1]                          / blockTotal@0, blockOffset@1
   gx:  kGidX[]; d: kGidI[gx]
   seed: redSeed op
@@ -809,9 +812,9 @@ compScanPartials: {[op]
   p2:  newId[]; emitBuf opAccChain[AKpf32; p2; ids 1; AKz; d]
   emitBuf opStore[p2; sPhi]                         / blockOffset[d] = Σ totals[0..d-1]
   kAsm[]}
-shader.scanPartials: compScanPartials
+
 / Combine each chunk's offset back into its elements (in place; disjoint ranges).
-compAddOffset: {[op]
+shader.addOffset: {[op]
   ids: kAlloc[0; 2; 1; 1]                           / out@0 (in place), blockOffset@1, uniform@2
   uv: (loadUniMember AKuniKi) 0
   ckF: newId[]; emitBuf opXtract[Tf32; ckF; uv; 0]
@@ -829,7 +832,6 @@ compAddOffset: {[op]
   emitBuf opStore[p1; nv]
   loopClose[RCf0; `f32; sNext; iNext; iPhi; conL; hdrL; mrgL]
   kAsm[]}
-shader.addOffset: compAddOffset
 
 / ── Compaction &mask (kk2 tier-2): stream-compact the true positions ──────────
 / Given a 0/1 mask and its INCLUSIVE prefix scan, one thread per element writes the
@@ -837,7 +839,7 @@ shader.addOffset: compAddOffset
 / scatter compaction. False (or over-dispatched i≥n) threads scatter to a sentinel
 / slot in out's padding tail, so the live output is never clobbered (same trick as
 / the atomic-scatter kernels). out is sized to the true count (+slack) by the host.
-compCompact: {[]
+shader.compact: {[]
   ids: kAlloc[0; 3; 1; 1]                          / mask@0, incl@1, out@2, uniform@3=(n; total)
   uv: (loadUniMember AKuniKi) 0
   nF:  newId[]; emitBuf opXtract[Tf32; nF;  uv; 0]
@@ -860,7 +862,6 @@ compCompact: {[]
   po:  newId[]; emitBuf opAccChain[AKpf32; po; ids 2; AKz; sIdx]
   emitBuf opStore[po; iF]                            / out[pos] = i
   kAsm[]}
-shader.compact: compCompact
 
 / ── Elementwise subset classifier (kk2 §2.1: "no silent fallback") ────────────
 / Walk the lambda body; return `nil if every node is in the elementwise subset
@@ -893,7 +894,7 @@ kkClassify: {[fn] lam: lamOf fn; kkAny lamBody lam}
 / elemNames, then the output. The body is compiled through the neutral IR with @
 / lowering to a nested buffer index (xGather) and elem names to buf[d] (xVarE).
 kGmapEnvOne: {[p] (xEmit[`bufp; p 1; (); p 0]; p 1)}
-compGmap: {[fn; bufNames; elemNames]
+shader.gmap: {[fn; bufNames; elemNames]
   nbuf: #bufNames; nb: nbuf + #elemNames
   ids: kAlloc[0; nb+1; 0; 1]                / hasLoop=1: +/x@W needs the rsum consts
   lam: lamOf fn
@@ -907,14 +908,13 @@ compGmap: {[fn; bufNames; elemNames]
   xLowerC[,rp 0]
   kStore[ids nb; gx; xId rp 0]
   kAsm[]}
-shader.gmap: compGmap
 
 / ── Placed-table map kernel (kk2 §2.5): {(t`a)+(t`b)} over a placed table ──────
 / Each referenced column is one storage binding (0..nc-1), loaded elementwise at
 / the thread index; the table var resolves to a col-name→bufp dict (a `table env
 / entry) that xTableCol reads. Output → binding nc. Binding inference (kk.compile)
 / passes only the columns the body mentions, so dead columns cost nothing.
-compTable: {[fn; tableName; colNames]
+shader.table: {[fn; tableName; colNames]
   nc: #colNames
   ids: kAlloc[0; nc+1; 0; 1]
   lam: lamOf fn
@@ -928,7 +928,6 @@ compTable: {[fn; tableName; colNames]
   xLowerC[,rp 0]
   kStore[ids nc; gx; xId rp 0]
   kAsm[]}
-shader.table: compTable
 
 / Interleaved placed-table map (kk2 §2.5): the whole table is ONE storage buffer
 / (row-major, stride nc = #allCols), so an n-column table costs just 2 bindings
@@ -1701,6 +1700,9 @@ xLowerC: {[extra]
   xId:: (#xOp)#-1
   $[xOpt; xFold[]; 0]
   xRe:: $[xOpt; xReachC[extra]; (#xOp)#1b]
+  / Fragment/vertex paths don't run kAllocLoop; if the body uses a loop region node
+  / and the loop consts are unset, emit them now (compute already has them → no-op).
+  $[(RCi0=0) & $[#xOp; |/xOp in xLoopOps; 0b]; kAllocLoop[]; 0]
   {[j] $[(0 > xRgn j) & xRe j; xLowerOne j; 0]}' !#xOp
   0}
 

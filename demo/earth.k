@@ -224,11 +224,11 @@ window.run[{[props]
   $[earthPipe=0;   earthPipe::   mesh.compilePull[earthVtx; earthFrag]; 0]
   $[earthVB=0;     earthVB::     gpu.buffer[earthMesh]; 0]
   $[earthUB=0;     earthUB::     gpu.buffer[16#0.];     0]
-  $[0~earthTex;    earthTex::    {texture.upload x}'(imgDay;imgNight;imgClouds;imgSpec;imgNorm); 0]
+  $[earthTex~0;    earthTex::    {texture.upload x}'(imgDay;imgNight;imgClouds;imgSpec;imgNorm); 0]
   $[starPipe=0;    starPipe::    mesh.compilePull[starVtx; starFrag]; 0]
   $[starVB=0;      starVB::      gpu.buffer[starQuad]; 0]
   $[starUB=0;      starUB::      gpu.buffer[8#0.];     0]
-  $[0~starTex;     starTex::     ,texture.upload[imgStars];              0]
+  $[starTex~0;     starTex::     ,texture.upload[imgStars];              0]
 
   E: props`events
   w: props`width; h: props`height

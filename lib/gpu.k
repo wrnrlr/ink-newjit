@@ -81,6 +81,9 @@ mesh.drawPull: {[pipe; bufs; count] gpuDrawPull0[pipe; `i$bufs; count]}
 / per-frame uniforms) from the resident storage buffers in `bufs`.
 mesh.drawPullT: {[pipe; bufs; count; texs] gpuDrawPullT0[pipe; `i$bufs; count; `i$texs]}
 gpuTexture0:   so 2: (`gpuTexture;  2)   / ((w;h;comp)_I; data_I) → texHandle : upload an image to a sampled GPU texture
+/ Float data texture (R32G32B32A32_SFLOAT, NEAREST): exact per-texel reads for
+/ data (e.g. Slug glyph curve tables). data = w*h*4 f32 (RGBA/texel), row-major.
+gpu.textureF:  so 2: (`gpuTextureF; 2)   / ((w;h)_I; data_F) → texHandle
 / Upload an image dict (`width`height`comp`data, e.g. from image.read) as a texture,
 / sampled at @group(1) by a shader.fragmentTexN fragment (image k = binding k).
 texture.upload: {[img] w:img`width; h:img`height; c:img`comp; d:img`data; gpuTexture0[(w;h;c); d]}

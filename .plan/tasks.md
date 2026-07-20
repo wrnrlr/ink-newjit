@@ -98,6 +98,16 @@ Toolchain: `brew install molten-vk vulkan-headers glslang`.
 7. **Perf pass**: compute is correctness-first (deferred submission, `vkQueueWaitIdle`
    at each readback). Revisit with fences / overlap if profiling shows it matters.
 
+### Shader dialect
+- **`&`/`|` as min/max in shaders**: in the dye shader dialect `&`/`|` currently emit
+  only `OpLogicalAnd`/`OpLogicalOr` (bool), whereas in ordinary ink they are polysemic
+  (min/max on numbers, and/or on bools). This surprises shader authors — `y0&y2` for
+  `min[y0;y2]` silently compiles to a logical-and of two floats (see lib/slug.k, which
+  had to use `min[]`/`max[]`). Make the dialect dispatch `&`/`|` by operand type: min/max
+  (`OpFMin`/`OpFMax`) for float/vector operands, logical for bool. Lower risk than it
+  looks — the `min`/`max` builtins already exist (xMathW `opFmin`/`opFmax`); this just
+  routes the `&`/`|` glyphs there when the operands aren't bool. Add a shader test.
+
 ### Housekeeping
 - `spike/` (vkspike.zig + run.sh) is the throwaway Phase-0 proof — keep or delete.
 - `test/computevk.k` is the headless Vulkan compute smoke test — keep.

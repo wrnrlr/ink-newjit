@@ -50,8 +50,10 @@ gpuSetup:{[side]
   im0::nP#1.; im0::@[im0;0,W-1;:;0.]; posf::{[k] (px0@k;py0@k;pz0@k)}   / pin corners (@-amend, not x[i]:v — breaks in a fn)
   hi::&col<W-1; vi::&row<H-1; di::&(col<W-1)&row<H-1
   mkE::{[is;js;al] l0:{[a;b]distp[posf a;posf b]}'[is;js]; ,/+((0.+is);(0.+js);l0;al;im0@is;im0@js;(im0@is)+im0@js)}
-  P::gpu.buffer[,/+(px0;py0;pz0)]; V::gpu.buffer[nDof#0.]; PREV::gpu.buffer[nDof#0.]; IM::gpu.buffer[im0]; DP::gpu.buffer[nDof#0.]
-  bH::gpu.buffer[mkE[hi;hi+1;(#hi)#0.]]; bV::gpu.buffer[mkE[vi;vi+W;(#vi)#0.]]; bD::gpu.buffer[mkE[di;di+W+1;(#di)#0.]]; bB::gpu.buffer[mkE[di+1;di+W;(#di)#1.]]
+  P::gpu.buffer[,/+(px0;py0;pz0)]; V::gpu.buffer[nDof#0.]
+  PREV::gpu.buffer[nDof#0.]; IM::gpu.buffer[im0]; DP::gpu.buffer[nDof#0.]
+  bH::gpu.buffer[mkE[hi;hi+1;(#hi)#0.]]; bV::gpu.buffer[mkE[vi;vi+W;(#vi)#0.]];
+  bD::gpu.buffer[mkE[di;di+W+1;(#di)#0.]]; bB::gpu.buffer[mkE[di+1;di+W;(#di)#1.]]
   G::gpu.buffer[SDT,0.995,0.,0.]; GH::gpu.buffer[(0.+(#hi)),SDT,0.,0.]; GV::gpu.buffer[(0.+(#vi)),SDT,0.,0.]; GD::gpu.buffer[(0.+(#di)),SDT,0.,0.]; GB::gpu.buffer[(0.+(#di)),SDT,0.,0.]
   cons::((bH;GH);(bV;GV);(bD;GD);(bB;GB)); 0}
 pInt::gpu.compileCompute[kInt;5]; pCon::gpu.compileCompute[kCon;4]; pApp::gpu.compileCompute[kApp;3]; pVel::gpu.compileCompute[kVel;5]

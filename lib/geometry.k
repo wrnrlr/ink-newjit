@@ -27,6 +27,7 @@ sqr:   {x*x}                            / (prelude `sqr is scalar/vector only �
 rnd:   {(_ 0.5+x*1e3)%1e3}              / snap to a 1e-3 grid → float-safe ~ match
 nrm:   {x%sqrt[+/x*x]}                  / unit vector
 cross: {((x[1]*y 2)-x[2]*y 1;(x[2]*y 0)-x[0]*y 2;(x[0]*y 1)-x[1]*y 0)}
+cross3:{((x@1 2 0)*y@2 0 1)-(x@2 0 1)*y@1 2 0}
 mm:    {x {+/x*y}/:\: +y}               / 3x3 · 3x3
 id3:   (1. 0. 0.;0. 1. 0.;0. 0. 1.)
 refl:  {y-(2*+/x*y)*x}                  / reflect point y in the mirror with unit normal x

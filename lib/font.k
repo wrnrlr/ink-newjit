@@ -4,7 +4,7 @@
 / a single TTF/OTF yields a one-element list — uniform API across flavours).
 / Each face dict is keyed by normalized table name → that table's value:
 /   head  maxp  hhea  hmtx  loca  post  name  OS2  cmap  cvt  fpgm  prep  gasp
-\d font read outline outlines shape scale metrics upm glyph nameID family subfamily fullName
+\d font read outline outlines quads shape scale metrics upm glyph nameID family subfamily fullName
   so:"./zig-out/lib/libfont.dylib"
   read:so 2:(`ReadFont; 1)            / "path" → L of face dicts
   upm:{[f] f[`head]`upm}                                          / units per em
@@ -24,12 +24,17 @@
   / to gpu.tessellate. outlines does the whole gid vector at once.
   outline:{[f;gid;sz]$[`CFF in !f;cff2.outline;glyf.outline][f;scale[f;sz];gid]}
   outlines:{[f;sz;gids] $[`CFF in !f;cff2.outline;glyf.outline][f;scale[f;sz]]'gids}
+  / quads  f gid sz  → L of flat F contours of RAW quadratic control points
+  / [x0 y0 cx cy x1 y1 …] (pixel-space, y-flipped), for GPU analytic coverage.
+  / TrueType/glyf only for now (CFF is cubic — convert later); ~8× fewer segments
+  / than `outline`, and truly resolution-independent when fed to a quadratic shader.
+  quads:{[f;gid;sz] glyf.quads[f;scale[f;sz];gid]}
 / ── font.glyf — TrueType quadratic (glyf) outline flattening ────────────────
 / glyf stores quadratic Béziers as on/off-curve points; two consecutive
 / off-curve points imply an on-curve midpoint. Everything below flattens that to
 / (x;y) point lists in FONT UNITS, resolves composite glyphs, then scales+flips.
-/ Only `outline` is public.
-\d font.glyf outline
+/ `outline` (flattened polylines) and `quads` (raw quadratic control triples) public.
+\d font.glyf outline quads
   midway: {0.5*x+y}                                                    / midpoint of two points
   / Flatten one quad a(on)→b(ctrl)→c(on) over QN sample times, vectorized.
   subdivide:{[a;b;c]
@@ -78,6 +83,42 @@
   / scale to pixels + flip y (font y-up → screen y-down) → flat F [x,y,x,y,…].
   emit: {[sc;c] xs: {x 0}'c; ys: {x 1}'c; ,/ +((sc*xs); (-sc)*ys)}
   outline: {[f;sc;gid] emit[sc]' resolve[f;gid]}
+  / ── Raw quadratic control points (for GPU analytic coverage; lib/slug.k) ─────
+  / Same walk as flatC, but instead of subdividing each quad it emits the control
+  / TRIPLE (on; ctrl; on) as 6 floats — a contour becomes a flat buffer of quads
+  / [x0 y0 cx cy x1 y1 …]. Straight runs (on→on) get a midpoint control (degenerate
+  / quad = a line). ~8× fewer segments than the flattened outline.
+  seg3: {[a;b;c] a,b,c}
+  rOn: {[st;p]
+    $[st 3;(st[0],seg3[st 1;st 2;p]; p; st 2; 0);
+           (st[0],seg3[st 1;midway[st 1;p];p]; p; st 2; 0)]}
+  rOff:{[st;p]
+    $[st 3;(st[0],seg3[st 1;st 2;midway[st 2;p]]; midway[st 2;p]; p; 1);
+           (st 0; st 1; p; 1)]}
+  rStep: {[st;e] $[e 1; rOn[st;e 0]; rOff[st;e 0]]}
+  rawC: {[c]
+    pts:c 0; on:c 1; pr:+(pts;on); hasOn:1 in on
+    start:fpStart[pts;on;hasOn]; seq:fpSeq[pr;on;hasOn]
+    acc:(0#0.; start; 0. 0.; 0) rStep/ seq
+    cur:acc 1
+    $[acc 3; (acc 0),seg3[cur;acc 2;start]; (acc 0),seg3[cur;midway[cur;start];start]]}
+  / affine a flat [x y …] segment buffer (composite recursion; no closure via each-multi)
+  xformBuf:{[xx;xy;yx;yy;dx;dy;buf]
+    n:(#buf)div 2; ix:2*!n; xs:buf@ix; ys:buf@ix+1
+    ,/+(((xx*xs)+(yx*ys)+dx); ((xy*xs)+(yy*ys)+dy))}
+  compRowQ:{[f;r]
+    bufs: quadsResolve[f; r 0]; nb:#bufs
+    xformBuf'[nb#(r 3); nb#(r 4); nb#(r 5); nb#(r 6); nb#(r 1); nb#(r 2); bufs]}
+  compositeQ:{[f;g]
+    ps:g`parts
+    rows:+((ps`glyph); 0.+(ps`dx); 0.+(ps`dy); ps`xx; ps`xy; ps`yx; ps`yy)
+    ,/[compRowQ[f]'rows]}
+  quadsResolve:{[f;gid]
+    g:(f`glyf) gid
+    $[`parts in !g; compositeQ[f;g]; rawC' contours g]}
+  quads: {[f;sc;gid] emit2[sc]' quadsResolve[f;gid]}
+  / scale + y-flip a flat quad buffer (control points are just points).
+  emit2: {[sc;buf] n:(#buf)div 2; ix:2*!n; xs:buf@ix; ys:buf@ix+1; ,/+((sc*xs); (-sc)*ys)}
 / ── font.cff2 — PostScript / CFF Type-2 charstring outlines (in Zig) ────────
 / Returns the same shape as the glyf path (pixel-scaled, y-flipped). Only
 / `outline` is public.

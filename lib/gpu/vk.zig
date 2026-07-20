@@ -1228,6 +1228,55 @@ pub const Vk = struct {
     return t;
   }
 
+  // Upload RGBA32F data to a NEAREST-sampled texture — a data texture for exact
+  // per-texel reads (OpImageFetch / texelFetch), e.g. Slug glyph curve tables.
+  // `data` is w*h*4 f32 (RGBA per texel), row-major.
+  pub fn createTextureF(self: *Vk, w: u32, h: u32, data: []const f32) Error!Texture {
+    var t: Texture = undefined;
+    const ici = c.VkImageCreateInfo{
+      .sType = c.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = c.VK_IMAGE_TYPE_2D, .format = c.VK_FORMAT_R32G32B32A32_SFLOAT,
+      .extent = .{ .width = w, .height = h, .depth = 1 }, .mipLevels = 1, .arrayLayers = 1, .samples = c.VK_SAMPLE_COUNT_1_BIT,
+      .tiling = c.VK_IMAGE_TILING_OPTIMAL, .usage = c.VK_IMAGE_USAGE_SAMPLED_BIT | c.VK_IMAGE_USAGE_TRANSFER_DST_BIT, .sharingMode = c.VK_SHARING_MODE_EXCLUSIVE, .initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    if (!ok(vkCreateImage(self.dev, &ici, null, &t.img))) return Error.OutOfMemory;
+    var req: c.VkMemoryRequirements = undefined;
+    vkGetImageMemoryRequirements(self.dev, t.img, &req);
+    const ai = c.VkMemoryAllocateInfo{ .sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size, .memoryTypeIndex = self.memtype };
+    if (!ok(vkAllocateMemory(self.dev, &ai, null, &t.mem))) { vkDestroyImage(self.dev, t.img, null); return Error.OutOfMemory; }
+    _ = vkBindImageMemory(self.dev, t.img, t.mem, 0);
+
+    const bytes = std.mem.sliceAsBytes(data);
+    const stage = try self.createBuffer(@as(u64, w) * h * 16, false);
+    defer self.destroyBuffer(stage);
+    @memcpy(stage.mapped[0..bytes.len], bytes);
+
+    var tcb: c.VkCommandBuffer = undefined;
+    const cbai = c.VkCommandBufferAllocateInfo{ .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = self.cmd_pool, .level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1 };
+    _ = vkAllocateCommandBuffers(self.dev, &cbai, &tcb);
+    const bi = c.VkCommandBufferBeginInfo{ .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+    _ = vkBeginCommandBuffer(tcb, &bi);
+    var b = c.VkImageMemoryBarrier{ .sType = c.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .srcAccessMask = 0, .dstAccessMask = c.VK_ACCESS_TRANSFER_WRITE_BIT, .oldLayout = c.VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, .srcQueueFamilyIndex = c.VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = c.VK_QUEUE_FAMILY_IGNORED, .image = t.img, .subresourceRange = .{ .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 } };
+    vkCmdPipelineBarrier(tcb, c.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, c.VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, null, 0, null, 1, @ptrCast(&b));
+    const region = c.VkBufferImageCopy{ .bufferOffset = 0, .bufferRowLength = 0, .bufferImageHeight = 0, .imageSubresource = .{ .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1 }, .imageOffset = .{ .x = 0, .y = 0, .z = 0 }, .imageExtent = .{ .width = w, .height = h, .depth = 1 } };
+    vkCmdCopyBufferToImage(tcb, stage.buf, t.img, c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, @ptrCast(&region));
+    b.srcAccessMask = c.VK_ACCESS_TRANSFER_WRITE_BIT;
+    b.dstAccessMask = c.VK_ACCESS_SHADER_READ_BIT;
+    b.oldLayout = c.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    b.newLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkCmdPipelineBarrier(tcb, c.VK_PIPELINE_STAGE_TRANSFER_BIT, c.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, null, 0, null, 1, @ptrCast(&b));
+    _ = vkEndCommandBuffer(tcb);
+    const si = c.VkSubmitInfo{ .sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = @ptrCast(&tcb) };
+    _ = vkQueueSubmit(self.queue, 1, @ptrCast(&si), null);
+    _ = vkQueueWaitIdle(self.queue);
+    _ = vkResetCommandPool(self.dev, self.cmd_pool, 0);
+
+    const ivci = c.VkImageViewCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = t.img, .viewType = c.VK_IMAGE_VIEW_TYPE_2D, .format = c.VK_FORMAT_R32G32B32A32_SFLOAT, .components = .{}, .subresourceRange = .{ .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 } };
+    _ = vkCreateImageView(self.dev, &ivci, null, &t.view);
+    const smci = c.VkSamplerCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, .magFilter = c.VK_FILTER_NEAREST, .minFilter = c.VK_FILTER_NEAREST, .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, .maxLod = 1.0 };
+    _ = vkCreateSampler(self.dev, &smci, null, &t.sampler);
+    return t;
+  }
+
   pub fn destroyTexture(self: *Vk, t: Texture) void {
     vkDestroySampler(self.dev, t.sampler, null);
     vkDestroyImageView(self.dev, t.view, null);
