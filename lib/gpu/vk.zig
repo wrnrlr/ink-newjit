@@ -1037,10 +1037,12 @@ pub const Vk = struct {
     const fsmi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = frg.len * 4, .pCode = frg.ptr };
     if (!ok(vkCreateShaderModule(self.dev, &fsmi, null, &pp.fmod))) { vkDestroyShaderModule(self.dev, pp.vmod, null); return Error.ShaderModule; }
 
-    // set 0: nbuf storage buffers (vertex stage)
+    // set 0: nbuf storage buffers, readable from BOTH stages — the vertex shader pulls
+    // geometry and the fragment shader (shader.fragmentBuf) may read data (e.g. Slug
+    // curve tables) from the same descriptors (Vulkan sets are shared across stages).
     var binds: [MAX_BIND]c.VkDescriptorSetLayoutBinding = undefined;
     var i: u32 = 0;
-    while (i < nbuf) : (i += 1) binds[i] = .{ .binding = i, .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT };
+    while (i < nbuf) : (i += 1) binds[i] = .{ .binding = i, .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT };
     const dsli = c.VkDescriptorSetLayoutCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = nbuf, .pBindings = &binds };
     if (!ok(vkCreateDescriptorSetLayout(self.dev, &dsli, null, &pp.dsl))) { vkDestroyShaderModule(self.dev, pp.vmod, null); vkDestroyShaderModule(self.dev, pp.fmod, null); return Error.Pipeline; }
     // set 1: @group(1) texture layout — n_tex sampled images (0..n-1) + one shared
@@ -1068,7 +1070,13 @@ pub const Vk = struct {
     const vps = c.VkPipelineViewportStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1 };
     const rs = c.VkPipelineRasterizationStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, .polygonMode = c.VK_POLYGON_MODE_FILL, .cullMode = c.VK_CULL_MODE_NONE, .frontFace = c.VK_FRONT_FACE_COUNTER_CLOCKWISE, .lineWidth = 1.0 };
     const ms = c.VkPipelineMultisampleStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, .rasterizationSamples = c.VK_SAMPLE_COUNT_1_BIT };
-    const ds = c.VkPipelineDepthStencilStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO, .depthTestEnable = c.VK_TRUE, .depthWriteEnable = c.VK_TRUE, .depthCompareOp = c.VK_COMPARE_OP_LESS };
+    // LESS_OR_EQUAL, not LESS: 2D fills/text (VTXF/VTXC) emit every quad at z=0.5, so
+    // overlapping coplanar quads (tightly-packed glyphs, whose square coverage quads
+    // overlap heavily) must all pass — blend/paint order then decides. Plain LESS rejects
+    // the second-and-later quad at an equal-depth pixel, dropping whole repeated glyphs.
+    // Benign for 3D pulls: distinct depths still occlude; only exactly-coplanar surfaces
+    // switch from first-wins to last-wins.
+    const ds = c.VkPipelineDepthStencilStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO, .depthTestEnable = c.VK_TRUE, .depthWriteEnable = c.VK_TRUE, .depthCompareOp = c.VK_COMPARE_OP_LESS_OR_EQUAL };
     const cba = c.VkPipelineColorBlendAttachmentState{
       .blendEnable = c.VK_TRUE,
       .srcColorBlendFactor = c.VK_BLEND_FACTOR_SRC_ALPHA, .dstColorBlendFactor = c.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, .colorBlendOp = c.VK_BLEND_OP_ADD,

@@ -38,9 +38,9 @@
 /     cnv.render[props`width; props`height] }   / w,h = framebuffer size (for Slug text)
 /   window.run[run; 640. 480.]
 /
-/ Fills/strokes/gradients rasterise on the CPU tessellate + NanoVG fill path; TEXT
-/ (cnv.text) renders through the analytic Slug backend (lib/slug.k) — resolution-
-/ independent, antialiased, composited over the fills.
+/ SOLID fills and TEXT render through the analytic Slug SCENE-BUFFER backend (lib/slug.k)
+/ — resolution-independent, antialiased, one resident curve buffer per frame. Gradient/
+/ clipped fills + strokes still rasterise on the CPU tessellate + NanoVG fill path.
 
 2: "lib/gpu.k"
 2: "lib/slug.k"
@@ -115,8 +115,9 @@
   / cnv.text[face; sz; str; paint] lays str's glyphs left-to-right from the current
   / pen (its baseline-left origin, e.g. set with moveTo) at pixel size sz, coloured by
   / paint's inner colour. Glyphs are RECORDED here and rendered by cnv.render through
-  / lib/slug.k: each glyph is a cached curve texture drawn as a quad (positioned by the
-  / current transform), with per-pixel Bézier coverage + AA. No kerning/ligatures.
+  / lib/slug.k's SCENE-BUFFER path (same as the solid fills): each glyph's raw quadratic
+  / outline bins into the frame's shared curve buffer and draws as a bbox quad with
+  / per-pixel Bézier coverage + AA. No kerning/ligatures.
   TXFACE: ()     / per-glyph face
   TXGID:  0#0    / per-glyph glyph id
   TXPX:   0#0.   / per-glyph pen x (local)
@@ -243,23 +244,86 @@
     polys:{flatContour x}'(m xfBuf/:drawContours i)
     v:,/[w strokePoly/:polys]
     $[0<#v; gpu.fill[v; PAINTS PIDX i]; 0]}
-  drawIdx:{[i] $[0=KIND i; fillDraw i; strokeDraw i]}
+  / SOLID fills (paint inner==outer) route through the Slug scene buffer (analytic,
+  / resolution-independent); gradient/clipped fills + strokes stay on the tessellator.
+  solidFill:{[i] p:PAINTS PIDX i; (0=KIND i) & (p@24+!4)~(p@28+!4)}
+  drawIdx:{[i] $[solidFill i; 0; 0=KIND i; fillDraw i; strokeDraw i]}   / solid fills done in Pass 1
   recStep:{[i] drawIdx i; recFrom i+1}
   recFrom:{[i] $[i<ndraws[]; recStep i; 0]}
-  / ── Slug text pass (after the fills/strokes) ──────────────────────────────────
-  / w,h = the framebuffer size (props`width/`height) — used as the Slug viewSize so
-  / analytic text lands in the same pixel space as gpu.fill (which uses framebuffer).
-  xf2:{[m;x;y] (((m 0)*x)+((m 2)*y)+(m 4)) , (((m 1)*x)+((m 3)*y)+(m 5))}
-  drawGlyph:{[i]
-    face:TXFACE i; gid:TXGID i; px:TXPX i; py:TXPY i; m:TXXF i
-    cl: slug.cell[face; gid; TXSZ i]
-    a: xf2[m; px+cl 0; py+cl 3]; b: xf2[m; px+cl 2; py+cl 3]
-    c: xf2[m; px+cl 2; py+cl 1]; d: xf2[m; px+cl 0; py+cl 1]
-    slug.drawCell[a; b; c; d; TXCOL i; ,slug.tex[face;gid]]}
-  txStep:{[i] drawGlyph i; txFrom i+1}
-  txFrom:{[i] $[i<#TXGID; txStep i; 0]}
-  renderText:{[w;h] slug.begin[w;h]; txFrom 0}
-  / render[w;h] — issue fills/strokes, then the Slug text pass. Pass the framebuffer
-  / size (props`width/`height). (render[] with no size skips text.)
-  render:{[w;h] $[0<ndraws[]; recFrom 0; 0]; $[0<#TXGID; renderText[w;h]; 0]}
+  / ── Slug text pass — glyphs ride the SAME scene buffer as the solid fills ───────
+  / Each glyph's raw quadratic outline (font.quads) is just another fill: addGlyph bins
+  / its curves into the resident scene buffer (during the accumulate phase), drawGlyphS
+  / then draws the glyph's clip-space bbox quad whose fragment reads those curves back
+  / (analytic coverage, holes, AA). Unifying text onto the scene buffer (was a per-glyph
+  / curve texture) retires a redundant path — the roadmap's "one backend" direction.
+  / NB: glyph coverage quads are SQUARES (aspect-preserving normalisation) that overlap
+  / heavily when packed, so correct text needed the pull pipeline's depth compare relaxed
+  / to LESS_OR_EQUAL (see vk.zig) — under LESS the overlapping part of each later glyph
+  / was depth-rejected, dropping halves/whole glyphs ("Canvas in ink" → "C nvas i  i k").
+  TXOFF:  0#0.   / per-glyph scene-buffer offset (-1 = empty glyph, e.g. space: skip)
+  TXRECT: ()     / per-glyph uv-square rect in glyph pixel space (from addFill)
+  / A space/empty glyph has no contours — addFill would bin garbage (min/max over an
+  / empty point set) and poison the shared buffer; record a -1 sentinel and skip its draw.
+  / NB: the empty-glyph branch is a NAMED helper, not an inline [..;..] block — a
+  / bracket block inside a $[...] branch parses as a dict literal (doesn't run the
+  / statements), which would leave TXOFF/TXRECT short and desync them from the glyph
+  / indices (spaces then draw, words lose their gaps).
+  addGlyph:{[i]
+    cs: font.quads[TXFACE i; TXGID i; TXSZ i]
+    $[0<#cs; addGlyphC[i;cs]; addGlyphSkip[]]}
+  addGlyphC:{[i;cs] r:slug.addFill[cs; 0.14]; TXOFF::TXOFF,r 0; TXRECT::TXRECT,,r 1}
+  addGlyphSkip:{[] TXOFF::TXOFF,-1.; TXRECT::TXRECT,,0. 0. 0. 0.}
+  scanTStep:{[i] addGlyph i; scanText i+1}
+  scanText:{[i] $[i<#TXGID; scanTStep i; 0]}
+  drawGlyphS:{[i]
+    off:TXOFF i; cl:TXRECT i; m:TXXF i; px:TXPX i; py:TXPY i
+    a: toClip[m; px+cl 0; py+cl 3]; b: toClip[m; px+cl 2; py+cl 3]
+    c: toClip[m; px+cl 2; py+cl 1]; d: toClip[m; px+cl 0; py+cl 1]
+    e:b-a; cd:1e-6|sqrt[((e 0)*(e 0))+((e 1)*(e 1))]    / clip-space width of the quad
+    aa: 2.4%(cd*SFW)                                    / ≈1.2 screen px expressed in uv
+    slug.fillDraw[a; b; c; d; aa; off; TXCOL i]}
+  drawTStep:{[i] $[(TXOFF i)<0.; 0; drawGlyphS i]; drawText i+1}
+  drawText:{[i] $[i<#TXGID; drawTStep i; 0]}
+
+  / ── Solid-fill Slug pass (scene buffer) ───────────────────────────────────────
+  SFOFF: 0#0.    / per solid-fill: scene-buffer offset
+  SFRECT: ()     / its local uv-square rect (sqx0;sqTop;sqx1;sqBot)
+  SFXF: ()       / its transform (2×3)
+  SFCOL: ()      / its rgba
+  SFW: 0.; SFH: 0.
+  / Pass 1a: accumulate each solid fill's curves into slug's scene buffer.
+  addSolid:{[i]
+    r: slug.addFill[drawContours i; 0.14]
+    SFOFF::SFOFF,r 0; SFRECT::SFRECT,,r 1; SFXF::SFXF,,drawM i; SFCOL::SFCOL,,4#24_PAINTS PIDX i}
+  scanStep:{[i] $[solidFill i; addSolid i; 0]; scanSolids i+1}
+  scanSolids:{[i] $[i<ndraws[]; scanStep i; 0]}
+  / (px,py) local → clip space via transform m and viewport (SFW,SFH).
+  toClip:{[m;lx;ly]
+    sx:(((m 0)*lx)+((m 2)*ly))+(m 4); sy:(((m 1)*lx)+((m 3)*ly))+(m 5)
+    (((2.*sx)%SFW)-1.) , (1.-((2.*sy)%SFH))}
+  / Pass 1b: draw each solid fill's bbox quad (fragment reads its curves from the buffer).
+  drawSolid:{[k]
+    off:SFOFF k; cl:SFRECT k; m:SFXF k
+    a: toClip[m; cl 0; cl 3]; b: toClip[m; cl 2; cl 3]
+    c: toClip[m; cl 2; cl 1]; d: toClip[m; cl 0; cl 1]
+    e:b-a; cd:1e-6|sqrt[((e 0)*(e 0))+((e 1)*(e 1))]    / clip-space width of the quad
+    aa: 2.4%(cd*SFW)                                    / ≈1.2 screen px expressed in uv
+    slug.fillDraw[a; b; c; d; aa; off; SFCOL k]}
+  solStep:{[k] drawSolid k; solFrom k+1}
+  solFrom:{[k] $[k<#SFOFF; solStep k; 0]}
+  / render[w;h] — solid fills AND text share ONE Slug scene buffer (accumulate → flush
+  / once → draw). Gradient/clipped fills + strokes go through the tessellator in between.
+  / Draw order: solid fills (base), tessellation (gradients/strokes), text (top). w,h =
+  / framebuffer size. (fill-pipeline draws replay under all pull draws in the pass, so the
+  / tessellated background gradient still lands beneath the scene-buffer fills/text.)
+  render:{[w;h]
+    SFOFF::0#0.; SFRECT::(); SFXF::(); SFCOL::(); SFW::w; SFH::h
+    TXOFF::0#0.; TXRECT::()
+    slug.sceneBegin[]
+    $[0<ndraws[]; scanSolids 0; 0]                      / accumulate solid-fill curves
+    $[0<#TXGID; scanText 0; 0]                          / accumulate glyph curves
+    $[(0<#SFOFF)|(0<#TXGID); slug.sceneFlush[]; 0]      / upload the whole frame once
+    $[0<#SFOFF; solFrom 0; 0]                           / draw solid fills
+    $[0<ndraws[]; recFrom 0; 0]                         / gradient/clipped fills + strokes
+    $[0<#TXGID; drawText 0; 0]}                         / draw text glyphs
 \d

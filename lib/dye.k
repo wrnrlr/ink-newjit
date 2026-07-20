@@ -24,7 +24,7 @@
 shader.fragment: {[ioTypes; fn]
   Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::(); Xidx::0
   RCi0::0; RCi1::0; RCf0::0; RCfNeg::0     / reset loop consts; xLowerC allocates on demand
-  TexVars:: ()                      / no texture section (see shader.fragmentTexN)
+  TexVars:: (); BufVars:: ()        / no texture / storage-buffer section
 
   lam: lamOf fn
   argNames: lamArgs lam
@@ -60,6 +60,7 @@ shader.fragment: {[ioTypes; fn]
 shader.fragmentTexN: {[ioTypes; nTex; fn]
   Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::(); Xidx::0
   RCi0::0; RCi1::0; RCf0::0; RCfNeg::0     / reset loop consts; xLowerC allocates on demand
+  BufVars:: ()                            / no storage-buffer section
 
   lam: lamOf fn
   argNames: lamArgs lam
@@ -96,6 +97,45 @@ shader.fragmentTexN: {[ioTypes; nTex; fn]
 / Single-texture convenience: sample[uv] samples the one texture.
 shader.fragmentTex: {[ioTypes; fn] shader.fragmentTexN[ioTypes; 1; fn]}
 
+/ ── shader.fragmentBuf[ioTypes; nBuf; fn] → SPIR-V word list ──────────────────
+/ Like shader.fragment, plus nBuf StorageBuffer f32 runtime-arrays bound at set 0
+/ (buffer k = binding k) — the SAME set-0 descriptors a vertexPull shader pulls from
+/ (native binds them VERTEX|FRAGMENT), so a pulled draw can hand the fragment resident
+/ data (e.g. a Slug scene curve buffer) with no textures. The fn's LAST nBuf params are
+/ the buffers, read `buf[i]` (f32) like a compute/vertex-pull kernel; the earlier
+/ params are v2/v3/v4 varyings typed by ioTypes. mesh.drawPull(T) binds the buffers.
+shader.fragmentBuf: {[ioTypes; nBuf; fn]
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::(); Xidx::0
+  RCi0::0; RCi1::0; RCf0::0; RCfNeg::0
+  TexVars:: ()
+
+  lam: lamOf fn; argNames: lamArgs lam
+  bufNames:  (0-nBuf)#argNames             / last nBuf params = storage buffers
+  varyNames: (0-nBuf)_argNames             / the rest = varyings (from ioTypes)
+
+  outTySym: ioTypes[`out]; outPtr: PtrOut[outTySym]
+  inTySyms: ioTypes' varyNames
+  inTys:  Tid'  inTySyms
+  inPtrs: PtrIn' inTySyms
+  inVarIds: {[x] newId[]}' varyNames
+  outId: newId[]
+
+  / StorageBuffer f32 types (mirror vertexPull) + the u32-zero member index.
+  FBu32:: newId[]; FBrta:: newId[]; FBtbuf:: newId[]; FBpbufs:: newId[]; pf: newId[]
+  FBz:: newId[]; emitCon (0x0004002B; FBu32; FBz; 0)
+  CKz:: FBz; CPf32:: pf
+  BufVars:: {[k] newId[]}' !nBuf
+
+  loadedPairs: inVarIds loadOnePair' inTySyms
+  env: (varyNames , bufNames) ! loadedPairs , (BufVars ,' (nBuf # `buf))
+
+  rp: kSeqIr[lamBody lam; env; outTySym]
+  emitBuf opStore[outId; rp 0]
+
+  locs: !#varyNames
+  buildMod[outId; inVarIds; inTys; inPtrs; outPtr; locs]
+}
+
 / ── shader.vertexPull[varyTypes; fn] — vertex pulling (kk2 §5) ────────────────
 / A vertex shader as a kernel-shaped fn `{[buf0;buf1;…; vid] (posV4; vary0;…)}`:
 / the LAST param is the vertex index (gl_VertexIndex), every other param is an f32
@@ -105,7 +145,8 @@ shader.fragmentTex: {[ioTypes; fn] shader.fragmentTexN[ioTypes; 1; fn]}
 / IR (bufidx) for the body and the shader.vertex output interface (gl_PerVertex block
 / + varyings + `vstore` effect nodes) for the result.
 vpBufDec: {[p] (0x00040047; p 0; 34; 0),(0x00040047; p 0; 33; p 1)}   / DescriptorSet 0 + Binding k
-vpBufVar: {[id] (0x0004003B; VPpbufs; id; 12)}                         / OpVariable StorageBuffer
+vpBufVar: {[id] (0x0004003B; VPpbufs; id; 12)}                         / OpVariable StorageBuffer (vertex)
+fbBufVar: {[id] (0x0004003B; FBpbufs; id; 12)}                         / OpVariable StorageBuffer (fragment)
 shader.vertexPull: {[varyTypes; fn]
   Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::(); Xidx::0
   RCi0::0; RCi1::0; RCf0::0; RCfNeg::0     / reset loop consts; xLowerC allocates on demand
@@ -268,6 +309,14 @@ PUCimg::  0   / OpTypePointer UniformConstant → image
 PUCsamp:: 0   / OpTypePointer UniformConstant → sampler
 TexVars:: ()  / OpVariable UniformConstant image ids (image k at set 1 binding k)
 SampVar:: 0   / OpVariable UniformConstant sampler (set 1, binding nTex)
+/ shader.fragmentBuf storage-buffer scratch: SPIR-V type ids + one variable per
+/ StorageBuffer f32 runtime-array read by the fragment (Slug curve tables etc). Mirrors
+/ the vertexPull buffer types; #BufVars>0 signals buildMod to emit the buffer section.
+FBu32::   0   / OpTypeInt 32 0 (u32 member index)
+FBrta::   0   / OpTypeRuntimeArray f32
+FBtbuf::  0   / OpTypeStruct { rta }  (BufferBlock)
+FBpbufs:: 0   / OpTypePointer StorageBuffer → struct
+BufVars:: ()  / OpVariable StorageBuffer ids (buffer k at set 0 binding k)
 / Stencil-compute scratch: the u32-zero constant id (struct member index) and the
 / StorageBuffer→f32 pointer type id, needed by xLoBufIdx for a dynamic-index load
 / (ink lambdas can't close over the entry's locals, so these live as globals).
@@ -390,7 +439,7 @@ buildModW: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
   bnd:   Nid+1
   / SPIR-V 1.4: OpEntryPoint lists EVERY global variable — the texture images
   / and shared sampler (UniformConstant) join the Input/Output interface.
-  iface: inVarIds,(,outId),$[#TexVars; TexVars,,SampVar; !0]
+  iface: inVarIds,(,outId),($[#TexVars; TexVars,,SampVar; !0]),$[#BufVars; BufVars; !0]
 
   hdr:  (0x07230203; 0x00010400; 0; bnd; 0)
   cap:  (0x00020011; 1)
@@ -418,6 +467,15 @@ buildModW: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
   texTypes: $[hasTex; (0x00090019;Timg2;Tf32;1;0;0;0;1;0),(0x0002001A;Tsamp2),(0x0003001B;TsImg;Timg2),(0x00040020;PUCimg;0;Timg2),(0x00040020;PUCsamp;0;Tsamp2); !0]
   varTex:   $[hasTex; (,/texVarOne'!nTex),(0x0004003B;PUCsamp;SampVar;0); !0]
 
+  / shader.fragmentBuf storage-buffer section (emitted only when BufVars allocated):
+  / ArrayStride/struct-offset/BufferBlock decorations + DescriptorSet/Binding per buffer,
+  / the u32/runtime-array/struct/pointer types, and one StorageBuffer variable per buffer.
+  nBuf:     #BufVars
+  hasBuf:   nBuf>0
+  decBuf:   $[hasBuf; (0x00040047;FBrta;6;4),(0x00050048;FBtbuf;0;35;0),(0x00030047;FBtbuf;2),(,/ vpBufDec' BufVars ,' !nBuf); !0]
+  bufTypes: $[hasBuf; (0x00040015;FBu32;32;0),(0x0003001D;FBrta;Tf32),(0x0003001E;FBtbuf;FBrta),(0x00040020;FBpbufs;12;FBtbuf),(0x00040020;CPf32;12;Tf32); !0]
+  varBuf:   $[hasBuf; ,/ fbBufVar' BufVars; !0]
+
   label: newId[]
   fn:  (0x00050036; Tvoid; Fmain; 0; Tfunc; 0x000200F8; label)
   ret: (0x000100FD; 0x00010038)
@@ -425,7 +483,7 @@ buildModW: {[outId; inVarIds; inTys; inPtrs; outPtr; locs]
   conWds: $[#Con; ,/Con; !0]
   bodWds: $[#Buf; ,/Buf; !0]
 
-  ,/(hdr; cap; ext; mem; ep; exm; decIn; decOut; decTex; types; texTypes; varIn; varOut; varTex; conWds; fn; bodWds; ret)
+  ,/(hdr; cap; ext; mem; ep; exm; decIn; decOut; decTex; decBuf; types; texTypes; bufTypes; varIn; varOut; varTex; varBuf; conWds; fn; bodWds; ret)
 }
 
 

@@ -7,8 +7,9 @@
 / Shows the whole Phase-0 story: an immediate-mode path API that RECORDS into a
 / retained ops table (cnv.scene[]), each draw carrying its own 2×3 transform, then
 / one CPU render pass that flattens the quads and issues the fills. save/restore
-/ nest transforms; fill takes a paint, stroke takes paint+width; text fills glyph
-/ outlines (one draw per glyph) at a pixel size from the current pen.
+/ nest transforms; fill takes a paint, stroke takes paint+width; text renders through
+/ the analytic Slug backend (lib/slug.k) — resolution-independent, antialiased,
+/ composited over the fills (cnv.render takes the framebuffer size for Slug's viewSize).
 
 2: "lib/canvas.k"
 
@@ -31,8 +32,9 @@ square: {[r] cnv.moveTo[(-r);(-r)]; cnv.lineTo[r;(-r)]; cnv.lineTo[r;r]; cnv.lin
 / An axis-aligned rectangle as a closed path.
 rectPath: {[x;y;w;h] cnv.moveTo[x;y]; cnv.lineTo[x+w;y]; cnv.lineTo[x+w;y+h]; cnv.lineTo[x;y+h]; cnv.close[]}
 
-scene: {[t]
+scene: {[t; dpi]
   cnv.new[]
+  cnv.scale[dpi; dpi]   / canvas coords == framebuffer pixels; scale logical→framebuffer
 
   / background — a vertical linear gradient across the whole window
   rectPath[0.;0.;WINW;WINH]
@@ -77,7 +79,10 @@ scene: {[t]
   cnv.restore[]}
 
 run: {[props]
-  scene props`time
-  cnv.render[]}
+  / props`width/`height are the FRAMEBUFFER size (2× logical on a retina display);
+  / scale the logical WINW×WINH layout up to fill it, so the canvas isn't a quarter
+  / of the screen on high-DPI. Both fills and Slug text honour this transform.
+  scene[props`time; (0.+props`width)%WINW]
+  cnv.render[props`width; props`height]}
 
 window.run[run; WINW,WINH]
