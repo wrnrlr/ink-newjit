@@ -94,6 +94,13 @@ opGrpFMul: {[t;r;sc;v] (0x00060160;t;r;sc;0;v)}   / OpGroupNonUniformFMul 352
 opGrpFMin: {[t;r;sc;v] (0x00060163;t;r;sc;0;v)}   / OpGroupNonUniformFMin 355
 opGrpFMax: {[t;r;sc;v] (0x00060166;t;r;sc;0;v)}   / OpGroupNonUniformFMax 358
 opSelMrg:  {[m]        (0x000300F7;m;0)}          / OpSelectionMerge 247 (merge; None)
+/ OpControlBarrier 224: workgroup execution+memory barrier (shared-memory sync). ex/me
+/ = execution/memory scope <id> (Workgroup=2), se = memory semantics <id>
+/ (WorkgroupMemory|AcquireRelease = 264). Needs no capability in a compute shader.
+opBarrier: {[ex;me;se] (0x000400E0; ex; me; se)}
+/ OpTypeArray 28 (result; elemType; length-<id>) — a fixed-size array type. The length
+/ must be an OpConstant of integer type defined textually before this instruction.
+opArrTy:   {[r;el;len] (0x0004001C; r; el; len)}
 opDot:  {[t;r;a;b] (0x00050094;t;r;a;b)}   / OpDot 148
 opLoad: {[t;r;ptr] (0x0004003D;t;r;ptr)}   / OpLoad 61
 opStore:{[ptr;val] (0x0003003E;ptr;val)}   / OpStore 62

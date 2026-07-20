@@ -50,6 +50,14 @@ sample in fragment via `sample[k;uv]` with `shader.fragmentTexN`.
 - `gpu.pipeline[fn]` — lambda → SPIR-V → cached pipeline in one call;
   `shader.kernel[fn]` infers the binding table (i32 accumulator params fed to
   `scatterAdd`/`iget`/`iset` come first; LAST param = thread index; rest = f32 buffers).
+- Workgroup shared memory: `gpu.kernelWG[fn;nAcc;nBuf;shSizes]` (shSizes = list of shared
+  f32 array element-counts). In the body: `lid` (index within the workgroup = gid mod wg),
+  `wgsz` (workgroup size), `lset[s;i;v]`/`lget[s;i]` (write/read shared array `s`, a literal
+  index), `barrier[]` (sync — shared writes before it visible to reads after). Dispatched
+  like any kernel (ceil(n/wg) workgroups); shared arrays aren't bindings, so nbind still =
+  nAcc+nBuf. The algorithm must respect workgroup boundaries. Set `wg` before compiling to
+  change the tile size. Example (tiled GEMM reusing one A-row per workgroup): see
+  `test/kkwg.k`. Barriers inside a `+/` fold work (loop-owned, replayed in the loop body).
 - Placed arrays: `d: 9: x` upload (descriptor dict), `d 9: x` overwrite in place,
   `8: d` fetch back, `n 8: d` first n (trims ×64 padding). After a name, `f 9: x` is
   dyadic — bracket `9:[x]`.

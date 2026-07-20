@@ -457,6 +457,37 @@ AKlsz::0                                        / per-kernel LocalSize x overrid
 / f2s); the kernel casts f32 bounds with `i$/`f$. Default 0 keeps the f32-index
 / dialect byte-identical (kkgold).
 Xidx::0
+/ ── Workgroup shared memory (kk.md finding 3) ─────────────────────────────────
+/ A shared-memory kernel (gpu.kernelWG) declares one or more Workgroup-storage f32
+/ arrays a whole workgroup reads/writes cooperatively, synchronised with barrier[].
+/ ALL of this is gated on #SHvar>0 (a shared kernel), so ordinary kernels emit zero
+/ extra words and stay byte-identical (kkgold). The array length const must precede
+/ its OpTypeArray textually, so lengths are emitted INLINE in kAsm's shTypes (not via
+/ emitCon); the barrier scope/semantics + the wg i32 const ride the constants section.
+SHvar::   ()   / shared OpVariable ids — GATE: #SHvar>0 → kAsm emits the shared section
+SHsz::    ()   / per-array element counts (baked into OpTypeArray lengths)
+SHlen::   ()   / per-array length const ids (u32); emitted inline in shTypes
+SHarr::   ()   / per-array OpTypeArray ids
+SHptr::   ()   / per-array OpTypePointer Workgroup <array> ids
+SPwgf::   0    / OpTypePointer Workgroup f32 (shared, element access chain)
+SHwgc::   0    / i32 const = LocalSize.x (lid = gid mod wg; wgsz name → this)
+SBscope:: 0    / u32 const 2  = Workgroup scope (OpControlBarrier execution+memory)
+SBsem::   0    / u32 const 264 = WorkgroupMemory|AcquireRelease (barrier semantics)
+SHnodes:: ()   / IR bufp nodes for the shared arrays (set during the body build)
+/ Allocate the shared-memory ids + emit the scope/semantics/wg constants. Array-length
+/ consts are allocated here but EMITTED in shTypes (ordering). Call after kAlloc.
+kAllocShared: {[shSizes]
+  SHsz:: shSizes
+  wgx: $[AKlsz; AKlsz; wg]
+  SHwgc::   newId[]; emitCon opConst[Ti32; SHwgc; wgx]
+  SBscope:: newId[]; emitCon (0x0004002B; AKu32; SBscope; 2)
+  SBsem::   newId[]; emitCon (0x0004002B; AKu32; SBsem; 264)
+  SPwgf::   newId[]
+  SHlen:: {[x] newId[]}' shSizes
+  SHarr:: {[x] newId[]}' shSizes
+  SHptr:: {[x] newId[]}' shSizes
+  SHvar:: {[x] newId[]}' shSizes
+  0}
 kAllocI:   {[] AKrtaI::newId[]; AKtbufI::newId[]; AKpbufsI::newId[]; AKpi32::newId[]}
 kAllocDev: {[] AKdev::newId[]; emitCon (0x0004002B; AKu32; AKdev; 1); CPi32::AKpi32; CScope::AKdev}
 / Device memory-scope const only (no i32 accumulator types) — for the f32-atomic
@@ -469,6 +500,7 @@ kAllocLoop:{[] RCi0::newId[]; emitCon opConst[Ti32;RCi0;0]; RCi1::newId[]; emitC
 kAlloc: {[nAcc;nBuf;hasUni;hasLoop]
   xErr::`
   AKfa::0; AKsg::0; AKlsz::0; Xidx::0
+  SHvar::(); SHnodes::()                          / no shared memory unless kAllocShared runs
   Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::()
   AKu32::newId[]; AKv3::newId[]
   AKrta::newId[]; AKtbuf::newId[]; AKpbufs::newId[]; AKpf32::newId[]
@@ -525,13 +557,18 @@ kScatAddF: {[accBid; idxBid; gx; val]
 / read the globals; binding k = position k in AKids).
 akDecOne: {[k] (0x00040047;AKids[k];34;0),(0x00040047;AKids[k];33;k)}
 akVarOne: {[k] (0x0004003B; $[`i~AKknd k; AKpbufsI; AKpbufs]; AKids[k]; 12)}
+/ One shared array's types: its length const (inline, precedes the array type), the
+/ OpTypeArray f32[len], and the OpTypePointer Workgroup → that array.
+shTypeOne: {[s] (0x0004002B; AKu32; SHlen[s]; SHsz[s]), opArrTy[SHarr[s]; Tf32; SHlen[s]], (0x00040020; SHptr[s]; 4; SHarr[s])}
+shVarOne:  {[s] (0x0004003B; SHptr[s]; SHvar[s]; 4)}    / OpVariable Workgroup (no binding)
 / A latched compile error (xFoldBad/xBakeBad) aborts assembly with `!xErr`.
 kAsm: {[] $[xErr~`; kAsmWords[]; !xErr]}
 kAsmWords: {[]
   bnd: Nid+1
   / SPIR-V 1.4: OpEntryPoint lists EVERY global variable — gid + all storage
   / bindings + the uniform block (not just the builtin Input).
-  iface: (,AKgid),AKids,$[AKuni; ,AKuniVar; !0]
+  / SPIR-V 1.4 lists EVERY global var — Workgroup shared arrays join the interface too.
+  iface: (,AKgid),AKids,($[AKuni; ,AKuniVar; !0]),$[#SHvar; SHvar; !0]
   hdr: (0x07230203; 0x00010400; 0; bnd; 0)
   cap: (0x00020011; 1)
   / f32 buffer atomics (§7): OpCapability AtomicFloat32AddEXT (6033) + OpExtension
@@ -556,6 +593,11 @@ kAsmWords: {[]
   cTi: $[AKnAcc>0; (0x0003001D;AKrtaI;Ti32;0x0003001E;AKtbufI;AKrtaI;0x00040020;AKpbufsI;12;AKtbufI;0x00040020;AKpi32;12;Ti32); !0]
   cTv: (0x00040020;AKpv3i;1;AKv3)
   uT:  $[AKuni; (0x0003001E;AKuniT;Tv4;0x00040020;AKuniP;2;AKuniT;0x00040020;AKuniPv4;2;Tv4); !0]
+  / Shared-memory (gpu.kernelWG) types + variables — gated on #SHvar, so an ordinary
+  / kernel adds zero words (kkgold byte-identical). Length const is inline before each
+  / OpTypeArray; SPwgf = the element access-chain pointer type.
+  shTypes: $[#SHvar; (,/ shTypeOne' !#SHvar),(0x00040020;SPwgf;4;Tf32); !0]
+  shVars:  $[#SHvar; ,/ shVarOne' !#SHvar; !0]
   varGid: (0x0004003B;AKpv3i;AKgid;1)
   varB: ,/akVarOne' !#AKids
   varU: $[AKuni; (0x0004003B;AKuniP;AKuniVar;2); !0]
@@ -564,7 +606,7 @@ kAsmWords: {[]
   ret: (0x000100FD;0x00010038)
   conWds: $[#Con; ,/Con; !0]
   bodWds: $[#Buf; ,/Buf; !0]
-  ,/(hdr;cap;capFA;capSG;extFA;ext;mem;ep;exm;decGid;decF;decI;decB;decU;sTypes;cTf;cTi;cTv;uT;varGid;varB;varU;conWds;fnh;bodWds;ret)}
+  ,/(hdr;cap;capFA;capSG;extFA;ext;mem;ep;exm;decGid;decF;decI;decB;decU;sTypes;cTf;cTi;cTv;uT;shTypes;varGid;varB;varU;shVars;conWds;fnh;bodWds;ret)}
 
 / ── Entry points (thin wrappers; see the old per-entry docs in git history) ───
 / shader.compute — element-wise map {[x] …}: x = in[gid] (binding 0) → out[gid]
@@ -1144,6 +1186,45 @@ gpu.kernel:  {[fn; nAcc; nBuf] compGpN[fn; nAcc; nBuf; 0; 1]}
 gpu.kernelF: {[fn; nAcc; nBuf] compGpN[fn; nAcc; nBuf; 1; 1]}   / native f32-atomic accumulators
 gpu.kernelI: gpu.kernel                                          / alias: the default IS integer-index now
 
+/ ── gpu.kernelWG[fn; nAcc; nBuf; shSizes] — workgroup shared memory (kk.md finding 3) ─
+/ Like gpu.kernel (integer-index dialect), but the kernel may declare Workgroup-storage
+/ shared f32 arrays (shSizes = a list of element counts) that a whole workgroup reads and
+/ writes cooperatively. Extra names/intrinsics visible in the body:
+/   lid            — this thread's index WITHIN its workgroup (0 .. wg-1), = gid mod wg
+/   wgsz           — the workgroup size (LocalSize.x; the sticky `wg`, default 64)
+/   lset[s;i;v]    — write v to shared array s (a literal 0-based index) at position i
+/   lget[s;i]      — read shared array s at position i
+/   barrier[]      — synchronise the workgroup (OpControlBarrier): all shared writes
+/                    before it are visible to all reads after it
+/ The host dispatches it like any kernel (ceil(n/wg) workgroups of wg threads); the
+/ algorithm must respect workgroup boundaries. Shared arrays are NOT bindings, so the
+/ host pipeline still takes nAcc+nBuf storage bindings (published as KKnb). Set `wg`
+/ before compiling to change the workgroup/tile size (shSizes then track it).
+compGpShared: {[fn; nAcc; nBuf; shSizes]
+  ids: kAlloc[nAcc; nBuf; 0; 1]
+  Xidx:: 1
+  kAllocShared[shSizes]
+  lam: lamOf fn; argNames: lamArgs lam
+  gx: kGidX[]
+  di: kGidI[gx]                                    / i32 thread index d
+  lidId: newId[]; emitBuf opSrem[Ti32; lidId; di; SHwgc]   / lid = d mod wg
+  accPairs: {[id] (id;`scat)}' nAcc#ids
+  bufPairs: {[id] (id;`buf)}' nAcc _ ids
+  env0: argNames!(accPairs,bufPairs,(,(di;`i32)))
+  xReset[]
+  SHnodes:: {[v] xEmit[`bufp; `shared; (); v]}' SHvar        / one bufp node per shared array
+  base: (!env0) ! kIrEnvOne' env0[!env0]                     / wrap params into IR nodes (like kSeqIr)
+  / add lid / wgsz as extra i32 params (explicit key/value lists — `!base , x` would
+  / parse as `!(base,x)`, and dict-join on general-list values is unreliable).
+  eks: (!base), `lid`wgsz
+  evs: (base[!base]), ((xEmit[`param;`i32;();lidId]; `i32); (xEmit[`param;`i32;();SHwgc]; `i32))
+  e2:  eks ! evs
+  KKnb:: nAcc + nBuf
+  rp: xSeq[lamBody lam; e2; `f32]
+  xLowerC[,rp 0]
+  kAsm[]}
+gpu.kernelWG: {[fn; nAcc; nBuf; shSizes] compGpShared[fn; nAcc; nBuf; shSizes]}
+
 / ── shader.kernel[fn] — gpu.kernel with the binding table INFERRED ───────────
 / Roles come from the lambda itself (kk.md incr 3, bindings-from-free-vars):
 / a param passed as the FIRST argument of scatterAdd/iget/iset anywhere in the
@@ -1361,6 +1442,9 @@ xApply: {[i;env;oty]
     nm~`set;         xSet[i;env]
     nm~`iget;        xIget[i;env]
     nm~`iset;        xIset[i;env]
+    nm~`barrier;     xBarrier[i;env]
+    nm~`lset;        xLset[i;env]
+    nm~`lget;        xLget[i;env]
     nm~`rsum;        xRsum[i;env]
     nm~`rmax;        xRmax[i;env]
     nm in mathFns;   xFnCall[nm;i;env;oty]
@@ -1422,6 +1506,27 @@ xSample: {[i; env]
   ti: $[two; kVal args 0; 0]
   uv: xNode[$[two; args 1; args 0]; env; `v2]
   (xEmit[`sample; `v4; ,uv 0; ti]; `v4)}
+
+/ ── Workgroup shared memory intrinsics (gpu.kernelWG) ─────────────────────────
+/ barrier[]         — OpControlBarrier (effect; a DCE root, lowered in build order so
+/                     it sits between the stores before it and the loads after it).
+/ lset[s;i;v]       — store v into shared array s (a literal index) at i.
+/ lget[s;i]         — load shared array s at i. s resolves to SHnodes[s], a bufp node
+/                     whose id is the shared OpVariable; the access chain has ONE index
+/                     (the array IS the variable — no wrapping buffer struct).
+xBarrier: {[i;env] (xEmit[`barrier; `f32; (); 0n]; `f32)}
+xLset: {[i;env]
+  args: kF[i;`arg]
+  shN: SHnodes kVal args 0
+  si:  xIdx[args 1; env]
+  vp:  xNode[args 2; env; `f32]
+  z: xEmit[`lset; `f32; (shN; si; vp 0); 0n]
+  vp}
+xLget: {[i;env]
+  args: kF[i;`arg]
+  shN: SHnodes kVal args 0
+  si:  xIdx[args 1; env]
+  (xEmit[`lget; `f32; (shN; si); 0n]; `f32)}
 
 / ── Loops as opaque region nodes ─────────────────────────────────────────────
 / The loop node is emitted BEFORE its body so it lowers at the position the
@@ -1581,7 +1686,7 @@ xReach: {[root] {[m;k] $[(m k) & 0<#xArg k; @[m; xArg k; :; 1b]; m]}/[@[(#xOp)#0
 / xArg sweep descend into owned loop bodies and mark the top-level values they use
 / (e.g. a `base` computed before the loop) — without which those would be culled.
 / Un-reached owned nodes are then skipped by xLoRegion, giving intra-loop DCE too.
-xEffOps::  `setb`sadd`saddf`isetb`vstore
+xEffOps::  `setb`sadd`saddf`isetb`vstore`lset`barrier
 xLoopOps:: `rsum`rmax`ndo`whileL
 xLoopRes: {[L] v:xVal L; $[(xOp L)~`whileL; (v 1;v 3); ,v 1]}
 xReachC: {[extra]
@@ -1640,6 +1745,11 @@ xLoBufIdx: {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPf32; p; xId a 0; CKz; 
 xLoSadd:   {[k] a:xArg k; ptr:newId[]; emitBuf opAccChain[CPi32; ptr; xId a 0; CKz; xId a 1]; old:newId[]; emitBuf opAtomicIAdd[Ti32; old; ptr; CScope; CKz; xId a 2]; xId[k]::old}
 xLoSaddf:  {[k] a:xArg k; ptr:newId[]; emitBuf opAccChain[CPf32; ptr; xId a 0; CKz; xId a 1]; old:newId[]; emitBuf opAtomicFAdd[Tf32; old; ptr; CScope; CKz; xId a 2]; xId[k]::old}
 xLoSet:    {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPf32; p; xId a 0; CKz; xId a 1]; emitBuf opStore[p; xId a 2]; xId[k]::0}
+/ Shared-memory element access: the variable IS the array, so ONE index (opAccChain1)
+/ through the Workgroup→f32 pointer. barrier lowers to OpControlBarrier at build order.
+xLoLset:   {[k] a:xArg k; p:newId[]; emitBuf opAccChain1[SPwgf; p; xId a 0; xId a 1]; emitBuf opStore[p; xId a 2]; xId[k]::0}
+xLoLget:   {[k] a:xArg k; p:newId[]; emitBuf opAccChain1[SPwgf; p; xId a 0; xId a 1]; r:newId[]; emitBuf opLoad[Tf32; r; p]; xId[k]::r}
+xLoBarrier:{[k] emitBuf opBarrier[SBscope; SBscope; SBsem]; xId[k]::0}
 xLoIget:   {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPi32; p; xId a 0; CKz; xId a 1]; iv:newId[]; emitBuf opLoad[Ti32; iv; p]; fv:newId[]; emitBuf opI2f[Tf32; fv; iv]; xId[k]::fv}
 xLoIset:   {[k] a:xArg k; p:newId[]; emitBuf opAccChain[CPi32; p; xId a 0; CKz; xId a 1]; emitBuf opStore[p; xId a 2]; xId[k]:: xId a 2}
 
@@ -1720,6 +1830,9 @@ xLowerOne: {[k]
     op~`f2s;     xLoF2s[k]
     op~`i2f;     xLoI2f[k]
     op~`bufidx;  xLoBufIdx[k]
+    op~`lset;    xLoLset[k]
+    op~`lget;    xLoLget[k]
+    op~`barrier; xLoBarrier[k]
     op~`sadd;    xLoSadd[k]
     op~`saddf;   xLoSaddf[k]
     op~`setb;    xLoSet[k]

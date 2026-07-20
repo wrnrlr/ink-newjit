@@ -33,15 +33,45 @@ gemmK: gpu.kernel[{[c;a;b;g;d]
   i:d div n; j:d mod n
   set[c; d; +/{[k] (a[(i*kk)+k]) * b[(k*n)+j]}'!kk]}; 0; 4]
 
-gPipe::  0    / cached gemm pipeline
+/ 8×8-tiled GEMM with workgroup shared memory (kk.md finding 3). A 1-D workgroup of 64
+/ threads computes an 8×8 block of C, cooperatively loading an 8×8 tile of BOTH A and B
+/ into shared memory per K-tile — each A/B element is fetched from global once per tile
+/ (8× fewer global loads) instead of once per output. Block coords derive from the 1-D
+/ index; the store index is computed (row*n+col). Requires M,N,K all multiples of 8 (then
+/ M*N is a multiple of 64, so the launch is exact — no over-dispatch to guard). Same
+/ params buffer (M;N;K) and thread count (M*N) as gemmK, so GemmR just swaps the pipeline.
+gemm2dK: gpu.kernelWG[{[c;a;b;g;d]
+  n:`i$g[1]; kk:`i$g[2]
+  wgId:d div wgsz
+  lr:lid div 8; lc:lid mod 8
+  bpr:n div 8
+  brow:wgId div bpr; bcol:wgId mod bpr
+  row:(brow*8)+lr; col:(bcol*8)+lc
+  nt:kk div 8
+  acc: +/{[t]
+    lset[0; (lr*8)+lc; a[(row*kk)+(t*8)+lc]]
+    lset[1; (lr*8)+lc; b[(((t*8)+lr)*n)+col]]
+    barrier[]
+    p: +/{[m] (lget[0; (lr*8)+m]) * lget[1; (m*8)+lc]}'!8
+    barrier[]
+    p}'!nt
+  set[c; (row*n)+col; acc]}; 0; 4; (64;64)]
+
+gPipe::  0    / cached gemm pipeline (untiled)
+gTile::  0    / cached 8×8-tiled gemm pipeline
 gParam:: 0    / cached 4-float params scratch buffer
+gemmPlainPipe: {[] $[gPipe=0; gPipe:: gpu.compileCompute[gemmK;4]; 0]; gPipe}
+gemmTilePipe:  {[] $[gTile=0; gTile:: gpu.compileCompute[gemm2dK;4]; 0]; gTile}
 
 / Resident GEMM: bc must already be a buffer of length ≥ nnPad[M*N]; ba/bb hold A/B.
+/ Dispatches the shared-memory-tiled kernel when the dims are 8-aligned (the common
+/ nn case: D is a multiple of 8), else the plain per-element kernel.
 GemmR: {[bc;ba;bb;M;K;N]
-  $[gPipe=0;  gPipe::  gpu.compileCompute[gemmK;4]; 0]
   $[gParam=0; gParam:: gpu.buffer[4#0.]; 0]
   gpu.write[gParam; (0.+M),(0.+N),(0.+K),0.]
-  gpu.dispatch[gPipe; (bc;ba;bb;gParam); M*N]
+  tiled: (0 = M mod 8) & (0 = N mod 8) & (0 = K mod 8)
+  pipe: $[tiled; gemmTilePipe[]; gemmPlainPipe[]]
+  gpu.dispatch[pipe; (bc;ba;bb;gParam); M*N]
   bc}
 
 / Host convenience: A,B host arrays → C host array (M*N).

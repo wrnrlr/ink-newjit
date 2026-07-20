@@ -35,6 +35,8 @@ check kkint   test/kkint.k   'FAIL '     'kkint: [0-9]+ ok, 0 fail'
 check kkbits  test/kkbits.k  'FAIL '     'kkbits: [0-9]+ ok, 0 fail'
 # kkgrp: tier-2 histogram kk.freq (scatter-add) vs the CPU freq peephole.
 check kkgrp   test/kkgrp.k   'FAIL '     'kkgrp: [0-9]+ ok, 0 fail'
+# kkwg: workgroup shared memory (gpu.kernelWG) — reverse/broadcast + tiled GEMM vs gemmK.
+check kkwg    test/kkwg.k    'FAIL '     'kkwg: [0-9]+ ok, 0 fail'
 check walkgpu test/walkgpu.k 'walkgpu: FAIL'  'walkgpu: PASS'
 # clothgpu: native f32-atomic XPBD (kk2 §7). INK_CLOTH_CHECK runs the headless
 # drape invariant instead of opening a window; asserts no NaN + physical drape.

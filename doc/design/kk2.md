@@ -660,7 +660,58 @@ residency, and the reduce/scan count cliff. Each is additive and oracle-guarded.
   Small-n reductions stay bit-identical (kkred 33/33), and none of these kernels are in
   the kkgold byte-oracle so no dumps moved.
 
-Still open from the review (larger increments, deferred): workgroup shared memory +
-tiled/f16 GEMM (the ML throughput tier); i32 index *buffers* for gather/scatter (the
-count-uniform cliff is fixed here, but placement index vectors still upload as f32);
+Still open from the review (larger increments, deferred): i32 index *buffers* for
+gather/scatter (the count-uniform cliff is fixed here, but placement index vectors still
+upload as f32); f16 storage for weights (`caps.f16` is green, unused); 2-D workgroups;
 offscreen render targets + fragment-stage loops.
+
+## 11. Workgroup shared memory (2026-07-19)
+
+The compute dialect gained Workgroup-storage shared arrays + a real barrier — the ML
+throughput primitive. A new entry point `gpu.kernelWG[fn; nAcc; nBuf; shSizes]` (dye.k
+`compGpShared`) declares one or more Workgroup f32 arrays (`shSizes` = element counts) a
+whole workgroup reads/writes cooperatively. New names/intrinsics in the body:
+
+- `lid` — this thread's index within its workgroup (`gid mod wg`); `wgsz` — the
+  workgroup size (LocalSize.x, the sticky `wg`).
+- `lset[s;i;v]` / `lget[s;i]` — write/read shared array `s` (a literal index) at `i`
+  (one-index `OpAccessChain` through a `Workgroup→f32` pointer; the variable IS the array).
+- `barrier[]` — `OpControlBarrier` (Workgroup exec+mem scope, `WorkgroupMemory|
+  AcquireRelease`): shared writes before it are visible to reads after it.
+
+**IR mechanics.** `barrier` and `lset` are effect nodes (DCE roots, `xEffOps`); `lget` is a
+value node. The whole thing rides on the IR's build-order lowering — the barrier lowers
+at its build position between the stores before it and the loads after it, and inside a
+loop it is owned by the loop node (`xRgn`) and replayed in the loop body by the loop's
+lowerer, so barriers **inside** a `+/` fold work (the tiled GEMM uses two per tile). All
+shared machinery is gated on `#SHvar>0`, so every existing kernel emits zero extra words
+and stays byte-identical (kkgold). SPIR-V: an inline length const before each
+`OpTypeArray`, a `Workgroup` pointer type, an un-decorated `OpVariable`, and the var in
+the SPIR-V-1.4 entry-point interface (spirv.k gained `opBarrier`/`opArrTy`).
+
+**Consumers / oracle (`test/kkwg.k`, wired into oracles.sh; both kernels also
+spirv-val'd via kkgold dumps):**
+- reverse-within-workgroup + broadcast — prove cooperative load, barrier sync,
+  cross-thread read, `lid`, and per-workgroup shared isolation across 4 blocks.
+- **tiled GEMM** — each workgroup shares one A row (needs `N%wg==0`, `K%wg==0`); the row
+  tile is loaded once per K-tile into shared memory and reused by all `wg` threads (`wg`×
+  fewer A global loads). Nested `+/` folds with barriers between tiles; bit-for-bit equal
+  to nn.k's untiled `gemmK` on the test inputs (checked to 1e-4 tol for fractional data).
+
+**2-D tiling + `GemmR` adoption (2026-07-19).** The follow-ups landed. A key realization:
+2-D tiling needs no 2-D dispatch — a 1-D workgroup of 64 threads derives its 8×8 C-block
+coordinates from the 1-D index (`wgId=d div wgsz`, `lr=lid div 8`, `lc=lid mod 8`,
+`brow/bcol` from `wgId` and `n div 8`) and stores at a *computed* index (`row*n+col`). With
+TWO shared arrays it loads an 8×8 tile of BOTH A and B per K-tile, so each A/B element is
+fetched from global once per tile (8× fewer loads) — the real reuse win. `nn.k`'s `gemm2dK`
+does exactly this; `GemmR` dispatches it when `M,N,K` are all multiples of 8 (then `M*N` is
+a multiple of 64, so the launch is exact — no over-dispatch), else falls back to the
+per-element `gemmK`. The nn GEMM test (3×4×2) stays on `gemmK`, bit-identical. Verified
+bit-for-bit vs `gemmK` on non-square dims (24×40×16) and correct at 512³ (64 barrier'd
+tiles) — `test/kkwg.k` (5/5) covers both the direct kernel and the `Gemm` guard path.
+
+Still open on this axis: f16 shared tiles + f16 storage (`caps.f16` green, unused — its own
+precision increment: a `Tf16` type, `f32↔f16` conversions, half-width buffers); tiling
+`Linear`'s transposed-B access pattern; and a compute-throughput bench harness (the current
+`gpu.computeRun` micro-bench is dominated by ~2.1s device init + a 1024-dispatch/batch cap,
+so wall-clock kernel timing isn't cleanly isolable — the tiling win here is architectural).
