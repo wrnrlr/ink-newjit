@@ -108,10 +108,14 @@ outlines, one-backend cutover, image paint (`shader.fragmentBufTex`), CFF/OTF `f
 double-buffering. Also DONE 2026-07-21: `&`/`|` polysemic in the shader dialect (task 3),
 text clipping (task 4), image sampler confirmed LINEAR (task 6). Remaining, rough priority:
 
-1. **Band-loop truncation cap.** The fragment loops a fixed `slugMPB=24` curves/band; a
-   denser band silently drops curves (winding leak). Compaction stores the real count in
-   the band index — wire a `whileL` fragment loop (already in the compute dialect) driven
-   by that count to remove the cap. Needs the while-loop lowered into the fragment path.
+1. **Band-loop truncation cap — DONE 2026-07-21.** The scene-buffer fragment now loops the
+   REAL per-band count via `rsum[bcnt; …]` (a RUNTIME trip count — `loopOpen` already
+   compares the i32 counter against a runtime `Kmax`, so no `whileL` and no dye change were
+   needed, only slug.k). Removed the host-side `(#sel)&slugMPB` cap in `oneBandC` (compacted
+   path stores every overlapping curve; `oneBand`/texture path keeps its cap since its texture
+   width is fixed) and dropped the clamp+`valid` mask in FRAGF/FRAGFI. Verified with an
+   18-stripe single-fill test (36 curves/band): all render; re-adding the cap drops the dense
+   middle stripes (winding leak reproduced then fixed).
 2. **`dFdx`/`fwidth` AA.** AA width is host-computed per fill/glyph (~1.2px). A real
    `OpDPdx`/`OpDPdy`/`OpFwidth` (207/208/210) intrinsic in dye makes edge AA exact under
    any transform. Needs the `DerivativeControl`/no-cap fragment path.
@@ -122,11 +126,19 @@ text clipping (task 4), image sampler confirmed LINEAR (task 6). Remaining, roug
    assertions added to `test/spirv.k` (float→FMin/FMax, bool→logical).
 4. **Text clipping — DONE 2026-07-21.** `slugText` snapshots the live clip (`TXCLM`/`TXCLE`)
    per glyph; `txPaint` bakes it via `applyClipM`. Verified: text cropped to a clip band.
-5. **Retire the native tessellation files** (`triangulate.zig`, `fill.frag`/`.vert`) once
-   nothing else calls `gpu.fill`/`gpu.tessellate` — canvas no longer does, but
-   `demo/{typeset,eyes,replay,asr}.k` STILL DO (grepped 2026-07-21), so this stays BLOCKED
-   until those demos migrate to canvas.k (or the tessellation path is kept for them). Also
-   the Phase-7 self-host task above.
+5. **Retire the native tessellation files** (`triangulate.zig`, `fill.frag`) — IN PROGRESS.
+   - `gpu.fill`/`gpu.tessellate` DEPRECATED 2026-07-21 (marked in `lib/gpu.k`); use canvas.
+   - Migrated to canvas: `demo/{eyes,drawing,typeset}.k` (verified via `-snap`). Added
+     `cnv.rect`/`cnv.ellipse`/`cnv.circle` convenience path builders to `lib/canvas.k`.
+   - STILL on the deprecated API: `demo/{replay,edit,asr}.k` — interactive apps (audio
+     waveform = vertical bars, ASR viz, a text editor with a glyph-tessellation cache +
+     event table). Pure `gpu.fill`/`gpu.tessellate` (no mesh/shader draws → they CAN move to
+     canvas), but each needs restructuring (side-effecting rect/text fills, waveform as a
+     path, glyph cache → `cnv.text`) and interactive validation, so deferred.
+   - NOTE: `fill.vert` CANNOT be deleted — `gpu.drawShader` (circle/pbr/drive/demo/ir, NOT
+     deprecated) draws its custom fragment over the built-in fill VERTEX shader. Only
+     `fill.frag` + `triangulate.zig` + `gpuFill`/`gpuTess` can go, and only after the 3 apps
+     migrate. Also the Phase-7 self-host task above.
 6. **Image sampler filtering — DONE (already LINEAR).** `texture.upload` (vk.zig
    `createTexture`, line 635) is `VK_FILTER_LINEAR`, so image paint already scales smoothly;
    only the data texture (`createTextureF`) is NEAREST (required for exact per-texel reads).

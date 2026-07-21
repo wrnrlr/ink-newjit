@@ -92,7 +92,7 @@ The parser, compiler, and runtime are all written in Zig 0.16.
   - `test.zig` 
 - `test/` - test scripts and data
   - `circle.k` Example of fragment shader with simple SDF for circle
-  - `eyes.k` Eyes that follow the mouse drawn using 2D raster API FillFrame & Tessellate
+  - `eyes.k` Eyes that follow the mouse, drawn with the analytic Canvas/Slug API (lib/canvas.k)
   - `planes.k` 
 
 # Optimizations

@@ -138,10 +138,13 @@ canvas.k no longer calls `gpu.tessellate`/`gpu.fill`. Tasks 1–3 below are DONE
    horizontal edge's 16 collinear pieces × 2 sides overflow one band's `slugMPB` and drop
    (`segFlat` emits straight segs as a single edge); (ii) the annulus needs the two separate
    contours, not one concatenated ribbon (that was the missing-triangle-base bug).
-3. **Retire tessellation — DONE (canvas side).** canvas.k's `fillDraw`/`strokeDraw`/
-   `gpu.tessellate` paths are gone. `triangulate.zig` + `fill.frag`/`fill.vert` still exist
-   (other callers of `gpu.fill`/`gpu.tessellate` may remain) — deleting the native files is a
-   separate cleanup once nothing else uses them.
+3. **Retire tessellation — canvas side DONE; API deprecated; example migration IN PROGRESS.**
+   canvas.k's `fillDraw`/`strokeDraw`/`gpu.tessellate` paths are gone. `gpu.fill`/
+   `gpu.tessellate` are now DEPRECATED (marked in `lib/gpu.k`, 2026-07-21); `demo/{eyes,
+   drawing,typeset}.k` migrated to canvas (added `cnv.rect`/`ellipse`/`circle`). Still on the
+   deprecated API: `demo/{replay,edit,asr}.k` (interactive apps). `fill.vert` must STAY
+   (`gpu.drawShader` draws over it); only `fill.frag` + `triangulate.zig` + `gpuFill`/`gpuTess`
+   can eventually be deleted, once those 3 apps migrate. See `.plan/tasks.md` task 5.
 
    **Enabler for 1+2: independent-aspect normalisation.** `bandData`/`rectOf`/`normC` now
    scale x and y INDEPENDENTLY (sx,sy) instead of aspect-preserving square. A wide/flat shape
@@ -190,10 +193,11 @@ canvas.k no longer calls `gpu.tessellate`/`gpu.fill`. Tasks 1–3 below are DONE
    with 5.0 filler → `slugNB*slugMPB*8 = 3072` floats/fill regardless, capping a frame at
    ~85 fills (a paragraph overflowed `SCCAP`). Now `bandDataC` writes a COMPACTED layout:
    `[paint][band index: slugNB×(poolOffset,count)][tightly-packed curve pool]`. The fragment
-   reads its band's `(off,count)`, loops `slugMPB` but clamps the read index to `[0,count-1]`
-   and masks padded slots (`valid = 1-step[count; j+0.5]`). ~10× smaller for glyphs (verified:
-   a 250+-glyph paragraph renders). The FIXED `bandData` is kept for the texture path
-   (`slug.glyph`→`upload`, demo/slug.k). Truncation still caps a band's LOOP at `slugMPB`.
+   reads its band's `(off,count)` and loops the REAL `count` via `rsum[bcnt; …]` — a runtime
+   trip count, so the old `slugMPB` truncation cap is GONE (the host `oneBandC` cap was removed
+   too; dense bands render). ~10× smaller for glyphs (verified: a 250+-glyph paragraph
+   renders). The FIXED `bandData` is kept for the texture path (`slug.glyph`→`upload`,
+   demo/slug.k), which still caps at `slugMPB` (its texture width is fixed).
 10. **Shape-texture eviction / dynamic geometry.** The text glyph cache is
     grow-only (fine — glyphs are a fixed set). If a truly morphing path ever used
     the *texture* path it'd leak; the scene-buffer path already handles dynamic

@@ -753,21 +753,25 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
     resetFrameMeshes(); // callback accumulates this frame's mesh draws
 
     // Run the k callback (compute + draw commands), then clear + record + present.
-    const prop_keys = [6][*:0]const u8{ "width", "height", "mx", "my", "time", "events" };
+    // width/height/mx/my are FRAMEBUFFER pixels (mx/my already scaled by the device pixel
+    // ratio, so cursor and drawing share one space); dpr = that ratio (framebuffer/window),
+    // so a UI can work in logical units and multiply by dpr for crisp, consistent sizing.
+    const prop_keys = [7][*:0]const u8{ "width", "height", "mx", "my", "time", "dpr", "events" };
     const v_w = kf(@floatFromInt(fbw));
     const v_h = kf(@floatFromInt(fbh));
     const v_mx = kf(@floatCast(mx * g_dpr_x));
     const v_my = kf(@floatCast(my * g_dpr_y));
     const v_t = kf(t);
+    const v_dpr = kf(@floatCast(g_dpr_x));
     const v_events = buildEvents();
     g_nev = 0;
-    const prop_vals = [6]?K{ v_w, v_h, v_mx, v_my, v_t, v_events };
-    if (k_make_dict(6, &prop_keys, &prop_vals)) |pk| {
+    const prop_vals = [7]?K{ v_w, v_h, v_mx, v_my, v_t, v_dpr, v_events };
+    if (k_make_dict(7, &prop_keys, &prop_vals)) |pk| {
       const result = k_call(loop_fn, pk);
       ku(result);
       ku(pk);
     }
-    ku(v_w); ku(v_h); ku(v_mx); ku(v_my); ku(v_t); ku(v_events);
+    ku(v_w); ku(v_h); ku(v_mx); ku(v_my); ku(v_t); ku(v_dpr); ku(v_events);
 
     v.sync(); // finish any compute the callback queued before the frame
 

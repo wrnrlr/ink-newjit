@@ -19,12 +19,21 @@ Screenshots: run with `-snap out.png` (env `INK_SNAP`).
 
 ## 2D drawing
 
-- `gpu.fill[verts;frag]` — triangles; `verts` = flat `F` of `[x,y,u,v]` per vertex;
-  `frag` = 44-float uniform block; `gpu.solid[r;g;b;a]` builds one.
-- `gpu.tessellate[pts]` — triangulate polygon `F` (NaN x/y pairs separate contours = holes:
-  `,/{x,0n,0n}'contours`).
-- **Draw calls inside `'`/`/` adverbs are eliminated** (treated as pure) — compute vertices
-  with adverbs, then issue ONE explicit `gpu.fill` per layer as a statement.
+**Prefer `lib/canvas.k`** (the analytic Canvas/Slug backend) for all 2D vector graphics —
+fills, strokes, gradients, clips, images, and text render resolution-independent + antialiased
+with no tessellation. Immediate-mode: `cnv.new[]`, path ops (`moveTo`/`lineTo`/`quadTo`/
+`cubicTo`/`close`, plus `rect`/`ellipse`/`circle`), `fill paint` / `stroke[paint;width]`,
+`text[face;sz;str;paint]`, paints (`rgba`/`linearGradient`/`radialGradient`/`boxGradient`/
+`image`), `clip`/`noClip`, then `render[w;h]` once per frame. See `demo/{canvas,eyes,drawing,
+typeset}.k`. Gotcha: an inner path-building lambda can't see the caller's locals (lambdas
+don't capture parent scope) — pass coords as ARGS via each-multi (`{[x;y] cnv.lineTo[x;y]}'[xs;ys]`).
+
+- `gpu.fill[verts;frag]` / `gpu.tessellate[pts]` — **DEPRECATED** (CPU tessellation); use
+  canvas. Still work for legacy demos. `gpu.tessellate` NaN x/y pairs separate contours/holes.
+- `gpu.drawShader[verts;handle]` is NOT deprecated — the general custom-2D-fragment API.
+- **Draw calls inside `'`/`/` adverbs are eliminated** (treated as pure) — for the deprecated
+  path, compute vertices with adverbs then issue ONE explicit `gpu.fill` per layer. (Canvas
+  fills/text DO record correctly inside an each — they mutate the scene table, not draw.)
 
 ## Meshes & 3D (vertex pulling only)
 

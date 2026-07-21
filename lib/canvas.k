@@ -45,7 +45,7 @@
 2: "lib/gpu.k"
 2: "lib/slug.k"
 
-\d cnv new save restore translate scale rotate xform moveTo lineTo quadTo cubicTo close text fill stroke rgba linearGradient radialGradient boxGradient loadImg image clip noClip render scene draws ndraws
+\d cnv new save restore translate scale rotate xform moveTo lineTo quadTo cubicTo close rect ellipse circle text fill stroke rgba linearGradient radialGradient boxGradient loadImg image clip noClip render scene draws ndraws
 
   / ── State (private members; initialised here so bare names resolve to cnv.*) ──
   CTM:  1. 0. 0. 1. 0. 0.   / current transform [a b c d e f]: (x,y)→(a x+c y+e, b x+d y+f)
@@ -110,6 +110,21 @@
     appendSeg[,/(P0;ql;m)]; appendSeg[,/(m;qr;P3)]; PEN::P3}
   doClose:{[] appendSeg[,/(PEN; 0.5*PEN+SUB0; SUB0)]; flushSub[]; PEN::SUB0}
   close:{[] $[0<#CUR; doClose[]; 0]}
+
+  / ── Convenience shape paths (all record into the current path, like moveTo/lineTo) ──
+  / Axis-aligned rectangle as a closed subpath.
+  rect:{[x;y;w;h] moveTo[x;y]; lineTo[x+w;y]; lineTo[x+w;y+h]; lineTo[x;y+h]; close[]}
+  / Ellipse centred (cx,cy) with radii (rx,ry) — four cubic Béziers (kappa≈0.5523), closed.
+  ellipse:{[cx;cy;rx;ry]
+    k:0.5522847498
+    moveTo[cx+rx; cy]
+    cubicTo[cx+rx; cy+k*ry; cx+k*rx; cy+ry; cx; cy+ry]
+    cubicTo[cx-k*rx; cy+ry; cx-rx; cy+k*ry; cx-rx; cy]
+    cubicTo[cx-rx; cy-k*ry; cx-k*rx; cy-ry; cx; cy-ry]
+    cubicTo[cx+k*rx; cy-ry; cx+rx; cy-k*ry; cx+rx; cy]
+    close[]}
+  / Circle of radius r.
+  circle:{[cx;cy;r] ellipse[cx;cy;r;r]}
 
   / ── Text (analytic Slug coverage — resolution-independent, antialiased) ──────
   / cnv.text[face; sz; str; paint] lays str's glyphs left-to-right from the current

@@ -1,20 +1,16 @@
-/ test/gpu_eyes.k — GPU eyes demo (mouse tracking)
+/ demo/eyes.k — GPU eyes demo (mouse tracking), drawn with the Canvas/Slug API.
 / Build GPU lib first:  zig build gpu
-/ Run:                  ink test/gpu_eyes.k
+/ Run:                  ink demo/eyes.k
+/
+/ Migrated from the old gpu.fill + gpu.tessellate path to lib/canvas.k: each eye is a
+/ few analytic ellipse fills (cnv.ellipse) — resolution-independent and antialiased,
+/ no CPU tessellation. Coordinates are framebuffer pixels (props`width/`height), which
+/ is exactly what cnv.render maps 1:1, so no DPI scale is needed.
 
-2: "lib/gpu.k"
+2: "lib/canvas.k"
 
-pi: 3.14159265359
-
-/ Flat [x0;y0;x1;y1;...] polygon for an ellipse (n segments)
-ellipsePts: {[cx;cy;rx;ry;n]
-  t: (2.*pi%(n+0.))*!n;
-  pts: @[(2*n)#0.; 2*!n; :; cx + rx * cos t];
-  @[pts; 1+2*!n; :; cy + ry * sin t]}
-
-/ Fill a solid-color ellipse
-fillEllipse: {[cx;cy;rx;ry;r;g;b]
-  gpu.fill[gpu.tessellate ellipsePts[cx;cy;rx;ry;64]; gpu.solid[r;g;b;1.]]}
+/ Fill a solid-colour ellipse via the canvas scene buffer.
+fillEllipse: {[cx;cy;rx;ry;r;g;b] cnv.ellipse[cx;cy;rx;ry]; cnv.fill cnv.rgba[r;g;b;1.]}
 
 drawEye: {[ex;ey;er;mx;my]
   br: er * 0.35
@@ -33,8 +29,10 @@ run: {[props]
   w: props`width; h: props`height
   mx: props`mx;   my: props`my
   er: (w & h) % 6.
-  fillEllipse[w%2.; h%2.; w; h; 0.08; 0.08; 0.10]
+  cnv.new[]
+  fillEllipse[w%2.; h%2.; w; h; 0.08; 0.08; 0.10]         / full-bleed dark backdrop
   drawEye[(w%2.) - er*1.5; h%2.; er; mx; my]
-  drawEye[(w%2.) + er*1.5; h%2.; er; mx; my]}
+  drawEye[(w%2.) + er*1.5; h%2.; er; mx; my]
+  cnv.render[w; h]}
 
 window.run[run; 800. 600.]

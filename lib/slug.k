@@ -44,11 +44,13 @@
 /
 / STATUS / LIMITS
 / ---------------
-/ slugNB/MPB/TW/AA are baked shader constants (slugTW must = 2*slugMPB). Bands over
-/ slugMPB curves truncate (raise slugMPB). TrueType/glyf only (font.quads; CFF cubic →
-/ TODO). AA is a baked uv width (dFdx would make it zoom-exact). Vertical AA on long
-/ horizontal edges is limited (winding gives horizontal AA); fine for real outlines.
-/ Scene buffer pads every fill to slugNB*slugMPB*8 floats (SCCAP caps total/frame).
+/ slugNB/MPB/TW/AA are baked shader constants (slugTW must = 2*slugMPB). The SCENE-BUFFER
+/ path (FRAGF/FRAGFI) has NO per-band cap: bandDataC stores every overlapping curve and the
+/ fragment loops the real per-band count (rsum[bcnt]), so dense bands render correctly. Only
+/ the fixed TEXTURE path (FRAG) still caps at slugMPB (its texture width is fixed). AA is a
+/ baked uv width (dFdx would make it zoom-exact). Vertical AA on long horizontal edges is
+/ limited (winding gives horizontal AA); fine for real outlines. The scene buffer is
+/ compacted (bandDataC), so a fill costs only its real curve count (SCCAP caps total/frame).
 
 2: "lib/gpu.k"
 
@@ -86,13 +88,15 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
     ie:(te>0.)&(te<1.)&(~a=0.)
     ye:(((1.-te)*(1.-te))*y0)+((2.*(1.-te)*te)*cy)+((te*te)*y2)
     (ymn&$[ie;ye;ymn]; ymx|$[ie;ye;ymx])}
-  / The (≤slugMPB) curves whose [BLO,BHI] band-range covers band b, flat (8 floats each).
-  oneBandC:{[b]
-    sel: &((~(BLO>b))&(~(b>BHI)))
-    n: (#sel)&slugMPB
-    $[n>0; ,/BC@n#sel; 0#0.]}
-  / Band b's FIXED row for the texture path: oneBandC padded to slugMPB curves with 5.0.
-  oneBand:{[b] p:oneBandC b; p,((slugMPB*8)-#p)#5.}
+  / Indices of the curves whose [BLO,BHI] band-range covers band b.
+  bandSel:{[b] &((~(BLO>b))&(~(b>BHI)))}
+  / ALL of band b's curves, flat (8 floats each) — NO cap. The compacted scene-buffer path
+  / stores every curve and the fragment loops the real count (rsum[bcnt]), so a dense band
+  / no longer silently drops curves (the old (#sel)&slugMPB truncation was a winding leak).
+  oneBandC:{[b] sel:bandSel b; $[0<#sel; ,/BC@sel; 0#0.]}
+  / Band b's FIXED row for the TEXTURE path: first ≤slugMPB curves padded to slugMPB with
+  / 5.0. Still capped — the data texture width (slugTW=2*slugMPB) is fixed. (demo/slug.k.)
+  oneBand:{[b] sel:bandSel b; n:(#sel)&slugMPB; p:$[n>0; ,/BC@n#sel; 0#0.]; p,((slugMPB*8)-#p)#5.}
   / bandBuild[cs;pad] — normalise the contours into [pad,1-pad]² (independent sx,sy), split
   / to quads, and set the per-curve record (BC) + band range (BLO,BHI) globals used by both
   / the fixed (oneBand) and compacted (oneBandC) band builders. Bins by TRUE y-extent.
@@ -249,10 +253,10 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
     off: floor[wUvA[3]+0.5]
     band: clamp[floor[py*slugNB]; 0.; slugNB-1.]
     idx: (off+slugPS)+(band*2.)                     / this band's (poolOffset;count) index entry
-    bcnt: sbuf[idx+1.]                              / curves actually in this band (≤slugMPB)
+    bcnt: sbuf[idx+1.]                              / curves actually in this band (uncapped)
     base: ((off+slugPS)+(slugNB*2.))+sbuf[idx]      / pool start + this band's offset
-    cov: rsum[slugMPB; {[j]
-      o: base+((0.|(j&bcnt-1.))*8.)       / clamp j into [0,count-1] (avoid OOB read)
+    cov: rsum[bcnt; {[j]
+      o: base+(j*8.)                                / j in [0,bcnt-1]: rsum's runtime bound = the real count (no slugMPB cap)
       x0:sbuf[o]; y0:sbuf[o+1.]; cx:sbuf[o+2.]; cy:sbuf[o+3.]; x2:sbuf[o+4.]; y2:sbuf[o+5.]
       a: (y0-(2.*cy))+y2
       b: 2.*(cy-y0)
@@ -280,8 +284,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
       w2: sign[(2.*aq*t2)+b]
       r1: clamp[(0.5+((xc1-px)%aa)); 0.; 1.]
       r2: clamp[(0.5+((xc2-px)%aa)); 0.; 1.]
-      valid: 1.-step[bcnt; 0.5+j]                    / 0 for the padded slots j≥count
-      valid*(((g1*w1)*r1)+((g2*w2)*r2))}]
+      (((g1*w1)*r1)+((g2*w2)*r2))}]
     ins: clamp[abs[cov]; 0.; 1.]
     / ── paint block @ off (NanoVG FragUniforms mat3s = 3 vec4 .xyz) ──
     / scissorMask(fpos): abs(scissorMat·(fx,fy,1)) - scissorExt, ramp by scissorScale.
@@ -315,10 +318,10 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
     off: floor[wUvA[3]+0.5]
     band: clamp[floor[py*slugNB]; 0.; slugNB-1.]
     idx: (off+slugPS)+(band*2.)                     / this band's (poolOffset;count) index entry
-    bcnt: sbuf[idx+1.]                              / curves actually in this band (≤slugMPB)
+    bcnt: sbuf[idx+1.]                              / curves actually in this band (uncapped)
     base: ((off+slugPS)+(slugNB*2.))+sbuf[idx]      / pool start + this band's offset
-    cov: rsum[slugMPB; {[j]
-      o: base+((0.|(j&bcnt-1.))*8.)       / clamp j into [0,count-1] (avoid OOB read)
+    cov: rsum[bcnt; {[j]
+      o: base+(j*8.)                                / j in [0,bcnt-1]: rsum's runtime bound = the real count (no slugMPB cap)
       x0:sbuf[o]; y0:sbuf[o+1.]; cx:sbuf[o+2.]; cy:sbuf[o+3.]; x2:sbuf[o+4.]; y2:sbuf[o+5.]
       a: (y0-(2.*cy))+y2
       b: 2.*(cy-y0)
@@ -346,8 +349,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
       w2: sign[(2.*aq*t2)+b]
       r1: clamp[(0.5+((xc1-px)%aa)); 0.; 1.]
       r2: clamp[(0.5+((xc2-px)%aa)); 0.; 1.]
-      valid: 1.-step[bcnt; 0.5+j]                    / 0 for the padded slots j≥count
-      valid*(((g1*w1)*r1)+((g2*w2)*r2))}]
+      (((g1*w1)*r1)+((g2*w2)*r2))}]
     ins: clamp[abs[cov]; 0.; 1.]
     scx: ((sbuf[off]*fx)+(sbuf[off+4.]*fy))+sbuf[off+8.]
     scy: ((sbuf[off+1.]*fx)+(sbuf[off+5.]*fy))+sbuf[off+9.]

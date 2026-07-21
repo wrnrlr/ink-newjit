@@ -6,6 +6,8 @@
 so: "./zig-out/lib/libgpu.dylib"
 / window.run calls loop_fn(props) each frame. props is a dict:
 /   width height mx my time     — framebuffer size, cursor pos (px), seconds
+/   dpr                         — device pixel ratio (framebuffer/window). width/height/mx/my
+/                                 are FRAMEBUFFER px; work in logical units × dpr for crisp UI.
 /   events                      — a TABLE of every input event since last frame
 /                                 (one row each; use it directly, no flip). Columns:
 /                                   kind  `text `key `mouse `scroll   (symbol)
@@ -29,8 +31,14 @@ gpu.computeRun: so 2: (`gpuComputeRun; 1)   / fn → 0 : headless compute, no wi
 / bda (buffer device address), f16, atomicFadd (native f32 scatter-add).
 / The kk compiler schedules around these — see doc/design/kk.md §4.
 gpu.caps:    so 2: (`gpuCaps;      1)   / x → dict : device capability flags
-gpu.fill:    so 2: (`gpuFill;      2)   / (verts_F; frag_F) → 0 : draw triangles with built-in shader
-gpu.tessellate:   so 2: (`gpuTess;      1)   / pts_F → verts_F   : gpu.tessellate polygon
+/ DEPRECATED (2026-07-21): the CPU-tessellation 2D path. Use lib/canvas.k instead — it
+/ renders fills/strokes/gradients/text analytically through the Slug scene buffer
+/ (resolution-independent, antialiased, no tessellation). These remain only for the few
+/ legacy app demos still on them (demo/{replay,edit,asr}.k); once those migrate, gpuFill +
+/ gpuTess + the native triangulate.zig / fill.frag can be deleted. (gpu.drawShader is NOT
+/ deprecated — it's the general custom-2D-shader API and shares the fill VERTEX shader.)
+gpu.fill:    so 2: (`gpuFill;      2)   / DEPRECATED → lib/canvas.k. (verts_F; frag_F) → 0 : draw triangles with built-in shader
+gpu.tessellate:   so 2: (`gpuTess;      1)   / DEPRECATED → lib/canvas.k. pts_F → verts_F : CPU polygon triangulation
 gpu.compileSpirv: so 2: (`gpuSpirv;     2)   / (spirv_I; 0) → handle : compile SPIR-V fragment shader
 gpu.drawShader:   so 2: (`gpuFillShader;2)   / (verts_F; handle) → 0 : draw triangles with custom SPIR-V shader
 gpu.runShader:    so 2: (`gpuCompute;   2)   / (spirv_I; input_F) → output_F : run compute shader
