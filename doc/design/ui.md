@@ -85,10 +85,20 @@ vectors). `ui.frame` returns only the non-input (button) actions for the app. Pa
 bar for the row whose id is focused. So the app never touches focus or caret; it just binds a field
 by key. Two-way binding (#2) is then: read `ui.get`c``, parse, `ui.set`f` the derived value.
 
-## Layout: flexbox (`lib/layout.k`)
+## One namespace (`ui`)
 
-You never hard-code x/y/w/h. You describe the UI as a **tree of nodes** — `row`/`col` containers
-plus leaves (`label`/`button`/`box`/`spacer`) — and `layout.solve` does the arithmetic. Two passes:
+Everything lives in a single `ui` namespace in `lib/ui.k`: interaction state, the frame passes, the
+flexbox engine, the combinators, and the widgets. `layout.*` is gone (the split was a false
+boundary); `lib/layout.k` is a deprecated shim that just loads `lib/ui.k`. Nested namespaces
+(`\d ui.menu`) aren't supported by the compiler, so widget internals stay in `ui` as private
+members (naming, not scoping); a genuinely large widget could be split to a `ui.table.*`-style set
+of dotted globals if it ever earns one.
+
+## Layout: flexbox (in `ui`)
+
+You never hard-code x/y/w/h. You describe the UI as a **tree of nodes** — `ui.row`/`ui.col`
+containers plus leaves (`ui.label`/`ui.button`/`ui.input`/`ui.select`/`ui.box`/`ui.spacer`) — and
+`ui.solve` does the arithmetic. Two passes:
 
 1. **`natSize` (bottom-up)** — each node's intrinsic content size. A leaf reports its own size (a
    label measures its text: FiraCode is monospace so width = `#s · sz · 0.6`); a container sums its
@@ -123,6 +133,26 @@ App/UI state goes in a `world` namespace (`\d world`), addressed as `world.count
 assignment (`world.count[key]:: 1 + world.count key`) both at top level and inside lambdas, so the
 controller mutates the model in place without threading it through every call.
 
+## Widget kit & composable state (`layout` + `ui`)
+
+Leaves: `label`, `button`, `input` (focusable/editable, framework buffer), `select` (cycles through
+registered options on click — bound to a buffer like an input), `box`, `spacer`. Containers: `row`,
+`col`. **Combinators** amend one field of the node dict and chain, so state-driven styling is pure
+and declarative: `layout.disabled nd` (grey + `act:`nop` → uninteractive), `layout.invalid nd`
+(red background), plus `grow`/`pad`/`sized`/`gap`/`bg`. A validated field is just
+`$[ok; input[…]; layout.invalid input[…]]` in the `view`. `ui.draw[W;w;h]` wraps
+`cnv.new`/`paint`/`cnv.render` — the whole per-frame render.
+
+**Overlays (solved, no native change).** Every canvas quad — fills *and* glyphs — is drawn at a
+constant `z=0.5` with `LESS_OR_EQUAL`, so occlusion is pure **painter's algorithm: last draw wins**.
+Within one `cnv.render` all fills draw before all text, so an overlay in the *same* render can't hide
+base text — but a **second `cnv.render`** composites on top of the first (frame order is
+`fills₁,text₁,fills₂,text₂`, so render-2's fills cover render-1's text). So `ui.draw` renders the
+main UI (render 1) then the open dropdown's menu rows (render 2). `select` is a real popup again.
+Cap: **2 render passes per frame** (the Slug scene buffer is double-buffered, `SCNF=2`); enough for
+a menu or one modal — nested overlays would need `SCNF` bumped (a one-line native change). #6's
+radius dialog rides the same path.
+
 ## Render: why per-row emit is still batched
 
 `paint` calls `cnv.rect`/`cnv.text` per row, which *reads* like immediate mode — but `lib/canvas.k`
@@ -138,9 +168,9 @@ off *more* as they get harder:
 
 | # | Task | What it stresses | How it maps |
 |---|------|------------------|-------------|
-| 1 | **Counter** | trivial state | model = one int; `view` formats it; click bumps it. **Done.** |
-| 2 | **Temperature** | two-way binding | model = one canonical value (°C). Both fields are *derived views*; editing either parses → writes °C. Bidirectional binding = single source + derived columns. |
-| 3 | **Flight Booker** | validation, enable/disable | model = `(mode;d1;d2)`. Validity is a **derived column** computed by a pure function; the button's `disabled`/`bg` is a function of it. |
+| 1 | **Counter** | trivial state | model = one int; `view` formats it; click bumps it. **Done** (`demo/counter.k`). |
+| 2 | **Temperature** | two-way binding | the two `ui` input buffers *are* the state; each frame read the FOCUSED field, and if it parses, write the converted value into the other (invalid → leave it). No separate model. **Done** (`demo/temperature.k`). |
+| 3 | **Flight Booker** | validation, enable/disable | a `select` (mode) + two date inputs; validity/enablement are **pure derived functions** of the buffers, recomputed in `view` — an invalid date wraps its input in `layout.invalid` (red), the return field / Book button in `layout.disabled` (grey + inert). **Done** (`demo/flight.k`). |
 | 4 | **Timer** | time, progress | the render loop *is* the clock: `props`time` feeds `elapsed`; progress-bar width = `elapsed%duration`. No threads. |
 | 5 | **CRUD** | collections, filter | model **is a table** of names; the list widget is a direct view of a filtered column (`&prefix~/:names`); create/update/delete = row append / amend / mask. |
 | 6 | **Circle Drawer** | custom draw, undo/redo | model = a circle table `(x;y;r)`; draw = a vectorised pass of `cnv.circle`; **undo = a stack of model snapshots** — free under COW columns. |

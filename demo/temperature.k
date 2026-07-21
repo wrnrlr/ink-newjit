@@ -9,7 +9,7 @@
 / number write the converted value into the other. Reading the focused one avoids clobbering
 / what the user is typing.
 
-2: "lib/layout.k"
+2: "lib/ui.k"
 ui.setFont (font.read "font/FiraCode-Regular.ttf") 0
 ui.set[`c; "20"]; ui.set[`f; "68"]
 
@@ -26,22 +26,20 @@ ui.set[`c; "20"]; ui.set[`f; "68"]
   syncFrom:{[src;dst;conv] s:ui.get src; $[isNum s; ui.set[dst; fmt conv num s]; 0]}
   sync:{[] $[ui.focus~`c; syncFrom[`c;`f;cToF]; ui.focus~`f; syncFrom[`f;`c;fToC]; 0]}
 
-  view:{[] layout.bg[0.96 0.96 0.98 1.; layout.pad[44.; layout.col[26.; (
-    layout.label["Temperature Converter"]
-    layout.row[12.; (
-      layout.input[`c; 110.; "°C"]
-      layout.sized[112.;34.; layout.label["Celsius  ="]]
-      layout.input[`f; 110.; "°F"]
-      layout.sized[112.;34.; layout.label["Fahrenheit"]] )]
-    layout.spacer[] )]]}
+  view:{[] ui.bg[0.96 0.96 0.98 1.; ui.pad[44.; ui.col[26.; (
+    ui.label["Temperature Converter"]
+    ui.row[12.; (
+      ui.input[`c; 110.; "°C"]
+      ui.sized[112.;34.; ui.label["Celsius  ="]]
+      ui.input[`f; 110.; "°F"]
+      ui.sized[112.;34.; ui.label["Fahrenheit"]] )]
+    ui.spacer[] )]]}
 \d
 
 run:{[props]
-  W: layout.run[world.view[]; props]
+  W: ui.run[world.view[]; props]
   {0}' ui.frame[W; props`events]     / edit the focused buffer
   world.sync[]                        / propagate to the other field
-  cnv.new[]
-  ui.paint layout.run[world.view[]; props]
-  cnv.render[props`width; props`height]}
+  ui.draw[ui.run[world.view[]; props]; props`width; props`height]}
 
 window.run[run; 720. 300.]
