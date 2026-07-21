@@ -148,12 +148,21 @@ canvas.k no longer calls `gpu.tessellate`/`gpu.fill`. Tasks 1–3 below are DONE
    (a stroke, a thin bar) then fills the full uv-y range so its curves spread across ALL bands
    instead of cramming into a few (→ `slugMPB` truncation). The non-square quad undoes the
    stretch, so coverage stays exact; glyphs/fills verified unchanged.
-4. **Image paint.** Sample an image texture × coverage in the Slug shader (add a
-   texture binding to the fill pipeline). The uber-shader's type-1 path is the
-   reference.
-5. **CFF cubic→quad.** `font.quads` is glyf-only; CFF/OTF fonts are cubic. Add a
-   cubic→quadratic split (2 quads/cubic, as `canvas.cubicTo` already does) so
-   `font.quads` works for CFF, then Slug renders CFF glyphs too.
+4. **Image paint — DONE.** `cnv.image[img;x;y;w;h;rgba]` (img = `cnv.loadImg[path]` →
+   `(handle;iw;ih)`) is a type-1 paint: paintMat maps screen→image space, extent=(iw,ih).
+   The texture handle rides in the paint block (`frag[10].z`); the draw pass reads it and
+   routes the fill to `slug.fillDrawImg`/`FRAGFI` (a `shader.fragmentBufTex` = fragment that
+   reads BOTH the scene STORAGE buffers AND a texture — new dye helper). FRAGFI samples the
+   image at `paintMat·fpos/extent` × innerCol × coverage × scissor, so image fills get the
+   same analytic coverage + clip as everything else. Solid/gradient/text stay on FRAGF (no
+   per-draw texture bind → no tex_upool pressure for text). Gotcha: the texture handle must be
+   a FLOAT in the paint block (a bare int boxes it). Verified: image + clipped/tinted image.
+5. **CFF cubic→quad — DONE.** `font.quads` now dispatches to `cff2.quads` for CFF/OTF fonts.
+   The native charstring interpreter (`cff_outline.zig`) gained a `quads` mode: instead of
+   flattening cubics to lines it emits raw quadratic control triples (each cubic split to 2
+   quads via de Casteljau, lines → degenerate quads, closing quad per contour). Exported as
+   `cffQuads`. Gotcha: the k `3.*a+d` split formula is `3*(a+d)` (right-to-left) — a literal
+   Zig `3*a+d` is wrong and gives spiky "flame" glyphs. Verified: OTF text renders clean.
 6. **`&`/`|` as min/max in the shader dialect** (see `.plan/tasks.md`). `min[]`/
    `max[]` already exist; route the glyphs there for float operands. Bit us in
    slug.k.
@@ -161,12 +170,25 @@ canvas.k no longer calls `gpu.tessellate`/`gpu.fill`. Tasks 1–3 below are DONE
    A real `dFdx`/`fwidth` intrinsic in dye would make it exact under any transform
    without host math. Needs `OpDPdx`/`OpDPdy`/`OpFwidth` (opcodes 207/208/210) in
    the dialect + the `DerivativeControl`/no-cap fragment path.
-8. **Perf: async GPU submission.** See §5 — the extension is fully synchronous;
-   this is the ceiling on dynamic-scene throughput.
-9. **Scene-buffer compaction.** Bands currently pad to `slugMPB` curves (mostly
-   5.0 filler) → a shape costs `NB*MPB*8 = 3072` floats regardless. An indexed
-   layout (a curve pool + per-band `(offset,count)` index lists) is tighter; costs
-   an indirection in the shader.
+8. **Async GPU submission — DONE (double-buffering).** First, the myth: `gpuBufferWrite`'s
+   `sync()` is gated on `self.recording` (the COMPUTE path), which is FALSE during windowed
+   rendering — so the per-frame scene write never stalled; it's a plain memcpy into the
+   coherent mapped buffer. `createTextureF`'s `vkQueueWaitIdle` stalls only on texture creation
+   (cached glyphs, images loaded once), not per frame. The REAL bug was a latent data race:
+   FRAMES=2, one shared `SCENE` buffer, so frame N's memcpy could clobber frame N-1's in-flight
+   GPU read. Fixed in slug.k (no engine change) by **double-buffering** `SCENE` AND the quad
+   pool: keep `SCNF`=FRAMES copies and cycle by parity `SLFR`, which advances once per
+   sceneBegin — in lockstep with the GPU frame — so the copy about to be written was last used
+   2 frames ago, whose fence `beginFrame` already waited on. Correctness under pipelining, no
+   stall. (Uses the deep indexed-assign `SCENEV[SLFR]:: …` VM feature.)
+9. **Scene-buffer compaction — DONE.** The fixed layout padded every band to `slugMPB` curves
+   with 5.0 filler → `slugNB*slugMPB*8 = 3072` floats/fill regardless, capping a frame at
+   ~85 fills (a paragraph overflowed `SCCAP`). Now `bandDataC` writes a COMPACTED layout:
+   `[paint][band index: slugNB×(poolOffset,count)][tightly-packed curve pool]`. The fragment
+   reads its band's `(off,count)`, loops `slugMPB` but clamps the read index to `[0,count-1]`
+   and masks padded slots (`valid = 1-step[count; j+0.5]`). ~10× smaller for glyphs (verified:
+   a 250+-glyph paragraph renders). The FIXED `bandData` is kept for the texture path
+   (`slug.glyph`→`upload`, demo/slug.k). Truncation still caps a band's LOOP at `slugMPB`.
 10. **Shape-texture eviction / dynamic geometry.** The text glyph cache is
     grow-only (fine — glyphs are a fixed set). If a truly morphing path ever used
     the *texture* path it'd leak; the scene-buffer path already handles dynamic

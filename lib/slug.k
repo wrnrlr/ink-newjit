@@ -59,7 +59,7 @@ slugTW:  48.       / texture width in texels = 2*slugMPB
 slugAA:  0.004     / antialias ramp width (uv)
 slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUniforms floats)
 
-\d slug glyph upload pipe draw quad rectOf sceneBegin addFill sceneFlush fillDraw
+\d slug glyph upload pipe draw quad rectOf sceneBegin addFill sceneFlush fillDraw fillDrawImg
 
   / ── Per-glyph band-build scratch (globals: the mapped builders can't close) ───
   BC:  ()          / list of 8-float texel records, one per curve
@@ -86,24 +86,37 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
     ie:(te>0.)&(te<1.)&(~a=0.)
     ye:(((1.-te)*(1.-te))*y0)+((2.*(1.-te)*te)*cy)+((te*te)*y2)
     (ymn&$[ie;ye;ymn]; ymx|$[ie;ye;ymx])}
-  / Band b's row: the (≤slugMPB) curves whose [BLO,BHI] covers b, flattened + padded.
-  oneBand:{[b]
+  / The (≤slugMPB) curves whose [BLO,BHI] band-range covers band b, flat (8 floats each).
+  oneBandC:{[b]
     sel: &((~(BLO>b))&(~(b>BHI)))
     n: (#sel)&slugMPB
-    picked: $[n>0; ,/BC@n#sel; 0#0.]
-    picked,((slugMPB-n)*8)#5.}
-  / bandData[cs; pad] → banded curve data (slugNB rows × slugMPB curves × 8 floats,
-  / row-major), for ANY list of quadratic contour buffers [x0 y0 cx cy x1 y1 …] — glyph
-  / outlines or arbitrary canvas paths. Normalises into [pad,1-pad]² and bins by y-extent.
-  bandData:{[cs;pad]
+    $[n>0; ,/BC@n#sel; 0#0.]}
+  / Band b's FIXED row for the texture path: oneBandC padded to slugMPB curves with 5.0.
+  oneBand:{[b] p:oneBandC b; p,((slugMPB*8)-#p)#5.}
+  / bandBuild[cs;pad] — normalise the contours into [pad,1-pad]² (independent sx,sy), split
+  / to quads, and set the per-curve record (BC) + band range (BLO,BHI) globals used by both
+  / the fixed (oneBand) and compacted (oneBandC) band builders. Bins by TRUE y-extent.
+  bandBuild:{[cs;pad]
     allp:,/cs; nn:(#allp)div 2; ix:2*!nn; xs:allp@ix; ys:allp@ix+1
     mx:&/xs; my:&/ys; sx:1e-6|(|/xs-mx); sy:1e-6|(|/ys-my); nc:#cs
     ncs: normC'[cs; nc#mx; nc#my; nc#sx; nc#sy; nc#pad]
     quads: ,/ {[c] (6*!(#c)div 6)_c}' ncs
     BC:: {[q] q,0. 0.}' quads
     yy: +yext' quads
-    BLO:: 0.|((slugNB-1.)&(_ slugNB*yy 0)); BHI:: 0.|((slugNB-1.)&(_ slugNB*yy 1))
-    ,/[oneBand'(0.+!`i$slugNB)]}
+    BLO:: 0.|((slugNB-1.)&(_ slugNB*yy 0)); BHI:: 0.|((slugNB-1.)&(_ slugNB*yy 1))}
+  / bandData[cs;pad] → FIXED slugNB×slugMPB×8 banded data (row-major, 5.0-padded) — the
+  / TEXTURE-path layout (slug.glyph→upload; demo/slug.k). Kept for that path.
+  bandData:{[cs;pad] bandBuild[cs;pad]; ,/[oneBand'(0.+!`i$slugNB)]}
+  / bandDataC[cs;pad] → COMPACTED banded data for the scene buffer: a slugNB×2 index of
+  / (poolFloatOffset; count) followed by a tightly-packed curve POOL (no 5.0 filler). Far
+  / smaller than the fixed layout (a shape no longer costs slugNB*slugMPB*8 regardless), so
+  / many more fills fit SCCAP. The fragment reads its band's (off,count) then loops count.
+  bandDataC:{[cs;pad]
+    bandBuild[cs;pad]
+    pools: oneBandC'(0.+!`i$slugNB)
+    cnts: 0.+{(#x)div 8}'pools                     / curves per band
+    offs: 0.,+\-1_{0.+#x}'pools                    / cumulative float offset of each band
+    (,/+(offs;cnts)),(,/pools)}                    / [index: slugNB×2][pool]
   / The [pad,1-pad] uv-rect in the contours' own coordinate space (sqx0;sqTop;sqx1;sqBot),
   / matching normC's INDEPENDENT sx,sy so uv maps back exactly (non-square in general).
   rectOf:{[cs;pad]
@@ -177,22 +190,34 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
   / scene buffer at the fill's offset — enabled by shader.fragmentBuf (fragment reads a
   / StorageBuffer). No per-shape textures, no cache: one gpu.write per frame.
   SCACC:  0#0.       / this frame's concatenated banded curve data (host side)
-  SCENE:  0          / resident scene buffer
   SCCAP:  262144     / scene buffer capacity (floats)
   SCPIPE: 0          / buffer-based fill pipeline
-  SCQPOOL: 0#0       / per-fill quad-buffer pool
+  / DOUBLE-BUFFERED (avoids a data race): with FRAMES=2 frames in flight, one shared scene
+  / buffer would let frame N's host write clobber frame N-1's in-flight GPU read. So keep
+  / SCNF=FRAMES copies of the scene buffer AND the quad pool and cycle by parity SLFR. SLFR
+  / advances once per sceneBegin — in lockstep with the GPU frame — so the copy we're about
+  / to write was last used 2 frames ago, whose fence beginFrame already waited on. No stall.
+  SCNF:   2          / = native FRAMES
+  SLFR:   0          / current parity
+  SCENE:  0          / this frame's scene buffer (= SCENEV SLFR)
+  SCENEV: (0; 0)     / the SCNF resident scene buffers
+  SCQPOOL: 0#0       / this frame's per-fill quad-buffer pool (= SCQPV SLFR)
+  SCQPV:  (0#0; 0#0) / the SCNF quad pools
   SCQI:   0
   sceneBegin:{[]
     SCACC:: 0#0.; SCQI:: 0
+    SLFR:: (SLFR+1)mod SCNF
     $[SCPIPE=0; SCPIPE:: mesh.compilePull[VTXF; FRAGF]; 0]
-    $[SCENE=0; SCENE:: gpu.buffer[SCCAP#0.]; 0]}
+    $[(SCENEV SLFR)=0; SCENEV[SLFR]:: gpu.buffer[SCCAP#0.]; 0]
+    SCENE:: SCENEV SLFR; SCQPOOL:: SCQPV SLFR}
   / addFill[cs; pad; paint] → (float-offset into scene buffer; local uv-square rect).
   / Appends the fill's 44-float NanoVG paint block (gradient/solid + baked clip) THEN its
-  / banded curve data. off is a FLOAT (0.+#SCACC) — a bare int would box the vertex join.
-  / Layout per fill: [paint: slugPS floats][bands: slugNB*slugMPB*8 floats]. off → paint.
-  addFill:{[cs;pad;paint] off:0.+#SCACC; SCACC:: SCACC,paint,bandData[cs;pad]; (off; rectOf[cs;pad])}
+  / COMPACTED banded curve data. off is a FLOAT (0.+#SCACC) — a bare int would box the join.
+  / Layout per fill: [paint: slugPS][band index: slugNB×2][curve pool]. off → paint;
+  / the fragment reads the index at off+slugPS and the pool at off+slugPS+slugNB*2.
+  addFill:{[cs;pad;paint] off:0.+#SCACC; SCACC:: SCACC,paint,bandDataC[cs;pad]; (off; rectOf[cs;pad])}
   sceneFlush:{[] gpu.write[SCENE; SCACC]}                / upload the whole frame's curves
-  scGrow:{[] SCQPOOL:: SCQPOOL,gpu.buffer[48#0.]}        / 6 verts × 8 floats
+  scGrow:{[] SCQPOOL:: SCQPOOL,gpu.buffer[48#0.]; SCQPV[SLFR]:: SCQPOOL}   / grow + persist this parity's pool
   scNext:{[] $[SCQI<#SCQPOOL; 0; scGrow[]]; b:SCQPOOL SCQI; SCQI::SCQI+1; b}
   / stride-8 vertex [clipX clipY u v fx fy off aa]: clip pos for gl_Position, uv for
   / coverage, (fx,fy) = SCREEN/framebuffer pos for the paint & scissor matrices, off, aa.
@@ -223,9 +248,11 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
     / low → reads the previous fill's data. Round to recover the exact integer.
     off: floor[wUvA[3]+0.5]
     band: clamp[floor[py*slugNB]; 0.; slugNB-1.]
-    base: (off+slugPS)+(band*(slugMPB*8.))
+    idx: (off+slugPS)+(band*2.)                     / this band's (poolOffset;count) index entry
+    bcnt: sbuf[idx+1.]                              / curves actually in this band (≤slugMPB)
+    base: ((off+slugPS)+(slugNB*2.))+sbuf[idx]      / pool start + this band's offset
     cov: rsum[slugMPB; {[j]
-      o: base+(j*8.)
+      o: base+((max[0.; min[j; bcnt-1.]])*8.)       / clamp j into [0,count-1] (avoid OOB read)
       x0:sbuf[o]; y0:sbuf[o+1.]; cx:sbuf[o+2.]; cy:sbuf[o+3.]; x2:sbuf[o+4.]; y2:sbuf[o+5.]
       a: (y0-(2.*cy))+y2
       b: 2.*(cy-y0)
@@ -253,7 +280,8 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
       w2: sign[(2.*aq*t2)+b]
       r1: clamp[(0.5+((xc1-px)%aa)); 0.; 1.]
       r2: clamp[(0.5+((xc2-px)%aa)); 0.; 1.]
-      ((g1*w1)*r1)+((g2*w2)*r2)}]
+      valid: 1.-step[bcnt; 0.5+j]                    / 0 for the padded slots j≥count
+      valid*(((g1*w1)*r1)+((g2*w2)*r2))}]
     ins: clamp[abs[cov]; 0.; 1.]
     / ── paint block @ off (NanoVG FragUniforms mat3s = 3 vec4 .xyz) ──
     / scissorMask(fpos): abs(scissorMat·(fx,fy,1)) - scissorExt, ramp by scissorScale.
@@ -281,14 +309,16 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
   / Same scene-buffer coverage + scissor as FRAGF, but the colour is an IMAGE sampled at
   / paintMat·(fx,fy)/extent (extent = image w,h) and tinted by innerCol. Used ONLY for
   / type-1 (image) fills — solid/gradient/text stay on FRAGF (no per-draw texture bind).
-  FRAGFI: shader.fragmentBufTex[[wUvA:`v4; wPos:`v4; out:`v4]; 2; 1; {[wUvA; wPos; qbuf; sbuf}
+  FRAGFI: shader.fragmentBufTex[[wUvA:`v4; wPos:`v4; out:`v4]; 2; 1; {[wUvA; wPos; qbuf; sbuf]
     px: wUvA[0]; py: wUvA[1]; aa: wUvA[2]
     fx: wPos[0]; fy: wPos[1]
     off: floor[wUvA[3]+0.5]
     band: clamp[floor[py*slugNB]; 0.; slugNB-1.]
-    base: (off+slugPS)+(band*(slugMPB*8.))
+    idx: (off+slugPS)+(band*2.)                     / this band's (poolOffset;count) index entry
+    bcnt: sbuf[idx+1.]                              / curves actually in this band (≤slugMPB)
+    base: ((off+slugPS)+(slugNB*2.))+sbuf[idx]      / pool start + this band's offset
     cov: rsum[slugMPB; {[j]
-      o: base+(j*8.)
+      o: base+((max[0.; min[j; bcnt-1.]])*8.)       / clamp j into [0,count-1] (avoid OOB read)
       x0:sbuf[o]; y0:sbuf[o+1.]; cx:sbuf[o+2.]; cy:sbuf[o+3.]; x2:sbuf[o+4.]; y2:sbuf[o+5.]
       a: (y0-(2.*cy))+y2
       b: 2.*(cy-y0)
@@ -316,7 +346,8 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
       w2: sign[(2.*aq*t2)+b]
       r1: clamp[(0.5+((xc1-px)%aa)); 0.; 1.]
       r2: clamp[(0.5+((xc2-px)%aa)); 0.; 1.]
-      ((g1*w1)*r1)+((g2*w2)*r2)}]
+      valid: 1.-step[bcnt; 0.5+j]                    / 0 for the padded slots j≥count
+      valid*(((g1*w1)*r1)+((g2*w2)*r2))}]
     ins: clamp[abs[cov]; 0.; 1.]
     scx: ((sbuf[off]*fx)+(sbuf[off+4.]*fy))+sbuf[off+8.]
     scy: ((sbuf[off+1.]*fx)+(sbuf[off+5.]*fy))+sbuf[off+9.]

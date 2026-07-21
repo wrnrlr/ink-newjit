@@ -45,7 +45,7 @@
 2: "lib/gpu.k"
 2: "lib/slug.k"
 
-\d cnv new save restore translate scale rotate xform moveTo lineTo quadTo cubicTo close text fill stroke rgba linearGradient radialGradient boxGradient clip noClip render scene draws ndraws
+\d cnv new save restore translate scale rotate xform moveTo lineTo quadTo cubicTo close text fill stroke rgba linearGradient radialGradient boxGradient loadImg image clip noClip render scene draws ndraws
 
   / ── State (private members; initialised here so bare names resolve to cnv.*) ──
   CTM:  1. 0. 0. 1. 0. 0.   / current transform [a b c d e f]: (x,y)→(a x+c y+e, b x+d y+f)
@@ -161,6 +161,18 @@
   / Box gradient: a feathered/rounded rect (x,y,w,h; corner rad; feather f).
   boxGradient:{[x;y;w;h;rad;f;inner;outer]
     mkGrad[1.,0.,0.,1.,(x+0.5*w),(y+0.5*h); inner; outer; 0.5*w; 0.5*h; rad; 1.|f]}
+  / loadImg[path] → (gpu texture handle; imageW; imageH), all FLOATS (a bare int handle
+  / would box the 44-float paint block). image.read auto-loads its module.
+  loadImg:{[path] i:image.read path; (0.+texture.upload i; 0.+i`width; 0.+i`height)}
+  / Image PAINT (type 1): map the image (from loadImg → (handle;iw;ih)) onto the rect
+  / (x,y,w,h) in the current transform space, tinted by rgba (use 1 1 1 1 for the plain
+  / image). paintMat = inverse(CTM ∘ image→rect), extent = (iw,ih) so paintMat·fpos/extent
+  / is the [0,1] uv. The texture HANDLE rides in frag[10].z (off+42); the draw pass reads
+  / it, binds the image, and routes the fill to slug.FRAGFI (which samples it × coverage).
+  image:{[img;x;y;w;h;rgba]
+    hnd:img 0; iw:img 1; ih:img 2
+    pm:invAffine mul[CTM; (w%iw),0.,0.,(h%ih),x,y]
+    ,/((1. 0. 0. 0. 0. 1. 0. 0. 0. 0. 1. 0.); matCols pm; rgba; 0. 0. 0. 0.; 1e10 1e10 1. 1.; iw,ih,0.,0.; 0.,1.,hnd,0.)}
   / Clip subsequent draws to rect (x,y,w,h) in the current transform space. Scoped
   / by save/restore (REPLACES, does not intersect). Reset early with cnv.noClip.
   clip:{[x;y;w;h]
@@ -266,14 +278,17 @@
   SFW: 0.; SFH: 0.
   toScreen:{[m;lx;ly] (((m 0)*lx)+((m 2)*ly)+(m 4)) , (((m 1)*lx)+((m 3)*ly)+(m 5))}
   scrClip:{[s] (((2.*(s 0))%SFW)-1.) , (1.-((2.*(s 1))%SFH))}
-  / drawQuad[off;cl;m;ox;oy] — draw one scene-buffer fill: uv-rect cl offset by (ox,oy) in
-  / local space, transformed by m → 4 SCREEN + 4 clip corners; per-draw AA ≈1.2 screen px.
-  drawQuad:{[off;cl;m;ox;oy]
+  / qCorners[cl;m;ox;oy] → (clip4; screen4; aa): uv-rect cl offset by (ox,oy) in local space,
+  / transformed by m → 4 SCREEN + 4 clip corners; per-draw AA ≈1.2 screen px (in uv).
+  qCorners:{[cl;m;ox;oy]
     sa:toScreen[m; ox+cl 0; oy+cl 3]; sb:toScreen[m; ox+cl 2; oy+cl 3]
     sc:toScreen[m; ox+cl 2; oy+cl 1]; sd:toScreen[m; ox+cl 0; oy+cl 1]
     ca:scrClip sa; cb:scrClip sb; cc:scrClip sc; cd:scrClip sd
     e:cb-ca; cw:1e-6|sqrt[((e 0)*(e 0))+((e 1)*(e 1))]
-    slug.fillDraw[(ca;cb;cc;cd); (sa;sb;sc;sd); off; 2.4%(cw*SFW)]}
+    ((ca;cb;cc;cd); (sa;sb;sc;sd); 2.4%(cw*SFW))}
+  / draw one scene-buffer fill (gradient/solid/clip via FRAGF) or image fill (via FRAGFI).
+  drawQuad:{[off;cl;m;ox;oy] q:qCorners[cl;m;ox;oy]; slug.fillDraw[q 0; q 1; off; q 2]}
+  drawImgQ:{[off;cl;m;ox;oy;tex] q:qCorners[cl;m;ox;oy]; slug.fillDrawImg[q 0; q 1; off; q 2; tex]}
 
   / ── Slug text pass — glyphs ride the SAME scene buffer as fills/strokes ─────────
   / Each glyph's raw quadratic outline (font.quads) is just another fill (a SOLID paint of
@@ -304,7 +319,7 @@
   / fragment reads the curves for coverage AND evaluates the paint (gradient/solid + baked
   / clip) at its screen pos. No tessellation. Fills = local contours + drawM; strokes = a
   / SCREEN-space offset outline (so width is screen px) + identity transform.
-  DOFF: 0#0.; DRECT: (); DXF: ()
+  DOFF: 0#0.; DRECT: (); DXF: (); DTEX: 0#0   / DTEX k = image texture handle (0 = not an image)
   / Flatten a stroke contour to a polyline, but DON'T subdivide straight segments (control
   / ≈ midpoint) — a subdivided straight edge piles all its collinear pieces into ONE band
   / (a horizontal edge → 16 pieces × 2 outline sides > slugMPB → truncated/dropped). Curves
@@ -319,19 +334,21 @@
     ,/strokeOutline'[polys; (#polys)#hw]}
   drawCs:{[i] $[0=KIND i; drawContours i; strokeCs i]}
   drawXf:{[i] $[0=KIND i; drawM i; 1. 0. 0. 1. 0. 0.]}
+  / paint frag[10] = (texType; type; handle; blur). type 1 = image; handle at index 42.
   addDraw:{[i]
-    r: slug.addFill[drawCs i; 0.14; PAINTS PIDX i]
-    DOFF::DOFF,r 0; DRECT::DRECT,,r 1; DXF::DXF,,drawXf i}
+    p: PAINTS PIDX i
+    r: slug.addFill[drawCs i; 0.14; p]
+    DOFF::DOFF,r 0; DRECT::DRECT,,r 1; DXF::DXF,,drawXf i; DTEX::DTEX,$[0.5<p 41; `i$p 42; 0]}
   scanStep:{[i] addDraw i; scanDraws i+1}
   scanDraws:{[i] $[i<ndraws[]; scanStep i; 0]}
-  drawOne:{[k] drawQuad[DOFF k; DRECT k; DXF k; 0.; 0.]}
+  drawOne:{[k] $[0<DTEX k; drawImgQ[DOFF k; DRECT k; DXF k; 0.; 0.; DTEX k]; drawQuad[DOFF k; DRECT k; DXF k; 0.; 0.]]}
   drawStep:{[k] drawOne k; drawFrom k+1}
   drawFrom:{[k] $[k<#DOFF; drawStep k; 0]}
   / render[w;h] — fills + strokes + text, ALL analytic through the ONE Slug scene buffer:
   / accumulate every draw's curves+paint → upload once → draw (fills/strokes in ops order,
   / then text on top). w,h = framebuffer size (= the fragment's screen space for paints).
   render:{[w;h]
-    DOFF::0#0.; DRECT::(); DXF::(); TXOFF::0#0.; TXRECT::(); SFW::w; SFH::h
+    DOFF::0#0.; DRECT::(); DXF::(); DTEX::0#0; TXOFF::0#0.; TXRECT::(); SFW::w; SFH::h
     slug.sceneBegin[]
     $[0<ndraws[]; scanDraws 0; 0]
     $[0<#TXGID; scanText 0; 0]
