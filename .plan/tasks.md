@@ -98,6 +98,33 @@ Toolchain: `brew install molten-vk vulkan-headers glslang`.
 7. **Perf pass**: compute is correctness-first (deferred submission, `vkQueueWaitIdle`
    at each readback). Revisit with fences / overlap if profiling shows it matters.
 
+## Canvas / Slug 2D renderer
+Full roadmap + architecture + gotchas: **`doc/design/canvas-slug.md`** (read §3 first).
+The 2D stack is now ONE analytic backend — fills, gradients, clips, strokes, text, and
+image paint all render through the Slug scene buffer (`lib/slug.k` + `lib/canvas.k`); no
+tessellation. DONE this cycle: gradients/clip in the fill shader, strokes as miter
+outlines, one-backend cutover, image paint (`shader.fragmentBufTex`), CFF/OTF `font.quads`
+(cubic→2 quads), scene-buffer compaction (indexed band layout), and scene/quad-pool
+double-buffering. Remaining, rough priority:
+
+1. **Band-loop truncation cap.** The fragment loops a fixed `slugMPB=24` curves/band; a
+   denser band silently drops curves (winding leak). Compaction stores the real count in
+   the band index — wire a `whileL` fragment loop (already in the compute dialect) driven
+   by that count to remove the cap. Needs the while-loop lowered into the fragment path.
+2. **`dFdx`/`fwidth` AA.** AA width is host-computed per fill/glyph (~1.2px). A real
+   `OpDPdx`/`OpDPdy`/`OpFwidth` (207/208/210) intrinsic in dye makes edge AA exact under
+   any transform. Needs the `DerivativeControl`/no-cap fragment path.
+3. **`&`/`|` → min/max in the shader dialect** — see below; bit slug.k (had to use
+   `min[]`/`max[]`).
+4. **Text on the scene buffer can't clip yet** (glyph paint is a plain solid; the active
+   clip isn't baked into `txPaint`). Bake `applyClip` into the glyph paint if text-in-a-
+   clip is wanted.
+5. **Retire the native tessellation files** (`triangulate.zig`, `fill.frag`/`.vert`) once
+   nothing else calls `gpu.fill`/`gpu.tessellate` — canvas no longer does (also Phase-7
+   self-host task above). Grep other callers first.
+6. **Image sampler filtering.** Image paint samples via the default `gpu.texture` sampler;
+   confirm/upgrade to LINEAR for smooth scaling.
+
 ### Shader dialect
 - **`&`/`|` as min/max in shaders**: in the dye shader dialect `&`/`|` currently emit
   only `OpLogicalAnd`/`OpLogicalOr` (bool), whereas in ordinary ink they are polysemic

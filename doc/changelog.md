@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-07-21
+- **Canvas/Slug 2D renderer → ONE analytic backend.** Fills, gradients, clips,
+  strokes, text, and image paint all render through the Slug scene buffer
+  (`lib/slug.k` + `lib/canvas.k`); tessellation is retired from the canvas path.
+  Design/gotchas: `doc/design/canvas-slug.md`.
+  - **Gradients + clip in the fill shader.** Each fill packs its 44-float NanoVG
+    paint block (linear/radial/box gradient or solid, with the active clip baked in)
+    into the scene buffer; the fragment evaluates `scissorMask` + the rounded-rect
+    gradient SDF at its screen position and folds paint × coverage into the alpha.
+  - **Strokes via Slug.** A stroke becomes a fill outline: each vertex offset ±½-width
+    along its miter bisector (`canvas.miterContour`). Open paths → a ribbon (butt
+    caps); closed paths → an annulus (two contours). Then it's a normal fill.
+  - **Image paint.** `cnv.image[img;x;y;w;h;rgba]` (img = `cnv.loadImg[path]`) samples
+    an image texture × analytic coverage × clip. Enabler: `shader.fragmentBufTex` —
+    a dye fragment that reads both storage buffers and a texture.
+  - **CFF/OTF fonts.** `font.quads` now works for PostScript (CFF) outlines: the
+    native charstring interpreter gained a quads mode (each cubic split to 2
+    quadratics, exported `cffQuads`), so OTF text renders analytically like glyf.
+  - **Scene-buffer compaction.** An indexed band layout (per-band `(offset,count)` +
+    a packed curve pool, no `slugMPB` padding) shrinks a fill ~10× — a 250+-glyph
+    paragraph now fits (was capped at ~85 fills).
+  - **Double-buffered scene/quad-pool** (parity-cycled, in lockstep with the GPU
+    frame) removes the FRAMES-in-flight write-vs-read data race — no engine change.
+  - **Robustness:** independent-aspect band normalisation (flat shapes spread across
+    all bands instead of truncating), and the pull pipeline's depth compare relaxed
+    to `LESS_OR_EQUAL` so overlapping coplanar 2D quads (packed glyphs) all pass.
+
 ## 2026-07-16
 - **`kk.compile` placed tables** (kk2 §2.5, the last §2 milestone): `gpu.holdT[t]`
   places a k table as a structured buffer — one resident buffer per column
