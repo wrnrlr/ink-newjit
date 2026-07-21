@@ -90,6 +90,20 @@ export fn ReadSafetensors(path_k: ?K) callconv(.c) ?K {
   // reader treats the tensor data as a plain []u8 indexed by data_offsets, so a
   // demand-paged mmap view is a drop-in replacement that avoids the single
   // ~2 GB malloc that used to fail (silently) for multi-gigabyte models.
+  // Windows has no POSIX mmap, so fall back to reading the whole file there.
+  if (@import("builtin").os.tag == .windows) {
+    const bytes = alloc.alloc(u8, @intCast(st.size)) catch return null;
+    defer alloc.free(bytes);
+    _ = file.readPositionalAll(io, bytes, 0) catch |e| {
+      std.debug.print("safetensors: read '{s}' failed: {s}\n", .{ path, @errorName(e) });
+      return null;
+    };
+    return build(alloc, bytes) catch |e| {
+      std.debug.print("safetensors: decode '{s}' failed: {s}\n", .{ path, @errorName(e) });
+      return null;
+    };
+  }
+
   const mapped = std.posix.mmap(
     null,
     @intCast(st.size),
