@@ -309,3 +309,17 @@ chk[1b; |/wle=0x000400A8;    "a<=b emits OpLogicalNot"]
 wge: shader.fragment[[uv:`v2; out:`f32]; {[uv] $[uv[0]>=uv[1]; 1.0; 0.0]}]
 chk[1b; |/wge=0x000500B8;    "a>=b emits OpFOrdLessThan"]
 chk[1b; |/wge=0x000400A8;    "a>=b emits OpLogicalNot"]
+
+/ ══ 9. Polysemic &/| — min/max on floats, logical on bools ═══════════════════
+/ float&float → OpFMin (GLSL ext-inst 37 via OpExtInst 0x0007000C), NOT OpLogicalAnd.
+wmin: shader.fragment[[uv:`v2; out:`f32]; {[uv] uv[0] & uv[1]}]
+chk[1b; |/wmin=0x0007000C;   "float&float emits OpExtInst"]
+chk[1b; |/wmin=37;           "float&float emits GLSL FMin (ext-inst 37)"]
+chk[0b; |/wmin=0x000500A7;   "float&float does NOT emit OpLogicalAnd"]
+/ float|float → OpFMax (GLSL ext-inst 40).
+wmax: shader.fragment[[uv:`v2; out:`f32]; {[uv] uv[0] | uv[1]}]
+chk[1b; |/wmax=40;           "float|float emits GLSL FMax (ext-inst 40)"]
+chk[0b; |/wmax=0x000500A6;   "float|float does NOT emit OpLogicalOr"]
+/ bool&bool (two comparisons) still → OpLogicalAnd (0xA7).
+wand: shader.fragment[[uv:`v2; out:`f32]; {[uv] $[(uv[0]>0.5) & (uv[1]>0.5); 1.0; 0.0]}]
+chk[1b; |/wand=0x000500A7;   "bool&bool still emits OpLogicalAnd"]

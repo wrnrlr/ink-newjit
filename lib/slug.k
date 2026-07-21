@@ -154,7 +154,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
       isLine: 1.-step[1e-4; abs[a]]
       aq: a+(isLine*1.)
       disc: (b*b)-(4.*aq*c)
-      sq: sqrt[max[disc;0.]]
+      sq: sqrt[disc|0.]
       inv: 1.%(2.*aq)
       tq1: ((0.-b)-sq)*inv
       tq2: ((0.-b)+sq)*inv
@@ -167,7 +167,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
       xc2: (((u2*u2)*x0)+(2.*u2*t2*cx))+((t2*t2)*x2)
       gq1: (step[0.;disc]*step[0.;t1])*(1.-step[1.;t1])
       gq2: (step[0.;disc]*step[0.;t2])*(1.-step[1.;t2])
-      gl: step[min[y0;y2];py]*(1.-step[max[y0;y2];py])
+      gl: step[y0&y2;py]*(1.-step[y0|y2;py])
       g1: mix[gq1; gl; isLine]
       g2: (1.-isLine)*gq2
       w1: mix[sign[(2.*aq*t1)+b]; sign[y2-y0]; isLine]
@@ -252,7 +252,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
     bcnt: sbuf[idx+1.]                              / curves actually in this band (≤slugMPB)
     base: ((off+slugPS)+(slugNB*2.))+sbuf[idx]      / pool start + this band's offset
     cov: rsum[slugMPB; {[j]
-      o: base+((max[0.; min[j; bcnt-1.]])*8.)       / clamp j into [0,count-1] (avoid OOB read)
+      o: base+((0.|(j&bcnt-1.))*8.)       / clamp j into [0,count-1] (avoid OOB read)
       x0:sbuf[o]; y0:sbuf[o+1.]; cx:sbuf[o+2.]; cy:sbuf[o+3.]; x2:sbuf[o+4.]; y2:sbuf[o+5.]
       a: (y0-(2.*cy))+y2
       b: 2.*(cy-y0)
@@ -260,7 +260,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
       isLine: 1.-step[1e-4; abs[a]]
       aq: a+(isLine*1.)
       disc: (b*b)-(4.*aq*c)
-      sq: sqrt[max[disc;0.]]
+      sq: sqrt[disc|0.]
       inv: 1.%(2.*aq)
       tq1: ((0.-b)-sq)*inv
       tq2: ((0.-b)+sq)*inv
@@ -273,7 +273,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
       xc2: (((u2*u2)*x0)+(2.*u2*t2*cx))+((t2*t2)*x2)
       gq1: (step[0.;disc]*step[0.;t1])*(1.-step[1.;t1])
       gq2: (step[0.;disc]*step[0.;t2])*(1.-step[1.;t2])
-      gl: step[min[y0;y2];py]*(1.-step[max[y0;y2];py])
+      gl: step[y0&y2;py]*(1.-step[y0|y2;py])
       g1: mix[gq1; gl; isLine]
       g2: (1.-isLine)*gq2
       w1: mix[sign[(2.*aq*t1)+b]; sign[y2-y0]; isLine]
@@ -295,9 +295,9 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
     pty: ((sbuf[off+13.]*fx)+(sbuf[off+17.]*fy))+sbuf[off+21.]
     extx: sbuf[off+36.]; exty: sbuf[off+37.]; rad: sbuf[off+38.]; feth: sbuf[off+39.]
     dx: abs[ptx]-(extx-rad); dy: abs[pty]-(exty-rad)
-    mdx: max[dx;0.]; mdy: max[dy;0.]
-    sd: ((min[max[dx;dy];0.])+sqrt[(mdx*mdx)+(mdy*mdy)])-rad
-    gd: clamp[(sd+(feth*0.5))%max[feth;1e-4]; 0.; 1.]
+    mdx: dx|0.; mdy: dy|0.
+    sd: ((0.&(dx|dy))+sqrt[(mdx*mdx)+(mdy*mdy)])-rad
+    gd: clamp[(sd+(feth*0.5))%(feth|1e-4); 0.; 1.]
     d: (step[0.5;extx])*gd            / extx<0.5 ⇒ solid (d=0 ⇒ innerCol); else gradient
     cr: mix[sbuf[off+24.]; sbuf[off+28.]; d]
     cg: mix[sbuf[off+25.]; sbuf[off+29.]; d]
@@ -318,7 +318,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
     bcnt: sbuf[idx+1.]                              / curves actually in this band (≤slugMPB)
     base: ((off+slugPS)+(slugNB*2.))+sbuf[idx]      / pool start + this band's offset
     cov: rsum[slugMPB; {[j]
-      o: base+((max[0.; min[j; bcnt-1.]])*8.)       / clamp j into [0,count-1] (avoid OOB read)
+      o: base+((0.|(j&bcnt-1.))*8.)       / clamp j into [0,count-1] (avoid OOB read)
       x0:sbuf[o]; y0:sbuf[o+1.]; cx:sbuf[o+2.]; cy:sbuf[o+3.]; x2:sbuf[o+4.]; y2:sbuf[o+5.]
       a: (y0-(2.*cy))+y2
       b: 2.*(cy-y0)
@@ -326,7 +326,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
       isLine: 1.-step[1e-4; abs[a]]
       aq: a+(isLine*1.)
       disc: (b*b)-(4.*aq*c)
-      sq: sqrt[max[disc;0.]]
+      sq: sqrt[disc|0.]
       inv: 1.%(2.*aq)
       tq1: ((0.-b)-sq)*inv
       tq2: ((0.-b)+sq)*inv
@@ -339,7 +339,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
       xc2: (((u2*u2)*x0)+(2.*u2*t2*cx))+((t2*t2)*x2)
       gq1: (step[0.;disc]*step[0.;t1])*(1.-step[1.;t1])
       gq2: (step[0.;disc]*step[0.;t2])*(1.-step[1.;t2])
-      gl: step[min[y0;y2];py]*(1.-step[max[y0;y2];py])
+      gl: step[y0&y2;py]*(1.-step[y0|y2;py])
       g1: mix[gq1; gl; isLine]
       g2: (1.-isLine)*gq2
       w1: mix[sign[(2.*aq*t1)+b]; sign[y2-y0]; isLine]

@@ -163,9 +163,14 @@ canvas.k no longer calls `gpu.tessellate`/`gpu.fill`. Tasks 1–3 below are DONE
    quads via de Casteljau, lines → degenerate quads, closing quad per contour). Exported as
    `cffQuads`. Gotcha: the k `3.*a+d` split formula is `3*(a+d)` (right-to-left) — a literal
    Zig `3*a+d` is wrong and gives spiky "flame" glyphs. Verified: OTF text renders clean.
-6. **`&`/`|` as min/max in the shader dialect** (see `.plan/tasks.md`). `min[]`/
-   `max[]` already exist; route the glyphs there for float operands. Bit us in
-   slug.k.
+6. **`&`/`|` as min/max in the shader dialect — DONE.** `dispBin`/`binRty`/`xTransNorm`
+   in `lib/dye.k` dispatch `&`/`|` by operand type: bool→`OpLogicalAnd`/`Or`,
+   float/vector→`OpFMin`/`OpFMax`. slug.k's shader bodies now use `&`/`|` directly
+   (dropped the `min[]`/`max[]` workaround); canvas + slug demos verified unchanged.
+   Golden assertions in `test/spirv.k` §9.
+6b. **Text clipping — DONE.** `canvas.k` `slugText` snapshots the live clip
+   (`TXCLM`/`TXCLE`) per glyph and `txPaint` bakes it via `applyClipM`, so text inside a
+   `cnv.clip` is cropped like any fill. Verified: glyphs cropped to a clip band.
 7. **dFdx-based AA width.** Currently AA is host-computed per fill/glyph (~1.2px).
    A real `dFdx`/`fwidth` intrinsic in dye would make it exact under any transform
    without host math. Needs `OpDPdx`/`OpDPdy`/`OpFwidth` (opcodes 207/208/210) in
@@ -282,8 +287,10 @@ canvas.k no longer calls `gpu.tessellate`/`gpu.fill`. Tasks 1–3 below are DONE
   *app* fixes it (`cnv.scale[props`width/WINW …]`), not the library.
 
 ### dye / shaders
-- **`&`/`|` in the shader dialect are LOGICAL and/or, NOT min/max** — use `min[]`/
-  `max[]`. (Host-side k is the opposite: `&`=min `|`=max.)
+- **`&`/`|` in the shader dialect are now POLYSEMIC** (as of 2026-07-21, matching host
+  k): min/max on float/vector operands (`OpFMin`/`OpFMax`), logical and/or on bool
+  operands. So `y0&y2` = `min[y0;y2]`; `(a>b)&(c>d)` = logical-and. `min[]`/`max[]` still
+  work but are no longer required. (Older notes below saying "&/| are logical" are stale.)
 - Vector loop-state needs component brackets (`t[0]`); params can't be named `in`;
   max 8 params.
 - Loop consts (`RCi0/RCf0`) are compile-scoped globals — a stage that uses loops
@@ -316,9 +323,9 @@ whole class of workaround.
   not shader-level.
 - **`dFdx`/`fwidth` in the dialect** (opcodes 207/208/210). Removes host-side AA
   width math and makes edge AA exact under arbitrary transforms. Small addition.
-- **`&`/`|` → min/max dispatch by operand type** (float→`OpFMin/FMax`, bool→
-  logical). `min`/`max` builtins already exist; just route the glyphs. Removes a
-  sharp edge for shader authors. (Task logged.)
+- **`&`/`|` → min/max dispatch by operand type — DONE** (float→`OpFMin/FMax`, bool→
+  logical). Removed a sharp edge for shader authors; slug.k dropped its `min[]`/`max[]`
+  workaround.
 - **Storage buffers in the fragment — DONE this session** (`shader.fragmentBuf`).
   Worth generalising: a fragment that reads *both* textures and buffers, and
   configurable binding bases (right now fragment buffer index == binding index,

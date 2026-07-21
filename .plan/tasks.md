@@ -105,7 +105,8 @@ image paint all render through the Slug scene buffer (`lib/slug.k` + `lib/canvas
 tessellation. DONE this cycle: gradients/clip in the fill shader, strokes as miter
 outlines, one-backend cutover, image paint (`shader.fragmentBufTex`), CFF/OTF `font.quads`
 (cubic→2 quads), scene-buffer compaction (indexed band layout), and scene/quad-pool
-double-buffering. Remaining, rough priority:
+double-buffering. Also DONE 2026-07-21: `&`/`|` polysemic in the shader dialect (task 3),
+text clipping (task 4), image sampler confirmed LINEAR (task 6). Remaining, rough priority:
 
 1. **Band-loop truncation cap.** The fragment loops a fixed `slugMPB=24` curves/band; a
    denser band silently drops curves (winding leak). Compaction stores the real count in
@@ -114,26 +115,29 @@ double-buffering. Remaining, rough priority:
 2. **`dFdx`/`fwidth` AA.** AA width is host-computed per fill/glyph (~1.2px). A real
    `OpDPdx`/`OpDPdy`/`OpFwidth` (207/208/210) intrinsic in dye makes edge AA exact under
    any transform. Needs the `DerivativeControl`/no-cap fragment path.
-3. **`&`/`|` → min/max in the shader dialect** — see below; bit slug.k (had to use
-   `min[]`/`max[]`).
-4. **Text on the scene buffer can't clip yet** (glyph paint is a plain solid; the active
-   clip isn't baked into `txPaint`). Bake `applyClip` into the glyph paint if text-in-a-
-   clip is wanted.
+3. **`&`/`|` → min/max in the shader dialect — DONE 2026-07-21.** `dispBin`/`binRty`/
+   `xTransNorm` in `lib/dye.k` now dispatch `&`/`|` by operand type: bool→`OpLogicalAnd`/
+   `Or`, float/vector→`OpFMin`/`OpFMax`. slug.k's shader bodies use `&`/`|` (dropped the
+   `min[]`/`max[]` workaround); verified canvas + slug demos render unchanged. 6 golden
+   assertions added to `test/spirv.k` (float→FMin/FMax, bool→logical).
+4. **Text clipping — DONE 2026-07-21.** `slugText` snapshots the live clip (`TXCLM`/`TXCLE`)
+   per glyph; `txPaint` bakes it via `applyClipM`. Verified: text cropped to a clip band.
 5. **Retire the native tessellation files** (`triangulate.zig`, `fill.frag`/`.vert`) once
-   nothing else calls `gpu.fill`/`gpu.tessellate` — canvas no longer does (also Phase-7
-   self-host task above). Grep other callers first.
-6. **Image sampler filtering.** Image paint samples via the default `gpu.texture` sampler;
-   confirm/upgrade to LINEAR for smooth scaling.
+   nothing else calls `gpu.fill`/`gpu.tessellate` — canvas no longer does, but
+   `demo/{typeset,eyes,replay,asr}.k` STILL DO (grepped 2026-07-21), so this stays BLOCKED
+   until those demos migrate to canvas.k (or the tessellation path is kept for them). Also
+   the Phase-7 self-host task above.
+6. **Image sampler filtering — DONE (already LINEAR).** `texture.upload` (vk.zig
+   `createTexture`, line 635) is `VK_FILTER_LINEAR`, so image paint already scales smoothly;
+   only the data texture (`createTextureF`) is NEAREST (required for exact per-texel reads).
 
 ### Shader dialect
-- **`&`/`|` as min/max in shaders**: in the dye shader dialect `&`/`|` currently emit
-  only `OpLogicalAnd`/`OpLogicalOr` (bool), whereas in ordinary ink they are polysemic
-  (min/max on numbers, and/or on bools). This surprises shader authors — `y0&y2` for
-  `min[y0;y2]` silently compiles to a logical-and of two floats (see lib/slug.k, which
-  had to use `min[]`/`max[]`). Make the dialect dispatch `&`/`|` by operand type: min/max
-  (`OpFMin`/`OpFMax`) for float/vector operands, logical for bool. Lower risk than it
-  looks — the `min`/`max` builtins already exist (xMathW `opFmin`/`opFmax`); this just
-  routes the `&`/`|` glyphs there when the operands aren't bool. Add a shader test.
+- **`&`/`|` as min/max in shaders — DONE 2026-07-21.** The dye dialect now dispatches
+  `&`/`|` by operand type: `OpFMin`/`OpFMax` for float/vector operands, `OpLogicalAnd`/
+  `Or` for bool — so `y0&y2` in a shader is `min[y0;y2]`, matching ordinary ink. Touched
+  `dispBin` (route by `aty~bool`), `binRty`/`cmpOps` (result type propagates for numeric
+  `&`/`|`), and `xTransNorm` (drop the forced-bool operand hint). slug.k dropped its
+  `min[]`/`max[]` workaround. Golden coverage in `test/spirv.k` §9.
 
 ### Housekeeping
 - `spike/` (vkspike.zig + run.sh) is the throwaway Phase-0 proof — keep or delete.

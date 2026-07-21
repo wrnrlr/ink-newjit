@@ -68,7 +68,7 @@
     KIND::0#0; PIDX::0#0; WIDTH::0#0.; RULE::0#0
     CSTART::0#0; CCOUNT::0#0; CONSTART::0#0; CONCOUNT::0#0
     XF::0#0.; CURVES::0#0.; CONLEN::0#0; PAINTS::()
-    TXFACE::(); TXGID::0#0; TXPX::0#0.; TXPY::0#0.; TXSZ::0#0.; TXCOL::(); TXXF::()}
+    TXFACE::(); TXGID::0#0; TXPX::0#0.; TXPY::0#0.; TXSZ::0#0.; TXCOL::(); TXXF::(); TXCLM::(); TXCLE::()}
 
   / ── Affine transform ─────────────────────────────────────────────────────────
   / compose m∘n: the matrix that applies n first, then m (post-multiply for nesting).
@@ -125,6 +125,8 @@
   TXSZ:   0#0.   / per-glyph pixel size
   TXCOL:  ()     / per-glyph rgba
   TXXF:   ()     / per-glyph transform (2×3)
+  TXCLM:  ()     / per-glyph clip scissor matrix (live at record time)
+  TXCLE:  ()     / per-glyph clip scissorExt/scale
   slugText:{[face;sz;gids;paint]
     n:#gids; sc:font.scale[face;sz]; adv:(face`hmtx)`adv; na:#adv
     advPx: sc*adv@(gids & na-1)
@@ -134,6 +136,7 @@
     TXFACE::TXFACE,(n#,face); TXGID::TXGID,gids
     TXPX::TXPX,penXs; TXPY::TXPY,n#oy; TXSZ::TXSZ,n#sz
     TXCOL::TXCOL,(n#,rgba); TXXF::TXXF,(n#,CTM)
+    TXCLM::TXCLM,(n#,CLIPM); TXCLE::TXCLE,(n#,CLIPE)
     PEN::(ox++/advPx),oy}
   / 1_0,… normalises a single-char string (a char ATOM) to a 1-glyph vector.
   text:{[face;sz;s;paint] g:1_0,font.shape[face;s]; $[0<#g; slugText[face;sz;g;paint]; 0]}
@@ -180,9 +183,11 @@
     CLIPM::invAffine c2s
     CLIPE::(0.5*w),(0.5*h),sqrt[((CTM 0)*(CTM 0))+((CTM 1)*(CTM 1))],sqrt[((CTM 2)*(CTM 2))+((CTM 3)*(CTM 3))]}
   noClip:{[] CLIPM::1. 0. 0. 1. 0. 0.; CLIPE::1e10 1e10 1. 1.}
-  / Bake the active clip (scissorMat @ frag[0..2], scissorExt/scale @ frag[8]) into
-  / a paint at register time, then store it. No clip ⇒ identity/huge ⇒ no-op.
-  applyClip:{[p] @[@[p; !12; :; matCols CLIPM]; 32+!4; :; CLIPE]}
+  / Bake a clip (scissorMat @ frag[0..2], scissorExt/scale @ frag[8]) into a paint.
+  / No clip ⇒ identity/huge ⇒ no-op. applyClip uses the ACTIVE clip; applyClipM takes an
+  / explicit (matrix;ext) so text can bake the clip that was live at record time.
+  applyClipM:{[p;clm;cle] @[@[p; !12; :; matCols clm]; 32+!4; :; cle]}
+  applyClip:{[p] applyClipM[p; CLIPM; CLIPE]}
   regPaint:{[p] i:#PAINTS; PAINTS::PAINTS,(,applyClip p); i}
 
   / ── Emit a draw (flush pending path into the ops table) ───────────────────────
@@ -302,7 +307,8 @@
   / point set) and poison the shared buffer; record a -1 sentinel and skip its draw. NB:
   / the skip branch is a NAMED helper, not an inline [..;..] block — a bracket block in a
   / $[...] branch parses as a DICT literal (runs nothing), which would desync TXOFF/TXRECT.
-  txPaint:{[i] c:TXCOL i; gpu.solid[c 0; c 1; c 2; c 3]}   / glyph = a solid-colour fill
+  / glyph = a solid-colour fill with the record-time clip baked in (so text-in-a-clip crops).
+  txPaint:{[i] c:TXCOL i; applyClipM[gpu.solid[c 0; c 1; c 2; c 3]; TXCLM i; TXCLE i]}
   addGlyph:{[i]
     cs: font.quads[TXFACE i; TXGID i; TXSZ i]
     $[0<#cs; addGlyphC[i;cs]; addGlyphSkip[]]}

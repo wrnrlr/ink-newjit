@@ -75,7 +75,10 @@ fract sign tanh length normalize`. Types are symbols: `` `f32`v2`v3`v4 ``.
 
 ### Shader-dialect gotchas
 
-- `|` is **logical or**, NOT max — ReLU is `max[0.;x]`.
+- `&`/`|` are **polysemic** (as of 2026-07-21, like host k): min/max on float/vector
+  operands, logical and/or on bool operands. So ReLU is `0.|x` or `max[0.;x]` (both fine);
+  `(a>b)&(c>d)` is logical-and. (Before this change they were logical-only — older code
+  used `min[]`/`max[]`, which still works.)
 - No `>=` on GPU either in some paths — safest is `~(a<b)`.
 - Vector loop-state needs component brackets: `t[0]` not `t`.
 - Params can't be named `in`; max 8 params (pack config into a buffer).

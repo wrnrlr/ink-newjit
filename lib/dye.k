@@ -282,9 +282,12 @@ isVecTy: {[ty] (ty~`v4) | (ty~`v2) | (ty~`v3)}
 ncVec: [f32:1; v2:2; v3:3; v4:4]
 jnRty: {[a;b] n: ncVec[a]+ncVec[b]; $[n=2;`v2;n=3;`v3;`v4]}
 
-/ Comparison ops always produce bool; others propagate vector type or use operand type
-cmpOps: `"<"`">"`"="`"~"`"&"`"|"
-binRty: {[op;aty;bty;oty] $[op in cmpOps; `bool; op in `div`mod; `i32; op~`","; jnRty[aty;bty]; isVecTy[aty]; aty; isVecTy[bty]; bty; aty]}
+/ Comparison ops always produce bool; others propagate vector type or use operand type.
+/ &/| are POLYSEMIC (like host k): logical and/or on bool operands, min/max on float/vector
+/ operands — so `y0&y2` in a shader is min[y0;y2], matching ordinary ink (dispBin routes it).
+cmpOps: `"<"`">"`"="`"~"
+propTy: {[aty;bty] $[isVecTy[aty]; aty; isVecTy[bty]; bty; aty]}
+binRty: {[op;aty;bty;oty] $[op in cmpOps; `bool; op in (`"&";`"|"); $[aty~`bool; `bool; propTy[aty;bty]]; op in `div`mod; `i32; op~`","; jnRty[aty;bty]; propTy[aty;bty]]}
 
 / ── Known 1-arg and multi-arg math function names ────────────────────────────
 mathFns:  `abs`floor`fract`sign`sqrt`exp`log`tanh`sqr`sin`cos`asin`acos`atan`length`normalize`pow`min`max`atan2`dot`cross`step`mod`clamp`mix`smoothstep
@@ -313,8 +316,9 @@ dispBin: {[op;rty;r;aty;a;bty;b]
     op~`">";   $[aty~`i32; opSGT[Tbool;r;a;b]; opFOgt[at;r;a;b]]
     op~`"=";   $[aty~`i32; opIEq[Tbool;r;a;b]; opFOeq[at;r;a;b]]
     op~`"~";   $[aty~`i32; opINe[Tbool;r;a;b]; opFOne[at;r;a;b]]
-    op~`"&";   opLAnd[at;r;a;b]
-    op~`"|";   opLOr[at;r;a;b]
+    / &/| dispatch by operand type: bool→logical and/or, float/vector→min/max (OpFMin/FMax).
+    op~`"&";   $[aty~`bool; opLAnd[at;r;a;b]; opFmin[rt;r;a;b]]
+    op~`"|";   $[aty~`bool; opLOr[at;r;a;b];  opFmax[rt;r;a;b]]
     opFadd[rt;r;a;b]]}
 
 / ── Compiler state (reset per compShader call) ───────────────────────────────
@@ -1407,7 +1411,9 @@ xScalarLit: {[i;oty] litTy:kKind i; useTy:$[(litTy~`int)&(oty~`f32)&~Xidx;`float
 
 xTransNorm: {[i;env;oty]
   op: kVal kF1[i;`v]
-  opTy: $[op in `"<"`">"`"="`"~"; `f32; op in (`"&";`"|"); `bool; oty]
+  / &/| no longer force a bool hint — operands self-type (a comparison still yields bool,
+  / so bool&bool→logical; float operands stay float, so float&float→min). See dispBin.
+  opTy: $[op in `"<"`">"`"="`"~"; `f32; oty]
   ap: xNode[kF1[i;`a];env;opTy]; bp: xNode[kF1[i;`b];env;opTy]
   aty: ap 1; bty: bp 1
   rty: binRty[op;aty;bty;oty]
