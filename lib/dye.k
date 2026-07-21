@@ -136,6 +136,49 @@ shader.fragmentBuf: {[ioTypes; nBuf; fn]
   buildMod[outId; inVarIds; inTys; inPtrs; outPtr; locs]
 }
 
+/ ── shader.fragmentBufTex[ioTypes; nBuf; nTex; fn] → SPIR-V word list ─────────
+/ Both worlds at once: nBuf StorageBuffer f32 runtime-arrays at set 0 (the fn's LAST nBuf
+/ params, read `buf[i]`) AND nTex sampled 2-D textures at set 1 (sampled `sample[k;uv]`).
+/ buildMod already emits the texture and buffer sections independently (gated on
+/ #TexVars/#BufVars), so this just allocates BOTH scratch sets. For the Slug image-paint
+/ fill: analytic coverage from the scene buffer × an image sampled per pixel.
+shader.fragmentBufTex: {[ioTypes; nBuf; nTex; fn]
+  Nid::Nfixed; Buf::(); Con::(); ConKeyT::(); ConKeyV::(); ConVal::(); Xidx::0
+  RCi0::0; RCi1::0; RCf0::0; RCfNeg::0
+
+  lam: lamOf fn; argNames: lamArgs lam
+  bufNames:  (0-nBuf)#argNames             / last nBuf params = storage buffers
+  varyNames: (0-nBuf)_argNames             / the rest = varyings; textures via sample[]
+
+  outTySym: ioTypes[`out]; outPtr: PtrOut[outTySym]
+  inTySyms: ioTypes' varyNames
+  inTys:  Tid'  inTySyms
+  inPtrs: PtrIn' inTySyms
+  inVarIds: {[x] newId[]}' varyNames
+  outId: newId[]
+
+  / texture scratch (set 1) — as shader.fragmentTexN
+  Timg2::   newId[]; Tsamp2::  newId[]; TsImg::   newId[]
+  PUCimg::  newId[]; PUCsamp:: newId[]
+  TexVars:: {[x] newId[]}' !nTex
+  SampVar:: newId[]
+
+  / storage-buffer scratch (set 0) — as shader.fragmentBuf
+  FBu32:: newId[]; FBrta:: newId[]; FBtbuf:: newId[]; FBpbufs:: newId[]; pf: newId[]
+  FBz:: newId[]; emitCon (0x0004002B; FBu32; FBz; 0)
+  CKz:: FBz; CPf32:: pf
+  BufVars:: {[k] newId[]}' !nBuf
+
+  loadedPairs: inVarIds loadOnePair' inTySyms
+  env: (varyNames , bufNames) ! loadedPairs , (BufVars ,' (nBuf # `buf))
+
+  rp: kSeqIr[lamBody lam; env; outTySym]
+  emitBuf opStore[outId; rp 0]
+
+  locs: !#varyNames
+  buildMod[outId; inVarIds; inTys; inPtrs; outPtr; locs]
+}
+
 / ── shader.vertexPull[varyTypes; fn] — vertex pulling (kk2 §5) ────────────────
 / A vertex shader as a kernel-shaped fn `{[buf0;buf1;…; vid] (posV4; vary0;…)}`:
 / the LAST param is the vertex index (gl_VertexIndex), every other param is an f32

@@ -24,11 +24,11 @@
   / to gpu.tessellate. outlines does the whole gid vector at once.
   outline:{[f;gid;sz]$[`CFF in !f;cff2.outline;glyf.outline][f;scale[f;sz];gid]}
   outlines:{[f;sz;gids] $[`CFF in !f;cff2.outline;glyf.outline][f;scale[f;sz]]'gids}
-  / quads  f gid sz  → L of flat F contours of RAW quadratic control points
-  / [x0 y0 cx cy x1 y1 …] (pixel-space, y-flipped), for GPU analytic coverage.
-  / TrueType/glyf only for now (CFF is cubic — convert later); ~8× fewer segments
-  / than `outline`, and truly resolution-independent when fed to a quadratic shader.
-  quads:{[f;gid;sz] glyf.quads[f;scale[f;sz];gid]}
+  / quads  f gid sz  → L of flat F contours of RAW quadratic control points (glyf native;
+  / CFF cubics are split to 2 quads each in the charstring interpreter — cff2.quads).
+  / [x0 y0 cx cy x1 y1 …] (pixel-space, y-flipped), for GPU analytic coverage. ~8× fewer
+  / segments than `outline`, and truly resolution-independent when fed to a quadratic shader.
+  quads:{[f;gid;sz] $[`CFF in !f;cff2.quads;glyf.quads][f;scale[f;sz];gid]}
 / ── font.glyf — TrueType quadratic (glyf) outline flattening ────────────────
 / glyf stores quadratic Béziers as on/off-curve points; two consecutive
 / off-curve points imply an on-curve midpoint. Everything below flattens that to
@@ -122,14 +122,16 @@
 / ── font.cff2 — PostScript / CFF Type-2 charstring outlines (in Zig) ────────
 / Returns the same shape as the glyf path (pixel-scaled, y-flipped). Only
 / `outline` is public.
-\d font.cff2 outline
+\d font.cff2 outline quads
   so:   "./zig-out/lib/libfont.dylib"
   / (charstring_C; gsubrs_L; lsubrs_L; scale_f) → L of flat F contours.
   outline0: so 2:(`cffOutline; 1)
+  / Same, but RAW quadratic control triples (cubics split to 2 quads) for the Slug shader.
+  quads0:   so 2:(`cffQuads; 1)
   / Local subrs: non-CID `localSubrs`, or per-FD subrs picked by fdSelect (CID).
   lsubrs:{[c;gid]$[
     `localSubrs in !c; c`localSubrs;
     `fdLocalSubrs in !c; (c`fdLocalSubrs)@((c`fdSelect)gid);,()]}
-  outline:{[f;sc;gid]
-    c: f`CFF;
-    outline0 ((c`charStrings)gid; c`globalSubrs; lsubrs[c;gid]; sc)}
+  args:{[f;gid;sc] c:f`CFF; ((c`charStrings)gid; c`globalSubrs; lsubrs[c;gid]; sc)}
+  outline:{[f;sc;gid] outline0 args[f;gid;sc]}
+  quads:{[f;sc;gid] quads0 args[f;gid;sc]}

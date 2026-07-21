@@ -61,7 +61,7 @@ fn readSubrs(listk: ?*anyopaque) ![][]const u8 {
   return out;
 }
 
-export fn cffOutline(arg: ?*anyopaque) callconv(.c) ?*anyopaque {
+fn cffRun(arg: ?*anyopaque, quads: bool) ?*anyopaque {
   if (k.kn(arg) < 4) return null;
 
   const csk = k.listGet(arg, 0);
@@ -82,7 +82,15 @@ export fn cffOutline(arg: ?*anyopaque) callconv(.c) ?*anyopaque {
   defer alloc.free(lsubrs);
 
   const scale: f64 = k.kfval(sk);
-  return cffo.outline(charstring, gsubrs, lsubrs, scale);
+  return if (quads) cffo.outlineQuads(charstring, gsubrs, lsubrs, scale) else cffo.outline(charstring, gsubrs, lsubrs, scale);
+}
+// cffOutline[cs;gsubrs;lsubrs;scale] → flattened polyline contours.
+export fn cffOutline(arg: ?*anyopaque) callconv(.c) ?*anyopaque {
+  return cffRun(arg, false);
+}
+// cffQuads[cs;gsubrs;lsubrs;scale] → raw quadratic control-triple contours (Slug).
+export fn cffQuads(arg: ?*anyopaque) callconv(.c) ?*anyopaque {
+  return cffRun(arg, true);
 }
 
 // ── terse_init ──────────────────────────────────────────────────────────────────
@@ -93,6 +101,7 @@ fn inkInit(reg: *anyopaque) void {
   const kr: *const @import("kabi").KRegistry(*anyopaque) = @ptrCast(@alignCast(reg));
   kr.k_register("ReadFont", @ptrCast(&ReadFont), 1);
   kr.k_register("cffOutline", @ptrCast(&cffOutline), 1);
+  kr.k_register("cffQuads", @ptrCast(&cffQuads), 1);
 }
 
 export fn terse_init(reg: *anyopaque) callconv(.c) void { inkInit(reg); }

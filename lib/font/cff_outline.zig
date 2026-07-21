@@ -21,6 +21,9 @@ const Interp = struct {
   sp: usize = 0,
   x: f64 = 0,
   y: f64 = 0,
+  sx: f64 = 0, // subpath start (for the closing quad in quads mode)
+  sy: f64 = 0,
+  quads: bool = false, // true → emit RAW quadratic control triples, not flattened lines
   gsubrs: [][]const u8,
   lsubrs: [][]const u8,
   gbias: i32,
@@ -43,8 +46,17 @@ const Interp = struct {
   fn emit(self: *Interp, fx: f64, fy: f64) void {
     self.cur.append(alloc, .{ @floatCast(fx * self.scale), @floatCast(-fy * self.scale) }) catch {};
   }
+  // A quadratic segment (on;ctrl;on) → three control points (scaled/flipped by emit).
+  fn emitQuad(self: *Interp, x0: f64, y0: f64, cx: f64, cy: f64, x1: f64, y1: f64) void {
+    self.emit(x0, y0);
+    self.emit(cx, cy);
+    self.emit(x1, y1);
+  }
 
   fn flushContour(self: *Interp) void {
+    // quads mode: close the contour with a final quad back to the subpath start.
+    if (self.quads and self.open and self.cur.items.len > 0)
+      self.emitQuad(self.x, self.y, 0.5 * (self.x + self.sx), 0.5 * (self.y + self.sy), self.sx, self.sy);
     if (self.cur.items.len > 0) {
       self.contours.append(alloc, self.cur) catch {};
       self.cur = .empty;
@@ -58,26 +70,54 @@ const Interp = struct {
     if (self.open) self.flushContour();
     self.x = nx;
     self.y = ny;
+    self.sx = nx;
+    self.sy = ny;
     self.open = true;
-    self.emit(self.x, self.y);
+    if (!self.quads) self.emit(self.x, self.y); // quads mode: first quad starts at the next seg
   }
 
   fn lineTo(self: *Interp, nx: f64, ny: f64) void {
+    if (self.quads) {
+      self.emitQuad(self.x, self.y, 0.5 * (self.x + nx), 0.5 * (self.y + ny), nx, ny); // degenerate quad
+    } else {
+      self.emit(nx, ny);
+    }
     self.x = nx;
     self.y = ny;
-    self.emit(self.x, self.y);
   }
 
   fn curveTo(self: *Interp, x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64) void {
     const x0 = self.x;
     const y0 = self.y;
-    var i: usize = 1;
-    while (i <= CURVE_STEPS) : (i += 1) {
-      const t = @as(f64, @floatFromInt(i)) / CURVE_STEPS;
-      const u = 1.0 - t;
-      const bx = u * u * u * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3;
-      const by = u * u * u * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3;
-      self.emit(bx, by);
+    if (self.quads) {
+      // cubic P0 C1 C2 P3 → two quadratics via one de Casteljau split at t=0.5.
+      const ax = 0.5 * (x0 + x1);
+      const ay = 0.5 * (y0 + y1);
+      const bx = 0.5 * (x1 + x2);
+      const by = 0.5 * (y1 + y2);
+      const ex = 0.5 * (x2 + x3);
+      const ey = 0.5 * (y2 + y3);
+      const dx = 0.5 * (ax + bx);
+      const dy = 0.5 * (ay + by);
+      const gx = 0.5 * (bx + ex);
+      const gy = 0.5 * (by + ey);
+      const mx = 0.5 * (dx + gx);
+      const my = 0.5 * (dy + gy);
+      const qlx = 0.25 * (3 * (ax + dx) - x0 - mx);
+      const qly = 0.25 * (3 * (ay + dy) - y0 - my);
+      const qrx = 0.25 * (3 * (gx + ex) - mx - x3);
+      const qry = 0.25 * (3 * (gy + ey) - my - y3);
+      self.emitQuad(x0, y0, qlx, qly, mx, my);
+      self.emitQuad(mx, my, qrx, qry, x3, y3);
+    } else {
+      var i: usize = 1;
+      while (i <= CURVE_STEPS) : (i += 1) {
+        const t = @as(f64, @floatFromInt(i)) / CURVE_STEPS;
+        const u = 1.0 - t;
+        const bxx = u * u * u * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3;
+        const byy = u * u * u * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3;
+        self.emit(bxx, byy);
+      }
     }
     self.x = x3;
     self.y = y3;
@@ -357,13 +397,23 @@ const Interp = struct {
 };
 
 /// Interpret one glyph charstring → L of flat F contours (pixel, y-flipped).
+/// `quads`=false: flattened polylines. `quads`=true: RAW quadratic control triples
+/// [x0 y0 cx cy x1 y1 …] (cubics split to 2 quads, lines → degenerate quads) for the
+/// analytic Slug renderer — same shape as font.glyf.quads.
 pub fn outline(charstring: []const u8, gsubrs: [][]const u8, lsubrs: [][]const u8, scale: f64) ?k.K {
+  return interp(charstring, gsubrs, lsubrs, scale, false);
+}
+pub fn outlineQuads(charstring: []const u8, gsubrs: [][]const u8, lsubrs: [][]const u8, scale: f64) ?k.K {
+  return interp(charstring, gsubrs, lsubrs, scale, true);
+}
+fn interp(charstring: []const u8, gsubrs: [][]const u8, lsubrs: [][]const u8, scale: f64, quads: bool) ?k.K {
   var it = Interp{
     .gsubrs = gsubrs,
     .lsubrs = lsubrs,
     .gbias = bias(gsubrs.len),
     .lbias = bias(lsubrs.len),
     .scale = scale,
+    .quads = quads,
     .contours = .empty,
     .cur = .empty,
   };

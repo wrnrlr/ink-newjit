@@ -276,4 +276,63 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
     cb: mix[sbuf[off+26.]; sbuf[off+30.]; d]
     ca: mix[sbuf[off+27.]; sbuf[off+31.]; d]
     (cr; cg; cb; ((ca*ins)*scis))}]
+
+  / ── Image-paint fill (analytic coverage × a sampled image) ─────────────────────
+  / Same scene-buffer coverage + scissor as FRAGF, but the colour is an IMAGE sampled at
+  / paintMat·(fx,fy)/extent (extent = image w,h) and tinted by innerCol. Used ONLY for
+  / type-1 (image) fills — solid/gradient/text stay on FRAGF (no per-draw texture bind).
+  FRAGFI: shader.fragmentBufTex[[wUvA:`v4; wPos:`v4; out:`v4]; 2; 1; {[wUvA; wPos; qbuf; sbuf}
+    px: wUvA[0]; py: wUvA[1]; aa: wUvA[2]
+    fx: wPos[0]; fy: wPos[1]
+    off: floor[wUvA[3]+0.5]
+    band: clamp[floor[py*slugNB]; 0.; slugNB-1.]
+    base: (off+slugPS)+(band*(slugMPB*8.))
+    cov: rsum[slugMPB; {[j]
+      o: base+(j*8.)
+      x0:sbuf[o]; y0:sbuf[o+1.]; cx:sbuf[o+2.]; cy:sbuf[o+3.]; x2:sbuf[o+4.]; y2:sbuf[o+5.]
+      a: (y0-(2.*cy))+y2
+      b: 2.*(cy-y0)
+      c: y0-py
+      isLine: 1.-step[1e-4; abs[a]]
+      aq: a+(isLine*1.)
+      disc: (b*b)-(4.*aq*c)
+      sq: sqrt[max[disc;0.]]
+      inv: 1.%(2.*aq)
+      tq1: ((0.-b)-sq)*inv
+      tq2: ((0.-b)+sq)*inv
+      bl: b+((1.-step[1e-6;abs[b]])*1e-6)
+      tll: (py-y0)%bl
+      t1: mix[tq1; tll; isLine]
+      t2: mix[tq2; 9.; isLine]
+      u1: 1.-t1; u2: 1.-t2
+      xc1: (((u1*u1)*x0)+(2.*u1*t1*cx))+((t1*t1)*x2)
+      xc2: (((u2*u2)*x0)+(2.*u2*t2*cx))+((t2*t2)*x2)
+      gq1: (step[0.;disc]*step[0.;t1])*(1.-step[1.;t1])
+      gq2: (step[0.;disc]*step[0.;t2])*(1.-step[1.;t2])
+      gl: step[min[y0;y2];py]*(1.-step[max[y0;y2];py])
+      g1: mix[gq1; gl; isLine]
+      g2: (1.-isLine)*gq2
+      w1: mix[sign[(2.*aq*t1)+b]; sign[y2-y0]; isLine]
+      w2: sign[(2.*aq*t2)+b]
+      r1: clamp[(0.5+((xc1-px)%aa)); 0.; 1.]
+      r2: clamp[(0.5+((xc2-px)%aa)); 0.; 1.]
+      ((g1*w1)*r1)+((g2*w2)*r2)}]
+    ins: clamp[abs[cov]; 0.; 1.]
+    scx: ((sbuf[off]*fx)+(sbuf[off+4.]*fy))+sbuf[off+8.]
+    scy: ((sbuf[off+1.]*fx)+(sbuf[off+5.]*fy))+sbuf[off+9.]
+    sax: 0.5-((abs[scx]-sbuf[off+32.])*sbuf[off+34.])
+    say: 0.5-((abs[scy]-sbuf[off+33.])*sbuf[off+35.])
+    scis: clamp[sax;0.;1.]*clamp[say;0.;1.]
+    ptx: ((sbuf[off+12.]*fx)+(sbuf[off+16.]*fy))+sbuf[off+20.]
+    pty: ((sbuf[off+13.]*fx)+(sbuf[off+17.]*fy))+sbuf[off+21.]
+    tx: sample[0; ((ptx%sbuf[off+36.]); (pty%sbuf[off+37.]))]
+    (tx[0]*sbuf[off+24.]; tx[1]*sbuf[off+25.]; tx[2]*sbuf[off+26.]; (((tx[3]*sbuf[off+27.])*ins)*scis))}]
+  SCPIPEI: 0    / lazy image-fill pipeline (buffer coverage + texture sample)
+  / fillDrawImg[clip;scr;off;aa;tex] — one image fill: like fillDraw, but binds the image
+  / texture (a bare handle) so FRAGFI can sample it. Shares the scene buffer + quad pool.
+  fillDrawImg:{[clip;scr;off;aa;tex]
+    $[SCPIPEI=0; SCPIPEI:: mesh.compilePull[VTXF; FRAGFI]; 0]
+    vb: scNext[]
+    gpu.write[vb; fillQuad[clip;scr;off;aa]]
+    mesh.drawPullT[SCPIPEI; (vb;SCENE); 6; ,tex]}
 \d
