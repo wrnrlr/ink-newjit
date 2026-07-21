@@ -8,14 +8,13 @@
 / An immediate-mode drawing API (moveTo/lineTo/quadTo/cubicTo/fill/stroke) that
 / RECORDS into a retained, columnar "ops table" instead of drawing eagerly. Every
 / path reduces to quadratic Béziers (lines = degenerate quads, cubics split to two
-/ quads) so the same encoding feeds both today's tessellate+fill backend and a
-/ future GPU Slug rasterizer.
+/ quads), which is exactly what the Slug analytic rasterizer consumes.
 /
 / Each draw carries its own 2×3 affine transform (the CTM at fill/stroke time) —
-/ points are stored in LOCAL space and the transform rides alongside, so a GPU
-/ backend can transform on-device. cnv.render (Phase 0) applies the CTM on the CPU,
-/ flattens the quads, and issues one gpu.fill per draw (recursively — draws inside
-/ '/ / adverbs are eliminated, so a dynamic draw count needs recursion).
+/ points are stored in LOCAL space and the transform rides alongside. cnv.render bins
+/ every draw's curves + paint into ONE resident scene buffer and issues one bbox-quad
+/ pull draw each (recursively — draws inside '/ / adverbs are eliminated, so a dynamic
+/ draw count needs recursion).
 /
 / THE OPS TABLE (cnv.scene[])
 / ---------------------------
@@ -38,9 +37,10 @@
 /     cnv.render[props`width; props`height] }   / w,h = framebuffer size (for Slug text)
 /   window.run[run; 640. 480.]
 /
-/ SOLID fills and TEXT render through the analytic Slug SCENE-BUFFER backend (lib/slug.k)
-/ — resolution-independent, antialiased, one resident curve buffer per frame. Gradient/
-/ clipped fills + strokes still rasterise on the CPU tessellate + NanoVG fill path.
+/ EVERYTHING — solid/gradient fills, clips, strokes, and text — renders through the ONE
+/ analytic Slug SCENE-BUFFER backend (lib/slug.k): resolution-independent, antialiased,
+/ one resident curve buffer per frame, the paint (gradient/solid + scissor clip) evaluated
+/ per pixel in the fragment. No tessellation. Strokes become fill outlines (miter joins).
 
 2: "lib/gpu.k"
 2: "lib/slug.k"
@@ -194,7 +194,7 @@
   draws:{[] +(`kind`pidx`width`rule`cstart`ccount`constart`concount)!(KIND;PIDX;WIDTH;RULE;CSTART;CCOUNT;CONSTART;CONCOUNT)}
   scene:{[] `draws`curves`conlen`xf`paints!(draws[];CURVES;CONLEN;XF;PAINTS)}
 
-  / ── CPU backend: reconstruct → transform → flatten → gpu.fill (Phase 0) ───────
+  / ── Ops-table geometry accessors (feed the Slug scene buffer) ────────────────
   drawM:{[i] XF@(6*i)+!6}
   / Draw i's contour buffers (list of flat quad buffers), local space.
   drawContours:{[i]
@@ -208,122 +208,134 @@
     X:(((m 0)*xs)+((m 2)*ys))+(m 4)
     Y:(((m 1)*xs)+((m 3)*ys))+(m 5)
     ,/+(X;Y)}
-  / Flatten one quadratic seg [x0 y0 cx cy x1 y1] to QN sample points (t=1/QN..1).
+  / Flatten one quadratic seg [x0 y0 cx cy x1 y1] to QN sample points (t=1/QN..1) — used
+  / by the stroke path to turn curved segments into a polyline before offsetting.
   segPts:{[seg]
     QN:16; tt:(1.+!QN)%QN; u:1.-tt; uu:u*u; ut:2.*u*tt; t2:tt*tt
     X:((uu*(seg 0))+(ut*(seg 2)))+(t2*(seg 4))
     Y:((uu*(seg 1))+(ut*(seg 3)))+(t2*(seg 5))
     ,/+(X;Y)}
-  / Flatten a contour buffer (6/seg) to a polyline [x y x y …].
-  flatContour:{[buf]
-    nseg:(#buf)div 6
-    segs:(6*!nseg)_buf
-    (2#buf),(,/{segPts x}'segs)}
-  / Fill: transform contours, flatten, NaN-separate (holes), tessellate, draw.
-  fillDraw:{[i]
-    m:drawM i
-    polys:{flatContour x}'(m xfBuf/:drawContours i)
-    gpu.fill[gpu.tessellate[,/{x,0n,0n}'polys]; PAINTS PIDX i]}
-  / One stroke segment (A→B, half-width via normal) → 6 tri verts [x y u v].
-  / v(=ftcoord.y) MUST be 1: the built-in fill shader multiplies alpha by
-  / clamp(ftcoord.y,0,1) (its edge-AA fringe), so v=0 verts draw fully transparent.
-  segQuad:{[ax;ay;bx;by;hw]
-    dx:bx-ax; dy:by-ay; L:1e-6|sqrt[(dx*dx)+(dy*dy)]
-    nx:((-dy)*hw)%L; ny:(dx*hw)%L
-    p1:(ax+nx),(ay+ny); p2:(bx+nx),(by+ny); p3:(bx-nx),(by-ny); p4:(ax-nx),(ay-ny)
-    ,/[(p1;p2;p3;p1;p3;p4),\:0. 1.]}
-  / Stroke a polyline [x y …] with width w → tri verts (butt caps, no joins).
-  strokePoly:{[w;pts]
-    np:(#pts)div 2
-    $[np<2; 0#0.; strokeSegs[w;pts;np]]}
-  strokeSegs:{[w;pts;np]
-    k:!np-1; ax:pts@2*k; ay:pts@(2*k)+1; bx:pts@2*k+1; by:pts@(2*k+1)+1
-    ,/[segQuad'[ax;ay;bx;by;(#k)#0.5*w]]}
-  strokeDraw:{[i]
-    m:drawM i; w:WIDTH i
-    polys:{flatContour x}'(m xfBuf/:drawContours i)
-    v:,/[w strokePoly/:polys]
-    $[0<#v; gpu.fill[v; PAINTS PIDX i]; 0]}
-  / SOLID fills (paint inner==outer) route through the Slug scene buffer (analytic,
-  / resolution-independent); gradient/clipped fills + strokes stay on the tessellator.
-  solidFill:{[i] p:PAINTS PIDX i; (0=KIND i) & (p@24+!4)~(p@28+!4)}
-  drawIdx:{[i] $[solidFill i; 0; 0=KIND i; fillDraw i; strokeDraw i]}   / solid fills done in Pass 1
-  recStep:{[i] drawIdx i; recFrom i+1}
-  recFrom:{[i] $[i<ndraws[]; recStep i; 0]}
-  / ── Slug text pass — glyphs ride the SAME scene buffer as the solid fills ───────
-  / Each glyph's raw quadratic outline (font.quads) is just another fill: addGlyph bins
-  / its curves into the resident scene buffer (during the accumulate phase), drawGlyphS
-  / then draws the glyph's clip-space bbox quad whose fragment reads those curves back
-  / (analytic coverage, holes, AA). Unifying text onto the scene buffer (was a per-glyph
-  / curve texture) retires a redundant path — the roadmap's "one backend" direction.
-  / NB: glyph coverage quads are SQUARES (aspect-preserving normalisation) that overlap
-  / heavily when packed, so correct text needed the pull pipeline's depth compare relaxed
-  / to LESS_OR_EQUAL (see vk.zig) — under LESS the overlapping part of each later glyph
-  / was depth-rejected, dropping halves/whole glyphs ("Canvas in ink" → "C nvas i  i k").
+  / ── Stroke → fill outline (SCREEN space) ─────────────────────────────────────
+  / A stroke becomes a FILL: ONE closed outline that offsets every vertex by ±half-width
+  / along its MITER normal (the bisector of the two adjacent segment normals). One contour
+  / of ~2·npts edges — far cheaper than per-segment rects + join discs (those pile many
+  / curves into the vertex bands and truncate at slugMPB). Butt caps at the open ends.
+  / Nonzero winding fills it (self-intersections at sharp corners stay filled). Fed to the
+  / Slug scene buffer like any fill → strokes get the same coverage + paint/gradient/clip.
+  / Closed polygon [x y …] → a flat quadratic contour (one degenerate quad per edge,
+  / control = edge midpoint), wrapping last→first.
+  polyContour:{[fp]
+    n:(#fp)div 2; i:!n; j:(1+i)mod n
+    xs:fp@2*i; ys:fp@1+2*i; nx:fp@2*j; ny:fp@1+2*j
+    ,/+(xs; ys; 0.5*xs+nx; 0.5*ys+ny; nx; ny)}
+  / Miter outline of an OPEN screen polyline (np points) at half-width hw → ONE ribbon
+  / contour: left offsets forward then right offsets reversed (a strip with butt caps at
+  / the ends — their vertex normal is just the adjacent segment normal; interior miters).
+  miterOpen:{[pts;np;hw]
+    xs:pts@2*!np; ys:pts@1+2*!np
+    sx:(1_xs)-(-1_xs); sy:(1_ys)-(-1_ys)
+    L:1e-6|sqrt[(sx*sx)+(sy*sy)]; nx:(0.-sy)%L; ny:sx%L          / np-1 segment normals
+    vnx:(*nx),((-1_nx)+(1_nx)),(*|nx); vny:(*ny),((-1_ny)+(1_ny)),(*|ny)
+    vl:1e-6|sqrt[(vnx*vnx)+(vny*vny)]; mx:vnx%vl; my:vny%vl
+    ri:(!np)&(np-2)
+    sca:hw%(0.25|((mx*nx@ri)+(my*ny@ri)))
+    ,polyContour[,/+(((xs+sca*mx),|(xs-sca*mx)); ((ys+sca*my),|(ys-sca*my)))]}
+  / Miter outline of a CLOSED polyline (from cnv.close: last point ≈ first). Drop the
+  / duplicate vertex, wrap the segments, miter EVERY vertex. A closed stroke is an ANNULUS,
+  / so return TWO contours — outer (left offset) + inner (right offset, REVERSED so its
+  / winding opposes the outer): nonzero winding then fills the ring and empties the hole.
+  miterClosed:{[pts;np;hw]
+    nv:np-1; i:!nv; j:(1+i)mod nv
+    xs:nv#pts@2*!np; ys:nv#pts@1+2*!np
+    sdx:(xs@j)-xs; sdy:(ys@j)-ys
+    L:1e-6|sqrt[(sdx*sdx)+(sdy*sdy)]; nx:(0.-sdy)%L; ny:sdx%L    / nv segment normals
+    pi:(i+nv-1)mod nv                                            / previous segment index
+    vnx:(nx@pi)+nx; vny:(ny@pi)+ny
+    vl:1e-6|sqrt[(vnx*vnx)+(vny*vny)]; mx:vnx%vl; my:vny%vl
+    sca:hw%(0.25|((mx*nx)+(my*ny)))
+    (polyContour[,/+((xs+sca*mx); (ys+sca*my))]; polyContour[,/+(|(xs-sca*mx); |(ys-sca*my))])}
+  / A path whose last point ≈ first is CLOSED — annulus (2 contours); else a ribbon (1).
+  miterContour:{[pts;np;hw]
+    xs:pts@2*!np; ys:pts@1+2*!np
+    $[(1e-4>abs[(*xs)-(*|xs)]) & (1e-4>abs[(*ys)-(*|ys)]); miterClosed[pts;np;hw]; miterOpen[pts;np;hw]]}
+  / strokeOutline[pts;hw] → list of outline contours (empty if <2 points).
+  strokeOutline:{[pts;hw] np:(#pts)div 2; $[np<2; (); miterContour[pts;np;hw]]}
+  / ── Shared corner math ──────────────────────────────────────────────────────
+  / The Slug fragment needs the SCREEN pos (for the paint/scissor matrices) AND the clip
+  / pos (for gl_Position), so every draw hands slug.fillDraw both sets of 4 corners.
+  SFW: 0.; SFH: 0.
+  toScreen:{[m;lx;ly] (((m 0)*lx)+((m 2)*ly)+(m 4)) , (((m 1)*lx)+((m 3)*ly)+(m 5))}
+  scrClip:{[s] (((2.*(s 0))%SFW)-1.) , (1.-((2.*(s 1))%SFH))}
+  / drawQuad[off;cl;m;ox;oy] — draw one scene-buffer fill: uv-rect cl offset by (ox,oy) in
+  / local space, transformed by m → 4 SCREEN + 4 clip corners; per-draw AA ≈1.2 screen px.
+  drawQuad:{[off;cl;m;ox;oy]
+    sa:toScreen[m; ox+cl 0; oy+cl 3]; sb:toScreen[m; ox+cl 2; oy+cl 3]
+    sc:toScreen[m; ox+cl 2; oy+cl 1]; sd:toScreen[m; ox+cl 0; oy+cl 1]
+    ca:scrClip sa; cb:scrClip sb; cc:scrClip sc; cd:scrClip sd
+    e:cb-ca; cw:1e-6|sqrt[((e 0)*(e 0))+((e 1)*(e 1))]
+    slug.fillDraw[(ca;cb;cc;cd); (sa;sb;sc;sd); off; 2.4%(cw*SFW)]}
+
+  / ── Slug text pass — glyphs ride the SAME scene buffer as fills/strokes ─────────
+  / Each glyph's raw quadratic outline (font.quads) is just another fill (a SOLID paint of
+  / the glyph colour): addGlyph bins it during the accumulate phase, drawGlyphS draws its
+  / bbox quad, the fragment reads the curves back for analytic coverage + holes + AA.
+  / Coverage quads are SQUARES (aspect-preserving normalise) that overlap when packed, so
+  / correct text needed the pull pipeline's depth relaxed to LESS_OR_EQUAL (see vk.zig).
   TXOFF:  0#0.   / per-glyph scene-buffer offset (-1 = empty glyph, e.g. space: skip)
   TXRECT: ()     / per-glyph uv-square rect in glyph pixel space (from addFill)
-  / A space/empty glyph has no contours — addFill would bin garbage (min/max over an
-  / empty point set) and poison the shared buffer; record a -1 sentinel and skip its draw.
-  / NB: the empty-glyph branch is a NAMED helper, not an inline [..;..] block — a
-  / bracket block inside a $[...] branch parses as a dict literal (doesn't run the
-  / statements), which would leave TXOFF/TXRECT short and desync them from the glyph
-  / indices (spaces then draw, words lose their gaps).
+  / A space/empty glyph has no contours — addFill would bin garbage (min/max over an empty
+  / point set) and poison the shared buffer; record a -1 sentinel and skip its draw. NB:
+  / the skip branch is a NAMED helper, not an inline [..;..] block — a bracket block in a
+  / $[...] branch parses as a DICT literal (runs nothing), which would desync TXOFF/TXRECT.
+  txPaint:{[i] c:TXCOL i; gpu.solid[c 0; c 1; c 2; c 3]}   / glyph = a solid-colour fill
   addGlyph:{[i]
     cs: font.quads[TXFACE i; TXGID i; TXSZ i]
     $[0<#cs; addGlyphC[i;cs]; addGlyphSkip[]]}
-  addGlyphC:{[i;cs] r:slug.addFill[cs; 0.14]; TXOFF::TXOFF,r 0; TXRECT::TXRECT,,r 1}
+  addGlyphC:{[i;cs] r:slug.addFill[cs; 0.14; txPaint i]; TXOFF::TXOFF,r 0; TXRECT::TXRECT,,r 1}
   addGlyphSkip:{[] TXOFF::TXOFF,-1.; TXRECT::TXRECT,,0. 0. 0. 0.}
   scanTStep:{[i] addGlyph i; scanText i+1}
   scanText:{[i] $[i<#TXGID; scanTStep i; 0]}
-  drawGlyphS:{[i]
-    off:TXOFF i; cl:TXRECT i; m:TXXF i; px:TXPX i; py:TXPY i
-    a: toClip[m; px+cl 0; py+cl 3]; b: toClip[m; px+cl 2; py+cl 3]
-    c: toClip[m; px+cl 2; py+cl 1]; d: toClip[m; px+cl 0; py+cl 1]
-    e:b-a; cd:1e-6|sqrt[((e 0)*(e 0))+((e 1)*(e 1))]    / clip-space width of the quad
-    aa: 2.4%(cd*SFW)                                    / ≈1.2 screen px expressed in uv
-    slug.fillDraw[a; b; c; d; aa; off; TXCOL i]}
+  drawGlyphS:{[i] drawQuad[TXOFF i; TXRECT i; TXXF i; TXPX i; TXPY i]}
   drawTStep:{[i] $[(TXOFF i)<0.; 0; drawGlyphS i]; drawText i+1}
   drawText:{[i] $[i<#TXGID; drawTStep i; 0]}
 
-  / ── Solid-fill Slug pass (scene buffer) ───────────────────────────────────────
-  SFOFF: 0#0.    / per solid-fill: scene-buffer offset
-  SFRECT: ()     / its local uv-square rect (sqx0;sqTop;sqx1;sqBot)
-  SFXF: ()       / its transform (2×3)
-  SFCOL: ()      / its rgba
-  SFW: 0.; SFH: 0.
-  / Pass 1a: accumulate each solid fill's curves into slug's scene buffer.
-  addSolid:{[i]
-    r: slug.addFill[drawContours i; 0.14]
-    SFOFF::SFOFF,r 0; SFRECT::SFRECT,,r 1; SFXF::SFXF,,drawM i; SFCOL::SFCOL,,4#24_PAINTS PIDX i}
-  scanStep:{[i] $[solidFill i; addSolid i; 0]; scanSolids i+1}
-  scanSolids:{[i] $[i<ndraws[]; scanStep i; 0]}
-  / (px,py) local → clip space via transform m and viewport (SFW,SFH).
-  toClip:{[m;lx;ly]
-    sx:(((m 0)*lx)+((m 2)*ly))+(m 4); sy:(((m 1)*lx)+((m 3)*ly))+(m 5)
-    (((2.*sx)%SFW)-1.) , (1.-((2.*sy)%SFH))}
-  / Pass 1b: draw each solid fill's bbox quad (fragment reads its curves from the buffer).
-  drawSolid:{[k]
-    off:SFOFF k; cl:SFRECT k; m:SFXF k
-    a: toClip[m; cl 0; cl 3]; b: toClip[m; cl 2; cl 3]
-    c: toClip[m; cl 2; cl 1]; d: toClip[m; cl 0; cl 1]
-    e:b-a; cd:1e-6|sqrt[((e 0)*(e 0))+((e 1)*(e 1))]    / clip-space width of the quad
-    aa: 2.4%(cd*SFW)                                    / ≈1.2 screen px expressed in uv
-    slug.fillDraw[a; b; c; d; aa; off; SFCOL k]}
-  solStep:{[k] drawSolid k; solFrom k+1}
-  solFrom:{[k] $[k<#SFOFF; solStep k; 0]}
-  / render[w;h] — solid fills AND text share ONE Slug scene buffer (accumulate → flush
-  / once → draw). Gradient/clipped fills + strokes go through the tessellator in between.
-  / Draw order: solid fills (base), tessellation (gradients/strokes), text (top). w,h =
-  / framebuffer size. (fill-pipeline draws replay under all pull draws in the pass, so the
-  / tessellated background gradient still lands beneath the scene-buffer fills/text.)
+  / ── Unified scene-buffer draw pass (fills + strokes, in ops-table order) ────────
+  / EVERY fill/stroke bins its curves + 44-float paint block into the ONE scene buffer; the
+  / fragment reads the curves for coverage AND evaluates the paint (gradient/solid + baked
+  / clip) at its screen pos. No tessellation. Fills = local contours + drawM; strokes = a
+  / SCREEN-space offset outline (so width is screen px) + identity transform.
+  DOFF: 0#0.; DRECT: (); DXF: ()
+  / Flatten a stroke contour to a polyline, but DON'T subdivide straight segments (control
+  / ≈ midpoint) — a subdivided straight edge piles all its collinear pieces into ONE band
+  / (a horizontal edge → 16 pieces × 2 outline sides > slugMPB → truncated/dropped). Curves
+  / still get segPts. So a rectangle/zigzag stroke is just its corner points; curves stay smooth.
+  segFlat:{[seg]
+    mx:0.5*(seg 0)+(seg 4); my:0.5*(seg 1)+(seg 5)
+    $[(1e-3>abs[(seg 2)-mx]) & (1e-3>abs[(seg 3)-my]); (seg 4),(seg 5); segPts seg]}
+  strokeFlat:{[buf] nseg:(#buf)div 6; (2#buf),(,/segFlat'(6*!nseg)_buf)}
+  strokeCs:{[i]
+    m:drawM i; hw:0.5*WIDTH i
+    polys:{strokeFlat x}'(m xfBuf/:drawContours i)
+    ,/strokeOutline'[polys; (#polys)#hw]}
+  drawCs:{[i] $[0=KIND i; drawContours i; strokeCs i]}
+  drawXf:{[i] $[0=KIND i; drawM i; 1. 0. 0. 1. 0. 0.]}
+  addDraw:{[i]
+    r: slug.addFill[drawCs i; 0.14; PAINTS PIDX i]
+    DOFF::DOFF,r 0; DRECT::DRECT,,r 1; DXF::DXF,,drawXf i}
+  scanStep:{[i] addDraw i; scanDraws i+1}
+  scanDraws:{[i] $[i<ndraws[]; scanStep i; 0]}
+  drawOne:{[k] drawQuad[DOFF k; DRECT k; DXF k; 0.; 0.]}
+  drawStep:{[k] drawOne k; drawFrom k+1}
+  drawFrom:{[k] $[k<#DOFF; drawStep k; 0]}
+  / render[w;h] — fills + strokes + text, ALL analytic through the ONE Slug scene buffer:
+  / accumulate every draw's curves+paint → upload once → draw (fills/strokes in ops order,
+  / then text on top). w,h = framebuffer size (= the fragment's screen space for paints).
   render:{[w;h]
-    SFOFF::0#0.; SFRECT::(); SFXF::(); SFCOL::(); SFW::w; SFH::h
-    TXOFF::0#0.; TXRECT::()
+    DOFF::0#0.; DRECT::(); DXF::(); TXOFF::0#0.; TXRECT::(); SFW::w; SFH::h
     slug.sceneBegin[]
-    $[0<ndraws[]; scanSolids 0; 0]                      / accumulate solid-fill curves
-    $[0<#TXGID; scanText 0; 0]                          / accumulate glyph curves
-    $[(0<#SFOFF)|(0<#TXGID); slug.sceneFlush[]; 0]      / upload the whole frame once
-    $[0<#SFOFF; solFrom 0; 0]                           / draw solid fills
-    $[0<ndraws[]; recFrom 0; 0]                         / gradient/clipped fills + strokes
-    $[0<#TXGID; drawText 0; 0]}                         / draw text glyphs
+    $[0<ndraws[]; scanDraws 0; 0]
+    $[0<#TXGID; scanText 0; 0]
+    $[(0<#DOFF)|(0<#TXGID); slug.sceneFlush[]; 0]
+    $[0<#DOFF; drawFrom 0; 0]
+    $[0<#TXGID; drawText 0; 0]}
 \d

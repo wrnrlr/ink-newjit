@@ -18,19 +18,17 @@ Related: `dye.md` (the ink→SPIR-V compiler), `kk.md`/`kk2.md` (compute), the
     │  cnv.moveTo/lineTo/quadTo/cubicTo/close, fill/stroke/text, gradients, clip
     ▼
   lib/canvas.k  ── records a columnar OPS TABLE (curves = quadratics, per-draw 2×3 xform)
-    │  cnv.render[w;h]  (accumulate → flush once → draw)
-    ├── solid fills ─────► lib/slug.k  scene-buffer path   (analytic, GPU, smooth)
-    ├── text glyphs ─────► lib/slug.k  scene-buffer path   (SAME buffer as solid fills)
-    └── gradient/clipped fills + strokes ─► tessellate + NanoVG uber-shader (blocky curves)
+    │  cnv.render[w;h]  (accumulate every draw's curves+paint → flush once → draw)
+    └── fills · gradients · clips · strokes · text ─► lib/slug.k ONE scene-buffer path
+                                                       (analytic coverage × per-pixel paint)
 ```
 
-Update (this session): **text moved off the per-glyph curve-texture path onto the
-scene buffer** — solid fills and glyph outlines now share ONE resident curve buffer,
-uploaded once per frame. The texture path (`slug.cell/tex/begin/drawCell`, `VTXC/FRAGC`)
-was **deleted** as redundant (roadmap "one backend"). The bug that had made text look
-broken ("Canvas in ink" → "C nvas i  i k") turned out to be a **depth-test** issue in
-the shared pull pipeline, fixed independently — see §4. Three fixes total made the
-scene-buffer text path correct.
+**ONE BACKEND.** Everything routes through the single Slug scene buffer now. Each draw bins
+its quadratic curves AND its 44-float NanoVG paint block (gradient/solid + baked clip) into
+one resident buffer; the fragment reads the curves for analytic coverage and evaluates the
+paint (rounded-rect gradient SDF + scissor) at its screen position, folding paint×coverage
+into the alpha. Strokes become fill outlines (miter joins, `canvas.miterContour`). No
+tessellation. See §3 (tasks 1–3, done) for how, and §4 for the gotchas.
 
 - **Canvas** (`lib/canvas.k`) is the API + scene model. Every path reduces to
   **quadratic Béziers** (lines = degenerate quads, cubics split to two quads),
@@ -120,30 +118,36 @@ scene-buffer text path correct.
 
 ## 3. Remaining tasks (roadmap to one backend)
 
-Priority order. The end state is: Slug renders *everything*, tessellation +
-`fill.frag` are deleted, `cnv.render` is a single pass.
+**ONE BACKEND REACHED.** Solid/gradient fills, clips, strokes, AND text all render through
+the single Slug scene-buffer path (`FRAGF`); `cnv.render` is one accumulate→flush→draw pass;
+canvas.k no longer calls `gpu.tessellate`/`gpu.fill`. Tasks 1–3 below are DONE:
 
-**Done this session:** solid fills + text now BOTH ride the scene buffer (one upload,
-one fragment shader `FRAGF`). What's left on the tessellator: gradient/clipped fills and
-strokes. So tasks 1–2 below are the last things standing between here and one backend.
+1. **Gradients + clip in `FRAGF` — DONE.** Each fill's full 44-float NanoVG paint block
+   (gradient/solid + baked clip) is packed into the scene buffer BEFORE its curves
+   (`addFill[cs;pad;paint]`, layout `[paint slugPS][bands]`, `off`→paint). The vertex now
+   carries the fragment's SCREEN pos (`fx,fy` varying) alongside uv; `FRAGF` evaluates
+   `scissorMask` and the rounded-rect gradient SDF at (fx,fy) — the exact math from
+   `lib/gpu/fill.frag` — and folds paint×scissor into the alpha. Solid = `ext.x<0.5` branch
+   (→ innerCol). Stride-8 vertex `[clipXY u v fx fy off aa]`; nbuf=1.
+2. **Strokes via Slug — DONE (option b, offset outline).** `canvas.miterContour` builds a
+   stroke's fill outline in SCREEN space by offsetting each vertex ±half-width along its
+   MITER bisector (limit ≈4×hw). OPEN paths → one ribbon contour (butt caps); CLOSED paths
+   (cnv.close, last≈first) → TWO contours (outer + reversed inner = an annulus, so winding
+   fills the ring and empties the hole). Then it's just a fill (identity transform, screen
+   space). Gotchas that bit: (i) don't subdivide STRAIGHT segments when flattening — a
+   horizontal edge's 16 collinear pieces × 2 sides overflow one band's `slugMPB` and drop
+   (`segFlat` emits straight segs as a single edge); (ii) the annulus needs the two separate
+   contours, not one concatenated ribbon (that was the missing-triangle-base bug).
+3. **Retire tessellation — DONE (canvas side).** canvas.k's `fillDraw`/`strokeDraw`/
+   `gpu.tessellate` paths are gone. `triangulate.zig` + `fill.frag`/`fill.vert` still exist
+   (other callers of `gpu.fill`/`gpu.tessellate` may remain) — deleting the native files is a
+   separate cleanup once nothing else uses them.
 
-1. **Gradients + clip in the Slug fill shader (`FRAGF`).** Evaluate the paint
-   (linear/radial/box) and scissor per-pixel and multiply into coverage. Needs a
-   **screen-position varying** (interpolate the fragment's canvas-local/screen
-   position across the quad) so the gradient/scissor math (same as NanoVG's
-   `paintMat`/`scissorMask`) can run. Pass the paint params (paintMat, inner/outer,
-   extent, radius, feather, scissorMat, scissorExt) per-fill — either packed into
-   the scene buffer alongside the curves, or as extra vertex attributes. Once done,
-   ALL fills route through the scene buffer (drop the `solidFill` gate).
-2. **Strokes via Slug.** Two options: (a) distance-to-nearest-curve coverage in
-   the shader (reuses the band structure; elegant for constant width; needs a
-   quadratic distance solve/approx), or (b) CPU offset-curve outline generation in
-   k (convert stroke+width → a fill outline, reuse the fill path; handles
-   caps/joins/dashes but more geometry). (a) is cleaner for the common case.
-3. **Retire tessellation.** Delete the `fillDraw`/`strokeDraw`/`gpu.tessellate`
-   canvas paths, `triangulate.zig`, and eventually `fill.frag`/`fill.vert` (also
-   satisfies the Phase-7 "self-host fill in dye" task in `.plan/tasks.md`). Make
-   Slug the default and only fill backend; `cnv.render` becomes one pass.
+   **Enabler for 1+2: independent-aspect normalisation.** `bandData`/`rectOf`/`normC` now
+   scale x and y INDEPENDENTLY (sx,sy) instead of aspect-preserving square. A wide/flat shape
+   (a stroke, a thin bar) then fills the full uv-y range so its curves spread across ALL bands
+   instead of cramming into a few (→ `slugMPB` truncation). The non-square quad undoes the
+   stretch, so coverage stays exact; glyphs/fills verified unchanged.
 4. **Image paint.** Sample an image texture × coverage in the Slug shader (add a
    texture binding to the fill pipeline). The uber-shader's type-1 path is the
    reference.
@@ -171,6 +175,27 @@ strokes. So tasks 1–2 below are the last things standing between here and one 
 ---
 
 ## 4. Lessons learned / gotchas (read before touching this code)
+
+### Gradients / clip / strokes (this session)
+- **Band truncation on FLAT shapes.** With aspect-preserving (square) normalisation, a
+  wide/flat shape (a stroke bbox, a thin bar) compresses in uv-y so ALL its curves land in a
+  couple of bands and overflow `slugMPB` → the higher-indexed curves silently drop. Fix:
+  normalise x and y INDEPENDENTLY (`normC`/`rectOf`/`bandData` take sx,sy); the non-square
+  quad undoes the stretch so coverage is still exact. This unblocked strokes.
+- **Don't subdivide straight stroke segments.** `segPts` flattens every segment to 16 points;
+  a horizontal edge's 16 collinear pieces × 2 outline sides = 32 curves in ONE band → dropped
+  (the "missing triangle base"). `segFlat` emits a straight segment (control≈midpoint) as a
+  single edge; only curves get 16 points.
+- **A CLOSED stroke is an ANNULUS = TWO contours** (outer offset + REVERSED inner offset), so
+  nonzero winding fills the ring and empties the hole. Concatenating L-forward+R-reversed into
+  ONE ribbon polygon is correct only for OPEN strokes (butt caps); using it for a closed path
+  gives a spiky, half-missing outline.
+- **Paint packed in the scene buffer, screen pos as a varying.** The fragment needs the pixel's
+  SCREEN (framebuffer) position for `paintMat`/`scissorMat` (both are inverse affines
+  screen→paint-local). Pass it as an extra vertex varying (`fx,fy`); pack the 44-float paint
+  block per-fill ahead of the curves (`off`→paint, bands at `off+slugPS`). Solid vs gradient =
+  `ext.x<0.5` (gpu.solid sets ext=0). Fold `paint.a × coverage × scissorMask` into out alpha
+  (straight SRC_ALPHA blend, so only alpha is the weight — don't premultiply rgb by scissor).
 
 ### ink language (cost real time)
 - **`,` adjacency.** `f ,/(...)` parses the `,` as *dyadic join with f*, not raze

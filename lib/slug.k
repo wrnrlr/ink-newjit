@@ -57,6 +57,7 @@ slugNB:  16.       / bands (rows)
 slugMPB: 24        / max curves per band = per-pixel loop length
 slugTW:  48.       / texture width in texels = 2*slugMPB
 slugAA:  0.004     / antialias ramp width (uv)
+slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUniforms floats)
 
 \d slug glyph upload pipe draw quad rectOf sceneBegin addFill sceneFlush fillDraw
 
@@ -65,12 +66,15 @@ slugAA:  0.004     / antialias ramp width (uv)
   BLO: 0#0.        / per-curve lowest overlapping band
   BHI: 0#0.        / per-curve highest overlapping band
 
-  / Normalise a flat [x y …] buffer into [pad,1-pad]² (aspect-preserving; y flipped
-  / from font y-down to uv y-up). Quad control points are just points.
-  normC:{[c;mx;my;s;pad]
+  / Normalise a flat [x y …] buffer into [pad,1-pad]² (y flipped from font y-down to uv
+  / y-up). x and y scale INDEPENDENTLY (sx,sy) — NOT aspect-preserving — so a wide/flat
+  / shape (a stroke, a thin bar) fills the full uv-y range and its curves spread across ALL
+  / bands instead of cramming into a few (which truncates at slugMPB). The non-square quad
+  / (rectOf uses the same sx,sy) exactly undoes the stretch, so coverage stays correct.
+  normC:{[c;mx;my;sx;sy;pad]
     nn:(#c)div 2; ix:2*!nn; xs:c@ix; ys:c@ix+1
-    nx: pad+(((xs-mx)%s)*(1.-2.*pad))
-    ny: (1.-pad)-(((ys-my)%s)*(1.-2.*pad))
+    nx: pad+(((xs-mx)%sx)*(1.-2.*pad))
+    ny: (1.-pad)-(((ys-my)%sy)*(1.-2.*pad))
     ,/+(nx;ny)}
   / True y-extent (ymin;ymax) of a normalised quad [x0 y0 cx cy x1 y1], including the
   / interior y-extremum if the control bends the curve past its endpoints.
@@ -93,18 +97,20 @@ slugAA:  0.004     / antialias ramp width (uv)
   / outlines or arbitrary canvas paths. Normalises into [pad,1-pad]² and bins by y-extent.
   bandData:{[cs;pad]
     allp:,/cs; nn:(#allp)div 2; ix:2*!nn; xs:allp@ix; ys:allp@ix+1
-    mx:&/xs; my:&/ys; s:(|/xs-mx)|(|/ys-my); nc:#cs
-    ncs: normC'[cs; nc#mx; nc#my; nc#s; nc#pad]
+    mx:&/xs; my:&/ys; sx:1e-6|(|/xs-mx); sy:1e-6|(|/ys-my); nc:#cs
+    ncs: normC'[cs; nc#mx; nc#my; nc#sx; nc#sy; nc#pad]
     quads: ,/ {[c] (6*!(#c)div 6)_c}' ncs
     BC:: {[q] q,0. 0.}' quads
     yy: +yext' quads
     BLO:: 0.|((slugNB-1.)&(_ slugNB*yy 0)); BHI:: 0.|((slugNB-1.)&(_ slugNB*yy 1))
     ,/[oneBand'(0.+!`i$slugNB)]}
-  / The [pad,1-pad] uv-square in the contours' own coordinate space (sqx0;sqTop;sqx1;sqBot).
+  / The [pad,1-pad] uv-rect in the contours' own coordinate space (sqx0;sqTop;sqx1;sqBot),
+  / matching normC's INDEPENDENT sx,sy so uv maps back exactly (non-square in general).
   rectOf:{[cs;pad]
     allp:,/cs; nn:(#allp)div 2; ix:2*!nn; xs:allp@ix; ys:allp@ix+1
-    mx:&/xs; my:&/ys; s:(|/xs-mx)|(|/ys-my); sc:s%(1.-2.*pad)
-    (mx-(pad*sc); my-(pad*sc); mx+((1.-pad)*sc); my+((1.-pad)*sc))}
+    mx:&/xs; my:&/ys; sx:1e-6|(|/xs-mx); sy:1e-6|(|/ys-my)
+    scx:sx%(1.-2.*pad); scy:sy%(1.-2.*pad)
+    (mx-(pad*scx); my-(pad*scy); mx+((1.-pad)*scx); my+((1.-pad)*scy))}
   glyph:{[face;gid;sz;pad] bandData[font.quads[face;gid;sz]; pad]}
   upload:{[data] gpu.textureF[`i$(slugTW; slugNB); data]}   / → 2-D texture handle
 
@@ -180,34 +186,44 @@ slugAA:  0.004     / antialias ramp width (uv)
     SCACC:: 0#0.; SCQI:: 0
     $[SCPIPE=0; SCPIPE:: mesh.compilePull[VTXF; FRAGF]; 0]
     $[SCENE=0; SCENE:: gpu.buffer[SCCAP#0.]; 0]}
-  / addFill[cs; pad] → (float-offset into scene buffer; local uv-square rect); appends data.
-  / off is a FLOAT (0.+#SCACC) — a bare int would box the stride-10 vertex join to a list.
-  addFill:{[cs;pad] off:0.+#SCACC; SCACC:: SCACC,bandData[cs;pad]; (off; rectOf[cs;pad])}
+  / addFill[cs; pad; paint] → (float-offset into scene buffer; local uv-square rect).
+  / Appends the fill's 44-float NanoVG paint block (gradient/solid + baked clip) THEN its
+  / banded curve data. off is a FLOAT (0.+#SCACC) — a bare int would box the vertex join.
+  / Layout per fill: [paint: slugPS floats][bands: slugNB*slugMPB*8 floats]. off → paint.
+  addFill:{[cs;pad;paint] off:0.+#SCACC; SCACC:: SCACC,paint,bandData[cs;pad]; (off; rectOf[cs;pad])}
   sceneFlush:{[] gpu.write[SCENE; SCACC]}                / upload the whole frame's curves
-  scGrow:{[] SCQPOOL:: SCQPOOL,gpu.buffer[60#0.]}        / 6 verts × 10 floats
+  scGrow:{[] SCQPOOL:: SCQPOOL,gpu.buffer[48#0.]}        / 6 verts × 8 floats
   scNext:{[] $[SCQI<#SCQPOOL; 0; scGrow[]]; b:SCQPOOL SCQI; SCQI::SCQI+1; b}
-  / stride-10 quad [clipX clipY u v aa off r g b a]×6 from 4 CLIP-space corners.
-  fillQuad:{[a;b;c;d;aa;off;col] ,/((a,0.,0.,aa,off,col); (b,1.,0.,aa,off,col); (c,1.,1.,aa,off,col); (a,0.,0.,aa,off,col); (c,1.,1.,aa,off,col); (d,0.,1.,aa,off,col))}
-  / fillDraw[a;b;c;d;aa;off;col] — one fill: 4 CLIP corners, AA width (uv), scene offset, rgba.
-  fillDraw:{[a;b;c;d;aa;off;col]
+  / stride-8 vertex [clipX clipY u v fx fy off aa]: clip pos for gl_Position, uv for
+  / coverage, (fx,fy) = SCREEN/framebuffer pos for the paint & scissor matrices, off, aa.
+  fillVert:{[cp;sp;u;v;off;aa] ((cp 0),(cp 1),u,v),((sp 0),(sp 1),off,aa)}
+  / clip/scr = 4 corners each (a=uv00 b=uv10 c=uv11 d=uv01); 2 tris (a,b,c, a,c,d).
+  fillQuad:{[clip;scr;off;aa]
+    a:clip 0; b:clip 1; c:clip 2; d:clip 3; sa:scr 0; sb:scr 1; sc:scr 2; sd:scr 3
+    ,/(fillVert[a;sa;0.;0.;off;aa]; fillVert[b;sb;1.;0.;off;aa]; fillVert[c;sc;1.;1.;off;aa]
+       fillVert[a;sa;0.;0.;off;aa]; fillVert[c;sc;1.;1.;off;aa]; fillVert[d;sd;0.;1.;off;aa])}
+  / fillDraw[clip;scr;off;aa] — one fill: 4 CLIP + 4 SCREEN corners, scene offset, AA (uv).
+  fillDraw:{[clip;scr;off;aa]
     vb: scNext[]
-    gpu.write[vb; fillQuad[a;b;c;d;aa;off;col]]
+    gpu.write[vb; fillQuad[clip;scr;off;aa]]
     mesh.drawPull[SCPIPE; (vb;SCENE); 6]}
-  / Vertex pulls the stride-10 quad from binding 0; scene buffer (binding 1) unused here.
-  VTXF: shader.vertexPull[[wUvA:`v4; wCol:`v4]; {[qbuf; sbuf; vid]
-    b:10.*vid
-    ((qbuf[b]; qbuf[b+1.]; 0.5; 1.0); (qbuf[b+2.]; qbuf[b+3.]; qbuf[b+4.]; qbuf[b+5.]); (qbuf[b+6.]; qbuf[b+7.]; qbuf[b+8.]; qbuf[b+9.]))}]
-  / Fragment reads this fill's curves from the scene buffer (binding 1) at base = off +
-  / band*slugMPB*8, same analytic band+coverage math as FRAG. qbuf (binding 0) declared, unused.
-  FRAGF: shader.fragmentBuf[[wUvA:`v4; wCol:`v4; out:`v4]; 2; {[wUvA; wCol; qbuf; sbuf]
+  / Vertex pulls the stride-8 quad from binding 0; scene buffer (binding 1) unused here.
+  VTXF: shader.vertexPull[[wUvA:`v4; wPos:`v4]; {[qbuf; sbuf; vid]
+    b:8.*vid
+    ((qbuf[b]; qbuf[b+1.]; 0.5; 1.0); (qbuf[b+2.]; qbuf[b+3.]; qbuf[b+7.]; qbuf[b+6.]); (qbuf[b+4.]; qbuf[b+5.]; 0.; 0.))}]
+  / Fragment: analytic coverage (curves at off+slugPS+band*slugMPB*8) × the fill's PAINT.
+  / The paint block (off..off+43) is the NanoVG FragUniforms layout; evaluate scissorMask
+  / and the gradient/solid paint at (fx,fy) — same math as lib/gpu/fill.frag — and fold
+  / into the alpha. So gradients, box/radial paints, and clip all come "for free" per fill.
+  FRAGF: shader.fragmentBuf[[wUvA:`v4; wPos:`v4; out:`v4]; 2; {[wUvA; wPos; qbuf; sbuf]
     px: wUvA[0]; py: wUvA[1]; aa: wUvA[2]
-    / off is one integer for the whole quad, but passed as an interpolated varying —
-    / barycentric fp gives off·(b0+b1+b2) with the sum ≠ 1.0 by ~1e-7, so a bare truncating
-    / buffer index (sbuf[off+…]) can land one slot low → reads the PREVIOUS fill's curves
-    / (glyphs dropped/half at some sizes/positions). Round to recover the exact integer.
+    fx: wPos[0]; fy: wPos[1]
+    / off is one integer/quad passed as an interpolated varying — barycentric fp gives
+    / off·(Σbary) with Σ≠1.0 by ~1e-7, so a bare truncating buffer index can land one slot
+    / low → reads the previous fill's data. Round to recover the exact integer.
     off: floor[wUvA[3]+0.5]
     band: clamp[floor[py*slugNB]; 0.; slugNB-1.]
-    base: off+(band*(slugMPB*8.))
+    base: (off+slugPS)+(band*(slugMPB*8.))
     cov: rsum[slugMPB; {[j]
       o: base+(j*8.)
       x0:sbuf[o]; y0:sbuf[o+1.]; cx:sbuf[o+2.]; cy:sbuf[o+3.]; x2:sbuf[o+4.]; y2:sbuf[o+5.]
@@ -239,5 +255,25 @@ slugAA:  0.004     / antialias ramp width (uv)
       r2: clamp[(0.5+((xc2-px)%aa)); 0.; 1.]
       ((g1*w1)*r1)+((g2*w2)*r2)}]
     ins: clamp[abs[cov]; 0.; 1.]
-    (wCol[0]; wCol[1]; wCol[2]; ins*wCol[3])}]
+    / ── paint block @ off (NanoVG FragUniforms mat3s = 3 vec4 .xyz) ──
+    / scissorMask(fpos): abs(scissorMat·(fx,fy,1)) - scissorExt, ramp by scissorScale.
+    scx: ((sbuf[off]*fx)+(sbuf[off+4.]*fy))+sbuf[off+8.]
+    scy: ((sbuf[off+1.]*fx)+(sbuf[off+5.]*fy))+sbuf[off+9.]
+    sax: 0.5-((abs[scx]-sbuf[off+32.])*sbuf[off+34.])
+    say: 0.5-((abs[scy]-sbuf[off+33.])*sbuf[off+35.])
+    scis: clamp[sax;0.;1.]*clamp[say;0.;1.]
+    / paint(fpos): paintMat·(fx,fy,1) → paint-local pt; rounded-rect SDF → inner↔outer.
+    ptx: ((sbuf[off+12.]*fx)+(sbuf[off+16.]*fy))+sbuf[off+20.]
+    pty: ((sbuf[off+13.]*fx)+(sbuf[off+17.]*fy))+sbuf[off+21.]
+    extx: sbuf[off+36.]; exty: sbuf[off+37.]; rad: sbuf[off+38.]; feth: sbuf[off+39.]
+    dx: abs[ptx]-(extx-rad); dy: abs[pty]-(exty-rad)
+    mdx: max[dx;0.]; mdy: max[dy;0.]
+    sd: ((min[max[dx;dy];0.])+sqrt[(mdx*mdx)+(mdy*mdy)])-rad
+    gd: clamp[(sd+(feth*0.5))%max[feth;1e-4]; 0.; 1.]
+    d: (step[0.5;extx])*gd            / extx<0.5 ⇒ solid (d=0 ⇒ innerCol); else gradient
+    cr: mix[sbuf[off+24.]; sbuf[off+28.]; d]
+    cg: mix[sbuf[off+25.]; sbuf[off+29.]; d]
+    cb: mix[sbuf[off+26.]; sbuf[off+30.]; d]
+    ca: mix[sbuf[off+27.]; sbuf[off+31.]; d]
+    (cr; cg; cb; ((ca*ins)*scis))}]
 \d
