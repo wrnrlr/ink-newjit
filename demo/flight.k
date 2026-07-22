@@ -48,7 +48,7 @@ ui.set[`type; "one-way flight"]; ui.set[`d1; "27.03.2014"]; ui.set[`d2; "27.03.2
 
 run:{[props]
   W: ui.run[world.view[]; props]
-  {world.act x}' ui.frame[W; props`events]
+  {world.act x}' ui.frame[W; props]
   ui.draw[ui.run[world.view[]; props]; props`width; props`height]}
 
 window.run[run; 460. 400.]

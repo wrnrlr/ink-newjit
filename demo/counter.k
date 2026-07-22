@@ -31,7 +31,7 @@ world.view:{[] ui.bg[0.97 0.97 0.98 1.; ui.pad[40.; ui.col[18.; (
 / ── frame: input (hit-test events) → update model → repaint fresh view ──
 run:{[props]
   W: ui.run[world.view[]; props]
-  {world.act x}' ui.frame[W; props`events]
+  {world.act x}' ui.frame[W; props]
   ui.draw[ui.run[world.view[]; props]; props`width; props`height]}
 
 ui.setFont (font.read "font/FiraCode-Regular.ttf") 0

@@ -38,7 +38,7 @@ ui.set[`c; "20"]; ui.set[`f; "68"]
 
 run:{[props]
   W: ui.run[world.view[]; props]
-  {0}' ui.frame[W; props`events]     / edit the focused buffer
+  {0}' ui.frame[W; props]     / edit the focused buffer
   world.sync[]                        / propagate to the other field
   ui.draw[ui.run[world.view[]; props]; props`width; props`height]}
 

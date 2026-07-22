@@ -191,3 +191,11 @@ in the front-end to the existing convert stencils.
 guard a side effect (why `scatterAdd`'s out-of-range guard selects value `0`
 rather than skipping the store). Promoting conditional *expressions* to real
 control flow is possible but not currently needed for pure expressions.
+
+## Namespace member written only externally is invisible to internal readers (file-load)
+A `\d ns` member that is only assigned from OUTSIDE the block (`ns.member:: v`) and read INSIDE by
+bare name resolves to a DIFFERENT global than the external write, when the file is loaded via `2:`
+or run as the main script. Repro: file `\d world; el:0.; probe:{[] el}; \d`; then `world.el::5`;
+`world.probe[]` → 0 (should be 5). Inline it returns 5. Adding any internal write (`el::…` in a
+namespace fn) makes both align. Likely compile-time name-mangling treating read-only members as
+file-private. Workaround: set members via an internal setter fn. Found building demo/timer.k.
