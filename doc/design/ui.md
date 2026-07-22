@@ -96,6 +96,16 @@ boundary); `lib/layout.k` is a deprecated shim that just loads `lib/ui.k`. Neste
 members (naming, not scoping); a genuinely large widget could be split to a `ui.table.*`-style set
 of dotted globals if it ever earns one.
 
+**Style: fully-qualified, no `\d` (2026-07-22).** `lib/ui.k`, `lib/fmt.k`, `lib/uitest.k` and every
+demo now write every member and every internal reference OUT — `ui.label:{…ui.measure…}`,
+`world.count[a]:: 1 + world.count a` — instead of a `\d ui …` block with bare names. Why: it
+sidesteps the compiler's namespace-external-write bug (`.plan/triage.md` — a `\d` member written only
+externally is invisible to inside bare-name readers) and makes resolution obvious. Everything is a
+public dotted global; there's no privacy distinction anymore. The mechanical conversion respected
+scope (a local `bg` shadowing the `ui.bg` combinator stays bare; `` `bg `` dict-key symbols are
+untouched) and is guarded by the 26+3 test suite. `\d` still exists in the language — this is a
+convention for the UI stack, not a language change.
+
 ## Layout: flexbox (in `ui`)
 
 You never hard-code x/y/w/h. You describe the UI as a **tree of nodes** — `ui.row`/`ui.col`
@@ -276,14 +286,23 @@ run:{[props]
 
 ## Roadmap — remaining work, ranked
 
-1. **Test framework (DONE — see below).** `lib/uitest.k` + `test/ui.k` (26 assertions, `make ui-test`)
+**Infrastructure DONE (2026-07-22) — the actual UI FEATURES below (from §3 on) are all still open;
+next session should start there.** This cycle was tooling + testing + a namespace refactor, not new
+widgets/behaviour:
+
+1. **Test framework (DONE).** `lib/uitest.k` + `test/ui.k` (26 assertions, `make ui-test`)
    regression-guard layout/hit-test/action-dispatch and the full interaction surface (focus, text
    editing, slider, select, list). `test/uishot.k` (`make ui-shot`) adds golden-PNG screenshot diffs
-   via the native `window.test`/`gpu.shot` verbs. Follow-up: k-level pipeline-cache invalidation on
-   device teardown, so more than one `window.test` context can render per process.
-2. **Codify the gotcha list into a lint/checklist**, and push the clearest compiler bug
-   (namespace-external-write) upstream via `.plan/triage.md`.
-3. **Scrolling** for `list`/`grid` (needs clip + content offset in the geometry pass).
+   via native `window.test`/`gpu.shot`; multiple render contexts per process work (a `gpu.gen`
+   device-generation guard in slug.k invalidates stale pipeline caches). Also DONE this cycle: the
+   whole UI stack converted from `\d` blocks to fully-qualified `ns.member` names (dodges the
+   namespace-external-write bug — see §"One namespace").
+2. **Gotcha lint (PARTIAL).** `tools/klint.k` (`make lint`) flags the `<=`/`>=` misparse (it already
+   caught a real bug in `lib/pga.k`); the `name`sym`-before-operator and bracketed-`$[]` checks need
+   a real tokenizer (CST spans are unreliable) — still open. The namespace-external-write compiler
+   bug is logged in `.plan/triage.md` (worth pushing upstream, or just keep using fully-qualified).
+3. **Scrolling** for `list`/`grid` (needs clip + content offset in the geometry pass). ← FIRST actual
+   UI feature for next session.
 4. **Generalise the overlay** so dialogs float (currently dropdown-only; dialogs use inline bars);
    lift the 2-render/frame cap (bump `SCNF`) if nested overlays are needed.
 5. **Multiple UI contexts** — the interaction state is global singletons; no independent sub-UIs /
@@ -328,12 +347,12 @@ run:{[props]
   via `image.read` in pure k — no native diff verb). `t.render` lazily loads a font (ui.draw needs
   one — a widget with text and no font renders blank).
 
-  Two constraints, documented at the verbs: **(1)** call `window.test` ONCE per process — a 2nd
-  context renders blank because lib/canvas.k/dye cache compiled-pipeline handles in k globals bound
-  to the first, torn-down device (k-level cache invalidation on teardown is the real fix; until then
-  put all a suite's shots in one `t.render`, and run separate shot files as separate processes — the
-  make target does). **(2)** goldens are GPU/driver-specific; regenerate by deleting a `<name>.png`.
-  `make ui-shot` is kept OUT of `make test` since it needs a GPU (window.test).
+  Multiple `t.render` contexts per process now work: `gpu.gen` is a native device-generation counter
+  (bumped on every device creation), and `lib/slug.k`'s `sceneBegin` compares it and drops its cached
+  pipeline/buffer handles (`SCPIPE`/`SCPIPEI`/`SCENEV`/`SCQPV`) when the device changes — so a 2nd
+  context recompiles instead of reusing dead handles (it used to render blank). Goldens are
+  GPU/driver-specific; regenerate by deleting a `<name>.png`. `make ui-shot` is kept OUT of
+  `make test` since it needs a GPU (window.test).
 
 ---
 

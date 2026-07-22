@@ -108,6 +108,10 @@ fn buildEvents() ?K {
 
 // ── Device + resident registries (live only inside a gpuComputeRun call) ───────
 var g_vk: ?*vk.Vk = null;
+// Bumped every time a NEW device is created (each gpuRun/gpuComputeRun/gpuRenderRun). k-level
+// caches that hold device-specific handles (lib/slug.k's SCPIPE/SCENEV/…) read gpu.gen and reset
+// when it changes, so a 2nd context in one process recompiles instead of reusing dead handles.
+var g_dev_gen: i64 = 0;
 const alloc = std.heap.c_allocator;
 
 var g_bufs: std.ArrayList(vk.Buffer) = .empty;      // 1-based handles
@@ -150,6 +154,7 @@ export fn gpuComputeRun(fn_k: ?K) callconv(.c) ?K {
   const cbk = fn_k orelse return ki(0);
   var v = vk.Vk.init() catch return ki(-1);
   g_vk = &v;
+  g_dev_gen += 1;
   g_bufs = .empty; g_pipes = .empty;
   defer { resetRegistries(); v.deinit(); g_vk = null; }
 
@@ -726,6 +731,7 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
 
   var v = vk.Vk.initWindowed(@ptrCast(window), @intCast(win_w), @intCast(win_h)) catch return ki(-1);
   g_vk = &v;
+  g_dev_gen += 1;
   g_bufs = .empty;
   g_pipes = .empty;
   defer { resetRegistries(); v.deinit(); g_vk = null; }
@@ -825,11 +831,9 @@ export fn gpuRenderRun(fn_k: ?K, config_k: ?K) callconv(.c) ?K {
     win_h = @intFromFloat(cf[1]);
   };
 
-  // NOTE: call window.test ONCE per process. A second context renders blank because lib/canvas.k
-  // (and dye) cache compiled-pipeline handles in k globals bound to the FIRST device; the second
-  // device doesn't own them. Fixing that needs k-level cache invalidation on teardown — until then,
-  // put all of a suite's shots inside one t.render, and run separate screenshot files as separate
-  // processes (the make target does).
+  // A fresh device each call: g_dev_gen is bumped (below), so lib/slug.k's device-generation guard
+  // drops its cached pipeline/buffer handles and recompiles — a 2nd+ window.test context in one
+  // process now renders correctly (was blank before the guard).
   vk.initGlfwLoader();
   zglfw.init() catch return ki(-1);
   defer zglfw.terminate();
@@ -841,6 +845,7 @@ export fn gpuRenderRun(fn_k: ?K, config_k: ?K) callconv(.c) ?K {
 
   var v = vk.Vk.initWindowed(@ptrCast(window), @intCast(win_w), @intCast(win_h)) catch return ki(-1);
   g_vk = &v;
+  g_dev_gen += 1;
   g_bufs = .empty;
   g_pipes = .empty;
   g_render_win = window;
@@ -891,6 +896,12 @@ export fn gpuShot(path_k: ?K) callconv(.c) ?K {
   }
   resetFrameMeshes();
   return ki(0);
+}
+
+// gpuGen[x] → the device generation counter (bumped on each device creation). k-level caches of
+// device-specific handles compare it to detect a fresh device and recompile. See lib/slug.k.
+export fn gpuGen(_: ?K) callconv(.c) ?K {
+  return ki(@intCast(g_dev_gen));
 }
 
 // ── gpuCaps: device capability dict (doc/design/kk.md §4) ─────────────────────
@@ -945,6 +956,7 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuRun", @ptrCast(&gpuRun), 2);
   r.k_register("gpuRenderRun", @ptrCast(&gpuRenderRun), 2);
   r.k_register("gpuShot", @ptrCast(&gpuShot), 1);
+  r.k_register("gpuGen", @ptrCast(&gpuGen), 1);
   r.k_register("gpuFill", @ptrCast(&gpuFill), 2);
   r.k_register("gpuTess", @ptrCast(&gpuTess), 1);
   r.k_register("gpuSpirv", @ptrCast(&gpuSpirv), 2);

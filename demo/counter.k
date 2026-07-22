@@ -11,9 +11,7 @@
 2: "lib/ui.k"
 
 / ── model: all app/UI state under `world` ──
-\d world count
-  count: `c1`c2!0 0
-\d
+world.count: `c1`c2!0 0
 world.act:{[a] $[a~`nop; 0; world.count[a]:: 1 + world.count a]}   / controller
 
 / ── a reusable component: label + button bound to counter `key` ──

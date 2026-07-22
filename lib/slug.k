@@ -208,7 +208,14 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
   SCQPOOL: 0#0       / this frame's per-fill quad-buffer pool (= SCQPV SLFR)
   SCQPV:  (0#0; 0#0) / the SCNF quad pools
   SCQI:   0
+  / Device-generation guard: SCPIPE/SCPIPEI (pipelines) and SCENEV/SCQPV (resident buffers) are
+  / handles owned by the device that built them. A new device (a 2nd window.test / gpu context in the
+  / same process, gpu.gen bumped) invalidates them, so drop the caches to 0/empty and let the lazy
+  / builders below recompile. Without this a 2nd context renders blank (reuses dead handles).
+  SCGEN: -1
+  newDevice:{[] SCPIPE::0; SCPIPEI::0; SCENEV::(0;0); SCQPV::(0#0;0#0); SLFR::0; SCGEN::gpu.gen 0}
   sceneBegin:{[]
+    $[SCGEN=gpu.gen 0; 0; newDevice[]]
     SCACC:: 0#0.; SCQI:: 0
     SLFR:: (SLFR+1)mod SCNF
     $[SCPIPE=0; SCPIPE:: mesh.compilePull[VTXF; FRAGF]; 0]

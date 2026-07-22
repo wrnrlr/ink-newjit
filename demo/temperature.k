@@ -14,19 +14,17 @@
 ui.setFont (font.read "font/FiraCode-Regular.ttf") 0
 ui.set[`c; "20"]; ui.set[`f; "68"]
 
-\d world
-  / ── numeric validation on codepoints (single-char strings are atoms — normalise first) ──
-  digv:{[t] isd:(~t<48)&(~t>57); isdot:t=46; (&/isd|isdot)&(~1<+/isdot)&0<+/isd}
-  okv:{[v] neg:45=*v; t:$[neg;1_v;v]; $[0=#t;0;digv t]}
-  isNum:{[s] v:(0#0),`i$s; $[0=#v;0;okv v]}
-  num:{[s] .s}                                  / parse (safe: only called when isNum)
-  cToF:{[c] 32.+c*9%5}
-  fToC:{[f] (f-32.)*5%9}
+world.digv:{[t] isd:(~t<48)&(~t>57); isdot:t=46; (&/isd|isdot)&(~1<+/isdot)&0<+/isd}
+world.okv:{[v] neg:45=*v; t:$[neg;1_v;v]; $[0=#t;0;world.digv t]}
+world.isNum:{[s] v:(0#0),`i$s; $[0=#v;0;world.okv v]}
+world.num:{[s] .s}                                  / parse (safe: only called when isNum)
+world.cToF:{[c] 32.+c*9%5}
+world.fToC:{[f] (f-32.)*5%9}
   / write `dst` from `src` through `conv`, only if `src` currently parses (fixed 1-decimal).
-  syncFrom:{[src;dst;conv] s:ui.get src; $[isNum s; ui.set[dst; fmt.dec[1; conv num s]]; 0]}
-  sync:{[] $[ui.focus~`c; syncFrom[`c;`f;cToF]; ui.focus~`f; syncFrom[`f;`c;fToC]; 0]}
+world.syncFrom:{[src;dst;conv] s:ui.get src; $[world.isNum s; ui.set[dst; fmt.dec[1; conv world.num s]]; 0]}
+world.sync:{[] $[ui.focus~`c; world.syncFrom[`c;`f;world.cToF]; ui.focus~`f; world.syncFrom[`f;`c;world.fToC]; 0]}
 
-  view:{[] ui.bg[0.96 0.96 0.98 1.; ui.pad[44.; ui.col[26.; (
+world.view:{[] ui.bg[0.96 0.96 0.98 1.; ui.pad[44.; ui.col[26.; (
     ui.label["Temperature Converter"]
     ui.row[12.; (
       ui.input[`c; 110.; "°C"]
@@ -34,7 +32,6 @@ ui.set[`c; "20"]; ui.set[`f; "68"]
       ui.input[`f; 110.; "°F"]
       ui.sized[112.;34.; ui.label["Fahrenheit"]] )]
     ui.spacer[] )]]}
-\d
 
 run:{[props]
   W: ui.run[world.view[]; props]

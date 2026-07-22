@@ -199,3 +199,11 @@ or run as the main script. Repro: file `\d world; el:0.; probe:{[] el}; \d`; the
 `world.probe[]` → 0 (should be 5). Inline it returns 5. Adding any internal write (`el::…` in a
 namespace fn) makes both align. Likely compile-time name-mangling treating read-only members as
 file-private. Workaround: set members via an internal setter fn. Found building demo/timer.k.
+
+## `>=` misparse in lib/pga.k:39 (found by tools/klint.k)
+`pgaLDotF: … & pgaGrd[pgaBj]>=pgaGrd[pgaAi]` — k has no `>=`; this parses as
+`pgaGrd[pgaBj] > (=pgaGrd[pgaAi])` (a monadic `=` group of the RHS), not the intended
+`gradeB >= gradeA`. The left-contraction grade filter is therefore wrong. Fix:
+`~(pgaGrd[pgaBj]<pgaGrd[pgaAi])`. Not touched here (GA logic is subtle and lacks a quick oracle in
+this session; unrelated to the UI work). Surfaced by the new `<=`/`>=` linter `tools/klint.k`
+(`make lint`) — 2026-07-22.

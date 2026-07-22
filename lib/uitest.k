@@ -19,107 +19,104 @@
 / Coords are LOGICAL units at dpr=1 (the default) so they match the flexbox layout 1:1. Every action
 / helper drives exactly ONE frame; accumulate several events into one frame with t.emit + t.flush.
 
-\d t app setView onAct viewport reset begin click rclick down up move type key keyMod scroll wait frame emit flush step W acts find rect val eq ok truthy err report clicks render shot shotEq setShotDir shotDir setFont
-
-  / ── harness state ────────────────────────────────────────────────────────────
-  EVK:`kind`code`mods`down`x`y`amt
-  VIEW:{[] ui.label[""]}                          / current view thunk (0-arg → node tree)
-  ACT:{[a] 0}                                     / current per-action handler
-  VW:800.; VH:600.; DPR:1.                         / viewport (logical) + device pixel ratio
-  CX:0.; CY:0.; TIME:0.                            / cursor (framebuffer px) + sim time (s)
-  PEND:()                                          / events queued for the next flush
-  LW:()                                            / last solved widget table
-  LA:()                                            / last frame's returned actions
-  NPASS:0; NFAIL:0; FAILS:()                        / assertion tally
+t.EVK:`kind`code`mods`down`x`y`amt
+t.VIEW:{[] ui.label[""]}                          / current view thunk (0-arg → node tree)
+t.ACT:{[a] 0}                                     / current per-action handler
+t.VW:800.; t.VH:600.; t.DPR:1.                         / viewport (logical) + device pixel ratio
+t.CX:0.; t.CY:0.; t.TIME:0.                            / cursor (framebuffer px) + sim time (s)
+t.PEND:()                                          / events queued for the next flush
+t.LW:()                                            / last solved widget table
+t.LA:()                                            / last frame's returned actions
+t.NPASS:0; t.NFAIL:0; t.FAILS:()                        / assertion tally
 
   / ── setup ────────────────────────────────────────────────────────────────────
   / Register the app: `vf` is a THUNK {[] node} returning the node tree for the current model;
   / `af` is {[a] …} run once per action ui.frame returns (updates the model). Either may be omitted
   / for framework-only tests — assert on ui.get/isFocus/getv + t.acts[] instead.
-  app:{[vf;af] VIEW::vf; ACT::af; `}
-  setView:{[vf] VIEW::vf; `}
-  onAct:{[af] ACT::af; `}
+t.app:{[vf;af] t.VIEW::vf; t.ACT::af; `}
+t.setView:{[vf] t.VIEW::vf; `}
+t.onAct:{[af] t.ACT::af; `}
   / Viewport in LOGICAL units; dpr scales layout to framebuffer px (test coords stay logical).
-  viewport:{[w;h;dpr] VW::w; VH::h; DPR::dpr; CX::0.; CY::0.; `}
+t.viewport:{[w;h;dpr] t.VW::w; t.VH::h; t.DPR::dpr; t.CX::0.; t.CY::0.; `}
   / Wipe INTERACTION state between independent test groups (queue, cursor, time). Does NOT touch
   / the assertion tally — call it freely mid-suite; only t.begin resets the pass/fail counters.
-  reset:{[] PEND::(); LW::(); LA::(); CX::0.; CY::0.; TIME::0.; `}
+t.reset:{[] t.PEND::(); t.LW::(); t.LA::(); t.CX::0.; t.CY::0.; t.TIME::0.; `}
   / Zero the assertion tally (call once at the top of a test file).
-  begin:{[] NPASS::0; NFAIL::0; FAILS::(); reset[]}
+t.begin:{[] t.NPASS::0; t.NFAIL::0; t.FAILS::(); t.reset[]}
 
   / ── build the props dict the native window would feed ui.frame ────────────────
-  mkTbl:{[rows] EVK! $[0=#rows; (0#`z;0#0;0#0;0#0;0#0.;0#0.;0#0.); +rows]}
-  props:{[rows] `width`height`mx`my`time`dpr`events!(VW*DPR; VH*DPR; CX; CY; TIME; DPR; mkTbl rows)}
+t.mkTbl:{[rows] t.EVK! $[0=#rows; (0#`z;0#0;0#0;0#0;0#0.;0#0.;0#0.); +rows]}
+t.props:{[rows] `width`height`mx`my`time`dpr`events!(t.VW*t.DPR; t.VH*t.DPR; t.CX; t.CY; t.TIME; t.DPR; t.mkTbl rows)}
 
   / ── the core driver: run one frame from the queued (or given) events ──────────
   / 1) solve the view for the current model (hit-test table), 2) ui.frame → actions (real input
   / path: focus/menu/slider/keys mutate ui state), 3) dispatch each action to the app, 4) re-solve
   / so t.W[] reflects the post-action model. Clears the queue. Returns the actions.
-  step:{[rows]
-    p: props rows
-    W0: ui.run[VIEW[]; p]
+t.step:{[rows]
+    p: t.props rows
+    W0: ui.run[t.VIEW[]; p]
     a:  ui.frame[W0; p]
-    ACT'a
-    LW:: ui.run[VIEW[]; p]                         / post-action geometry
-    LA:: a
-    PEND::()
+    t.ACT'a
+    t.LW:: ui.run[t.VIEW[]; p]                         / post-action geometry
+    t.LA:: a
+    t.PEND::()
     a}
   / low-level: queue events, flush explicitly (many events → ONE frame)
   / Driver helpers return null (the actions are read back via t.acts[]) so a test file can drive at
   / top level without every line auto-printing. Use t.step directly when you want the actions inline.
-  emit:{[rows] PEND:: PEND,rows; `}
-  flush:{[] step PEND; `}
-  frame:{[] step PEND; `}                          / an empty (or queued-only) frame; advances nothing
+t.emit:{[rows] t.PEND:: t.PEND,rows; `}
+t.flush:{[] t.step t.PEND; `}
+t.frame:{[] t.step t.PEND; `}                          / an empty (or queued-only) frame; advances nothing
 
   / ── event constructors (framebuffer px = logical × dpr) ──────────────────────
-  pxx:{[x] x*DPR}; pxy:{[y] y*DPR}
-  evMouse:{[code;dn;x;y] (`mouse;code;0;dn;pxx x;pxy y;0n)}
-  evText:{[cp] (`text;cp;0;0N;CX;CY;0n)}
-  evKey:{[code;mods] (`key;code;mods;1;CX;CY;0n)}
-  evScroll:{[amt] (`scroll;0N;0;0N;CX;CY;amt)}
+t.pxx:{[x] x*t.DPR}; t.pxy:{[y] y*t.DPR}
+t.evMouse:{[code;dn;x;y] (`mouse;code;0;dn;t.pxx x;t.pxy y;0n)}
+t.evText:{[cp] (`text;cp;0;0N;t.CX;t.CY;0n)}
+t.evKey:{[code;mods] (`key;code;mods;1;t.CX;t.CY;0n)}
+t.evScroll:{[amt] (`scroll;0N;0;0N;t.CX;t.CY;amt)}
 
   / ── one-frame action helpers (each drives a frame; cursor persists) ───────────
   / a left click: move cursor there, then a down+up pair in one frame.
-  clickB:{[code;x;y] CX::pxx x; CY::pxy y; step (evMouse[code;1;x;y]; evMouse[code;0;x;y]); `}
-  click:{[x;y] clickB[0;x;y]}
-  rclick:{[x;y] clickB[1;x;y]}
+t.clickB:{[code;x;y] t.CX::t.pxx x; t.CY::t.pxy y; t.step (t.evMouse[code;1;x;y]; t.evMouse[code;0;x;y]); `}
+t.click:{[x;y] t.clickB[0;x;y]}
+t.rclick:{[x;y] t.clickB[1;x;y]}
   / press / release the left button separately (for drags): down at (x;y), later up.
   / (parens around the enlist: `step ,ev` would misparse as `step , ev` — `,` after the noun
   / `step` reads as DYADIC join, so step is never applied. `step (,ev)` forces monadic enlist.)
-  down:{[x;y] CX::pxx x; CY::pxy y; step (,evMouse[0;1;x;y]); `}
-  up:{[x;y] CX::pxx x; CY::pxy y; step (,evMouse[0;0;x;y]); `}
+t.down:{[x;y] t.CX::t.pxx x; t.CY::t.pxy y; t.step (,t.evMouse[0;1;x;y]); `}
+t.up:{[x;y] t.CX::t.pxx x; t.CY::t.pxy y; t.step (,t.evMouse[0;0;x;y]); `}
   / hover: move the cursor and run a frame (no event row; drag/hover read props`mx/my).
-  move:{[x;y] CX::pxx x; CY::pxy y; step (); `}
+t.move:{[x;y] t.CX::t.pxx x; t.CY::t.pxy y; t.step (); `}
   / type a string: one `text event per codepoint, all in one frame.
   / (parens: `step evText' x` would misparse as `(step evText)' x` — the `'`-binds-left gotcha.)
-  type:{[s] step (evText' `i$s); `}
+t.type:{[s] t.step (t.evText' `i$s); `}
   / a single key press (259 backspace, 261 delete, 263/262 ←/→, 268/269 home/end, …).
-  key:{[code] step (,evKey[code;0]); `}
-  keyMod:{[code;mods] step (,evKey[code;mods]); `}
-  scroll:{[amt] step (,evScroll amt); `}
+t.key:{[code] t.step (,t.evKey[code;0]); `}
+t.keyMod:{[code;mods] t.step (,t.evKey[code;mods]); `}
+t.scroll:{[amt] t.step (,t.evScroll amt); `}
   / advance sim time by dt and run an idle frame (time-driven UI updates).
-  wait:{[dt] TIME:: TIME+dt; step (); `}
+t.wait:{[dt] t.TIME:: t.TIME+dt; t.step (); `}
   / click a sequence of (x;y) points, one frame each (e.g. drag path via down/move/up is separate).
-  clicks:{[pts] {click . x}' pts}
+t.clicks:{[pts] {t.click . x}' pts}
 
   / ── inspecting the last frame ─────────────────────────────────────────────────
-  W:{[] LW}
-  acts:{[] LA}
+t.W:{[] t.LW}
+t.acts:{[] t.LA}
   / first widget-table row index whose id matches `id`, or -1.
-  find:{[id] i:&(LW`id)~\:id; $[#i; *i; -1]}
+t.find:{[id] i:&(t.LW`id)~\:id; $[#i; *i; -1]}
   / the (x;y;w;h) rect (framebuffer px) of widget `id`, or () if absent.
-  rect:{[id] i:find id; $[i<0; (); ((LW`x)i;(LW`y)i;(LW`w)i;(LW`h)i)]}
+t.rect:{[id] i:t.find id; $[i<0; (); ((t.LW`x)i;(t.LW`y)i;(t.LW`w)i;(t.LW`h)i)]}
   / a widget-table column value for `id` (e.g. t.val[`fx;`txt] → the drawn text).
-  val:{[id;col] i:find id; $[i<0; (); (LW col)i]}
+t.val:{[id;col] i:t.find id; $[i<0; (); (t.LW col)i]}
 
   / ── assertions (quiet on pass, loud on fail; tally for t.report) ──────────────
-  pass:{[nm] NPASS:: NPASS+1; `}
-  failed:{[nm;msg] NFAIL:: NFAIL+1; FAILS:: FAILS,,nm; `0:"  FAIL ",nm," — ",msg,"\n"; `}
-  eq:{[nm;got;exp] $[got~exp; pass nm; failed[nm; ($got)," ~ ",$exp]]}
-  ok:{[nm;cond] $[cond; pass nm; failed[nm; "expected true"]]}
-  truthy:{[nm;cond] ok[nm; $[0=#cond; 0; ~0~*cond]]}   / non-empty & first item non-zero
+t.pass:{[nm] t.NPASS:: t.NPASS+1; `}
+t.failed:{[nm;msg] t.NFAIL:: t.NFAIL+1; t.FAILS:: t.FAILS,,nm; `0:"  FAIL ",nm," — ",msg,"\n"; `}
+t.eq:{[nm;got;exp] $[got~exp; t.pass nm; t.failed[nm; ($got)," ~ ",$exp]]}
+t.ok:{[nm;cond] $[cond; t.pass nm; t.failed[nm; "expected true"]]}
+t.truthy:{[nm;cond] t.ok[nm; $[0=#cond; 0; ~0~*cond]]}   / non-empty & first item non-zero
   / assert an expression evaluates to an error value (protects the parse/eval verbs).
-  err:{[nm;v] ok[nm; iserr v]}
+t.err:{[nm;v] t.ok[nm; iserr v]}
 
   / ── screenshots (golden PNG diffs) ───────────────────────────────────────────
   / A screenshot test runs INSIDE a headless render context: t.render[testThunk] wraps the whole
@@ -129,42 +126,41 @@
   / Goldens live under t.shotDir (default test/golden), one PNG per name. First run for a name has
   / no golden → it's saved as the baseline and the assertion passes; later runs render to <name>.out.png
   / and pixel-diff it against the golden, failing if more than `tol` (fraction 0..1) of bytes differ.
-  shotDir:"test/golden"
-  setShotDir:{[d] shotDir::d; `}
+t.shotDir:"test/golden"
+t.setShotDir:{[d] t.shotDir::d; `}
   / RFN holds the test thunk for the window.test callback (a lambda can't close over render's
   / param — lambdas don't capture parent scope — so it reads this global instead).
-  RFN:{[] 0}
-  render:{[fn] RFN::fn; window.test[{[x] RFN[]; 0}; (VW*DPR),(VH*DPR)]; `}
+t.RFN:{[] 0}
+t.render:{[fn] t.RFN::fn; window.test[{[x] t.RFN[]; 0}; (t.VW*t.DPR),(t.VH*t.DPR)]; `}
   / ui.draw renders widget TEXT via ui.k's font; with no font set, drawTxt corrupts the frame (a
   / blank render). Load one lazily before the first shot. Override the path with t.setFont.
-  fontPath:"font/FiraCode-Regular.ttf"
-  fontSet:0
-  setFont:{[p] fontPath::p; fontSet::0; `}
-  loadFont:{[] ui.setFont (font.read fontPath) 0; fontSet::1}
-  ensureFont:{[] $[fontSet; 0; loadFont[]]}
+t.fontPath:"font/FiraCode-Regular.ttf"
+t.fontSet:0
+t.setFont:{[p] t.fontPath::p; t.fontSet::0; `}
+t.loadFont:{[] ui.setFont (font.read t.fontPath) 0; t.fontSet::1}
+t.ensureFont:{[] $[t.fontSet; 0; t.loadFont[]]}
   / render the current view to the GPU frame queue (call inside a shot, before gpu.shot flushes it).
-  paintNow:{[] ensureFont[]; p:props (); W:ui.run[VIEW[]; p]; ui.draw[W; VW*DPR; VH*DPR]}
+t.paintNow:{[] t.ensureFont[]; p:t.props (); W:ui.run[t.VIEW[]; p]; ui.draw[W; t.VW*t.DPR; t.VH*t.DPR]}
   / pixel diff of two image.read dicts → fraction of bytes that differ (1.0 if dims mismatch).
   / (helpers, not bracketed $-branches: a `[stmt;stmt]` block inside $[…] breaks the parser.)
-  imDims:{[x] (x`width; x`height)}
-  byteDiff:{[da;db] n:(#da)&#db; $[n=0; 1.; (+/~(n#da)=n#db)%n]}
-  pngDiff:{[a;b] $[(imDims a)~imDims b; byteDiff[a`data; b`data]; 1.]}
+t.imDims:{[x] (x`width; x`height)}
+t.byteDiff:{[da;db] n:(#da)&#db; $[n=0; 1.; (+/~(n#da)=n#db)%n]}
+t.pngDiff:{[a;b] $[(t.imDims a)~t.imDims b; t.byteDiff[a`data; b`data]; 1.]}
   / path builder — kept as a var so `gpu.shot p` (not `gpu.shot dir,"/",…`, which parses as
   / `(gpu.shot dir),"/",…` — a monadic call binds before the `,`) targets the whole path.
-  shotPath:{[name;ext] shotDir,"/",name,ext}
+t.shotPath:{[name;ext] t.shotDir,"/",name,ext}
   / t.shot[name] — capture the current view to <shotDir>/<name>.png (no assertion).
-  shot:{[name] paintNow[]; p:shotPath[name;".png"]; gpu.shot p; `}
+t.shot:{[name] t.paintNow[]; p:t.shotPath[name;".png"]; gpu.shot p; `}
   / golden branches as functions (again: no bracketed $-branches). Compare = render to <name>.out.png
   / and diff vs the golden; save = write the golden and pass (baseline on first run).
-  shotCmp:{[name;tol;g] out:shotPath[name;".out.png"]; gpu.shot out; o:image.read out; ok[name; (pngDiff[g;o])<tol]}
-  shotSave:{[name;gold] gpu.shot gold; `0:"  NOTE ",name," saved new golden (review + rerun)\n"; pass name}
+t.shotCmp:{[name;tol;g] out:t.shotPath[name;".out.png"]; gpu.shot out; o:image.read out; t.ok[name; (t.pngDiff[g;o])<tol]}
+t.shotSave:{[name;gold] gpu.shot gold; `0:"  NOTE ",name," saved new golden (review + rerun)\n"; t.pass name}
   / t.shotEq[name;tol] — golden-diff the current view. Baseline-on-first-run; else assert diff<tol.
-  shotEq:{[name;tol] gold:shotPath[name;".png"]; g:image.read gold; paintNow[]; $[`m~@g; shotCmp[name;tol;g]; shotSave[name;gold]]}
+t.shotEq:{[name;tol] gold:t.shotPath[name;".png"]; g:image.read gold; t.paintNow[]; $[`m~@g; t.shotCmp[name;tol;g]; t.shotSave[name;gold]]}
 
   / ── report ───────────────────────────────────────────────────────────────────
-  report:{[]
-    n: NPASS+NFAIL
-    `0:"\n",($n)," assertions: ",($NPASS)," passed, ",($NFAIL)," failed\n"
-    $[NFAIL>0; `0:"FAILED: ",(","/$FAILS),"\n"; `0:"ALL PASS\n"]
-    NFAIL}
-\d
+t.report:{[]
+    n: t.NPASS+t.NFAIL
+    `0:"\n",($n)," assertions: ",($t.NPASS)," passed, ",($t.NFAIL)," failed\n"
+    $[t.NFAIL>0; `0:"FAILED: ",(","/$t.FAILS),"\n"; `0:"ALL PASS\n"]
+    t.NFAIL}

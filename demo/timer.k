@@ -13,22 +13,20 @@
 ui.setFont (font.read "font/FiraCode-Regular.ttf") 0
 ui.setv[`dur; 15.]                       / initial duration (s)
 
-\d world
-  t0: 0.; now: 0.; el: 0.                 / reset time, current time, clamped elapsed
+world.t0: 0.; world.now: 0.; world.el: 0.                 / reset time, current time, clamped elapsed
   / tick/reset WRITE el/now from INSIDE the namespace — a member only written from OUTSIDE
   / (world.el::…) isn't visible to functions reading it by bare name when file-loaded.
-  tick:{[t;d] now::t; el:: (t-t0)&d}       / advance clock, clamp elapsed to duration
-  reset:{[] t0::now}
-  act:{[a] $[a~`reset; reset[]; 0]}
-  view:{[] d:ui.getv[`dur]; ui.bg[0.96 0.96 0.98 1.; ui.pad[40.; ui.col[22.; (
+world.tick:{[t;d] world.now::t; world.el:: (t-world.t0)&d}       / advance clock, clamp elapsed to duration
+world.reset:{[] world.t0::world.now}
+world.act:{[a] $[a~`reset; world.reset[]; 0]}
+world.view:{[] d:ui.getv[`dur]; ui.bg[0.96 0.96 0.98 1.; ui.pad[40.; ui.col[22.; (
     ui.label["Timer"]
-    ui.row[16.; ( ui.sized[110.;28.; ui.label["Elapsed:"]] ; ui.progress[$[d>0.;el%d;1.]; 300.; 22.] )]
-    ui.sized[300.;26.; ui.label fmt.sec el]
+    ui.row[16.; ( ui.sized[110.;28.; ui.label["Elapsed:"]] ; ui.progress[$[d>0.;world.el%d;1.]; 300.; 22.] )]
+    ui.sized[300.;26.; ui.label fmt.sec world.el]
     ui.row[16.; ( ui.sized[110.;28.; ui.label["Duration:"]] ; ui.slider[`dur; 300.; 0.; 60.] )]
     ui.sized[300.;26.; ui.label fmt.sec d]
     ui.button["Reset"; `reset]
     ui.spacer[] )]]}
-\d
 
 run:{[props]
   world.tick[props`time; ui.getv[`dur]]              / advance the clock (internal setter)

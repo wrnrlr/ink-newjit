@@ -22,7 +22,11 @@ HOST := $(HOST_OS)-$(HOST_ARCH)
 # Jupyter kernel, and native FFI extensions are unavailable there.
 PLATFORMS := macos-arm64 macos-x64 linux-arm64 linux-x64 windows-arm64 windows-x64
 
-.PHONY: test ui-test ui-shot build release all static-all install data demo qa bench info clean docs docs-snap
+.PHONY: test ui-test ui-shot lint build release all static-all install data demo qa bench info clean docs docs-snap
+
+# Flag common ink parse gotchas (currently the `<=`/`>=` misparse) in the k libs + demos.
+lint:
+	$(INK) tools/klint.k lib/*.k demo/*.k tools/*.k
 
 # Headless UI regression tests (lib/ui.k via the lib/uitest.k harness). Needs the gpu
 # dylib (the ui libs load it) but runs windowless — no GPU device, no render.

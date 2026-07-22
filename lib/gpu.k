@@ -29,6 +29,9 @@ window.test:   so 2: (`gpuRenderRun; 2)   / (fn; (w;h)_F) → 0 : headless rende
 / (canvas fills + pulled geometry) and write them to `path` as a PNG. Clears the
 / per-frame draw queues after. No-op outside a window.test context.
 gpu.shot:      so 2: (`gpuShot;      1)   / path_C → 0 : capture current frame to a PNG
+/ gpu.gen[x] — device generation counter (bumped on each device creation). k caches of
+/ device-specific handles compare it to detect a fresh device and rebuild (see lib/slug.k).
+gpu.gen:       so 2: (`gpuGen;       1)   / x → i : current device generation
 / Headless one-shot compute: no window, no event loop. Creates a GPU device,
 / calls fn once (write it {[x] …}; x is an ignored placeholder), then tears the
 / device down. Like window.run, stash results in a global from inside fn:
