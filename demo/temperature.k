@@ -10,6 +10,7 @@
 / what the user is typing.
 
 2: "lib/ui.k"
+2: "lib/fmt.k"
 ui.setFont (font.read "font/FiraCode-Regular.ttf") 0
 ui.set[`c; "20"]; ui.set[`f; "68"]
 
@@ -19,11 +20,10 @@ ui.set[`c; "20"]; ui.set[`f; "68"]
   okv:{[v] neg:45=*v; t:$[neg;1_v;v]; $[0=#t;0;digv t]}
   isNum:{[s] v:(0#0),`i$s; $[0=#v;0;okv v]}
   num:{[s] . s}                                  / parse (safe: only called when isNum)
-  fmt:{[x] $0.1*_0.5+10.*x}                       / round to 0.1 and format
   cToF:{[c] 32.+c*9%5}
   fToC:{[f] (f-32.)*5%9}
-  / write `dst` from `src` through `conv`, only if `src` currently parses.
-  syncFrom:{[src;dst;conv] s:ui.get src; $[isNum s; ui.set[dst; fmt conv num s]; 0]}
+  / write `dst` from `src` through `conv`, only if `src` currently parses (fixed 1-decimal).
+  syncFrom:{[src;dst;conv] s:ui.get src; $[isNum s; ui.set[dst; fmt.dec[1; conv num s]]; 0]}
   sync:{[] $[ui.focus~`c; syncFrom[`c;`f;cToF]; ui.focus~`f; syncFrom[`f;`c;fToC]; 0]}
 
   view:{[] ui.bg[0.96 0.96 0.98 1.; ui.pad[44.; ui.col[26.; (

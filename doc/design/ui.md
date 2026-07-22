@@ -135,9 +135,11 @@ controller mutates the model in place without threading it through every call.
 
 ## Widget kit & composable state (`layout` + `ui`)
 
-Leaves: `label`, `button`, `input` (focusable/editable, framework buffer), `select` (cycles through
-registered options on click — bound to a buffer like an input), `box`, `spacer`. Containers: `row`,
-`col`. **Combinators** amend one field of the node dict and chain, so state-driven styling is pure
+Leaves: `label`, `button`, `input` (focusable/editable, framework buffer), `select` (dropdown popup,
+bound to a buffer), `slider` (drag-adjustable numeric, `ui.getv`/`ui.setv`), `progress` (gauge),
+`list` (selectable rows, bound to an index), `canvas` (custom draw via `ui.onCanvas`, click →
+`ui.cvx`/`ui.cvy`), `box`, `spacer`. Containers: `row`, `col`. Number
+formatting is `lib/fmt.k` (`fmt.dec[n;x]` = fixed-width decimals, so a live value doesn't jitter). **Combinators** amend one field of the node dict and chain, so state-driven styling is pure
 and declarative: `layout.disabled nd` (grey + `act:`nop` → uninteractive), `layout.invalid nd`
 (red background), plus `grow`/`pad`/`sized`/`gap`/`bg`. A validated field is just
 `$[ok; input[…]; layout.invalid input[…]]` in the `view`. `ui.draw[W;w;h]` wraps
@@ -172,8 +174,8 @@ off *more* as they get harder:
 | 2 | **Temperature** | two-way binding | the two `ui` input buffers *are* the state; each frame read the FOCUSED field, and if it parses, write the converted value into the other (invalid → leave it). No separate model. **Done** (`demo/temperature.k`). |
 | 3 | **Flight Booker** | validation, enable/disable | a `select` (mode) + two date inputs; validity/enablement are **pure derived functions** of the buffers, recomputed in `view` — an invalid date wraps its input in `layout.invalid` (red), the return field / Book button in `layout.disabled` (grey + inert). **Done** (`demo/flight.k`). |
 | 4 | **Timer** | time, progress, drag | the render loop *is* the clock (`props`time` → elapsed, clamped to duration); `ui.progress` gauge = elapsed/duration; `ui.slider` (drag-adjustable) sets duration; Reset zeroes it. First mouse-*move*-reactive widget (`ui.frame[W;props]` tracks a drag + reads `props`mx` each frame). **Done** (`demo/timer.k`). |
-| 5 | **CRUD** | collections, filter | model **is a table** of names; the list widget is a direct view of a filtered column (`&prefix~/:names`); create/update/delete = row append / amend / mask. |
-| 6 | **Circle Drawer** | custom draw, undo/redo | model = a circle table `(x;y;r)`; draw = a vectorised pass of `cnv.circle`; **undo = a stack of model snapshots** — free under COW columns. |
+| 5 | **CRUD** | collections, filter | model **is a table** (parallel name/surname columns); filter = prefix-match mask over the surname column, create = append, update = amend-at-index, delete = mask-out — every op an array op. `ui.list` shows the filtered rows (click → index by geometry; selected row highlighted). **Done** (`demo/crud.k`). |
+| 6 | **Circle Drawer** | custom draw, undo/redo | model = circle columns `(cx;cy;cr)`; a `ui.canvas` widget delegates paint to `world.paint` (via `ui.onCanvas`) which strokes/fills each circle; **undo/redo = a stack of column snapshots**, nearly free under COW — a few lines. Radius editor is an inline bar with a slider. **Done** (`demo/circle.k`; the old SDF shader → `demo/sdf.k`). |
 | 7 | **Cells** | dataflow, dependency graph | model = a grid table with `formula`/`value` columns; the dep graph is an **edge table**; recompute = topo-sort over columns then `exec` each formula. The array-language showcase. |
 
 The through-line: **CRUD is a table, undo is a snapshotted column, Cells is a dependency graph over

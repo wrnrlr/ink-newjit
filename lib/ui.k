@@ -16,7 +16,7 @@
 
 2: "lib/canvas.k"
 
-\d ui setFont fnt measure mkw build get set getv setv isFocus regOpts row col box label button input select slider progress spacer grow pad sized gap bg disabled invalid natSize solve run hit frame draw paint focus caret open
+\d ui setFont fnt measure mkw build get set getv setv isFocus regOpts row col box label button input select slider progress list canvas onCanvas cvx cvy spacer grow pad sized gap bg disabled invalid natSize solve run hit frame draw paint focus caret open
 
   / ── palette ──────────────────────────────────────────────────────────────────
   BLUE:0.22 0.45 0.95 1.; DARK:0.10 0.10 0.12 1.; WHITE:1. 1. 1. 1.; GREY:0.6 0.6 0.66 1.
@@ -72,6 +72,16 @@
   / A progress gauge (fraction 0..1), `w`×`h` — pure flexbox: a fill box grows to `frac` of a track.
   progress:{[frac;w;h] sized[w;h; bg[0.85 0.85 0.88 1.; row[0.; (
     grow[1e-4|frac; box[0.22 0.60 0.42 1.]] ; grow[1e-4|1.-frac; spacer[]] )]]]}
+  / A selectable list box `w`×`h` showing `items` (strings). Click an item to select it; the
+  / selected index is ui.getv/ui.setv[key]. act=`list; painted by drawList (highlight + text rows).
+  list:{[key;items;w;h] regOpts[key;items]; KEYS!(`leaf;w;h;0.;`row;0.;0.;();key;INBG;"";DARK;16.;`list)}
+  / A custom-draw canvas that fills its slot. `ui.onCanvas[fn]` sets a paint callback fn[x;y;w;h]
+  / (rect in framebuffer px, called during paint); a click stores its position in ui.cvx/ui.cvy and
+  / fires `canvas so the app can act on it.
+  canvasCB:{[x;y;w;h] 0}
+  onCanvas:{[fn] canvasCB::fn}
+  cvx:0.; cvy:0.
+  canvas:{[key] KEYS!(`leaf;0.;0.;1.;`row;0.;0.;();key;INBG;"";DARK;0.;`canvas)}
 
   / ── containers ───────────────────────────────────────────────────────────────
   row:{[g;kids] KEYS!(`box;0.;0.;0.;`row;g;0.;kids;`row;();"";DARK;0.;`nop)}
@@ -159,11 +169,16 @@
   slideTo:{[px] r:rng drag; f:0.|1.&(px-dragx)%dragw; setv[drag; (r 0)+f*(r 1)-r 0]}
   doSlide:{[W;i;px] drag::(W`id)@i; dragx::(W`x)@i; dragw::(W`w)@i; slideTo px; `nop}
   hitAct:{[W;i] focus::`none; open::`none; (W`act)@i}
-  onHit:{[W;i;px]
+  / click a list row → select the item under the cursor (index = row from the top, by geometry).
+  ITEMK:1.7                                    / list item height / font size
+  doList:{[W;i;py] k:(W`id)@i; n:#opts k; $[n=0; `nop; setList[W;i;py;k;n]]}
+  setList:{[W;i;py;k;n] ih:ITEMK*(W`sz)@i; setv[k; 0.+0|(n-1)&_(py-(W`y)@i)%ih]; `nop}
+  doCanvas:{[p] cvx::p 0; cvy::p 1; focus::`none; `canvas}
+  onHit:{[W;i;p]
     a:(W`act)@i
-    $[a~`focus; doFocus[W;i;px]; a~`open; toggleOpen[W;i]; a~`pick; pickOpt[W;i]; a~`slide; doSlide[W;i;px]; hitAct[W;i]]}
+    $[a~`focus; doFocus[W;i;p 0]; a~`open; toggleOpen[W;i]; a~`pick; pickOpt[W;i]; a~`slide; doSlide[W;i;p 0]; a~`list; doList[W;i;p 1]; a~`canvas; doCanvas[p]; hitAct[W;i]]}
   defocus:{[] focus::`none; open::`none; `nop}
-  dispatchPt:{[W;p] i:hit[W;p 0;p 1]; $[i<0; defocus[]; onHit[W;i;p 0]]}
+  dispatchPt:{[W;p] i:hit[W;p 0;p 1]; $[i<0; defocus[]; onHit[W;i;p]]}
   mouseActs:{[W;E]
     i:&((`mouse=E`kind)&(1=E`down))&(0=E`code)
     dispatchPt[W;]'+((E`x)@i;(E`y)@i)}
@@ -195,6 +210,14 @@
   fillRect:{[x;y;w;h;c] cnv.rect[x;y;w;h]; cnv.fill cnv.rgba[c 0;c 1;c 2;c 3]}
   drawTxt:{[x;y;sz;s;c] cnv.moveTo[x;y]; cnv.text[FONT; sz; s; cnv.rgba[c 0;c 1;c 2;c 3]]}
   drawCaret:{[tx;y;h;sz;col] cx:tx+col*sz*CW; cnv.rect[cx; y+0.15*h; 2.; 0.7*h]; cnv.fill cnv.rgba[0.2;0.5;0.95;1.]}
+  / a list box: one text row per item; the selected row (ui.getv[key]) gets a highlight behind it.
+  SELBG:0.80 0.89 1. 1.
+  drawItem:{[x;y;w;ih;sz;sel;j;s]
+    $[j=sel; fillRect[x; y+ih*j; w; ih; SELBG]; 0]
+    drawTxt[x+8.; (y+ih*j)+0.66*ih; sz; s; 0.1 0.1 0.12 1.]}
+  drawList:{[key;x;y;w;sz]
+    items:opts key; ih:ITEMK*sz; sel:`i$getv key
+    di:drawItem[x;y;w;ih;sz;sel;]; di'[!#items; items]}
   / a slider: a thin track, a filled portion up to the value, and a handle. frac from ui.getv/rng.
   drawSlider:{[key;x;y;w;h]
     r:rng key; f:0.|1.&(getv[key]-r 0)%(r 1)-r 0
@@ -208,6 +231,8 @@
     inp:a~`focus
     $[~bg~(); fillRect[x;y;w;h;bg]; 0]
     $[a~`slide; drawSlider[id;x;y;w;h]; 0]
+    $[a~`list; drawList[id;x;y;w;sz]; 0]
+    $[a~`canvas; canvasCB[x;y;w;h]; 0]
     center:(~bg~())&(~inp)&~a~`open              / buttons centre; inputs/selects/labels left
     tx:$[center; x+0.5*w-measure[sz;txt]; x+6.]
     by:y+$[h>0.; (0.5*h)+0.34*sz; sz]

@@ -125,7 +125,7 @@ install: build all static-all
 	@echo "Add to PATH:  ln -sf $(PREFIX)/ink /usr/local/bin/ink   (or add $(PREFIX) to PATH)"
 
 demo:
-	$(INK) demo/circle.k
+	$(INK) demo/sdf.k
 	$(INK) demo/drive.k
 	$(INK) demo/drawing.k
 	$(INK) demo/planes.k
@@ -133,7 +133,7 @@ demo:
 
 qa:
 	time zig build test
-	$(INK) demo/circle.k
+	$(INK) demo/sdf.k
 	$(INK) test/walk.k
 	$(INK) demo/eyes.k
 	INK=$(INK) sh test/oracles.sh

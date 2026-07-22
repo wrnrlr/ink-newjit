@@ -9,6 +9,7 @@
 / a ui slider buffer (ui.getv`dur); the only app state is `t0` and the per-frame `now`.
 
 2: "lib/ui.k"
+2: "lib/fmt.k"
 ui.setFont (font.read "font/FiraCode-Regular.ttf") 0
 ui.setv[`dur; 15.]                       / initial duration (s)
 
@@ -19,13 +20,12 @@ ui.setv[`dur; 15.]                       / initial duration (s)
   tick:{[t;d] now::t; el:: (t-t0)&d}       / advance clock, clamp elapsed to duration
   reset:{[] t0::now}
   act:{[a] $[a~`reset; reset[]; 0]}
-  fmt:{[x] ($0.1*_0.5+10.*x)," s"}         / 1-decimal seconds
   view:{[] d:ui.getv[`dur]; ui.bg[0.96 0.96 0.98 1.; ui.pad[40.; ui.col[22.; (
     ui.label["Timer"]
     ui.row[16.; ( ui.sized[110.;28.; ui.label["Elapsed:"]] ; ui.progress[$[d>0.;el%d;1.]; 300.; 22.] )]
-    ui.sized[300.;26.; ui.label fmt el]
+    ui.sized[300.;26.; ui.label fmt.sec el]
     ui.row[16.; ( ui.sized[110.;28.; ui.label["Duration:"]] ; ui.slider[`dur; 300.; 0.; 60.] )]
-    ui.sized[300.;26.; ui.label fmt d]
+    ui.sized[300.;26.; ui.label fmt.sec d]
     ui.button["Reset"; `reset]
     ui.spacer[] )]]}
 \d
