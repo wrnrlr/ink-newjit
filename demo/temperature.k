@@ -19,7 +19,7 @@ ui.set[`c; "20"]; ui.set[`f; "68"]
   digv:{[t] isd:(~t<48)&(~t>57); isdot:t=46; (&/isd|isdot)&(~1<+/isdot)&0<+/isd}
   okv:{[v] neg:45=*v; t:$[neg;1_v;v]; $[0=#t;0;digv t]}
   isNum:{[s] v:(0#0),`i$s; $[0=#v;0;okv v]}
-  num:{[s] . s}                                  / parse (safe: only called when isNum)
+  num:{[s] .s}                                  / parse (safe: only called when isNum)
   cToF:{[c] 32.+c*9%5}
   fToC:{[f] (f-32.)*5%9}
   / write `dst` from `src` through `conv`, only if `src` currently parses (fixed 1-decimal).

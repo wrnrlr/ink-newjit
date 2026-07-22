@@ -159,10 +159,14 @@ text clipping (task 4), image sampler confirmed LINEAR (task 6). Remaining, roug
 ## UI framework (7GUIs) — lib/ui.k + lib/fmt.k
 All seven 7GUIs built & verified (demo/{counter,temperature,flight,timer,crud,circle,cells}.k).
 Full design + API reference + roadmap + test-framework plan in **doc/design/ui.md**.
-NEXT SESSION: build the UI test framework — deterministic event-stream replay reusing the real
-`props`events` input path + a k-callable screenshot verb (blit like `ink -snap`) for golden-diff
-tests. See doc/design/ui.md §"Test framework — plan for next session".
-Ranked remaining work (from that doc): tests → gotcha-lint → scrolling → floating-overlay →
-multi-context → perf → polish (alignment/theming/proportional-fonts/error-surfacing) → richer
-Cells formulas. Likely compiler bug logged above: namespace member written only externally is
-invisible to inside readers when file-loaded.
+UI TEST FRAMEWORK (2026-07-22): headless harness `lib/uitest.k` (`t.*` event-replay over the real
+`props`events`→ui.run→ui.frame path) + `test/ui.k` (26 assertions: layout/hit-test/action-dispatch/
+focus + full interaction: text editing/backspace/arrows/home/end, slider drag, select open+pick,
+list select) + `make ui-test`. All interaction state commits headlessly — the "VM COW bug" chased
+earlier was a TEST-CODE parsing gotcha (`"…",get`k,"…"` = `get@(`k,"…")`; `step ,ev` = `step , ev`),
+not a runtime bug. STILL TODO: native pixel path — `gpu.shot[path]` + a persistent headless render
+context (frame-by-frame `-snap`) + golden PNGs; `t.shot` is a stub.
+Ranked remaining work (from that doc): pixel tests → gotcha-lint → scrolling → floating-overlay →
+multi-context → perf → polish (alignment/theming/proportional-fonts/error-surfacing) → richer Cells
+formulas. Likely compiler bug logged above: namespace member written only externally is invisible to
+inside readers when file-loaded.

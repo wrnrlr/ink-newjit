@@ -276,8 +276,10 @@ run:{[props]
 
 ## Roadmap — remaining work, ranked
 
-1. **Test framework (NEXT SESSION — see below).** Nothing regression-guards `ui.k` today; this is
-   the price of admission before building more.
+1. **Test framework (DONE for logic/interaction — see below).** `lib/uitest.k` + `test/ui.k` (26
+   assertions) regression-guard layout/hit-test/action-dispatch and the full interaction surface
+   (focus, text editing, slider, select, list) via `make ui-test`. Remaining: the native PIXEL path
+   (`gpu.shot` + a persistent headless render context) for golden-screenshot diffs.
 2. **Codify the gotcha list into a lint/checklist**, and push the clearest compiler bug
    (namespace-external-write) upstream via `.plan/triage.md`.
 3. **Scrolling** for `list`/`grid` (needs clip + content offset in the geometry pass).
@@ -295,7 +297,33 @@ run:{[props]
 
 ---
 
-## Test framework — plan for next session
+## Test framework — BUILT (harness + full logic/interaction suite); pixel tests remain
+
+**Status (2026-07-22).** The pure-k harness and a regression suite exist and run headlessly:
+
+- **`lib/uitest.k`** — the `t.*` harness. It builds the SAME `kind/code/mods/down/x/y/amt`
+  `props`events` table the native window feeds `ui.frame`, then drives `ui.run` + `ui.frame` (the
+  real input + flexbox path — no window, no GPU). `t.app[view;act]` registers a view thunk + action
+  handler; `t.click/rclick/down/up/move/type/key/scroll/wait/frame` each drive one frame; `t.W[]`,
+  `t.find`, `t.rect`, `t.val`, `t.acts[]` inspect the resulting widget table; `t.eq/ok/truthy/err`
+  assert with a tallied `t.report[]`. Coords are logical at dpr=1.
+- **`test/ui.k`** — 26 assertions, deterministic, covering flexbox layout (grow/gap/pad, row+col),
+  intrinsic sizes, hit-testing (topmost + misses), action dispatch, and the FULL interaction surface:
+  focus/defocus, **text editing** (type / backspace / ←→ / home / end / mid-string insert), slider
+  drag, dropdown open→pick→close, and list selection. `make ui-test` (and `make test`) run it.
+
+  All interaction state — typed buffers, caret motion, slider/select/list values — commits headlessly
+  through the real `ui.frame` path. (An earlier investigation mistook a **test-code parsing gotcha**
+  for a VM bug: `"…",ui.get`fx,"…"` parses as `ui.get @ (`fx,"…")` — `` dict`key `` before an
+  operator — and `step ,ev` parses as `step , ev` — `,` after a noun is dyadic. Both are AGENT.md
+  gotchas; the runtime and ui.k are fine. Read state into a variable first, and enlist with `(,ev)`.)
+
+**Still to build:** the native pieces for PIXEL tests (below) — `gpu.shot[path]` + a persistent
+headless render context — plus golden PNGs and screenshot-diff assertions. `t.shot` is a stub today.
+
+---
+
+## Test framework — original plan (pixel path still open)
 
 **Goal:** deterministic, replayable UI tests that reuse the *real* input + render path, so a test is
 "drive these events, assert model/geometry, and screenshot-diff the pixels."
