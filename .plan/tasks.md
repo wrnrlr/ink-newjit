@@ -155,3 +155,14 @@ text clipping (task 4), image sampler confirmed LINEAR (task 6). Remaining, roug
 - `spike/` (vkspike.zig + run.sh) is the throwaway Phase-0 proof — keep or delete.
 - `test/computevk.k` is the headless Vulkan compute smoke test — keep.
 - The 8 ported compute tests now use `gpu.computeRun` (run on both backends).
+
+## UI framework (7GUIs) — lib/ui.k + lib/fmt.k
+All seven 7GUIs built & verified (demo/{counter,temperature,flight,timer,crud,circle,cells}.k).
+Full design + API reference + roadmap + test-framework plan in **doc/design/ui.md**.
+NEXT SESSION: build the UI test framework — deterministic event-stream replay reusing the real
+`props`events` input path + a k-callable screenshot verb (blit like `ink -snap`) for golden-diff
+tests. See doc/design/ui.md §"Test framework — plan for next session".
+Ranked remaining work (from that doc): tests → gotcha-lint → scrolling → floating-overlay →
+multi-context → perf → polish (alignment/theming/proportional-fonts/error-surfacing) → richer
+Cells formulas. Likely compiler bug logged above: namespace member written only externally is
+invisible to inside readers when file-loaded.

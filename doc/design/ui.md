@@ -208,22 +208,126 @@ for flexbox for everything else.
 
 ## Dialect gotchas found building this (see also AGENT.md)
 
-- Lambdas cap at **8 params** — group related args into a vector (rect = `x,y,w,h`); dict
-  *construction* (`keys!vals`) has no such cap, so wide nodes are dicts, not lambda args.
-- `table,table` does **not** row-concatenate (it merges columns → 1 row). Concatenate **row lists**
-  and transpose once with `+`, or append single row-dicts as `demo/recs.k` does.
-- Inside a `{}` body a **newline is a statement separator** — a multi-line `a ,b ,c` becomes three
-  statements and returns only the last. Keep a concatenation on one line, or build a paren-list
-  (which *may* span newlines) and `,/` it.
-- `f'[a;b;c;…]` is each over conforming lists — the workhorse for mapping `solve` across a level's
-  per-child `X;Y;W;H` vectors.
-- `@` (index/apply) is right-greedy: `(W`x)@i + k` parses as `(W`x)@(i+k)`. Parenthesise:
-  `((W`x)@i)+k`.
-- No `>=`: `px≥x` is `~px<x`.
-- `table,table` does **not** row-concatenate (it merges columns → 1 row). Concatenate **row lists**
-  and transpose once with `+`, or append single row-dicts as `demo/recs.k` does.
-- Inside a `{}` body a **newline is a statement separator** — a multi-line `a ,b ,c` becomes three
-  statements and returns only the last. Keep a concatenation on one line, or build a paren-list
-  (which *may* span newlines) and `,/` it.
-- No `>=`: `px≥x` is `~px<x`.
-- `$dict`key` mis-parses when an operator sits either side — bind the value first (`v:d`k; $v`).
+These bit us repeatedly; nearly all fail **silently** (a wrong number, or a black frame — never an
+error). Building on this stack means internalising them.
+
+- **8-param lambda cap** — group args into a vector (`rect = x,y,w,h`). Dict *construction*
+  (`keys!vals`) has no cap, so wide nodes are dicts, not lambda args.
+- **A noun before an op-glyph makes it dyadic.** `ui.label $r` parses as `ui.label $ r` (dyadic
+  format) → a broken `!` dict; `ui.label ,x` → dyadic join. **Bracket the arg: `ui.label[$r]`.**
+- **Single-char strings are atoms.** `#`, indexing, `.`-parse, and `~`-match all differ from
+  multi-char vectors (`"M"~1#x` is false: atom vs 1-vector). Normalise via codepoints
+  (`(0#0),`i$s`) or force a vector (`. (0#" "),t`).
+- **`str , list` flattens the string's chars.** Enlist first: `(,str), list`.
+- **`I _ s` cut drops everything before the first index.** Prepend 0: `(0,&op)_s`.
+- **`table,table` doesn't row-concatenate** (merges columns → 1 row). Build a list of row-tuples and
+  transpose once with `+`; or append row-dicts as `demo/recs.k` does.
+- **Newline inside `[...]` separates arguments; inside `{}` separates statements.** A multi-line
+  `,`-chain in either splits — build the list in a local, or `,/` a paren-list.
+- **Lambdas don't close over locals.** A fold/each body can't see the enclosing function's locals;
+  fold over self-contained data (`{applyOp[x; y 0; y 1]}/[…]`), not over locals.
+- **A namespace member written only from *outside* (`ns.m::`) is invisible to inside readers when
+  file-loaded.** Give it an internal setter and call that (see `.plan/triage.md`).
+- `f'[a;b;c;…]` is each over conforming lists (maps `solve` across `X;Y;W;H`).
+- `@` and `$dict`key` are right-greedy / mis-parse near operators — bind first, or parenthesise.
+- No `>=`: `px≥x` is `~px<x`. `,/()` is a unit not `!0`. `*/0#10` is a unit not 1.
+
+---
+
+## API reference (`ui`, in `lib/ui.k`)
+
+**Setup / state.** `ui.setFont[face]`; `ui.get[k]`/`ui.set[k;str]` (text buffers), `ui.getv[k]`/
+`ui.setv[k;x]` (numeric, sliders), `ui.setFocus[k]`. Interaction state lives in module-level dicts
+keyed by widget id: `buf` (text), `val` (numbers), `opts` (select/list items), plus scalars
+`focus`, `open`, `caret`, `drag`.
+
+**Leaves (each returns a node dict).**
+- `ui.label[str]` — text, intrinsic size.
+- `ui.button[str; act]` — clickable; fires `act` on click.
+- `ui.input[key; w; placeholder]` — focusable text field; buffer `ui.get/set[key]`; caret + editing.
+- `ui.select[key; w; options]` — dropdown popup (overlay); selected value in `ui.get[key]`.
+- `ui.slider[key; w; min; max]` — drag-adjustable; value in `ui.getv/setv[key]`.
+- `ui.progress[frac; w; h]` — gauge (0..1).
+- `ui.list[key; items; w; h]` — selectable rows; selected **index** in `ui.getv/setv[key]`.
+- `ui.cell[id; label; w; h; hl]` — grid cell; click fires `id`; highlighted when `hl`.
+- `ui.canvas[key]` — custom draw: set `ui.onCanvas[{[x;y;w;h]…}]`; a click stores `ui.cvx`/`ui.cvy`
+  and fires `` `canvas ``.
+- `ui.box[color]`, `ui.spacer[]`.
+
+**Containers.** `ui.row[gap; kids]`, `ui.col[gap; kids]` (kids = a list of nodes).
+
+**Combinators (amend one field; chain).** `ui.grow[w; nd]`, `ui.pad[p; nd]`, `ui.sized[w; h; nd]`,
+`ui.gap[g; nd]`, `ui.bg[color; nd]`, `ui.disabled[nd]` (grey + inert), `ui.invalid[nd]` (red).
+
+**Frame passes.** `ui.run[tree; props]` → widget table `W` (solve + build + overlay). `ui.frame[W;
+props]` → app actions (handles focus/menu/slider-drag/list/canvas + keyboard; call
+`{app.act x}'` over the result). `ui.draw[W; w; h]` → render (main pass + overlay pass). Also
+`ui.hit`, `ui.paint`, `ui.solve`, `ui.natSize`, `ui.measure` for lower-level use.
+
+**The standard frame loop** (every demo):
+```
+run:{[props]
+  W: ui.run[app.view[]; props]
+  {app.act x}' ui.frame[W; props]
+  ui.draw[ui.run[app.view[]; props]; props`width; props`height]}
+```
+
+---
+
+## Roadmap — remaining work, ranked
+
+1. **Test framework (NEXT SESSION — see below).** Nothing regression-guards `ui.k` today; this is
+   the price of admission before building more.
+2. **Codify the gotcha list into a lint/checklist**, and push the clearest compiler bug
+   (namespace-external-write) upstream via `.plan/triage.md`.
+3. **Scrolling** for `list`/`grid` (needs clip + content offset in the geometry pass).
+4. **Generalise the overlay** so dialogs float (currently dropdown-only; dialogs use inline bars);
+   lift the 2-render/frame cap (bump `SCNF`) if nested overlays are needed.
+5. **Multiple UI contexts** — the interaction state is global singletons; no independent sub-UIs /
+   multiple windows.
+6. **Performance at scale** — profile full-rebuild + re-solve + per-row paint beyond ~50 widgets;
+   Cells recompute is O(cells²).
+7. **Polish:** field alignment (start/center/end), number-only input, proportional-font text
+   metrics (currently monospace-only), theming (palette is hardcoded constants), error surfacing
+   (a bad input blanks the frame instead of showing a message), resize-stable coordinates.
+8. **Richer formula language** in Cells (precedence, parens, ranges, functions) — currently a
+   left-to-right toy.
+
+---
+
+## Test framework — plan for next session
+
+**Goal:** deterministic, replayable UI tests that reuse the *real* input + render path, so a test is
+"drive these events, assert model/geometry, and screenshot-diff the pixels."
+
+**Why it fits:** input is already a **table** (`props`events`) and time/cursor are injected via
+`props`, so a frame is a pure function of `(model, props)`. A test is a *scripted event stream*
+replayed frame by frame — no live window needed. With `Date.now`/random out of the app (time comes
+from `props`time`), replays are byte-deterministic → golden screenshots work.
+
+**Shape of a test (all in k):**
+```
+/ actions build the props`events table the app already consumes, then call run[props]:
+t.click[x;y]      / a `mouse down/up event pair
+t.type["=A0+B1"]  / `text events (codepoints)
+t.key[259]        / a `key event (backspace, arrows, …)
+t.move[x;y] / t.wait[dt]     / cursor / advance props`time
+t.shot["cells-c0-selected"]  / capture the framebuffer to a PNG (a test ACTION)
+/ assertions are plain k:
+t.eq[world.count; `c1`c2!1 0]           / model state
+t.eq[#W`x; 6]                            / geometry / hit-test
+t.shotMatches["cells-default"]           / screenshot vs golden (byte or perceptual diff)
+```
+
+**Native pieces needed (small, the machinery exists in `gpu_vk.zig` snap path):**
+1. A **persistent headless render context** — like `-snap` but driven frame-by-frame from k rather
+   than capturing one frame and exiting. Options: a `window.test[run; script]` native driver, or
+   expose `gpu.testBegin[w;h;dpr]` / `gpu.testEnd[]` so k drives the loop and owns assertions.
+2. A **k-callable screenshot verb** — `gpu.shot[path]` that blits the current offscreen target to a
+   PNG on demand (reuse `writeSnapPng` + the offscreen target; today it's env-triggered + one-shot).
+3. Event injection is **pure k** — the harness builds the same `kind/code/mods/down/x/y/amt` table
+   `ui.frame` already reads, so no native input mocking.
+
+**Deliverables next session:** `lib/uitest.k` (the `t.*` harness), a golden-PNG directory, the two
+native verbs above, and a `make ui-test` target that replays each demo's script and diffs. Start by
+converting the throwaway logic checks we wrote this session into the first real tests.
