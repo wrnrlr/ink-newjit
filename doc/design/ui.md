@@ -1,8 +1,10 @@
 # UI as an ECS of tables
 
 A design for building GUIs in ink where **the UI is a table** — widgets are rows, traits are
-columns, and a frame is a few whole-array passes over those columns. `lib/ui.k` is the minimal
-kernel; `demo/counter.k` is 7GUIs #1 built on it.
+columns, and a frame is a few whole-array passes over those columns. `lib/ui.k` is the toolkit
+(one `ui` namespace: state, passes, flexbox, widgets); `lib/fmt.k` is number formatting. **All
+seven** of the classic [7GUIs](https://eugenkiss.github.io/7guis/) are built on it:
+`demo/{counter,temperature,flight,timer,crud,circle,cells}.k`.
 
 ## The thesis
 
@@ -176,7 +178,7 @@ off *more* as they get harder:
 | 4 | **Timer** | time, progress, drag | the render loop *is* the clock (`props`time` → elapsed, clamped to duration); `ui.progress` gauge = elapsed/duration; `ui.slider` (drag-adjustable) sets duration; Reset zeroes it. First mouse-*move*-reactive widget (`ui.frame[W;props]` tracks a drag + reads `props`mx` each frame). **Done** (`demo/timer.k`). |
 | 5 | **CRUD** | collections, filter | model **is a table** (parallel name/surname columns); filter = prefix-match mask over the surname column, create = append, update = amend-at-index, delete = mask-out — every op an array op. `ui.list` shows the filtered rows (click → index by geometry; selected row highlighted). **Done** (`demo/crud.k`). |
 | 6 | **Circle Drawer** | custom draw, undo/redo | model = circle columns `(cx;cy;cr)`; a `ui.canvas` widget delegates paint to `world.paint` (via `ui.onCanvas`) which strokes/fills each circle; **undo/redo = a stack of column snapshots**, nearly free under COW — a few lines. Radius editor is an inline bar with a slider. **Done** (`demo/circle.k`; the old SDF shader → `demo/sdf.k`). |
-| 7 | **Cells** | dataflow, dependency graph | model = a grid table with `formula`/`value` columns; the dep graph is an **edge table**; recompute = topo-sort over columns then `exec` each formula. The array-language showcase. |
+| 7 | **Cells** | dataflow, dependency graph | model = two dicts (`RAW` text, `VAL` numbers); a formula (`=A0+B1*2`) is evaluated by a tiny tokenizer (cell-refs + `+-*/`, left-to-right); any edit **recomputes the whole sheet to a fixpoint** (a few whole-sheet passes — cheap, array-native), so dependents update automatically. There's no built-in string→value eval to reuse (`.` parses only literals, `exec` is a shell verb). **Done** (`demo/cells.k`). |
 
 The through-line: **CRUD is a table, undo is a snapshotted column, Cells is a dependency graph over
 columns, validation is a derived column.** The ECS-of-tables framing isn't just for laying out

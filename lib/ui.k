@@ -16,7 +16,7 @@
 
 2: "lib/canvas.k"
 
-\d ui setFont fnt measure mkw build get set getv setv isFocus regOpts row col box label button input select slider progress list canvas onCanvas cvx cvy spacer grow pad sized gap bg disabled invalid natSize solve run hit frame draw paint focus caret open
+\d ui setFont fnt measure mkw build get set getv setv isFocus setFocus regOpts row col box label button input select slider progress list canvas cell onCanvas cvx cvy spacer grow pad sized gap bg disabled invalid natSize solve run hit frame draw paint focus caret open
 
   / ── palette ──────────────────────────────────────────────────────────────────
   BLUE:0.22 0.45 0.95 1.; DARK:0.10 0.10 0.12 1.; WHITE:1. 1. 1. 1.; GREY:0.6 0.6 0.66 1.
@@ -50,6 +50,7 @@
   getv:{[k] $[k in !val; val k; 0.]}
   setv:{[k;x] val[k]:: x}
   isFocus:{[k] focus~k}
+  setFocus:{[k] focus::k; caret:: #get k}       / focus an input from the app, caret at end
   regOpts:{[k;os] opts[k]:: os}
   regRng:{[k;r] rng[k]:: r}
 
@@ -82,6 +83,9 @@
   onCanvas:{[fn] canvasCB::fn}
   cvx:0.; cvy:0.
   canvas:{[key] KEYS!(`leaf;0.;0.;1.;`row;0.;0.;();key;INBG;"";DARK;0.;`canvas)}
+  / A grid cell `w`×`h` showing `label`, highlighted when `hl`. Clicking fires `id (the app uses the
+  / cell's own name as the action). For spreadsheets / tabular pickers.
+  cell:{[id;label;w;h;hl] KEYS!(`leaf;w;h;0.;`row;0.;0.;();id;$[hl;SELBG;WHITE];label;DARK;15.;id)}
 
   / ── containers ───────────────────────────────────────────────────────────────
   row:{[g;kids] KEYS!(`box;0.;0.;0.;`row;g;0.;kids;`row;();"";DARK;0.;`nop)}
