@@ -19,6 +19,16 @@ so: "./zig-out/lib/libgpu.dylib"
 /                                 unused cells are 0N/0n nulls — filter them.
 / For held keys/buttons, track down/up events yourself (see lib/camera.k).
 window.run:    so 2: (`gpuRun;       2)   / (loop_fn; config) → 0 : blocking event loop
+/ Headless RENDER context for screenshot tests (doc/design/ui.md). Like computeRun
+/ but stands up a hidden-window swapchain so gpu.shot can blit rendered frames to
+/ PNGs. Calls fn once ({[x] …}); the test drives frames and calls gpu.shot inside fn.
+/ Framebuffer == the (w;h) asked for (no display-scale surprise), so shots are exact.
+/   window.test[{[x] …draw…; gpu.shot"a.png"}; 320. 200.]
+window.test:   so 2: (`gpuRenderRun; 2)   / (fn; (w;h)_F) → 0 : headless render context, calls fn once
+/ gpu.shot[path] — inside window.test, render the draws queued since the last shot
+/ (canvas fills + pulled geometry) and write them to `path` as a PNG. Clears the
+/ per-frame draw queues after. No-op outside a window.test context.
+gpu.shot:      so 2: (`gpuShot;      1)   / path_C → 0 : capture current frame to a PNG
 / Headless one-shot compute: no window, no event loop. Creates a GPU device,
 / calls fn once (write it {[x] …}; x is an ignored placeholder), then tears the
 / device down. Like window.run, stash results in a global from inside fn:

@@ -164,9 +164,13 @@ UI TEST FRAMEWORK (2026-07-22): headless harness `lib/uitest.k` (`t.*` event-rep
 focus + full interaction: text editing/backspace/arrows/home/end, slider drag, select open+pick,
 list select) + `make ui-test`. All interaction state commits headlessly — the "VM COW bug" chased
 earlier was a TEST-CODE parsing gotcha (`"…",get`k,"…"` = `get@(`k,"…")`; `step ,ev` = `step , ev`),
-not a runtime bug. STILL TODO: native pixel path — `gpu.shot[path]` + a persistent headless render
-context (frame-by-frame `-snap`) + golden PNGs; `t.shot` is a stub.
-Ranked remaining work (from that doc): pixel tests → gotcha-lint → scrolling → floating-overlay →
+not a runtime bug. PIXEL PATH DONE: native `window.test[fn;(w;h)]` (gpuRenderRun, hidden-window
+swapchain, shots exactly w×h) + `gpu.shot[path]` (gpuShot) in lib/gpu/gpu_vk.zig; harness
+`t.render`/`t.shot`/`t.shotEq[name;tol]` (golden-diff via image.read, baseline-on-first-run, lazy
+font load); `test/uishot.k` + `make ui-shot` + test/golden/*.png. Constraint: ONE window.test per
+process (canvas/dye cache device pipeline handles in k globals → 2nd context blank); goldens are
+GPU-specific. FOLLOW-UP: k-level pipeline-cache invalidation on device teardown (enables multi-context).
+Ranked remaining work: k-level cache-invalidation → gotcha-lint → scrolling → floating-overlay →
 multi-context → perf → polish (alignment/theming/proportional-fonts/error-surfacing) → richer Cells
 formulas. Likely compiler bug logged above: namespace member written only externally is invisible to
 inside readers when file-loaded.

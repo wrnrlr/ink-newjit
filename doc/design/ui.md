@@ -276,10 +276,11 @@ run:{[props]
 
 ## Roadmap — remaining work, ranked
 
-1. **Test framework (DONE for logic/interaction — see below).** `lib/uitest.k` + `test/ui.k` (26
-   assertions) regression-guard layout/hit-test/action-dispatch and the full interaction surface
-   (focus, text editing, slider, select, list) via `make ui-test`. Remaining: the native PIXEL path
-   (`gpu.shot` + a persistent headless render context) for golden-screenshot diffs.
+1. **Test framework (DONE — see below).** `lib/uitest.k` + `test/ui.k` (26 assertions, `make ui-test`)
+   regression-guard layout/hit-test/action-dispatch and the full interaction surface (focus, text
+   editing, slider, select, list). `test/uishot.k` (`make ui-shot`) adds golden-PNG screenshot diffs
+   via the native `window.test`/`gpu.shot` verbs. Follow-up: k-level pipeline-cache invalidation on
+   device teardown, so more than one `window.test` context can render per process.
 2. **Codify the gotcha list into a lint/checklist**, and push the clearest compiler bug
    (namespace-external-write) upstream via `.plan/triage.md`.
 3. **Scrolling** for `list`/`grid` (needs clip + content offset in the geometry pass).
@@ -318,8 +319,21 @@ run:{[props]
   operator — and `step ,ev` parses as `step , ev` — `,` after a noun is dyadic. Both are AGENT.md
   gotchas; the runtime and ui.k are fine. Read state into a variable first, and enlist with `(,ev)`.)
 
-**Still to build:** the native pieces for PIXEL tests (below) — `gpu.shot[path]` + a persistent
-headless render context — plus golden PNGs and screenshot-diff assertions. `t.shot` is a stub today.
+- **`test/uishot.k`** — golden-PNG screenshot tests. `make ui-shot` renders each view headlessly and
+  pixel-diffs it against `test/golden/<name>.png`. Native pieces (in `lib/gpu/gpu_vk.zig`):
+  `window.test[fn; (w;h)]` (= `gpuRenderRun`) stands up a hidden-window swapchain — no display-scale,
+  so shots are exactly w×h — and calls `fn` once; `gpu.shot[path]` (= `gpuShot`) blits the draws
+  queued since the last shot to a PNG. The harness adds `t.render[thunk]` (wraps the test in
+  `window.test`), `t.shot[name]`, and `t.shotEq[name;tol]` (baseline-on-first-run, else diff < tol
+  via `image.read` in pure k — no native diff verb). `t.render` lazily loads a font (ui.draw needs
+  one — a widget with text and no font renders blank).
+
+  Two constraints, documented at the verbs: **(1)** call `window.test` ONCE per process — a 2nd
+  context renders blank because lib/canvas.k/dye cache compiled-pipeline handles in k globals bound
+  to the first, torn-down device (k-level cache invalidation on teardown is the real fix; until then
+  put all a suite's shots in one `t.render`, and run separate shot files as separate processes — the
+  make target does). **(2)** goldens are GPU/driver-specific; regenerate by deleting a `<name>.png`.
+  `make ui-shot` is kept OUT of `make test` since it needs a GPU (window.test).
 
 ---
 

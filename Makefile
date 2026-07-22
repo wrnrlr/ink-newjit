@@ -22,13 +22,20 @@ HOST := $(HOST_OS)-$(HOST_ARCH)
 # Jupyter kernel, and native FFI extensions are unavailable there.
 PLATFORMS := macos-arm64 macos-x64 linux-arm64 linux-x64 windows-arm64 windows-x64
 
-.PHONY: test ui-test build release all static-all install data demo qa bench info clean docs docs-snap
+.PHONY: test ui-test ui-shot build release all static-all install data demo qa bench info clean docs docs-snap
 
 # Headless UI regression tests (lib/ui.k via the lib/uitest.k harness). Needs the gpu
 # dylib (the ui libs load it) but runs windowless — no GPU device, no render.
 ui-test:
 	zig build gpu
 	$(INK) test/ui.k
+
+# UI golden-screenshot tests (t.render/t.shotEq): stand up a hidden-window headless
+# render context and pixel-diff each view against test/golden/*.png. Needs a GPU
+# (window.test), so it's SEPARATE from `test`. First run for a name writes the baseline.
+ui-shot:
+	zig build gpu
+	$(INK) test/uishot.k
 
 test:
 	time zig build test

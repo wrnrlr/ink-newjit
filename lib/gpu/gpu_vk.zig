@@ -41,6 +41,7 @@ fn kf(v: f32) ?K       { return g_api.?.kf(v); }
 fn kn(x: ?K) i32       { return g_api.?.kn(x); }
 fn kfp(x: ?K) ?[*]f32  { return g_api.?.kfp(x); }
 fn kip(x: ?K) ?[*]i32  { return g_api.?.kip(x); }
+fn kcp(x: ?K) ?[*]u8   { return g_api.?.kcp(x); }
 fn ki_val(x: ?K) i32   { return g_api.?.ki_val(x); }
 fn KI(n: i32) ?K       { return g_api.?.KI(n); }
 fn KF(n: i32) ?K       { return g_api.?.KF(n); }
@@ -798,6 +799,100 @@ export fn gpuRun(loop_k: ?K, config_k: ?K) callconv(.c) ?K {
   return ki(0);
 }
 
+// ── Headless render context for UI screenshot tests (doc/design/ui.md) ────────
+// gpuRenderRun[fn; (w;h)] mirrors gpuComputeRun but stands up a hidden-window
+// SWAPCHAIN context (so gpuShot can blit a rendered frame to a PNG), calls fn
+// once, then tears down. The test drives frames and calls gpu.shot at capture
+// points from inside fn. No CocoaRetina hint → framebuffer == the w×h asked for,
+// so shots are exactly w×h regardless of display scale (deterministic goldens).
+var g_render_win: ?*zglfw.Window = null;
+var g_snap_buf: ?vk.Buffer = null;
+var g_snap_cap: u64 = 0;
+
+fn writePngPath(path: []const u8, bgra: []const u8, w: u32, h: u32) void {
+  png.writePng(alloc, path, w, h, bgra, w * 4) catch |e| {
+    std.debug.print("[shot] write {s} failed: {}\n", .{ path, e });
+    return;
+  };
+}
+
+export fn gpuRenderRun(fn_k: ?K, config_k: ?K) callconv(.c) ?K {
+  const cbk = fn_k orelse return ki(0);
+  var win_w: i32 = 800;
+  var win_h: i32 = 600;
+  if (config_k) |cfg| if (kfp(cfg)) |cf| if (kn(cfg) >= 2) {
+    win_w = @intFromFloat(cf[0]);
+    win_h = @intFromFloat(cf[1]);
+  };
+
+  // NOTE: call window.test ONCE per process. A second context renders blank because lib/canvas.k
+  // (and dye) cache compiled-pipeline handles in k globals bound to the FIRST device; the second
+  // device doesn't own them. Fixing that needs k-level cache invalidation on teardown — until then,
+  // put all of a suite's shots inside one t.render, and run separate screenshot files as separate
+  // processes (the make target does).
+  vk.initGlfwLoader();
+  zglfw.init() catch return ki(-1);
+  defer zglfw.terminate();
+  zglfw.windowHint(zglfw.ClientAPI, zglfw.NoAPI);
+  zglfw.windowHint(zglfw.Visible, 0); // headless
+  zglfw.windowHint(zglfw.CocoaRetinaFramebuffer, 0); // fb == win size → shots are exactly w×h
+  const window = zglfw.createWindow(win_w, win_h, "ink-test", null, null) catch return ki(-1);
+  defer zglfw.destroyWindow(window);
+
+  var v = vk.Vk.initWindowed(@ptrCast(window), @intCast(win_w), @intCast(win_h)) catch return ki(-1);
+  g_vk = &v;
+  g_bufs = .empty;
+  g_pipes = .empty;
+  g_render_win = window;
+  defer { resetRegistries(); v.deinit(); g_vk = null; g_render_win = null; }
+
+  resetFrameMeshes();
+  const arg = ki(0) orelse return ki(-1);
+  const result = k_call(cbk, arg);
+  ku(result);
+  ku(arg);
+
+  if (g_snap_buf) |b| { v.destroyBuffer(b); g_snap_buf = null; g_snap_cap = 0; }
+  return ki(0);
+}
+
+// gpuShot[path] — render the draws queued since the last shot (canvas fills +
+// vertex-pulled geometry) into the offscreen frame and write it to `path` as a
+// PNG. Clears the per-frame draw registries afterward so the next shot starts
+// clean. No-op outside a gpuRenderRun context.
+export fn gpuShot(path_k: ?K) callconv(.c) ?K {
+  const v = g_vk orelse return ki(0);
+  if (g_render_win == null) return ki(0);
+  const pp = kcp(path_k) orelse return ki(0);
+  const plen = kn(path_k);
+  if (plen <= 0) return ki(0);
+  const path = pp[0..@intCast(plen)];
+
+  var fbw: i32 = 0;
+  var fbh: i32 = 0;
+  zglfw.getFramebufferSize(g_render_win.?, &fbw, &fbh);
+
+  v.sync(); // finish any compute the draw path queued
+  const ext = v.extent();
+  const need = @as(u64, ext[0]) * ext[1] * 4;
+  if (g_snap_buf == null or g_snap_cap < need) {
+    if (g_snap_buf) |b| v.destroyBuffer(b);
+    g_snap_buf = v.createBuffer(need, false) catch null;
+    g_snap_cap = if (g_snap_buf != null) need else 0;
+  }
+  if (v.beginFrame(@intCast(fbw), @intCast(fbh), .{ 0, 0, 0, 1 })) |cb| {
+    recordFills(v, cb, @floatFromInt(fbw), @floatFromInt(fbh));
+    recordPulls(v, cb);
+    v.endFrame(@intCast(fbw), @intCast(fbh), g_snap_buf);
+    if (g_snap_buf) |sb| {
+      v.waitIdle();
+      writePngPath(path, sb.mapped[0 .. @as(usize, ext[0]) * ext[1] * 4], ext[0], ext[1]);
+    }
+  }
+  resetFrameMeshes();
+  return ki(0);
+}
+
 // ── gpuCaps: device capability dict (doc/design/kk.md §4) ─────────────────────
 // Feature-gated capabilities the kk compiler schedules around; query inside a
 // gpu.computeRun / window.run (needs the live device). All values numeric:
@@ -848,6 +943,8 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuDispatch", @ptrCast(&gpuDispatch), 3);
   r.k_register("gpuDispatchLoop", @ptrCast(&gpuDispatchLoop), 5);
   r.k_register("gpuRun", @ptrCast(&gpuRun), 2);
+  r.k_register("gpuRenderRun", @ptrCast(&gpuRenderRun), 2);
+  r.k_register("gpuShot", @ptrCast(&gpuShot), 1);
   r.k_register("gpuFill", @ptrCast(&gpuFill), 2);
   r.k_register("gpuTess", @ptrCast(&gpuTess), 1);
   r.k_register("gpuSpirv", @ptrCast(&gpuSpirv), 2);

@@ -19,7 +19,7 @@
 / Coords are LOGICAL units at dpr=1 (the default) so they match the flexbox layout 1:1. Every action
 / helper drives exactly ONE frame; accumulate several events into one frame with t.emit + t.flush.
 
-\d t app setView onAct viewport reset begin click rclick down up move type key keyMod scroll wait frame emit flush step W acts find rect val eq ok truthy err report clicks shot
+\d t app setView onAct viewport reset begin click rclick down up move type key keyMod scroll wait frame emit flush step W acts find rect val eq ok truthy err report clicks render shot shotEq setShotDir shotDir setFont
 
   / ── harness state ────────────────────────────────────────────────────────────
   EVK:`kind`code`mods`down`x`y`amt
@@ -121,12 +121,45 @@
   / assert an expression evaluates to an error value (protects the parse/eval verbs).
   err:{[nm;v] ok[nm; iserr v]}
 
-  / ── screenshot (needs the native headless render context; see doc/design/ui.md) ─
-  / t.shot writes the current framebuffer to a PNG when a headless GPU context is live.
-  / Pure-k tests don't render, so this is a stub that records the request; wire it to the
-  / native gpu.shot verb (persistent headless target) to enable golden-PNG diffs.
-  SHOTS:()
-  shot:{[name] SHOTS:: SHOTS,,name; 0}
+  / ── screenshots (golden PNG diffs) ───────────────────────────────────────────
+  / A screenshot test runs INSIDE a headless render context: t.render[testThunk] wraps the whole
+  / test in window.test (a hidden-window swapchain, no display) so the pure-k logic drivers (click,
+  / type, …) and the GPU render path (ui.draw → gpu.shot) share one device. Sized to the CURRENT
+  / viewport (set t.viewport before t.render), so shots are exactly VW×VH px (retina off).
+  / Goldens live under t.shotDir (default test/golden), one PNG per name. First run for a name has
+  / no golden → it's saved as the baseline and the assertion passes; later runs render to <name>.out.png
+  / and pixel-diff it against the golden, failing if more than `tol` (fraction 0..1) of bytes differ.
+  shotDir:"test/golden"
+  setShotDir:{[d] shotDir::d; `}
+  / RFN holds the test thunk for the window.test callback (a lambda can't close over render's
+  / param — lambdas don't capture parent scope — so it reads this global instead).
+  RFN:{[] 0}
+  render:{[fn] RFN::fn; window.test[{[x] RFN[]; 0}; (VW*DPR),(VH*DPR)]; `}
+  / ui.draw renders widget TEXT via ui.k's font; with no font set, drawTxt corrupts the frame (a
+  / blank render). Load one lazily before the first shot. Override the path with t.setFont.
+  fontPath:"font/FiraCode-Regular.ttf"
+  fontSet:0
+  setFont:{[p] fontPath::p; fontSet::0; `}
+  loadFont:{[] ui.setFont (font.read fontPath) 0; fontSet::1}
+  ensureFont:{[] $[fontSet; 0; loadFont[]]}
+  / render the current view to the GPU frame queue (call inside a shot, before gpu.shot flushes it).
+  paintNow:{[] ensureFont[]; p:props (); W:ui.run[VIEW[]; p]; ui.draw[W; VW*DPR; VH*DPR]}
+  / pixel diff of two image.read dicts → fraction of bytes that differ (1.0 if dims mismatch).
+  / (helpers, not bracketed $-branches: a `[stmt;stmt]` block inside $[…] breaks the parser.)
+  imDims:{[x] (x`width; x`height)}
+  byteDiff:{[da;db] n:(#da)&#db; $[n=0; 1.; (+/~(n#da)=n#db)%n]}
+  pngDiff:{[a;b] $[(imDims a)~imDims b; byteDiff[a`data; b`data]; 1.]}
+  / path builder — kept as a var so `gpu.shot p` (not `gpu.shot dir,"/",…`, which parses as
+  / `(gpu.shot dir),"/",…` — a monadic call binds before the `,`) targets the whole path.
+  shotPath:{[name;ext] shotDir,"/",name,ext}
+  / t.shot[name] — capture the current view to <shotDir>/<name>.png (no assertion).
+  shot:{[name] paintNow[]; p:shotPath[name;".png"]; gpu.shot p; `}
+  / golden branches as functions (again: no bracketed $-branches). Compare = render to <name>.out.png
+  / and diff vs the golden; save = write the golden and pass (baseline on first run).
+  shotCmp:{[name;tol;g] out:shotPath[name;".out.png"]; gpu.shot out; o:image.read out; ok[name; (pngDiff[g;o])<tol]}
+  shotSave:{[name;gold] gpu.shot gold; `0:"  NOTE ",name," saved new golden (review + rerun)\n"; pass name}
+  / t.shotEq[name;tol] — golden-diff the current view. Baseline-on-first-run; else assert diff<tol.
+  shotEq:{[name;tol] gold:shotPath[name;".png"]; g:image.read gold; paintNow[]; $[`m~@g; shotCmp[name;tol;g]; shotSave[name;gold]]}
 
   / ── report ───────────────────────────────────────────────────────────────────
   report:{[]
