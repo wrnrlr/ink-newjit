@@ -246,7 +246,8 @@ error). Building on this stack means internalising them.
 
 ## API reference (`ui`, in `lib/ui.k`)
 
-**Setup / state.** `ui.setFont[face]`; `ui.get[k]`/`ui.set[k;str]` (text buffers), `ui.getv[k]`/
+**Setup / state.** `ui.setFont[face]`; `ui.setTheme[t]` (`t`=`ui.themeLight`/`ui.themeDark` or your own
+role→rgba dict — see `ui.TROLES`; rebinds the colour constants live); `ui.get[k]`/`ui.set[k;str]` (text buffers), `ui.getv[k]`/
 `ui.setv[k;x]` (numeric, sliders), `ui.setFocus[k]`. Interaction state lives in module-level dicts
 keyed by widget id: `buf` (text), `val` (numbers), `opts` (select/list items), plus scalars
 `focus`, `open`, `caret`, `drag`.
@@ -370,10 +371,10 @@ widgets/behaviour:
 6. **Performance at scale** — profile full-rebuild + re-solve + per-row paint beyond ~50 widgets;
    Cells recompute is O(cells²).
 7. **Polish:** field alignment (start/center/end), number-only input, proportional-font text
-   metrics (currently monospace-only), ~~theming~~ (DONE 2026-07-23 — `ui.k`'s colour constants
-   are now `oklch` Tailwind-palette lookups from `lib/color.k`; reskin by swapping palette names),
-   error surfacing (a bad input blanks the frame instead of showing a message), resize-stable
-   coordinates.
+   metrics (currently monospace-only), ~~theming~~ (DONE 2026-07-23 — `ui.k`'s colour constants are
+   `oklch` Tailwind-palette lookups; `ui.themeLight`/`ui.themeDark` role→rgba dicts + `ui.setTheme t`
+   rebind them live (next frame reskins); add a theme or swap palette names to retheme), error
+   surfacing (a bad input blanks the frame instead of showing a message), resize-stable coordinates.
 8. **Richer formula language** in Cells (precedence, parens, ranges, functions) — currently a
    left-to-right toy.
 

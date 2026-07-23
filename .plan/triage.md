@@ -224,10 +224,9 @@ or run as the main script. Repro: file `\d world; el:0.; probe:{[] el}; \d`; the
 namespace fn) makes both align. Likely compile-time name-mangling treating read-only members as
 file-private. Workaround: set members via an internal setter fn. Found building demo/timer.k.
 
-## `>=` misparse in lib/pga.k:39 (found by tools/klint.k)
-`pgaLDotF: … & pgaGrd[pgaBj]>=pgaGrd[pgaAi]` — k has no `>=`; this parses as
-`pgaGrd[pgaBj] > (=pgaGrd[pgaAi])` (a monadic `=` group of the RHS), not the intended
-`gradeB >= gradeA`. The left-contraction grade filter is therefore wrong. Fix:
-`~(pgaGrd[pgaBj]<pgaGrd[pgaAi])`. Not touched here (GA logic is subtle and lacks a quick oracle in
-this session; unrelated to the UI work). Surfaced by the new `<=`/`>=` linter `tools/klint.k`
-(`make lint`) — 2026-07-22.
+## `>=` misparse in lib/pga.k:39 (found by tools/klint.k) — FIXED 2026-07-23
+`pgaLDotF: … & pgaGrd[pgaBj]>=pgaGrd[pgaAi]` — k has no `>=`; this parsed as
+`pgaGrd[pgaBj] > (=pgaGrd[pgaAi])` (a monadic `=` group of the RHS), so the left-contraction grade
+filter was garbage. Fixed to `~(pgaGrd[pgaBj]<pgaGrd[pgaAi])`. Verified: `pgaLDotF` is now a proper
+256-element boolean mask (= `~(gradeB<gradeA)` AND the grade-difference condition); klint clean.
+Surfaced by the `<=`/`>=` linter `tools/klint.k` (`make lint`).

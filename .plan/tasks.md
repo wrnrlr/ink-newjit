@@ -209,3 +209,9 @@ Ranked remaining work: k-level cache-invalidation → gotcha-lint → scrolling 
 multi-context → perf → polish (alignment/theming/proportional-fonts/error-surfacing) → richer Cells
 formulas. Likely compiler bug logged above: namespace member written only externally is invisible to
 inside readers when file-loaded.
+
+## larger Graphics Tasks
+- **OKLab colormaps for dataviz** — generate perceptually-uniform colormap textures (the `texType 3` path) CPU-side; pairs naturally with the OKLab work.
+- **Phase 5 Vulkan cutover** — make `vulkan` the default backend, delete Dawn/zgpu. Big cleanup, unblocks Phase 6/7.
+- **Phase 7 fill self-host** — now scoped (the 5 dye-compiler gaps are documented); a deliberate multi-step effort to drop the glslang dependency.
+- **Retire native tessellation** — migrate `demo/{replay,edit,asr}.k` off `gpu.fill`/`gpu.tessellate` to canvas, then delete `triangulate.zig` + `fill.frag`.

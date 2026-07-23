@@ -290,7 +290,7 @@ propTy: {[aty;bty] $[isVecTy[aty]; aty; isVecTy[bty]; bty; aty]}
 binRty: {[op;aty;bty;oty] $[op in cmpOps; `bool; op in (`"&";`"|"); $[aty~`bool; `bool; propTy[aty;bty]]; op in `div`mod; `i32; op~`","; jnRty[aty;bty]; propTy[aty;bty]]}
 
 / ── Known 1-arg and multi-arg math function names ────────────────────────────
-mathFns:  `abs`floor`fract`sign`sqrt`exp`log`tanh`sqr`sin`cos`asin`acos`atan`length`normalize`pow`min`max`atan2`dot`cross`step`mod`clamp`mix`smoothstep
+mathFns:  `abs`floor`fract`sign`sqrt`cbrt`exp`log`tanh`sqr`sin`cos`asin`acos`atan`length`normalize`pow`min`max`atan2`dot`cross`step`mod`clamp`mix`smoothstep
 
 / ── Verb dispatch ────────────────────────────────────────────────────────────
 dispBin: {[op;rty;r;aty;a;bty;b]
@@ -1818,6 +1818,7 @@ xConsW: {[ty;r;ids] n:#ids; $[n=2;opCons2[Tid[ty];r;ids 0;ids 1]; n=3;opCons3[Ti
 xMathW: {[name;ty;r;ids;at]
   $[name~`abs;opAbs[at;r;ids 0]; name~`floor;opFloor[at;r;ids 0]; name~`fract;opFract[at;r;ids 0]
     name~`sign;opSign[at;r;ids 0]; name~`sqrt;opSqrt[at;r;ids 0]; name~`exp;opExp[at;r;ids 0]
+    name~`cbrt;opPow[at;r;ids 0; constId[Tf32; %[1.;3.]]]   / cube root = pow(x, 1/3); scalar operand
     name~`log;opLog[at;r;ids 0]; name~`tanh;opTanh[at;r;ids 0]; name~`sqr;opFmul[at;r;ids 0;ids 0]
     name~`sin;opSin[at;r;ids 0]; name~`cos;opCos[at;r;ids 0]; name~`asin;opAsin[at;r;ids 0]
     name~`acos;opAcos[at;r;ids 0]; name~`atan;opAtan[at;r;ids 0]; name~`atan2;opAtan2[at;r;ids 0;ids 1]

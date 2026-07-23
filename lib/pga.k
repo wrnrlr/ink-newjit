@@ -36,7 +36,7 @@ pgaWedgeF: pgaGrd[pgaGpB] = pgaGrd[pgaAi]+pgaGrd[pgaBj]
 pgaWedgeS: pgaGpS * pgaWedgeF
 
 / ── Left contraction filter (⌋): A⌋B — grade(result) = grade(B) - grade(A) ──────
-pgaLDotF: (pgaGrd[pgaGpB] = pgaGrd[pgaBj]-pgaGrd[pgaAi]) & pgaGrd[pgaBj]>=pgaGrd[pgaAi]
+pgaLDotF: (pgaGrd[pgaGpB] = pgaGrd[pgaBj]-pgaGrd[pgaAi]) & ~(pgaGrd[pgaBj]<pgaGrd[pgaAi])   / grade(B)≥grade(A); k has no >=
 pgaLDotS: pgaGpS * pgaLDotF
 
 / ── Reverse signs (flip sign of grade-2 and grade-3 blades) ─────────────────────

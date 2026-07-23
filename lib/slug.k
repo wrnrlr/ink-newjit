@@ -317,13 +317,13 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
     orl: mix[(sbuf[off+28.])%12.92; pow[((sbuf[off+28.])+0.055)%1.055;2.4]; step[0.04045; sbuf[off+28.]]]
     ogl: mix[(sbuf[off+29.])%12.92; pow[((sbuf[off+29.])+0.055)%1.055;2.4]; step[0.04045; sbuf[off+29.]]]
     obl: mix[(sbuf[off+30.])%12.92; pow[((sbuf[off+30.])+0.055)%1.055;2.4]; step[0.04045; sbuf[off+30.]]]
-    / linear → LMS then cube-root (cbrt via pow[·;1/3] on the ≥0-clamped cone response).
-    ill: pow[0.|(((0.4122214708*irl)+(0.5363325363*igl))+0.0514459929*ibl); 0.3333333333]
-    imm: pow[0.|(((0.2119034982*irl)+(0.6806995451*igl))+0.1073969566*ibl); 0.3333333333]
-    iss: pow[0.|(((0.0883024619*irl)+(0.2817188376*igl))+0.6299787005*ibl); 0.3333333333]
-    oll: pow[0.|(((0.4122214708*orl)+(0.5363325363*ogl))+0.0514459929*obl); 0.3333333333]
-    omm: pow[0.|(((0.2119034982*orl)+(0.6806995451*ogl))+0.1073969566*obl); 0.3333333333]
-    oss: pow[0.|(((0.0883024619*orl)+(0.2817188376*ogl))+0.6299787005*obl); 0.3333333333]
+    / linear → LMS then cube-root (dye `cbrt` intrinsic = pow[·;1/3], on the ≥0-clamped cone response).
+    ill: cbrt[0.|(((0.4122214708*irl)+(0.5363325363*igl))+0.0514459929*ibl)]
+    imm: cbrt[0.|(((0.2119034982*irl)+(0.6806995451*igl))+0.1073969566*ibl)]
+    iss: cbrt[0.|(((0.0883024619*irl)+(0.2817188376*igl))+0.6299787005*ibl)]
+    oll: cbrt[0.|(((0.4122214708*orl)+(0.5363325363*ogl))+0.0514459929*obl)]
+    omm: cbrt[0.|(((0.2119034982*orl)+(0.6806995451*ogl))+0.1073969566*obl)]
+    oss: cbrt[0.|(((0.0883024619*orl)+(0.2817188376*ogl))+0.6299787005*obl)]
     / LMS′ → OKLab (L;A;B) for both endpoints.
     iL: ((0.2104542553*ill)+(0.7936177850*imm))-0.0040720468*iss
     iA: ((1.9779984951*ill)-(2.4285922050*imm))+0.4505937099*iss

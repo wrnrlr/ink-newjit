@@ -17,22 +17,25 @@
 2: "lib/canvas.k"
 2: "lib/color.k"
 
-  / ── theme: Tailwind palette (OKLCh → rgba via color.k `oklch`) instead of raw literals ──
-  / One place to reskin the whole kit; swap these palette names to retheme.
-ui.BLUE:  oklch Blue600        / primary accent (buttons, slider fill, caret)
-ui.BLUED: oklch Blue700        / darker accent (slider handle)
-ui.DARK:  oklch Slate900       / body text / default fg
-ui.WHITE: oklch White          / on-accent text
-ui.GREY:  oklch Slate400       / placeholder text
-ui.INBG:  oklch White          / input background
-ui.INFOC: oklch Blue50         / focused input tint
-ui.MENUBG:oklch White          / dropdown menu background
-ui.MENUHI:oklch Blue50         / dropdown hover
-ui.DISBG: oklch Slate200       / disabled background
-ui.DISFG: oklch Slate400       / disabled foreground
-ui.BADBG: oklch Red100         / invalid-input background
-ui.TRACK: oklch Slate200       / slider / progress track
-ui.OK:    oklch Emerald600      / progress fill (positive)
+  / ── theme: Tailwind palette (OKLCh → rgba via color.k `oklch`), swappable at runtime ──
+  / A theme is a dict of role→rgba; `ui.setTheme t` rebinds the ui.* colour constants (the widget
+  / constructors read these each frame, so a live switch reskins the whole kit next frame). Roles:
+  / BLUE=accent, BLUED=accent-pressed, DARK=primary text/fg, WHITE=on-accent text, GREY=placeholder,
+  / INBG/INFOC=input bg/focus, MENUBG/MENUHI=menu bg/hover, DISBG/DISFG=disabled, BADBG=invalid,
+  / SELBG=selection, TRACK=slider·progress track, OK=progress fill, BG=page background.
+ui.TROLES:`BLUE`BLUED`DARK`WHITE`GREY`INBG`INFOC`MENUBG`MENUHI`DISBG`DISFG`BADBG`SELBG`TRACK`OK`BG
+ui.themeLight: ui.TROLES! oklch'(
+  Blue600; Blue700; Slate900; White; Slate400; White; Blue50; White; Blue50
+  Slate200; Slate400; Red100; Blue100; Slate200; Emerald600; Slate50 )
+ui.themeDark: ui.TROLES! oklch'(
+  Blue500; Blue600; Slate100; White; Slate500; Slate800; Slate700; Slate800; Slate700
+  Slate800; Slate600; Red950; Blue900; Slate700; Emerald500; Slate950 )
+ui.setTheme:{[t]
+  ui.BLUE::t`BLUE; ui.BLUED::t`BLUED; ui.DARK::t`DARK; ui.WHITE::t`WHITE; ui.GREY::t`GREY
+  ui.INBG::t`INBG; ui.INFOC::t`INFOC; ui.MENUBG::t`MENUBG; ui.MENUHI::t`MENUHI
+  ui.DISBG::t`DISBG; ui.DISFG::t`DISFG; ui.BADBG::t`BADBG; ui.SELBG::t`SELBG
+  ui.TRACK::t`TRACK; ui.OK::t`OK; ui.BG::t`BG}
+ui.setTheme ui.themeLight                          / default: light
 ui.CW:0.6                                       / monospace advance / em (FiraCode)
 ui.KEYS:`t`w`h`grow`dir`gap`pad`kids`id`bg`txt`fg`sz`act
 
@@ -233,7 +236,7 @@ ui.fillRect:{[x;y;w;h;c] cnv.rect[x;y;w;h]; cnv.fill cnv.rgba[c 0;c 1;c 2;c 3]}
 ui.drawTxt:{[x;y;sz;s;c] cnv.moveTo[x;y]; cnv.text[ui.FONT; sz; s; cnv.rgba[c 0;c 1;c 2;c 3]]}
 ui.drawCaret:{[tx;y;h;sz;col] cx:tx+col*sz*ui.CW; cnv.rect[cx; y+0.15*h; 2.; 0.7*h]; cnv.fill cnv.rgba[ui.BLUE 0;ui.BLUE 1;ui.BLUE 2;ui.BLUE 3]}
   / a list box: one text row per item; the selected row (ui.getv[key]) gets a highlight behind it.
-ui.SELBG: oklch Blue100
+  / (ui.SELBG is part of the theme — see ui.setTheme up top.)
 ui.drawItem:{[x;y;w;ih;sz;sel;j;s]
     $[j=sel; ui.fillRect[x; y+ih*j; w; ih; ui.SELBG]; 0]
     ui.drawTxt[x+8.; (y+ih*j)+0.66*ih; sz; s; ui.DARK]}
