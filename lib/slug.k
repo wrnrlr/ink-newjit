@@ -309,9 +309,48 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
     sd: ((0.&(dx|dy))+sqrt[(mdx*mdx)+(mdy*mdy)])-rad
     gd: clamp[(sd+(feth*0.5))%(feth|1e-4); 0.; 1.]
     d: (step[0.5;extx])*gd            / extx<0.5 ⇒ solid (d=0 ⇒ innerCol); else gradient
-    cr: mix[sbuf[off+24.]; sbuf[off+28.]; d]
-    cg: mix[sbuf[off+25.]; sbuf[off+29.]; d]
-    cb: mix[sbuf[off+26.]; sbuf[off+30.]; d]
+    / ── OKLab-interpolated gradient (perceptually uniform; same matrices as lib/color.k `oklch`). ──
+    / gamma-sRGB endpoints → linear light (branchless step), per channel: inner i*l / outer o*l.
+    irl: mix[(sbuf[off+24.])%12.92; pow[((sbuf[off+24.])+0.055)%1.055;2.4]; step[0.04045; sbuf[off+24.]]]
+    igl: mix[(sbuf[off+25.])%12.92; pow[((sbuf[off+25.])+0.055)%1.055;2.4]; step[0.04045; sbuf[off+25.]]]
+    ibl: mix[(sbuf[off+26.])%12.92; pow[((sbuf[off+26.])+0.055)%1.055;2.4]; step[0.04045; sbuf[off+26.]]]
+    orl: mix[(sbuf[off+28.])%12.92; pow[((sbuf[off+28.])+0.055)%1.055;2.4]; step[0.04045; sbuf[off+28.]]]
+    ogl: mix[(sbuf[off+29.])%12.92; pow[((sbuf[off+29.])+0.055)%1.055;2.4]; step[0.04045; sbuf[off+29.]]]
+    obl: mix[(sbuf[off+30.])%12.92; pow[((sbuf[off+30.])+0.055)%1.055;2.4]; step[0.04045; sbuf[off+30.]]]
+    / linear → LMS then cube-root (cbrt via pow[·;1/3] on the ≥0-clamped cone response).
+    ill: pow[0.|(((0.4122214708*irl)+(0.5363325363*igl))+0.0514459929*ibl); 0.3333333333]
+    imm: pow[0.|(((0.2119034982*irl)+(0.6806995451*igl))+0.1073969566*ibl); 0.3333333333]
+    iss: pow[0.|(((0.0883024619*irl)+(0.2817188376*igl))+0.6299787005*ibl); 0.3333333333]
+    oll: pow[0.|(((0.4122214708*orl)+(0.5363325363*ogl))+0.0514459929*obl); 0.3333333333]
+    omm: pow[0.|(((0.2119034982*orl)+(0.6806995451*ogl))+0.1073969566*obl); 0.3333333333]
+    oss: pow[0.|(((0.0883024619*orl)+(0.2817188376*ogl))+0.6299787005*obl); 0.3333333333]
+    / LMS′ → OKLab (L;A;B) for both endpoints.
+    iL: ((0.2104542553*ill)+(0.7936177850*imm))-0.0040720468*iss
+    iA: ((1.9779984951*ill)-(2.4285922050*imm))+0.4505937099*iss
+    iB: ((0.0259040371*ill)+(0.7827717662*imm))-0.8086757660*iss
+    oL: ((0.2104542553*oll)+(0.7936177850*omm))-0.0040720468*oss
+    oA: ((1.9779984951*oll)-(2.4285922050*omm))+0.4505937099*oss
+    oB: ((0.0259040371*oll)+(0.7827717662*omm))-0.8086757660*oss
+    / interpolate in OKLab.
+    mL: mix[iL;oL;d]; mA: mix[iA;oA;d]; mB: mix[iB;oB;d]
+    / OKLab → LMS′, cube, → linear light.
+    pl: (mL+(0.3963377774*mA))+0.2158037573*mB
+    pm: (mL-(0.1055613458*mA))-0.0638541728*mB
+    ps: (mL-(0.0894841775*mA))-1.2914855480*mB
+    ll3: pl*pl*pl; mm3: pm*pm*pm; ss3: ps*ps*ps
+    lr: ((4.0767416621*ll3)-(3.3077115913*mm3))+0.2309699292*ss3
+    lg: ((2.6097574011*mm3)-(1.2684380046*ll3))-0.3413193965*ss3
+    lb: ((1.7076147010*ss3)-(0.7034186147*mm3))-0.0041960863*ll3
+    / linear light → gamma sRGB.
+    gr: mix[lr*12.92; (1.055*pow[0.|lr;0.4166666667])-0.055; step[0.0031308;lr]]
+    gg: mix[lg*12.92; (1.055*pow[0.|lg;0.4166666667])-0.055; step[0.0031308;lg]]
+    gb: mix[lb*12.92; (1.055*pow[0.|lb;0.4166666667])-0.055; step[0.0031308;lb]]
+    / solids (step[0.5;extx]=0) keep the EXACT inner colour — no OKLab round-trip drift, so
+    / every solid fill / glyph stays bit-identical (UI goldens unaffected); only gradients change.
+    sel: step[0.5; extx]
+    cr: mix[sbuf[off+24.]; gr; sel]
+    cg: mix[sbuf[off+25.]; gg; sel]
+    cb: mix[sbuf[off+26.]; gb; sel]
     ca: mix[sbuf[off+27.]; sbuf[off+31.]; d]
     (cr; cg; cb; ((ca*ins)*scis))}]
 

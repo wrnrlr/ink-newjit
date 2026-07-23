@@ -91,6 +91,29 @@ Toolchain: `brew install molten-vk vulkan-headers glslang`.
    → `.spv` via `glslangValidator`) in the ink shader dialect compiled by `dye.k`;
    delete the GLSL sources + `.spv` + the glslang dependency. End state: zero
    `.wgsl`/`.glsl`, no external shader compiler.
+   **SCOPE (assessed 2026-07-23):** this is a real dye-compiler project, not a mechanical
+   port — 5 of 7 features `fill.frag` uses don't exist in the dialect: (a) **no fragment
+   uniform block** (only compute has UBOs; the `frag[11]` vec4 array is the shader's whole
+   parameterization) — needs a new `shader.fragment*` variant emitting a Uniform struct at
+   set0/b1 with `loadUniMember`-style indexed access; (b) **no matrix type** (mat3×vec3 must
+   be hand-expanded to scalar dot-products, as slug.k already does); (c) **descriptor-layout
+   mismatch** — dye emits images at set1 with ONE shared sampler, `fill.frag` needs set0,
+   per-texture samplers, interleaved bindings 2-5; (d) **no vertex-attribute path** — dye
+   only *pulls* from storage buffers by `gl_VertexIndex`, so `fill.vert`'s `in vec2 pos/uv`
+   + viewSize UBO have no equivalent (plumbing keeps the embedded `fill.vert.spv` so the
+   vertex stage can stay GLSL-bridged); (e) **no multi-component swizzles** (`.xy`/`.zw`/
+   `.rgb` are everywhere; only single-component `v[i]` extract exists) — needs OpVectorShuffle
+   or every swizzle rewritten as a component list. The 5-way `type==0..4` dispatch itself is
+   fine (eager nested `OpSelect`, composite-legal on the 1.4 header — just samples all
+   textures). Wiring (`vk.zig:608` `@embedFile`) also means re-sourcing the SPIR-V: either a
+   build step that runs `ink` to emit `fill.frag.spv`, or moving fill-pipeline creation to the
+   runtime k-driven `gpu.drawShader`/`buildFillPipe` path (which today reuses the fixed
+   6-binding set0 layout dye can't emit). Do (a),(b),(e) first — they touch nearly every line.
+   **NOTE — NOT a prerequisite for OKLab.** OKLab gradient interpolation was the motivation,
+   but the ACTIVE 2D renderer (`lib/slug.k` FRAGF) is ALREADY self-hosted in dye, so OKLab
+   landed there directly (2026-07-23, see Canvas/Slug §below) with no Phase 7. `fill.frag` is
+   the legacy NanoVG bridge (deprecated `gpu.fill`/`gpu.tessellate` path); Phase 7 is only
+   about deleting the glslang dependency, and can proceed on its own timeline.
 5. **Cross-platform**: the Vulkan backend is macOS/arm64-only for now; the `vk.zig`
    surface/extension seam was written to admit Linux/Windows later — wire those up.
 6. **Multi-time `-snap` scheduling** (single-frame capture works; port the Dawn
@@ -106,7 +129,19 @@ tessellation. DONE this cycle: gradients/clip in the fill shader, strokes as mit
 outlines, one-backend cutover, image paint (`shader.fragmentBufTex`), CFF/OTF `font.quads`
 (cubic→2 quads), scene-buffer compaction (indexed band layout), and scene/quad-pool
 double-buffering. Also DONE 2026-07-21: `&`/`|` polysemic in the shader dialect (task 3),
-text clipping (task 4), image sampler confirmed LINEAR (task 6). Remaining, rough priority:
+text clipping (task 4), image sampler confirmed LINEAR (task 6).
+
+**OKLab gradient interpolation — DONE 2026-07-23.** Gradients now interpolate in OKLab
+(perceptually uniform; no muddy sRGB-lerp midpoint) instead of per-channel gamma sRGB. All
+in the dye-compiled FRAGF fragment (`lib/slug.k` ~L311-345) using existing dialect intrinsics
+(`pow`/`step`/`mix`/`|`-max) — same Ottosson matrices as `lib/color.k`'s `oklch`. SOLIDS stay
+BIT-EXACT: `sel: step[0.5;extx]` picks the untouched inner sRGB for solid paints (extx<0.5), so
+the OKLab round-trip never perturbs solid fills or glyphs → all UI logic + golden-pixel tests
+still pass (`test/ui.k` 26/26, `test/uishot.k` 3/3). Verified on `demo/canvas.k`: 24.9k px changed
+(exactly the two gradient regions), every sampled solid/text/stroke pixel identical. Cost: the
+eager-select computes OKLab for every fill pixel (no expression-branch in the dialect), but it's
+dwarfed by the existing per-pixel analytic-coverage band loop. Needed the CPU `cbrt` operator
+(`syms.zig`+prelude) for the palette path; the shader uses `pow[·;1/3]`. Remaining, rough priority:
 
 1. **Band-loop truncation cap — DONE 2026-07-21.** The scene-buffer fragment now loops the
    REAL per-band count via `rsum[bcnt; …]` (a RUNTIME trip count — `loopOpen` already

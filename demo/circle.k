@@ -64,8 +64,8 @@ ui.onCanvas {[x;y;w;h] world.paint[x;y;w;h]}
 run:{[props]
   world.hover[props`mx; props`my]
   world.editTick[]
-  W: ui.run[world.view[]; props]
+  W: ui.run[view[]; props]
   {world.act x}' ui.frame[W; props]
-  ui.draw[ui.run[world.view[]; props]; props`width; props`height]}
+  ui.draw[ui.run[view[]; props]; props`width; props`height]}
 
 window.run[run; 640. 520.]

@@ -1,5 +1,29 @@
 # Issues
 
+## 22. `lib/color.k` legacy HSL/pct helpers are broken (disabled) + a `\`-swallow lexer bug
+
+`lib/color.k` could never be loaded (`2:"lib/color.k"`) because two legacy lines
+choke the lexer:
+
+- `perm:{,/'(|x,,s+&#*x)@*/1+\\~=1+s:#x}/[;!0]` — the literal `\\` (two backslashes)
+  makes the lexer **swallow the rest of the file** (no output, no error). Replacing
+  it with a single `\` lets the file load but then `perm 3` is `!type`, so the
+  algorithm is broken regardless. `hsl2rgb` depends on `perm`.
+- `tbl:+(-1+,/||:\!3)6!![6]+/:4*!3` (feeds `pct2rgb`) — the `||:\` similarly swallows
+  the following line at load. `pct2rgb` unusable.
+
+Because `perm` sat at line 4, the OKLCh palette + the new `oklch` converter below it
+were unreachable. **Fixed for the palette path** by commenting out `perm`/`hsl2rgb`
+and `tbl`/`pct2rgb` (2026-07-22); `2:"lib/color.k"` now loads and `oklch Blue500`
+etc. work (verified bit-exact on the neutral ramp vs Tailwind hex). The HSL/pct
+helpers remain DISABLED — reviving them needs (a) the underlying lexer bug fixed and
+(b) the perm/tbl math rewritten for this dialect. Root cause of (a): `src/parser/
+lexer.zig:184-207` — a `\` mid-expression, when the preceding token leaves the lexer
+in a state where the `\`+next char looks like a command (`\letter…`, line 194), runs
+`while … != '\n'` and eats to end of line. There is already a regression test
+"lexer divider not swallowed by later backslash" (lexer.zig:632); `\\` and `||:\`
+are cases it doesn't cover. Low priority (only bit legacy color helpers).
+
 ## 4. Slab free-size fragility — `Rc` header must stay 16 bytes (design note)
 
 Confirmed sound as built. The epoch stamp added for ECS change-detection was

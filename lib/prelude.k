@@ -19,6 +19,9 @@ exp:{`exp x};log:{`log x};abs:{`abs x}
 / ── inverse trig (syms.zig std.math; f32) ──
 asin:{`asin x};acos:{`acos x};atan:{`atan x};atan2:{`atan2(x;y)}
 
+/ ── cube root (syms.zig std.math.cbrt; f32-widening, signed) ──
+cbrt:{`cbrt x}
+
 / ── ex-keyword monadic verbs with a glyph form ──
 first:{*x};last:{*|x};count:{#x}
 / ── ex-keyword monadic verbs with no glyph (routed to their Op1 kernel by symbol) ──

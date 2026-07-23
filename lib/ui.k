@@ -96,6 +96,13 @@ ui.gap:{[g;nd] @[nd;`gap;:;g]}
 ui.bg:{[c;nd] @[nd;`bg;:;c]}
 ui.disabled:{[nd] @[@[@[nd;`bg;:;ui.DISBG];`fg;:;ui.DISFG];`act;:;`nop]}
 ui.invalid:{[nd] @[nd;`bg;:;ui.BADBG]}
+  / ── flat styling: set MANY node fields in one call, no combinator onion ─────────
+  / `ui.sty[nd; d]` amends node `nd` with every (field→value) in dict `d`. Since the
+  / bg/pad/sized/… combinators each just amend ONE field and return the same node,
+  / three nested calls set three fields; this collapses them: e.g.
+  /   ui.sty[ui.col[18.; kids]; `bg`pad!(Slate50; 40.)]
+  / replaces  ui.bg[Slate50; ui.pad[40.; ui.col[18.; kids]]]  (identical result).
+ui.sty:{[nd;d] {@[x; *y; :; *|y]}/[nd; +(!d;. d)]}
 
   / ── natSize: intrinsic content size, bottom-up ───────────────────────────────
 ui.gwf:{x`w}; ui.ghf:{x`h}; ui.ggf:{x`grow}; ui.gwf0:{x 0}; ui.ghf0:{x 1}

@@ -1,16 +1,37 @@
 // [[https://en.wikipedia.org/wiki/HSL_and_HSV]]
 chroma:{[s;l]s*(1-{x|-x}1-2*l)}
 c2:{[h;c](_h1;c*1-{x|-x}1-%[;A](2*A)!(h1:%[h;60])*A:1000)}
-perm:{,/'(|x,,s+&#*x)@*/1+\\~=1+s:#x}/[;!0]
+/ NOTE: `perm`/`hsl2rgb` are DISABLED — the `\\` in `perm` swallows the rest of the
+/ file at load time (lexer bug), and with a single `\` `perm 3` is `!type`. Both are
+/ triaged. The OKLCh palette + `oklch` below are the live path (see doc/design/ui.md).
+/ perm:{,/'(|x,,s+&#*x)@*/1+\\~=1+s:#x}/[;!0]
+/ hsl2rgb:{[h;s;l]
+/   c: chroma[s;l]; (h;x): c2[h;c]; m: l-c%2;
+/   _255*m+(c;x;0.0)((@/1<:\+perm 3)0 2 4 5 3 1)@(!7)'h
+/ }
 
-hsl2rgb:{[h;s;l]
-  c: chroma[s;l]; (h;x): c2[h;c]; m: l-c%2;
-  _255*m+(c;x;0.0)((@/1<:\+perm 3)0 2 4 5 3 1)@(!7)'h
-}
+/ less fanfare but only chroma component (also disabled: `||:\` swallows at load, triaged)
+/ tbl:+(-1+,/||:\!3)6!![6]+/:4*!3
+/ pct2rgb:{_255*1&0|tbl[s]+(f;1-f)@2!s:_s-f:1!s:6*1!x}
 
-/ less fanfare but only chroma component
-tbl:+(-1+,/||:\!3)6!![6]+/:4*!3
-pct2rgb:{_255*1&0|tbl[s]+(f;1-f)@2!s:_s-f:1!s:6*1!x}
+/ ── OKLab / OKLCh → gamma sRGB (Björn Ottosson's matrices, exact) ──────────────
+/ The Tailwind palette below is stored as OKLCh 4-tuples (l;c;h;a): l,a in [0,1],
+/ h in degrees. `oklch` resolves one to an rgba tuple (r;g;b;a), each 0..1 gamma
+/ sRGB — the form ui.k / canvas want. Verified bit-exact on the neutral ramp vs
+/ Tailwind hex (neutral-500=#737373, -800=#262626, -50=#fafafa, -950=#0a0a0a).
+COLPI:3.14159265358979
+oklxp:{[x;y] exp y*log x}                                      / x^y for positive x
+OKLM:(4.0767416621 -3.3077115913 0.2309699292
+      -1.2684380046 2.6097574011 -0.3413193965
+      -0.0041960863 -0.7034186147 1.7076147010)               / OKLab LMS'³ → linear sRGB
+oklab2lin:{[L;a;b]                                             / OKLab → linear sRGB (r;g;b)
+  l:L+(0.3963377774*a)+0.2158037573*b
+  m:L-(0.1055613458*a)+0.0638541728*b
+  s:L-(0.0894841775*a)+1.2914855480*b
+  +/'OKLM*\:(l*l*l;m*m*m;s*s*s)}
+oklgam:{$[x<0.0031308; 12.92*x; (1.055*oklxp[x;1%2.4])-0.055]} / linear → gamma sRGB channel
+oklch2rgb:{[L;C;h] hr:h*COLPI%180; 0.|1.&oklgam'oklab2lin[L;C*cos hr;C*sin hr]}
+oklch:{[c] (oklch2rgb[c 0;c 1;c 2]),c 3}                       / (l;c;h;a) → (r;g;b;a) rgba
 
 / Tailwind palette as OKLCh colors: each is (l;c;h;a), l,a in [0,1], h in degrees.
 Red50:      0.971 0.013 17.38 1.

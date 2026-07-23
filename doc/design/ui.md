@@ -269,6 +269,10 @@ keyed by widget id: `buf` (text), `val` (numbers), `opts` (select/list items), p
 **Combinators (amend one field; chain).** `ui.grow[w; nd]`, `ui.pad[p; nd]`, `ui.sized[w; h; nd]`,
 `ui.gap[g; nd]`, `ui.bg[color; nd]`, `ui.disabled[nd]` (grey + inert), `ui.invalid[nd]` (red).
 
+**Flat styling (avoids the combinator onion).** `ui.sty[nd; dict]` amends *many* fields in one
+call — `ui.sty[ui.col[18.; kids]; `bg`pad!(Slate50; 40.)]` is byte-identical to the nested
+`ui.bg[Slate50; ui.pad[40.; ui.col[18.; kids]]]`. See "Why the combinators nest" below.
+
 **Frame passes.** `ui.run[tree; props]` → widget table `W` (solve + build + overlay). `ui.frame[W;
 props]` → app actions (handles focus/menu/slider-drag/list/canvas + keyboard; call
 `{app.act x}'` over the result). `ui.draw[W; w; h]` → render (main pass + overlay pass). Also
@@ -283,6 +287,62 @@ run:{[props]
 ```
 
 ---
+
+## Why the combinators nest (and how to stop) — 2026-07-22
+
+The complaint "`ui.bg[ui.pad[ui.col[…]]]` has too many nested calls" is a **syntax**
+issue, not a VM or language limitation, and not extra nodes at runtime:
+
+- `ui.bg`/`ui.pad`/`ui.sized`/`ui.gap` are **field-amenders** — each is
+  `{[v; nd] @[nd; field; :; v]}`, returning the *same* node with one more field set.
+  So `ui.bg[c; ui.pad[p; ui.col[g; kids]]]` is **one** node (the `col`) carrying
+  `bg`, `pad`, and `gap`. The onion is three *calls* setting three *fields*, not
+  three boxes. No nesting cost; it's purely how right-to-left k spells "set these
+  three fields" when there are no named arguments and no pipe/`|>` operator.
+
+Options to flatten, in order of preference:
+
+1. **`ui.sty[nd; dict]`** (SHIPPED) — one call sets every field in a dict:
+   `ui.sty[ui.col[18.; kids]; `bg`pad!(Slate50; 40.)]`. Verified `~`-identical to the
+   nested form; all 26 UI tests pass. Order-independent, extensible (add `grow`,
+   `sized`… as dict keys), and it reads as "here's the node, here's its style."
+2. **Style-dict container arg** — give `ui.col`/`ui.row` an optional leading style
+   dict: `ui.col[`gap`pad`bg!(18.;40.;Slate50); kids]`. Fewer calls still, but it
+   changes the container signature (touches every demo) and mixes layout with style.
+3. **A `with`/pipe helper** — a threading combinator so styles read as a suffix
+   chain. k has no native pipe; simulating one (`nd ui.with (`bg;c;`pad;p)`) is
+   strictly worse than the dict in (1).
+
+Recommendation: keep the single-field combinators for the common one-off
+(`ui.grow[1.; …]`) and reach for `ui.sty` whenever ≥2 fields are set on one node —
+that removes essentially all of the observed nesting without a breaking change.
+
+## Colors & palette — OKLCh, 2026-07-22
+
+The general palette is Tailwind-in-OKLCh, stored in `lib/color.k` as `(l;c;h;a)`
+4-tuples (`Blue500`, `Slate50`, `Neutral950`, …). **Do we support the OKLab color
+space?** The *data* was there; the *conversion* was not. Added `oklch` (and
+`oklch2rgb`/`oklab2lin`) — Björn Ottosson's exact matrices — which resolve a palette
+entry to a gamma-sRGB `(r;g;b;a)` rgba tuple, the form `ui.k`/`canvas` already use.
+Verified **bit-exact** on the neutral ramp vs Tailwind hex (`Neutral500`→#737373,
+`Neutral800`→#262626, `Neutral50`→#fafafa, `Neutral950`→#0a0a0a). Chromatic values
+are more vivid than Tailwind *v3* hex because these OKLCh numbers are Tailwind *v4*.
+
+Usage: `2:"lib/color.k"` then `ui.bg[oklch Blue500; nd]` or
+`ui.sty[…; `bg!,oklch Slate50]`. NOTE `lib/color.k`'s legacy HSL/pct helpers
+(`perm`/`hsl2rgb`/`pct2rgb`) were disabled to make the file loadable at all — a `\`
+in them swallowed the rest of the file at load time (triage §22). Theming the whole
+kit is now a matter of swapping the hardcoded `ui.BLUE`/`ui.DARK`/… constants for
+`oklch` palette lookups (roadmap "theming" item).
+
+**OKLab at the shader level — DONE 2026-07-23.** Beyond the CPU palette, gradients now
+interpolate in OKLab in the dye-compiled 2D shader (`lib/slug.k` FRAGF), so gradient
+midpoints are perceptually even instead of the muddy sRGB-lerp result. Solid fills/glyphs
+stay bit-exact (a `step[0.5;extx]` select keeps solids on the untouched inner colour), so no
+UI golden changed. This did NOT need "Phase 7" (self-hosting the legacy `fill.frag`): the
+active 2D renderer is slug.k, already authored in the dye dialect. A CPU `cbrt` operator was
+added (`` `cbrt x `` / prelude `cbrt`) for the OKLab math; the shader uses `pow[·;1/3]`. See
+`.plan/tasks.md` Canvas/Slug §"OKLab gradient interpolation" and the Phase 7 scope note.
 
 ## Roadmap — remaining work, ranked
 
@@ -310,8 +370,10 @@ widgets/behaviour:
 6. **Performance at scale** — profile full-rebuild + re-solve + per-row paint beyond ~50 widgets;
    Cells recompute is O(cells²).
 7. **Polish:** field alignment (start/center/end), number-only input, proportional-font text
-   metrics (currently monospace-only), theming (palette is hardcoded constants), error surfacing
-   (a bad input blanks the frame instead of showing a message), resize-stable coordinates.
+   metrics (currently monospace-only), ~~theming~~ (DONE 2026-07-23 — `ui.k`'s colour constants
+   are now `oklch` Tailwind-palette lookups from `lib/color.k`; reskin by swapping palette names),
+   error surfacing (a bad input blanks the frame instead of showing a message), resize-stable
+   coordinates.
 8. **Richer formula language** in Cells (precedence, parens, ranges, functions) — currently a
    left-to-right toy.
 
