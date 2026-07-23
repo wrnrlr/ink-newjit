@@ -15,10 +15,24 @@
 / fills correctly occlude the base pass's text. Max 2 render passes per frame (see doc/design/ui.md).
 
 2: "lib/canvas.k"
+2: "lib/color.k"
 
-ui.BLUE:0.22 0.45 0.95 1.; ui.DARK:0.10 0.10 0.12 1.; ui.WHITE:1. 1. 1. 1.; ui.GREY:0.6 0.6 0.66 1.
-ui.INBG:1. 1. 1. 1.; ui.INFOC:0.90 0.94 1. 1.; ui.MENUBG:1. 1. 1. 1.; ui.MENUHI:0.90 0.94 1. 1.
-ui.DISBG:0.88 0.88 0.90 1.; ui.DISFG:0.62 0.62 0.66 1.; ui.BADBG:1. 0.86 0.86 1.
+  / ── theme: Tailwind palette (OKLCh → rgba via color.k `oklch`) instead of raw literals ──
+  / One place to reskin the whole kit; swap these palette names to retheme.
+ui.BLUE:  oklch Blue600        / primary accent (buttons, slider fill, caret)
+ui.BLUED: oklch Blue700        / darker accent (slider handle)
+ui.DARK:  oklch Slate900       / body text / default fg
+ui.WHITE: oklch White          / on-accent text
+ui.GREY:  oklch Slate400       / placeholder text
+ui.INBG:  oklch White          / input background
+ui.INFOC: oklch Blue50         / focused input tint
+ui.MENUBG:oklch White          / dropdown menu background
+ui.MENUHI:oklch Blue50         / dropdown hover
+ui.DISBG: oklch Slate200       / disabled background
+ui.DISFG: oklch Slate400       / disabled foreground
+ui.BADBG: oklch Red100         / invalid-input background
+ui.TRACK: oklch Slate200       / slider / progress track
+ui.OK:    oklch Emerald600      / progress fill (positive)
 ui.CW:0.6                                       / monospace advance / em (FiraCode)
 ui.KEYS:`t`w`h`grow`dir`gap`pad`kids`id`bg`txt`fg`sz`act
 
@@ -68,8 +82,8 @@ ui.select:{[key;w;options]
   / A slider `w` px wide bound to ui.getv/ui.setv[key] over [mn;mx]. Click/drag the track to set.
 ui.slider:{[key;w;mn;mx] ui.regRng[key;mn,mx]; ui.KEYS!(`leaf;w;28.;0.;`row;0.;0.;();key;();"";ui.DARK;0.;`slide)}
   / A progress gauge (fraction 0..1), `w`×`h` — pure flexbox: a fill box grows to `frac` of a track.
-ui.progress:{[frac;w;h] ui.sized[w;h; ui.bg[0.85 0.85 0.88 1.; ui.row[0.; (
-    ui.grow[1e-4|frac; ui.box[0.22 0.60 0.42 1.]] ; ui.grow[1e-4|1.-frac; ui.spacer[]] )]]]}
+ui.progress:{[frac;w;h] ui.sized[w;h; ui.bg[ui.TRACK; ui.row[0.; (
+    ui.grow[1e-4|frac; ui.box[ui.OK]] ; ui.grow[1e-4|1.-frac; ui.spacer[]] )]]]}
   / A selectable list box `w`×`h` showing `items` (strings). Click an item to select it; the
   / selected index is ui.getv/ui.setv[key]. act=`list; painted by drawList (highlight + text rows).
 ui.list:{[key;items;w;h] ui.regOpts[key;items]; ui.KEYS!(`leaf;w;h;0.;`row;0.;0.;();key;ui.INBG;"";ui.DARK;16.;`list)}
@@ -217,12 +231,12 @@ ui.frame:{[W;props] E:props`events; a:ui.mouseActs[W;E]; ui.releaseDrag E; ui.dr
   / ── paint ────────────────────────────────────────────────────────────────────
 ui.fillRect:{[x;y;w;h;c] cnv.rect[x;y;w;h]; cnv.fill cnv.rgba[c 0;c 1;c 2;c 3]}
 ui.drawTxt:{[x;y;sz;s;c] cnv.moveTo[x;y]; cnv.text[ui.FONT; sz; s; cnv.rgba[c 0;c 1;c 2;c 3]]}
-ui.drawCaret:{[tx;y;h;sz;col] cx:tx+col*sz*ui.CW; cnv.rect[cx; y+0.15*h; 2.; 0.7*h]; cnv.fill cnv.rgba[0.2;0.5;0.95;1.]}
+ui.drawCaret:{[tx;y;h;sz;col] cx:tx+col*sz*ui.CW; cnv.rect[cx; y+0.15*h; 2.; 0.7*h]; cnv.fill cnv.rgba[ui.BLUE 0;ui.BLUE 1;ui.BLUE 2;ui.BLUE 3]}
   / a list box: one text row per item; the selected row (ui.getv[key]) gets a highlight behind it.
-ui.SELBG:0.80 0.89 1. 1.
+ui.SELBG: oklch Blue100
 ui.drawItem:{[x;y;w;ih;sz;sel;j;s]
     $[j=sel; ui.fillRect[x; y+ih*j; w; ih; ui.SELBG]; 0]
-    ui.drawTxt[x+8.; (y+ih*j)+0.66*ih; sz; s; 0.1 0.1 0.12 1.]}
+    ui.drawTxt[x+8.; (y+ih*j)+0.66*ih; sz; s; ui.DARK]}
 ui.drawList:{[key;x;y;w;sz]
     items:ui.opts key; ih:ui.ITEMK*sz; sel:`i$ui.getv key
     di:ui.drawItem[x;y;w;ih;sz;sel;]; di'[!#items; items]}
@@ -230,9 +244,9 @@ ui.drawList:{[key;x;y;w;sz]
 ui.drawSlider:{[key;x;y;w;h]
     r:ui.rng key; f:0.|1.&(ui.getv[key]-r 0)%(r 1)-r 0
     ty:(y+0.5*h)-3.; hw:14.; hx:x+f*w-hw
-    ui.fillRect[x; ty; w; 6.; 0.82 0.82 0.86 1.]
-    ui.fillRect[x; ty; (hx-x)+0.5*hw; 6.; 0.22 0.45 0.95 1.]
-    ui.fillRect[hx; y+3.; hw; h-6.; 0.16 0.32 0.7 1.]}
+    ui.fillRect[x; ty; w; 6.; ui.TRACK]
+    ui.fillRect[x; ty; (hx-x)+0.5*hw; 6.; ui.BLUE]
+    ui.fillRect[hx; y+3.; hw; h-6.; ui.BLUED]}
 ui.paintRow:{[W;i]
     x:(W`x)i; y:(W`y)i; w:(W`w)i; h:(W`h)i; sz:(W`sz)i
     bg:(W`bg)i; txt:(W`txt)i; a:(W`act)i; id:(W`id)i
