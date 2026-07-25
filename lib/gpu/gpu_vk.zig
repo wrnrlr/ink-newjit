@@ -10,7 +10,6 @@ const std = @import("std");
 const vk = @import("vk.zig");
 const zglfw = @import("zglfw");
 const png = @import("png.zig");
-const tri = @import("triangulate");
 extern fn getenv(name: [*:0]const u8) ?[*:0]const u8;
 
 const K = *anyopaque;
@@ -567,7 +566,9 @@ fn resetFrameMeshes() void {
 }
 
 // ── 2-D fill pipeline (Phase 3, increment 3) ──────────────────────────────────
-const FillCall = struct { byte_offset: u64, count: u32, frag: [44]f32, spirv: i32 }; // spirv=-1 → built-in fill
+// Every 2-D draw carries a custom dye-compiled fragment (spirv = index into
+// g_spirv_pipes). gpu.drawShader and the Slug 2-D backend both route through here.
+const FillCall = struct { byte_offset: u64, count: u32, frag: [44]f32, spirv: i32 };
 var g_fill_calls: std.ArrayList(FillCall) = .empty;
 var g_fill_verts: std.ArrayList(f32) = .empty; // [x,y,u,v] per vertex
 var g_fbuf: ?vk.Buffer = null;
@@ -582,16 +583,6 @@ fn fillAccumulate(verts_k: ?K, frag: [44]f32, spirv: i32) void {
   const byte_offset: u64 = g_fill_verts.items.len * @sizeOf(f32);
   g_fill_verts.appendSlice(alloc, vf[0..nfloats]) catch return;
   g_fill_calls.append(alloc, .{ .byte_offset = byte_offset, .count = @intCast(nfloats / 4), .frag = frag, .spirv = spirv }) catch return;
-}
-
-export fn gpuFill(verts_k: ?K, frag_k: ?K) callconv(.c) ?K {
-  const ff = kfp(frag_k) orelse return ki(0);
-  if (kn(frag_k) != 44) return ki(0);
-  var frag: [44]f32 = undefined;
-  var i: usize = 0;
-  while (i < 44) : (i += 1) frag[i] = ff[i];
-  fillAccumulate(verts_k, frag, -1);
-  return ki(0);
 }
 
 // gpuSpirv[frag_words; _] -> negative handle : compile a custom fill-shader
@@ -614,47 +605,6 @@ export fn gpuFillShader(verts_k: ?K, shader_k: ?K) callconv(.c) ?K {
   return ki(0);
 }
 
-// gpuTess[pts_F] -> [x,y,u,v,...] : CPU polygon triangulation (verbatim from the
-// Dawn backend; no device). Multiple contours split on NaN x/y pairs.
-export fn gpuTess(pts_k: ?K) callconv(.c) ?K {
-  const pf = kfp(pts_k) orelse return ki(0);
-  const pn = kn(pts_k);
-  if (pn < 6) return ki(0);
-  const npair: usize = @as(usize, @intCast(pn)) / 2;
-  var da = std.heap.DebugAllocator(.{}).init;
-  defer _ = da.deinit();
-  const a = da.allocator();
-  var contours = std.ArrayList(tri.Contour).initCapacity(a, 4) catch return ki(0);
-  defer { for (contours.items) |c| a.free(c.pts); contours.deinit(a); }
-  var cur = std.ArrayList(tri.Pt).initCapacity(a, 32) catch return ki(0);
-  defer cur.deinit(a);
-  for (0..npair) |i| {
-    const x = pf[i * 2];
-    const y = pf[i * 2 + 1];
-    if (std.math.isNan(x) or std.math.isNan(y)) {
-      if (cur.items.len >= 3) {
-        const slice = a.dupe(tri.Pt, cur.items) catch return ki(0);
-        contours.append(a, .{ .pts = slice }) catch return ki(0);
-      }
-      cur.clearRetainingCapacity();
-    } else cur.append(a, .{ .x = x, .y = y }) catch return ki(0);
-  }
-  if (cur.items.len >= 3) {
-    const slice = a.dupe(tri.Pt, cur.items) catch return ki(0);
-    contours.append(a, .{ .pts = slice }) catch return ki(0);
-  }
-  var out = std.ArrayList(tri.Pt).initCapacity(a, 64) catch return ki(0);
-  defer out.deinit(a);
-  tri.triangulate(a, contours.items, &out) catch return ki(0);
-  const n_out = out.items.len;
-  const result_k = KF(@intCast(n_out * 4)) orelse return ki(0);
-  const rf = kfp(result_k) orelse { ku(result_k); return ki(0); };
-  for (out.items, 0..) |p, i| {
-    rf[i * 4 + 0] = p.x; rf[i * 4 + 1] = p.y; rf[i * 4 + 2] = 0.5; rf[i * 4 + 3] = 1.0;
-  }
-  return result_k;
-}
-
 // Upload this frame's 2-D fill vertices and record all fill draws (base layer,
 // before meshes). vw/vh = framebuffer size (the fill vertex shader's viewSize).
 fn recordFills(v: *vk.Vk, cb: anytype, vw: f32, vh: f32) void {
@@ -670,10 +620,10 @@ fn recordFills(v: *vk.Vk, cb: anytype, vw: f32, vh: f32) void {
   const fb = g_fbuf.?;
   @memcpy(fb.mapped[0..need], std.mem.sliceAsBytes(g_fill_verts.items[0..nf]));
   for (g_fill_calls.items) |fc| {
+    if (fc.spirv < 0) continue; // every 2-D draw carries a custom fragment now
     const set = v.fillSet(vw, vh, fc.frag[0..]);
     if (set == null) continue;
-    const pipe = if (fc.spirv >= 0) g_spirv_pipes.items[@intCast(fc.spirv)].pipe else vk.Vk.nullPipe();
-    v.drawFill(cb, fb, fc.byte_offset, fc.count, set, pipe);
+    v.drawFill(cb, fb, fc.byte_offset, fc.count, set, g_spirv_pipes.items[@intCast(fc.spirv)].pipe);
   }
 }
 
@@ -957,8 +907,6 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuRenderRun", @ptrCast(&gpuRenderRun), 2);
   r.k_register("gpuShot", @ptrCast(&gpuShot), 1);
   r.k_register("gpuGen", @ptrCast(&gpuGen), 1);
-  r.k_register("gpuFill", @ptrCast(&gpuFill), 2);
-  r.k_register("gpuTess", @ptrCast(&gpuTess), 1);
   r.k_register("gpuSpirv", @ptrCast(&gpuSpirv), 2);
   r.k_register("gpuFillShader", @ptrCast(&gpuFillShader), 2);
   r.k_register("gpuMeshPull", @ptrCast(&gpuMeshPull), 2);

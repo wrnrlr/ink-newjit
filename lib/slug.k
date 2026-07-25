@@ -249,8 +249,9 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
     ((qbuf[b]; qbuf[b+1.]; 0.5; 1.0); (qbuf[b+2.]; qbuf[b+3.]; qbuf[b+7.]; qbuf[b+6.]); (qbuf[b+4.]; qbuf[b+5.]; 0.; 0.))}]
   / Fragment: analytic coverage (curves at off+slugPS+band*slugMPB*8) × the fill's PAINT.
   / The paint block (off..off+43) is the NanoVG FragUniforms layout; evaluate scissorMask
-  / and the gradient/solid paint at (fx,fy) — same math as lib/gpu/fill.frag — and fold
-  / into the alpha. So gradients, box/radial paints, and clip all come "for free" per fill.
+  / and the gradient/solid paint at (fx,fy) — the NanoVG uber-shader paint math, now
+  / self-hosted here in dye — and fold into the alpha. So gradients, box/radial paints,
+  / and clip all come "for free" per fill.
   FRAGF: shader.fragmentBuf[[wUvA:`v4; wPos:`v4; out:`v4]; 2; {[wUvA; wPos; qbuf; sbuf]
     px: wUvA[0]; py: wUvA[1]; aa: wUvA[2]
     fx: wPos[0]; fy: wPos[1]

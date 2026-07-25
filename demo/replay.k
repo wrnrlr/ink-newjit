@@ -1,7 +1,7 @@
-/ test/replay.k — a tiny audio recorder / player on the GPU window loop.
+/ demo/replay.k — a tiny audio recorder / player on the GPU window loop.
 /
 / Build first:  zig build gpu && zig build audio
-/ Run:          ink test/replay.k
+/ Run:          ink demo/replay.k
 /
 / A little state machine driven by two keys, ENTER and SPACE:
 /   idle       ENTER→record   SPACE→play
@@ -15,6 +15,10 @@
 / lower two-thirds plots the recorded waveform, with a vertical playhead line
 / marking where in the clip we are (pinned to the right edge while recording).
 /
+/ DRAWING: all 2D is analytic through lib/canvas.k (Slug scene buffer) — no
+/ tessellation. Each frame cnv.new[] resets the recorder, shapes append to the
+/ scene, cnv.render[w;h] rasterizes. Rectangles/ellipses are cnv.rect/cnv.ellipse.
+/
 / How it works with the audio module (lib/audio.k):
 /  * Recording is the polled path — each frame while `rec` we drain the mic ring
 /    buffer with audio.rec.read[] and append to BUF.  Pausing just stops the
@@ -24,7 +28,7 @@
 /    audio.stop / audio.start pause & resume (miniaudio keeps the cursor), and
 /    audio.state gives the play cursor that drives the playhead.
 
-2: "lib/gpu.k"
+2: "lib/canvas.k"
 / audio.* autoloads lib/audio.k on first reference (compile time).
 
 pi:   3.14159265359
@@ -39,8 +43,7 @@ ICY: 60.
 ICR: 30.
 
 / ── colours ──────────────────────────────────────────────────────────────────
-BGV:      0.10 0.11 0.14                 / background (also used to punch the ring)
-BG:       gpu.solid[0.10; 0.11; 0.14; 1.]
+BGV:      0.10 0.11 0.14                 / background (also punches the ring centre)
 WAVEG:    gpu.solid[0.25; 0.68; 0.85; 1.]
 PHG:      gpu.solid[0.98; 0.82; 0.30; 1.]
 IDLEC:    0.72 0.72 0.80
@@ -54,21 +57,24 @@ METERFGC: 0.30 0.82 0.55
 ST:    `idle          / `idle `rec `recpause `play `playpause
 BUF:   0#0.           / recorded mono f32 samples
 PH:    -1             / playback sound handle (-1 = none)
-WAVE:  0#0.           / cached waveform vertex buffer
-DIRTY: 1              / waveform needs rebuilding
-WVW:   0.             / window size the cached waveform was built for
-WVH:   0.
 LEVEL: 0.             / smoothed level-meter value
 PATH:  "/tmp/ink-replay.wav"
 
-/ ── shape helpers (flat vertex buffers → one gpu.fill each) ─────────────────
-ellipsePts: {[cx;cy;rx;ry;n]
-  t: (2.*pi%(n+0.))*!n
-  pts: @[(2*n)#0.; 2*!n; :; cx + rx * cos t]
-  @[pts; 1+2*!n; :; cy + ry * sin t]}
-fillEllipse: {[cx;cy;rx;ry;c] gpu.fill[gpu.tessellate ellipsePts[cx;cy;rx;ry;48]; gpu.solid[c 0; c 1; c 2; 1.]]}
-quad:     {[x;y;w;h] gpu.tessellate (x,y, (x+w),y, (x+w),(y+h), x,(y+h))}
-fillRect: {[x;y;w;h;c] gpu.fill[quad[x;y;w;h]; gpu.solid[c 0; c 1; c 2; 1.]]}
+/ waveform cache (peaks + layout) — rebuilt only when the buffer/size changed.
+DIRTY: 1
+WVW:   0.
+WVH:   0.
+WVPK:  0#0.           / cached per-column peak amplitudes
+WVX0:  0.
+WVCOLW:0.
+WVCY:  0.
+WVSC:  0.
+WVN:   0             / number of columns (0 = nothing to draw)
+
+/ ── canvas shape helpers ─────────────────────────────────────────────────────
+solidC:      {[c] cnv.rgba[c 0; c 1; c 2; 1.]}
+fillEllipse: {[cx;cy;rx;ry;c] cnv.ellipse[cx;cy;rx;ry]; cnv.fill solidC c}
+fillRect:    {[x;y;w;h;c] cnv.rect[x;y;w;h]; cnv.fill solidC c}
 
 / ── status icon ──────────────────────────────────────────────────────────────
 ring: {[cx;cy;rad;c]
@@ -101,9 +107,6 @@ peaks: {[buf;ncols]
   b: 1 | `i$ ((n+ncols)-1) % ncols                / ceil(n/ncols), >=1
   pad: buf, ((ncols*b)-n)#0.
   |/' (ncols;b)# abs pad}
-/ One waveform bar (top-level so it takes its context as args — see the note
-/ above; a bar lambda nested in bldWave would read sc/pk/x0/… as undefined).
-barFn: {[x0;colw;cy;sc;pk;c] bh: 1. | sc*(pk c); quad[x0+(colw*c); cy-bh; 1. | colw*0.8; 2.*bh]}
 bldWave: {[w;h]
   x0: MARGIN
   ww: w - (2.*MARGIN)
@@ -113,11 +116,14 @@ bldWave: {[w;h]
   pk: peaks[BUF; ncols]
   mx: |/pk
   sc: hh * $[mx>0; 1.%mx; 1.]                      / normalise to full height
-  colw: ww%ncols
-  ,/ barFn[x0;colw;cy;sc;pk;]' !ncols}
-waveVerts: {[w;h] $[0=#BUF; 0#0.; bldWave[w;h]]}
-rebuildWave: {[w;h] WAVE:: waveVerts[w;h]; WVW:: w; WVH:: h; DIRTY:: 0}
+  WVPK:: pk; WVX0:: x0; WVCOLW:: ww%ncols; WVCY:: cy; WVSC:: sc; WVN:: ncols}
+rebuildWave: {[w;h] $[0=#BUF; WVN:: 0; bldWave[w;h]]; WVW:: w; WVH:: h; DIRTY:: 0}
 needWave: {[w;h] DIRTY | ~ (w~WVW) & (h~WVH)}
+/ one waveform bar → a rect in the current path (top-level so it takes its context
+/ from globals — a bar lambda can't close over locals).
+barRect: {[c] bh: 1. | WVSC*(WVPK c); cnv.rect[WVX0+(WVCOLW*c); WVCY-bh; 1. | WVCOLW*0.8; 2.*bh]}
+fillWave: {[] barRect' !WVN; cnv.fill WAVEG}      / all bars → one scene fill
+drawWave: {[] $[WVN>0; fillWave[]; 0]}
 
 / ── playhead ─────────────────────────────────────────────────────────────────
 pfPlay:  {[] $[PH<0; 0.; frac (audio.state PH)`cursor]}
@@ -126,13 +132,12 @@ playFrac:{[]
   $[(ST=`play)|ST=`playpause; pfPlay[]
     (ST=`rec)|ST=`recpause;   1.
     0.]}
-playheadV: {[w;h]
-  x0: MARGIN
+fillPlayhead: {[w;h]
   ww: w - (2.*MARGIN)
-  cy: h*0.62
   hh: h*0.28
-  px: x0 + (ww*playFrac[])
-  quad[px-1.5; cy-hh; 3.; 2.*hh]}
+  px: MARGIN + (ww*playFrac[])
+  cnv.rect[px-1.5; (h*0.62)-hh; 3.; 2.*hh]; cnv.fill PHG}
+drawPlayhead: {[w;h] $[0<#BUF; fillPlayhead[w;h]; 0]}
 
 / ── transitions / actions ────────────────────────────────────────────────────
 doStopPlay:    {[] audio.stop PH; audio.unload PH; PH:: -1}
@@ -176,10 +181,12 @@ run: {[props]
   w: props`width
   h: props`height
   $[needWave[w;h]; rebuildWave[w;h]; 0]
-  gpu.fill[quad[0.;0.;w;h]; BG]                  / background
-  $[0<#WAVE; gpu.fill[WAVE; WAVEG]; 0]           / waveform (single cached draw)
-  $[0<#BUF; gpu.fill[playheadV[w;h]; PHG]; 0]    / playhead
+  cnv.new[]
+  fillRect[0.; 0.; w; h; BGV]                     / background
+  drawWave[]                                      / waveform (all bars, one fill)
+  drawPlayhead[w;h]                               / playhead
   drawIcon[]
-  drawMeter[]}
+  drawMeter[]
+  cnv.render[w; h]}
 
 window.run[run; WINW,WINH]

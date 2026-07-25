@@ -54,71 +54,53 @@ Maybe we can use the digram form of the each adverb for parallel each.
 There is already stencil and window, we can add `` `ncpu f'!1000 `` to mean
 that the function f should be applied to `!1000` distributed over number of cpu cores.
 
-## GPU: Dawn → Vulkan (MoltenVK) migration — IN PROGRESS
-Full design + phase log: `doc/design/vulkan-migration.md`. Why: WebGPU/Dawn's Tint
-SPIR-V reader is permanently capped at Vulkan 1.1 / SPIR-V 1.3, so it refuses the
-SPIR-V 1.4 that `lib/dye.k` can emit. MoltenVK ingests SPIR-V 1.4 natively. The
-k-facing FFI (30 `gpu*` exports) is frozen, so `lib/gpu.k` + all `test/*.k` are
-unchanged; backend chosen with `-Dgpu-backend=vulkan` (default still `dawn`).
-Toolchain: `brew install molten-vk vulkan-headers glslang`.
+## GPU: Dawn → Vulkan (MoltenVK) migration — DONE (cut over 2026-07-14)
+Full design + phase log: `doc/design/vulkan-migration.md`. Vulkan/MoltenVK is now
+the ONLY backend (no `-Dgpu-backend` flag; Dawn/zgpu/zdawn/zpool + the lazy
+`dawn_aarch64_macos` dep + `patches/` + `blit.wgsl`/`fill.wgsl` all deleted).
+`build.zig` links `libMoltenVK.a` + vulkan-headers + GLFW and merges them into one
+archive for the static bundle. `gpuWgsl` removed. **Phase 6 done unconditionally**:
+`lib/dye.k` emits SPIR-V **1.4 natively** (version word `0x00010400` + full-interface
+`OpEntryPoint`) at every assembler; `vk.maybeBump`/`INK_SPV14` are gone. The k-facing
+FFI (30 `gpu*` exports) is unchanged, so `lib/gpu.k` + all `test/*.k` still work.
+Toolchain: `brew install molten-vk vulkan-headers`. **glslang is NO LONGER a build
+dependency** — `fill.vert.spv`/`fill.frag.spv` are committed blobs `@embedFile`'d by
+`lib/gpu/vk.zig`; nothing regenerates them at build time.
 
-**DONE + verified (pixel/numerically identical to Dawn):**
-- Phase 0 spike, Phase 1 build plumbing, Phase 2 **compute backend** — full ASR/nn
-  stack (nn/conformer/weights/gpusolve/stencil/relax/subsample/frontend) headless.
-- Phase 3 render increments 1 (window/swapchain/present/events), 2 (basic mesh),
-  2b (uniform mesh), 3 (2D fill + custom SDF fragment), 2c (textures + retained
-  geometry). 11 render tests pixel-identical: sphere/pbr/sword/eyes/circle/planes/
-  drawing/typeset/demo/edit/earth. Snapshot path: `INK_SNAP=frame`→`<base>-snap.png`.
-- **Phase 6 SPIR-V 1.4 — achieved live**: `vk.maybeBump` (`INK_SPV14=1`) rewrites
-  compute modules to 1.4 (version word + `OpEntryPoint` iface expansion); whole
-  compute/nn stack runs on genuine 1.4 via MoltenVK, bit-identical to 1.3.
-
-### Follow-up tasks (remaining, in rough priority order)
-1. **Instancing** (`gpuDrawInstanced`/`gpuDrawGeomResident`/`gpuDrawInstancedT`,
-   `gpuDrawMeshT`) — instance storage buffer @group(0). NOTE: current test targets
-   `scene`/`clothpull` render all-black even on Dawn in headless `-snap`, so they're
-   not snapshot-verifiable as-is; add a verifiable instancing test (or drive them
-   enough frames to have on-screen geometry) before/while implementing.
-2. **Phase 5 cutover**: make `vulkan` the default backend; delete Dawn/zgpu/zdawn/
-   zpool + the lazy `dawn_aarch64_macos` dep + `patches/`; rework `ink bundle`/`make
-   static` to link MoltenVK; **remove `gpuWgsl`** (still a stub) and delete
-   `blit.wgsl`. Update `AGENT.md`/`CLAUDE.md`.
-3. **Phase 6 make unconditional**: after cutover, fold `vk.maybeBump` into `lib/dye.k`
-   (emit 1.4 directly: version word `0x00010400` + per-emitter `OpEntryPoint` iface
-   expansion) and drop the `INK_SPV14` flag + `maybeBump`. Re-baseline `test/spirv.k`
-   golden (version word + word counts change).
-4. **Phase 7 self-host `fill`**: re-author `lib/gpu/fill.vert`/`.frag` (currently GLSL
-   → `.spv` via `glslangValidator`) in the ink shader dialect compiled by `dye.k`;
-   delete the GLSL sources + `.spv` + the glslang dependency. End state: zero
-   `.wgsl`/`.glsl`, no external shader compiler.
-   **SCOPE (assessed 2026-07-23):** this is a real dye-compiler project, not a mechanical
-   port — 5 of 7 features `fill.frag` uses don't exist in the dialect: (a) **no fragment
-   uniform block** (only compute has UBOs; the `frag[11]` vec4 array is the shader's whole
-   parameterization) — needs a new `shader.fragment*` variant emitting a Uniform struct at
-   set0/b1 with `loadUniMember`-style indexed access; (b) **no matrix type** (mat3×vec3 must
-   be hand-expanded to scalar dot-products, as slug.k already does); (c) **descriptor-layout
-   mismatch** — dye emits images at set1 with ONE shared sampler, `fill.frag` needs set0,
-   per-texture samplers, interleaved bindings 2-5; (d) **no vertex-attribute path** — dye
-   only *pulls* from storage buffers by `gl_VertexIndex`, so `fill.vert`'s `in vec2 pos/uv`
-   + viewSize UBO have no equivalent (plumbing keeps the embedded `fill.vert.spv` so the
-   vertex stage can stay GLSL-bridged); (e) **no multi-component swizzles** (`.xy`/`.zw`/
-   `.rgb` are everywhere; only single-component `v[i]` extract exists) — needs OpVectorShuffle
-   or every swizzle rewritten as a component list. The 5-way `type==0..4` dispatch itself is
-   fine (eager nested `OpSelect`, composite-legal on the 1.4 header — just samples all
-   textures). Wiring (`vk.zig:608` `@embedFile`) also means re-sourcing the SPIR-V: either a
-   build step that runs `ink` to emit `fill.frag.spv`, or moving fill-pipeline creation to the
-   runtime k-driven `gpu.drawShader`/`buildFillPipe` path (which today reuses the fixed
-   6-binding set0 layout dye can't emit). Do (a),(b),(e) first — they touch nearly every line.
-   **NOTE — NOT a prerequisite for OKLab.** OKLab gradient interpolation was the motivation,
-   but the ACTIVE 2D renderer (`lib/slug.k` FRAGF) is ALREADY self-hosted in dye, so OKLab
-   landed there directly (2026-07-23, see Canvas/Slug §below) with no Phase 7. `fill.frag` is
-   the legacy NanoVG bridge (deprecated `gpu.fill`/`gpu.tessellate` path); Phase 7 is only
-   about deleting the glslang dependency, and can proceed on its own timeline.
-5. **Cross-platform**: the Vulkan backend is macOS/arm64-only for now; the `vk.zig`
+### Remaining graphics work (in rough priority order)
+1. **Retire the native tessellation path — DONE (2026-07-25).** Deleted `lib/gpu/fill.frag`
+   + `fill.frag.spv` + `lib/gpu/triangulate.zig` + the `gpuFill`/`gpuTess` exports +
+   registrations + the `gpu.fill`/`gpu.tessellate` bindings + the built-in fill fragment
+   module/pipeline (`fill_fmod`/`fill_pipe`) and its `drawFill` fallback in `vk.zig` +
+   the `triangulate` build module. Migrated the last three interactive demos to
+   `lib/canvas.k`: `demo/{asr,edit,replay}.k` (analytic shapes via cnv.rect/cnv.ellipse,
+   transcript/editor text via cnv.text — the whole per-glyph tessellation cache is gone).
+   `fill.vert`/`fill.vert.spv` KEPT — `gpu.drawShader` (demo/{demo,drawing,drive,pbr,sdf}.k,
+   test/ir.k) + the Slug 2-D backend pair it with a dye-compiled fragment via
+   `createFillShaderPipe`. Verified: gpu builds clean, all 5 render demos + circle snapshot,
+   `make ui-test` 31/31, `make ui-shot` 3/3 golden. The active 2D renderer (`lib/slug.k`
+   FRAGF) was already self-hosted in dye, so nothing needed self-hosting — the NanoVG
+   bridge was just deleted.
+2. **Self-host `fill.vert`** (optional, low value) — the one remaining GLSL blob. Needs a
+   vertex-attribute path in dye (it only *pulls* from storage buffers by `gl_VertexIndex`
+   today; `fill.vert` takes `in vec2 pos/uv` + a viewSize UBO). Tiny, stable shader — the
+   committed `.spv` is fine to keep, so this is only worth it to reach literally-zero
+   non-dye shader source.
+3. **Instancing API** (`gpuDrawInstanced`/`gpuDrawGeomResident`/`gpuDrawInstancedT`/
+   `gpuDrawMeshT`) — still stubs. DECIDE whether to implement or delete: vertex pulling
+   (`shader.vertexPull`/`mesh.drawPull`, see `demo/scene.k`) already renders N entities in
+   one draw with no vertex-input state, subsuming the use case. If kept, needs a verifiable
+   test (the old `scene`/`clothpull` targets rendered all-black in headless `-snap`).
+4. **Shader-dialect I/O gaps** (see `.plan/triage.md` GPU section): i32/bool as shader
+   I/O types; multiple fragment outputs (MRT); user-facing int/float cast syntax; real
+   `OpBranchConditional` for side-effect-guarding expressions.
+5. **`dFdx`/`fwidth` AA** — a real `OpDPdx`/`OpDPdy`/`OpFwidth` intrinsic in dye for exact
+   edge AA under any transform (AA width is host-computed ~1.2px today).
+6. **Cross-platform**: the Vulkan backend is macOS/arm64-only for now; the `vk.zig`
    surface/extension seam was written to admit Linux/Windows later — wire those up.
-6. **Multi-time `-snap` scheduling** (single-frame capture works; port the Dawn
+7. **Multi-time `-snap` scheduling** (single-frame capture works; port the old
    scheduler that shoots at several sim-times).
-7. **Perf pass**: compute is correctness-first (deferred submission, `vkQueueWaitIdle`
+8. **Perf pass**: compute is correctness-first (deferred submission, `vkQueueWaitIdle`
    at each readback). Revisit with fences / overlap if profiling shows it matters.
 
 ## Canvas / Slug 2D renderer
@@ -211,7 +193,7 @@ formulas. Likely compiler bug logged above: namespace member written only extern
 inside readers when file-loaded.
 
 ## larger Graphics Tasks
+- ~~**Retire native tessellation**~~ — DONE 2026-07-25 (see GPU migration §above): all 2D is
+  analytic through lib/canvas.k; triangulate.zig / fill.frag / gpuFill / gpuTess deleted.
 - **OKLab colormaps for dataviz** — generate perceptually-uniform colormap textures (the `texType 3` path) CPU-side; pairs naturally with the OKLab work.
-- **Phase 5 Vulkan cutover** — make `vulkan` the default backend, delete Dawn/zgpu. Big cleanup, unblocks Phase 6/7.
-- **Phase 7 fill self-host** — now scoped (the 5 dye-compiler gaps are documented); a deliberate multi-step effort to drop the glslang dependency.
-- **Retire native tessellation** — migrate `demo/{replay,edit,asr}.k` off `gpu.fill`/`gpu.tessellate` to canvas, then delete `triangulate.zig` + `fill.frag`.
+- **Self-host `fill.vert`** — the last GLSL blob; needs a vertex-attribute path in dye. Low value (build no longer depends on glslang; it's a committed `.spv`).

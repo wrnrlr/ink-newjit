@@ -126,62 +126,18 @@ or the body stops returning it) — the workaround can then be dropped.
 # GPU shader compiler
 
 Enhancement tracking for the SPIR-V shader compiler (`lib/dye.k`, `lib/spirv.k`,
-`lib/gpu/gpu.zig`). These are missing capabilities, not correctness bugs — the
+`lib/gpu/gpu_vk.zig`). These are missing capabilities, not correctness bugs — the
 compiler emits valid SPIR-V for everything it supports.
 
 ## Open
 
-### SPIR-V 1.4 upgrade — RESOLVED via the Vulkan/MoltenVK migration (2026-07-13)
+### SPIR-V 1.4 — RESOLVED (Vulkan/MoltenVK migration, cut over 2026-07-14)
 
-**Outcome:** SPIR-V 1.4 is no longer blocked — it works on the new Vulkan/MoltenVK
-backend (`-Dgpu-backend=vulkan`, `INK_SPV14=1`). The whole compute/nn stack runs on
-genuine 1.4, bit-identical to 1.3. See `.plan/tasks.md` "GPU: Dawn → Vulkan
-migration" and `doc/design/vulkan-migration.md`. The analysis below remains correct
-for *WebGPU/Dawn* (which still refuses 1.4) and is why the migration was needed.
-
-### SPIR-V 1.4 on Dawn — BLOCKED (unchanged; Dawn's Tint reader caps at 1.3)
-
-Header is `0x00010300` (SPIR-V 1.3) in every emitter (vertex `buildMod`, all
-compute variants). `OpEntryPoint` uses 1.3 subset-interface semantics — only
-Input/Output builtins are listed (`iface: (,gidVar)` for compute; inputs +
-single output for render); StorageBuffer / uniform-block / texture globals are
-deliberately omitted.
-
-**Tried it — Dawn rejects 1.4 outright.** Bumping the version word to
-`0x00010400` and expanding every emitter's `OpEntryPoint` interface to list all
-referenced global variables (the two changes 1.4 requires) was implemented and
-tested. The prebuilt Dawn (`dawn_aarch64_macos` lazy dep) refuses the module
-before running it:
-
-    Tint SPIR-V reader failure: Invalid SPIR-V binary version 1.4 for target
-    environment SPIR-V 1.3 (under Vulkan 1.1 semantics).
-
-Dawn's ingestion target here is pinned to SPIR-V 1.3 / Vulkan 1.1, so *any* 1.4
-module is invalid regardless of correctness. Both changes were reverted.
-
-**A Dawn rebuild does NOT unblock this (investigated 2026-07-13).** The block is
-not a target-env knob in this particular prebuilt — it is inherent to the WebGPU
-raw-SPIR-V ingestion path. ink hands SPIR-V to Dawn via
-`ShaderModuleSPIRVDescriptor` (`lib/gpu/gpu.zig`), which routes through Tint's
-**SPIR-V reader**. That reader validates against the **Vulkan 1.1** environment
-(`spirv-val --target-env vulkan1.1`), which caps input at **SPIR-V 1.3** (Vulkan
-1.1↔SPIR-V 1.3; ingesting 1.4 would require the Vulkan 1.2 env). Dawn/Tint's own
-docs state "SPIR-V 1.4 and later are not supported in Tint's SPIR-V reader." So
-*no* Dawn version — rebuilt or newer prebuilt — accepts a 1.4 module through this
-API. (The 1.4 support that shipped on Android/ChromeOS is Tint's *writer*,
-WGSL→SPIR-V for the Vulkan backend — opposite direction, moot on macOS/Metal.)
-Also: the vendored `dawn_aarch64_macos` prebuilt (michal-z) has no build newer
-than July 2023, so there is no drop-in newer prebuilt anyway.
-
-**Assessment:** the only capability 1.4 adds *for us* is `OpSelect` on
-composite/array types (1.3 restricts it to scalars/vectors), which our
-`$[cond;a;b]` branching doesn't need. Combined with the reader constraint above,
-this is **WON'T-DO**, not merely deferred.
-
-**Only routes that could ever run 1.4-era features (both out of scope):**
-(a) emit or transpile to **WGSL** instead of raw SPIR-V (no version cap, but
-rewrites the GPU back-end); (b) drop WebGPU for a raw **Metal/Vulkan** backend
-(abandons Dawn). Neither is justified for an unused feature. See `.plan/tasks.md`.
+`lib/dye.k` now emits SPIR-V **1.4 natively** (`0x00010400` + full-interface
+`OpEntryPoint`) on the only backend, MoltenVK, which ingests it directly. The old
+Dawn/WebGPU path (whose Tint SPIR-V reader was permanently capped at Vulkan 1.1 /
+SPIR-V 1.3, and thus refused any 1.4 module) is deleted. Full history in
+`doc/design/vulkan-migration.md`; migration status in `.plan/tasks.md`.
 
 ### i32 / bool as shader I/O types
 

@@ -138,13 +138,15 @@ canvas.k no longer calls `gpu.tessellate`/`gpu.fill`. Tasks 1–3 below are DONE
    horizontal edge's 16 collinear pieces × 2 sides overflow one band's `slugMPB` and drop
    (`segFlat` emits straight segs as a single edge); (ii) the annulus needs the two separate
    contours, not one concatenated ribbon (that was the missing-triangle-base bug).
-3. **Retire tessellation — canvas side DONE; API deprecated; example migration IN PROGRESS.**
-   canvas.k's `fillDraw`/`strokeDraw`/`gpu.tessellate` paths are gone. `gpu.fill`/
-   `gpu.tessellate` are now DEPRECATED (marked in `lib/gpu.k`, 2026-07-21); `demo/{eyes,
-   drawing,typeset}.k` migrated to canvas (added `cnv.rect`/`ellipse`/`circle`). Still on the
-   deprecated API: `demo/{replay,edit,asr}.k` (interactive apps). `fill.vert` must STAY
-   (`gpu.drawShader` draws over it); only `fill.frag` + `triangulate.zig` + `gpuFill`/`gpuTess`
-   can eventually be deleted, once those 3 apps migrate. See `.plan/tasks.md` task 5.
+3. **Retire tessellation — DONE (2026-07-25).** All 2D rendering is analytic through canvas.k.
+   `gpu.fill`/`gpu.tessellate` (bindings + `gpuFill`/`gpuTess` exports), `lib/gpu/fill.frag` +
+   `fill.frag.spv`, `lib/gpu/triangulate.zig`, the `triangulate` build module, and the built-in
+   fill fragment module/pipeline in `vk.zig` are all deleted. The last interactive holdouts
+   `demo/{replay,edit,asr}.k` were migrated (shapes → `cnv.rect`/`cnv.ellipse`; editor/transcript
+   text → `cnv.text`, dropping the per-glyph tessellation cache entirely). `fill.vert` STAYS —
+   `gpu.drawShader` + the Slug backend pair it with a dye-compiled fragment via
+   `createFillShaderPipe`. Verified: gpu builds clean, render demos snapshot, `make ui-test`
+   31/31, `make ui-shot` 3/3 golden.
 
    **Enabler for 1+2: independent-aspect normalisation.** `bandData`/`rectOf`/`normC` now
    scale x and y INDEPENDENTLY (sx,sy) instead of aspect-preserving square. A wide/flat shape
@@ -378,8 +380,8 @@ whole class of workaround.
 | `lib/gpu.k` | `gpu.textureF` binding |
 | `lib/gpu/vk.zig` | `createTextureF`, pull storage-buffer stage flags |
 | `lib/gpu/gpu_vk.zig` | `gpuTextureF` export |
-| `lib/gpu/fill.frag`,`.vert` | legacy NanoVG uber-shader (tessellation path; to retire) |
-| `lib/gpu/triangulate.zig` | CPU ear-clip (tessellation path; to retire) |
+| `lib/gpu/fill.vert` | fill vertex shader (only remaining GLSL blob; `gpu.drawShader` + Slug pair it with a dye fragment). `fill.frag` deleted 2026-07-25. |
+| ~~`lib/gpu/triangulate.zig`~~ | CPU ear-clip — DELETED 2026-07-25 (tessellation retired) |
 | `demo/canvas.k`, `demo/slug.k` | demos |
 
 ### Key constants (baked into Slug shaders — bare globals in `lib/slug.k`)

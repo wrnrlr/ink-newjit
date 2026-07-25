@@ -99,17 +99,12 @@ pub fn build(b: *std.Build) !void {
   const mvk = "/opt/homebrew/opt/molten-vk";
   const vkh = "/opt/homebrew/opt/vulkan-headers/include";
   const zglfw_dep = b.lazyDependency("zglfw", .{ .target = target, .optimize = optimize }) orelse break :blk;
-  const vk_tri_mod = b.createModule(.{
-    .root_source_file = b.path("lib/gpu/triangulate.zig"),
-    .target = target, .optimize = optimize,
-  });
   const vk_ext_mod = b.createModule(.{
     .root_source_file = b.path("lib/gpu/gpu_vk.zig"),
     .target = target, .optimize = optimize, .link_libc = true, .link_libcpp = true,
   });
   vk_ext_mod.addImport("kabi", kabi_mod);
   vk_ext_mod.addImport("zglfw", zglfw_dep.module("glfw"));
-  vk_ext_mod.addImport("triangulate", vk_tri_mod);
   vk_ext_mod.addIncludePath(.{ .cwd_relative = vkh });
   vk_ext_mod.addLibraryPath(.{ .cwd_relative = mvk ++ "/lib" });
   vk_ext_mod.linkSystemLibrary("MoltenVK", .{ .preferred_link_mode = .static });

@@ -268,12 +268,12 @@ pub const Vk = struct {
   frame_cmd: [FRAMES]c.VkCommandBuffer,
   frame: u32, // frame-in-flight index (0..FRAMES-1)
   img_index: u32, // acquired swapchain image for the current frame
-  // 2-D fill pipeline (fill.vert/frag) + its 6-binding set + dummy texture
+  // 2-D fill pipelines (fill.vert + a dye-compiled custom fragment) share this
+  // 6-binding set + layout + vertex module + dummy texture. Each fragment shader
+  // gets its own VkPipeline via createFillShaderPipe (there is no built-in frag).
   fill_dsl: c.VkDescriptorSetLayout,
-  fill_pipe: c.VkPipeline,
   fill_layout: c.VkPipelineLayout,
   fill_vmod: c.VkShaderModule,
-  fill_fmod: c.VkShaderModule,
   dummy_img: c.VkImage,
   dummy_mem: c.VkDeviceMemory,
   dummy_view: c.VkImageView,
@@ -418,11 +418,9 @@ pub const Vk = struct {
         self.destroyBuffer(self.view_ubuf[i]);
         self.destroyBuffer(self.frag_ubuf[i]);
       }
-      vkDestroyPipeline(self.dev, self.fill_pipe, null);
       vkDestroyPipelineLayout(self.dev, self.fill_layout, null);
       vkDestroyDescriptorSetLayout(self.dev, self.fill_dsl, null);
       vkDestroyShaderModule(self.dev, self.fill_vmod, null);
-      vkDestroyShaderModule(self.dev, self.fill_fmod, null);
       vkDestroySampler(self.dev, self.dummy_sampler, null);
       vkDestroyImageView(self.dev, self.dummy_view, null);
       vkDestroyImage(self.dev, self.dummy_img, null);
@@ -588,9 +586,11 @@ pub const Vk = struct {
     return self;
   }
 
-  // Build the 2-D fill pipeline (fill.vert/frag SPIR-V), its 6-binding descriptor
-  // set layout, a 1×1 dummy texture+sampler (for the texture bindings on non-image
-  // fills), and per-frame view/frag uniform buffers + descriptor pools.
+  // Build the shared 2-D fill vertex module (fill.vert.spv), its 6-binding
+  // descriptor set layout + pipeline layout, a 1×1 dummy texture+sampler (for the
+  // texture bindings on non-image fills), and per-frame view/frag uniform buffers
+  // + descriptor pools. Fragment shaders are dye-compiled per pipeline (see
+  // createFillShaderPipe) — there is no built-in fragment.
   fn setupFill(self: *Vk) Error!void {
     // 6-binding DSL: view(u) frag(u) tex(img) samp colormap(img) samp
     const fb = [6]c.VkDescriptorSetLayoutBinding{
@@ -604,18 +604,15 @@ pub const Vk = struct {
     const dsli = c.VkDescriptorSetLayoutCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 6, .pBindings = &fb };
     if (!ok(vkCreateDescriptorSetLayout(self.dev, &dsli, null, &self.fill_dsl))) return Error.VulkanInit;
 
-    // shader modules from the GLSL→SPIR-V bridge output
+    // fill vertex module (the one remaining GLSL→SPIR-V blob; custom fragments
+    // come from dye.k). gpu.drawShader / the Slug 2-D backend pair it with a
+    // dye-compiled fragment via createFillShaderPipe.
     const vspv align(4) = @embedFile("fill.vert.spv").*;
-    const fspv align(4) = @embedFile("fill.frag.spv").*;
     const vsmi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = vspv.len, .pCode = @ptrCast(&vspv) };
     if (!ok(vkCreateShaderModule(self.dev, &vsmi, null, &self.fill_vmod))) return Error.VulkanInit;
-    const fsmi = c.VkShaderModuleCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = fspv.len, .pCode = @ptrCast(&fspv) };
-    if (!ok(vkCreateShaderModule(self.dev, &fsmi, null, &self.fill_fmod))) return Error.VulkanInit;
 
     const plci = c.VkPipelineLayoutCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1, .pSetLayouts = &self.fill_dsl };
     if (!ok(vkCreatePipelineLayout(self.dev, &plci, null, &self.fill_layout))) return Error.VulkanInit;
-
-    self.fill_pipe = self.buildFillPipe(self.fill_fmod) orelse return Error.VulkanInit;
 
     // 1×1 dummy texture (never sampled on solid/gradient fills; just satisfies the
     // layout). Transitioned UNDEFINED→SHADER_READ_ONLY via a one-time submit.
@@ -787,10 +784,10 @@ pub const Vk = struct {
   }
 
   // Record a 2-D fill draw (no depth) into the render-pass command buffer. `pipe`
-  // null → the built-in fill pipeline; else a custom fill-shader pipeline.
+  // is a custom fill-shader pipeline from createFillShaderPipe (dye-compiled frag).
   pub fn drawFill(self: *Vk, cb: c.VkCommandBuffer, vbuf: Buffer, byte_offset: u64, vcount: u32, set: c.VkDescriptorSet, pipe: c.VkPipeline) void {
     const off: c.VkDeviceSize = byte_offset;
-    vkCmdBindPipeline(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, if (pipe != null) pipe else self.fill_pipe);
+    vkCmdBindPipeline(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
     vkCmdBindDescriptorSets(cb, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.fill_layout, 0, 1, @ptrCast(&set), 0, null);
     vkCmdBindVertexBuffers(cb, 0, 1, @ptrCast(&vbuf.buf), @ptrCast(&off));
     vkCmdDraw(cb, vcount, 1, 0, 0);

@@ -44,14 +44,11 @@ gpu.computeRun: so 2: (`gpuComputeRun; 1)   / fn → 0 : headless compute, no wi
 / bda (buffer device address), f16, atomicFadd (native f32 scatter-add).
 / The kk compiler schedules around these — see doc/design/kk.md §4.
 gpu.caps:    so 2: (`gpuCaps;      1)   / x → dict : device capability flags
-/ DEPRECATED (2026-07-21): the CPU-tessellation 2D path. Use lib/canvas.k instead — it
-/ renders fills/strokes/gradients/text analytically through the Slug scene buffer
-/ (resolution-independent, antialiased, no tessellation). These remain only for the few
-/ legacy app demos still on them (demo/{replay,edit,asr}.k); once those migrate, gpuFill +
-/ gpuTess + the native triangulate.zig / fill.frag can be deleted. (gpu.drawShader is NOT
-/ deprecated — it's the general custom-2D-shader API and shares the fill VERTEX shader.)
-gpu.fill:    so 2: (`gpuFill;      2)   / DEPRECATED → lib/canvas.k. (verts_F; frag_F) → 0 : draw triangles with built-in shader
-gpu.tessellate:   so 2: (`gpuTess;      1)   / DEPRECATED → lib/canvas.k. pts_F → verts_F : CPU polygon triangulation
+/ REMOVED (2026-07-25): the CPU-tessellation 2D path (gpu.fill/gpu.tessellate, the
+/ native triangulate.zig, and fill.frag) is gone — all 2D rendering goes through
+/ lib/canvas.k, which draws fills/strokes/gradients/text analytically via the Slug
+/ scene buffer (resolution-independent, antialiased, no tessellation). gpu.drawShader
+/ below is the general custom-2D-shader API and shares the fill VERTEX shader.
 gpu.compileSpirv: so 2: (`gpuSpirv;     2)   / (spirv_I; 0) → handle : compile SPIR-V fragment shader
 gpu.drawShader:   so 2: (`gpuFillShader;2)   / (verts_F; handle) → 0 : draw triangles with custom SPIR-V shader
 gpu.runShader:    so 2: (`gpuCompute;   2)   / (spirv_I; input_F) → output_F : run compute shader
