@@ -23,16 +23,16 @@ todo.OPENFG: 0.12 0.13 0.16 1.
 / ── model: one table; row index = list position (`#todo.T` = row count) ───────
 todo.T: +`text`done!(();0#0b)                    / columns: task text (C…) + done flag (bool)
 
-todo.addDo:{[t] todo.T:: todo.T,`text`done!(t;0b); ui.set[`new; ""]}
+todo.addDo:{[t] todo.T,::`text`done!(t;0b); ui.set[`new; ""]}
 todo.add:{[] t:ui.get`new; $[0=#t; 0; todo.addDo t]}
-todo.toggle:{[i] $[i<#todo.T; todo.T[`done;i]:: ~todo.T[`done;i]; 0]}    / deep in-place amend
-todo.remove:{[i] todo.T:: todo.T[; &~(!#todo.T)=i]}                      / keep every row but i
+todo.toggle:{[i] $[i<#todo.T; todo.T[`done;i]::~todo.T[`done;i]; 0]}    / deep in-place amend
+todo.remove:{[i] todo.T::todo.T[; &~(!#todo.T)=i]}                      / keep every row but i
 
 / per-row action symbols, rebuilt from the current count so the dispatcher can find a click's row.
 todo.togSyms:{[] {`s$"t",$x}'!#todo.T}
 todo.delSyms:{[] {`s$"d",$x}'!#todo.T}
 todo.act:{[a]
-  ti: (todo.togSyms[])?a                         / row index if a toggle was clicked, else #T
+  ti: (todo.togSyms[])?a       / row index if a toggle was clicked, else #T
   di: (todo.delSyms[])?a
   $[a~`add; todo.add[]
     ti<#todo.T; todo.toggle ti
@@ -48,8 +48,8 @@ todo.rowView:{[i] done:todo.T[`done;i]; txt:todo.T[`text;i]
       @[ui.label txt; `fg; :; $[done; todo.DONEFG; todo.OPENFG]] ]]]
     ui.button["x"; `s$"d",$i] )]}
 todo.rows:{[] {todo.rowView x}'!#todo.T}
-todo.addBar:{[] ui.row[8.; ( ui.input[`new; 320.; "add a task..."] ; ui.button["Add"; `add] )]}
-todo.status:{[] ui.label[($todo.count[])," of ",($#todo.T)," done"]}
+todo.addBar:{[]ui.row[8.;(ui.input[`new;320.;"add a task..."];ui.button["Add";`add])]}
+todo.status:{[]ui.label[($todo.count[])," of ",($#todo.T)," done"]}
 todo.view:{[]
   ui.bg[0.96 0.96 0.98 1.; ui.pad[24.; ui.col[12.;
     ((ui.label["TODO"]; todo.addBar[]; todo.status[]), todo.rows[]), (,ui.spacer[]) ]]]}
@@ -61,7 +61,7 @@ todo.addDo "ship the todo demo"
 todo.toggle 0
 
 run:{[props]
-  W: ui.run[todo.view[]; props]
+  W:ui.run[todo.view[]; props]
   {todo.act x}' ui.frame[W; props]
   ui.draw[ui.run[todo.view[]; props]; props`width; props`height]}
 
