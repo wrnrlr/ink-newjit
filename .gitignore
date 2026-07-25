@@ -46,3 +46,4 @@ data/parakeet**/*
 # transient UI screenshot-test comparison outputs (goldens are the .png files)
 test/golden/*.out.png
 demo/data/modis.jpg
+demo/data/tile.jpg
