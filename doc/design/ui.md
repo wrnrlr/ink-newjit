@@ -260,6 +260,9 @@ keyed by widget id: `buf` (text), `val` (numbers), `opts` (select/list items), p
 - `ui.slider[key; w; min; max]` — drag-adjustable; value in `ui.getv/setv[key]`.
 - `ui.progress[frac; w; h]` — gauge (0..1).
 - `ui.list[key; items; w; h]` — selectable rows; selected **index** in `ui.getv/setv[key]`.
+  **Scrolls** when the content overflows `h`: the mouse wheel over the list adjusts a per-id offset
+  (`ui.scroll[key]`, clamped), rows are clipped to the box, and a thumb shows position. Clicks are
+  offset-aware.
 - `ui.cell[id; label; w; h; hl]` — grid cell; click fires `id`; highlighted when `hl`.
 - `ui.canvas[key]` — custom draw: set `ui.onCanvas[{[x;y;w;h]…}]`; a click stores `ui.cvx`/`ui.cvy`
   and fires `` `canvas ``.
@@ -362,8 +365,9 @@ widgets/behaviour:
    caught a real bug in `lib/pga.k`); the `name`sym`-before-operator and bracketed-`$[]` checks need
    a real tokenizer (CST spans are unreliable) — still open. The namespace-external-write compiler
    bug is logged in `.plan/triage.md` (worth pushing upstream, or just keep using fully-qualified).
-3. **Scrolling** for `list`/`grid` (needs clip + content offset in the geometry pass). ← FIRST actual
-   UI feature for next session.
+3. ~~**Scrolling** for `list`~~ (DONE 2026-07-23 — wheel-driven clamped offset per id, `cnv.clip`ped
+   rows, visible-range emit, scrollbar thumb, offset-aware click; pure k on the native `scroll`
+   event. `test/ui.k` +5 asserts). Still open: **`grid` scrolling** (Cells) — same idea, 2-axis.
 4. **Generalise the overlay** so dialogs float (currently dropdown-only; dialogs use inline bars);
    lift the 2-render/frame cap (bump `SCNF`) if nested overlays are needed.
 5. **Multiple UI contexts** — the interaction state is global singletons; no independent sub-UIs /

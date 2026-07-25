@@ -112,6 +112,23 @@ main:{[]
   t.click[20.;50.]
   t.eq["list selects row under cursor"; ui.getv`ls; 1.]
 
+  / ── list scrolling: wheel adjusts a clamped offset; clicks account for it ─────────
+  t.reset[]
+  t.setView {[] ui.list[`sl; $'1+!20; 200.; 120.]}        / 20 items, box fills viewport
+  t.viewport[240.;160.;1.]
+  t.move[100.;80.]                                        / cursor over the list
+  ih: 1.7*16.
+  t.eq["scroll offset starts at 0"; ui.scrollOf`sl; 0.]
+  t.scroll[-1.]                                           / wheel down one notch = 3 rows
+  t.eq["wheel down scrolls 3 rows"; ui.scrollOf`sl; 3.*ih]
+  t.scroll[-100.]                                         / far past the end
+  t.eq["scroll clamps to content max"; ui.scrollOf`sl; ui.listMax[20; ih; (t.W[]`h) 0]]
+  t.scroll[50.]                                           / far up
+  t.eq["scroll up clamps to 0"; ui.scrollOf`sl; 0.]
+  t.scroll[-1.]                                           / back to offset 3*ih
+  t.click[20.;10.]                                        / y=10 + off ⇒ row floor((10+3ih)/ih)=3
+  t.eq["click uses scroll offset"; ui.getv`sl; 3.]
+
   t.report[]}
 
 main[]

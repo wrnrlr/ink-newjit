@@ -54,6 +54,7 @@ ui.buf:(,`none)!,""                             / id → text buffer / selected 
 ui.opts:(,`none)!,()                            / id → select option list
 ui.val:(,`none)!,0.                             / id → numeric value (sliders)
 ui.rng:(,`none)!,0. 1.                          / id → (min;max) for sliders
+ui.scroll:(,`none)!,0.                          / id → list scroll offset (px from top)
 ui.focus:`none                                  / focused input id
 ui.open:`none                                   / open dropdown id
 ui.drag:`none                                   / slider being dragged (`none = none)
@@ -196,8 +197,13 @@ ui.doSlide:{[W;i;px] ui.drag::(W`id)@i; ui.dragx::(W`x)@i; ui.dragw::(W`w)@i; ui
 ui.hitAct:{[W;i] ui.focus::`none; ui.open::`none; (W`act)@i}
   / click a list row → select the item under the cursor (index = row from the top, by geometry).
 ui.ITEMK:1.7                                    / list item height / font size
+  / ── list scrolling: offset (px) per id, clamped to [0; content-height − box-height] ──
+ui.scrollOf:{[k] $[k in !ui.scroll; ui.scroll k; 0.]}
+ui.listMax:{[n;ih;h] 0.|(n*ih)-h}               / max scroll: content overflow past the box
+ui.clampScroll:{[k;n;ih;h] (ui.listMax[n;ih;h]) & 0.|ui.scrollOf k}
 ui.doList:{[W;i;py] k:(W`id)@i; n:#ui.opts k; $[n=0; `nop; ui.setList[W;i;py;k;n]]}
-ui.setList:{[W;i;py;k;n] ih:ui.ITEMK*(W`sz)@i; ui.setv[k; 0.+0|(n-1)&_(py-(W`y)@i)%ih]; `nop}
+  / click → selected index by geometry, shifted by the current scroll offset.
+ui.setList:{[W;i;py;k;n] ih:ui.ITEMK*(W`sz)@i; off:ui.clampScroll[k;n;ih;(W`h)@i]; ui.setv[k; 0.+0|(n-1)&_((py-(W`y)@i)+off)%ih]; `nop}
 ui.doCanvas:{[p] ui.cvx::p 0; ui.cvy::p 1; ui.focus::`none; `canvas}
 ui.onHit:{[W;i;p]
     a:(W`act)@i
@@ -210,6 +216,11 @@ ui.mouseActs:{[W;E]
   / a mouse RELEASE ends any drag; continuous drag reads props`mx each frame.
 ui.releaseDrag:{[E] $[0<#&(`mouse=E`kind)&0=E`down; ui.drag::`none; 0]}
 ui.dragUpdate:{[props] $[ui.drag~`none; 0; ui.slideTo props`mx]}
+  / ── wheel scrolling: a `scroll event over a list adjusts its offset (3 rows / notch) ──
+ui.scrollList:{[W;i;amt] k:(W`id)@i; ih:ui.ITEMK*(W`sz)@i; n:#ui.opts k
+    ui.scroll[k]:: (ui.listMax[n;ih;(W`h)@i]) & 0.|(ui.scrollOf k)-amt*3.*ih}
+ui.doScroll:{[W;e] i:ui.hit[W;e 0;e 1]; $[i<0; 0; ((W`act)@i)~`list; ui.scrollList[W;i;e 2]; 0]}
+ui.scrollActs:{[W;E] i:&`scroll=E`kind; ui.doScroll[W;]'+((E`x)@i;(E`y)@i;(E`amt)@i)}
 
   / ── editing the focused buffer (mechanics from demo/edit.k) ───────────────────
 ui.insChDo:{[cp] k:ui.focus; s:ui.get k; c:ui.caret; ui.set[k; (c#s),(`c$cp),(c_s)]; ui.caret::c+1}
@@ -229,7 +240,7 @@ ui.keys:{[E] $[ui.focus~`none; 0; ui.keysDo E]}
 ui.keysDo:{[E] ui.editText E; ui.editKeys E; 0}
 
   / One entry point per frame: clicks (focus/menu/slider + app actions), drag, keyboard.
-ui.frame:{[W;props] E:props`events; a:ui.mouseActs[W;E]; ui.releaseDrag E; ui.dragUpdate props; ui.keys E; a}
+ui.frame:{[W;props] E:props`events; a:ui.mouseActs[W;E]; ui.releaseDrag E; ui.dragUpdate props; ui.scrollActs[W;E]; ui.keys E; a}
 
   / ── paint ────────────────────────────────────────────────────────────────────
 ui.fillRect:{[x;y;w;h;c] cnv.rect[x;y;w;h]; cnv.fill cnv.rgba[c 0;c 1;c 2;c 3]}
@@ -240,9 +251,19 @@ ui.drawCaret:{[tx;y;h;sz;col] cx:tx+col*sz*ui.CW; cnv.rect[cx; y+0.15*h; 2.; 0.7
 ui.drawItem:{[x;y;w;ih;sz;sel;j;s]
     $[j=sel; ui.fillRect[x; y+ih*j; w; ih; ui.SELBG]; 0]
     ui.drawTxt[x+8.; (y+ih*j)+0.66*ih; sz; s; ui.DARK]}
-ui.drawList:{[key;x;y;w;sz]
-    items:ui.opts key; ih:ui.ITEMK*sz; sel:`i$ui.getv key
-    di:ui.drawItem[x;y;w;ih;sz;sel;]; di'[!#items; items]}
+  / clipped to the box, shifted by the scroll offset; only the visible row range is emitted.
+ui.drawList:{[key;x;y;w;h;sz]
+    items:ui.opts key; ih:ui.ITEMK*sz; sel:`i$ui.getv key; n:#items
+    off:ui.clampScroll[key;n;ih;h]
+    j0:0|`i$_off%ih; j1:(n-1)&`i$_(off+h)%ih
+    rows:$[j1<j0; !0; j0+!1+j1-j0]
+    cnv.save[]; cnv.clip[x;y;w;h]
+    di:ui.drawItem[x;(y-off);w;ih;sz;sel;]; di'[rows; items@rows]
+    cnv.restore[]
+    ui.drawScrollbar[x;y;w;h;n;ih;off]}
+  / a thin thumb on the right edge, only when the content overflows the box.
+ui.drawScrollbar:{[x;y;w;h;n;ih;off] tot:n*ih; $[~tot>h; 0; ui.scrollThumb[x;y;w;h;tot;off]]}
+ui.scrollThumb:{[x;y;w;h;tot;off] th:h*h%tot; ty:y+off*h%tot; ui.fillRect[(x+w)-5.; ty; 5.; th; ui.GREY]}
   / a slider: a thin track, a filled portion up to the value, and a handle. frac from ui.getv/rng.
 ui.drawSlider:{[key;x;y;w;h]
     r:ui.rng key; f:0.|1.&(ui.getv[key]-r 0)%(r 1)-r 0
@@ -256,7 +277,7 @@ ui.paintRow:{[W;i]
     inp:a~`focus
     $[~bg~(); ui.fillRect[x;y;w;h;bg]; 0]
     $[a~`slide; ui.drawSlider[id;x;y;w;h]; 0]
-    $[a~`list; ui.drawList[id;x;y;w;sz]; 0]
+    $[a~`list; ui.drawList[id;x;y;w;h;sz]; 0]
     $[a~`canvas; ui.canvasCB[x;y;w;h]; 0]
     center:(~bg~())&(~inp)&~a~`open              / buttons centre; inputs/selects/labels left
     tx:$[center; x+0.5*w-ui.measure[sz;txt]; x+6.]
