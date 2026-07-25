@@ -92,19 +92,19 @@ earthMesh: ,/ +(X;Y;Z;X;Y;Z;us;v)
 / depth is independent of zoom (the globe never clips out).  Normal + east tangent
 / get the same rotation for a consistent lighting/bump frame.  The sun rides
 / through unrotated (it lives in view space, set by the arrow keys → arrows move
-/ the day, camera moves the view).  Varyings: wNor, wTan, wUvF=(u;v;cloudsOn), wSun.
+/ the day, camera moves the view).  Varyings: wNor, wTan, wUvF=(u;v;cloudsOn;atmos), wSun.
 / VERTEX PULLING (kk2 §5): geometry lives in a resident storage buffer `vb` (stride 8,
 / pos/nor/uv at 8*vid) and the per-frame uniforms in a second storage buffer `ub` (16
 / floats, same layout the old uniform block used) — both PULLED by gl_VertexIndex, no
 / vertex-input state.  ub: [0..3]=yaw/pitch cos/sin, 4=zoom, 7=aspect, 8=cloudsOn,
-/ 12..14=view-space sun.  The math is identical to the attribute version.
-earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v3;wSun:`v3]; {[vb;ub;vid]
+/ 9=atmosphere, 12..14=view-space sun.  The math is identical to the attribute version.
+earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v3]; {[vb;ub;vid]
   b:8.*vid
   px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
   nx:vb[b+3.]; ny:vb[b+4.]; nz:vb[b+5.]
   uu:vb[b+6.]; vv:vb[b+7.]
   yc:ub[0.]; ys:ub[1.]; pc:ub[2.]; ps:ub[3.]
-  zoom:ub[4.]; asp:ub[7.]; cloudsOn:ub[8.]
+  zoom:ub[4.]; asp:ub[7.]; cloudsOn:ub[8.]; atm:ub[9.]
   Lx:ub[12.]; Ly:ub[13.]; Lz:ub[14.]
   / rotate position: yaw about Y, then pitch about X
   rx:(yc*px)+(ys*pz); rz:(yc*pz)-(ys*px)
@@ -119,7 +119,7 @@ earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v3;wSun:`v3]; {[vb;ub;vid]
   trx:(yc*Tx)+(ys*Tz); trz:(yc*Tz)-(ys*Tx)
   twx:trx; twy:0.0-(ps*trz); twz:pc*trz
   / orthographic: zoom scales screen XY; depth from wz only → no zoom clipping
-  ((asp*zoom*wx; zoom*wy; 0.5-0.45*wz; 1.0); (nwx;nwy;nwz); (twx;twy;twz); (uu;vv;cloudsOn); (Lx;Ly;Lz))
+  ((asp*zoom*wx; zoom*wy; 0.5-0.45*wz; 1.0); (nwx;nwy;nwz); (twx;twy;twz); (uu;vv;cloudsOn;atm); (Lx;Ly;Lz))
 }]
 
 / ── Fragment shader: PBR-ish earth — bump + specular + day/night + clouds ──────
@@ -130,9 +130,10 @@ earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v3;wSun:`v3]; {[vb;ub;vid]
 / night city lights); the specular mask gates an ocean sun-glint; clouds (white)
 / overlay both, lit by the sun and toggled by wUvF.z.  Output is clamped so the
 / glint/lights can't blow out to a white seam.
-earthFrag:shader.fragmentTexN[[wNor:`v3;wTan:`v3;wUvF:`v3;wSun:`v3;out:`v4]; 5; {[wNor;wTan;wUvF;wSun]
+earthFrag:shader.fragmentTexN[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v3;out:`v4]; 5; {[wNor;wTan;wUvF;wSun]
   uv:    (wUvF[0]; wUvF[1])
   flag:  wUvF[2]
+  atm:   wUvF[3]
   day:sample[0;uv];night:sample[1;uv];cloud:sample[2;uv];
   specM:sample[3;uv];nmap:sample[4;uv];
   / bump: decode tangent-space normal, transform to world with the T,B,N frame
@@ -153,6 +154,11 @@ earthFrag:shader.fragmentTexN[[wNor:`v3;wTan:`v3;wUvF:`v3;wSun:`v3;out:`v4]; 5; 
   r0: spc+mix[night[0]; day[0]*sh; dayF]
   g0: spc+mix[night[1]; day[1]*sh; dayF]
   b0: spc+mix[night[2]; day[2]*sh; dayF]
+  / atmosphere: a sun-lit blue Fresnel rim at the view-grazing limb (Vd=(0,0,1) ⇒ dot=N0.z).
+  / atm is the HUD slider; the terminator term keeps the day limb bright and the night limb faint.
+  fres: pow[1.0-max[0.0; N0[2]]; 2.5]
+  glow: atm*fres*(0.12+0.9*max[0.0; glit])
+  r0: r0+glow*0.40; g0: g0+glow*0.60; b0: b0+glow*1.00
   / clouds (grayscale in red): white, lit by the sun, gated by the toggle
   cl: cloud[0]*flag*(0.12+0.88*max[0.0;glit])
   (clamp[mix[r0;1.0;cl];0.;1.]; clamp[mix[g0;1.0;cl];0.;1.]; clamp[mix[b0;1.0;cl];0.;1.]; 1.0)
@@ -221,6 +227,7 @@ ui.setFont (font.read "font/FiraCode-Regular.ttf") 0
 ui.setTheme ui.themeDark
 ui.setv[`clouds; 1.]; ui.setv[`play; 0.]                    / checkbox defaults
 ui.setv[`sunAz; sunAz]; ui.setv[`sunEl; sunEl]; ui.setv[`speed; 0.02]   / slider defaults
+ui.setv[`atmos; 1.0]                                        / atmosphere intensity
 / The panel title is a button that collapses/expands the body (hudMin). Built in named
 / steps, NOT one nested inline expression: a deeply-nested inline (ui.col[.;(ui.row[.;(…)];…)])
 / silently halts the compiler (triage) — locals dodge it. `body` is a FLAT node list (safe).
@@ -232,7 +239,8 @@ hud: {[]
     ui.label["Sun azimuth"];   ui.slider[`sunAz; SW; 0.; TAU]
     ui.label["Sun elevation"]; ui.slider[`sunEl; SW; -1.4; 1.4]
     ui.checkbox[`play; "Auto-advance"]
-    ui.label["Speed"];         ui.slider[`speed; SW; 0.; 0.06] )
+    ui.label["Speed"];         ui.slider[`speed; SW; 0.; 0.06]
+    ui.label["Atmosphere"];    ui.slider[`atmos; SW; 0.; 2.] )
   kids:  $[hudMin; ,title; (,title),body]
   inner: ui.col[10.; kids]
   panel: ui.sty[inner; `bg`pad!((0.06 0.07 0.10 0.82); 16.)]
@@ -305,7 +313,8 @@ window.run[{[props]
   starUni: (cos yaw; sin yaw; cos pitch; sin pitch; asp;STARFOV;0.;0.)
   gpu.write[starUB; starUni]
   mesh.drawPullT[starPipe; (starVB;starUB); 6; starTex]
-  uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;0.;0.;asp; cloudsOn;0.;0.;0.; Lx;Ly;Lz;0.)
+  atmos: ui.getv[`atmos]
+  uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;0.;0.;asp; cloudsOn;atmos;0.;0.; Lx;Ly;Lz;0.)
   gpu.write[earthUB; uni]
   mesh.drawPullT[earthPipe; (earthVB;earthUB); earthN; earthTex]
   / HUD last → 2D panel composites on top of the 3D scene
