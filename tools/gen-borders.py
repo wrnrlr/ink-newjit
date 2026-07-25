@@ -2,8 +2,11 @@
 # One-time asset generator for demo/earth.k's country-borders overlay.
 #
 # Rasterises Natural Earth 110m coastlines + admin-0 boundary lines into an
-# equirectangular RGB PNG (white lines on black) that the earth fragment shader
-# samples as a 6th texture layer and composites over the surface.
+# equirectangular RGB PNG holding a DISTANCE FIELD (red = distance-to-nearest-border
+# in texels, 0 on the line, saturating at DMAX). The earth fragment shader samples it
+# and draws a line by thresholding the distance at a zoom-compensated half-width, so
+# the borders stay a constant screen width (they don't thicken as you zoom in) up to
+# ~DMAX/1.3 × zoom before hitting the 1-texel data floor. DMAX must match the shader.
 #
 #   pip install numpy   # (no PIL needed — we emit the PNG by hand)
 #   curl -sL -o coast.geojson    .../ne_110m_coastline.geojson
@@ -23,8 +26,10 @@ def load_lines(path):
         elif t == "MultiLineString": out.extend(c)
     return out
 
-def rasterise(lines, W, H, rad):
-    img = np.zeros((H, W), np.uint8)
+DMAX = 8.0   # distance field saturates at 8 texels (must match the shader's DMAX)
+
+def rasterise(lines, W, H):
+    seed = np.zeros((H, W), bool)                     # 1-texel centreline seed
     for ln in lines:
         p = np.asarray(ln, float)
         lon, lat = p[:, 0], p[:, 1]
@@ -35,16 +40,22 @@ def rasterise(lines, W, H, rad):
             if abs(lon[i + 1] - lon[i]) > 180.0:      # antimeridian wrap — don't connect across the seam
                 continue
             n = int(max(abs(x1 - x0), abs(y1 - y0))) + 1
-            xs = np.linspace(x0, x1, n).round().astype(int)
-            ys = np.linspace(y0, y1, n).round().astype(int)
-            for dx in range(-rad, rad + 1):           # thicken the stroke
-                for dy in range(-rad, rad + 1):
-                    img[np.clip(ys + dy, 0, H - 1), np.clip(xs + dx, 0, W - 1)] = 255
-    return img
+            xs = np.clip(np.linspace(x0, x1, n).round().astype(int), 0, W - 1)
+            ys = np.clip(np.linspace(y0, y1, n).round().astype(int), 0, H - 1)
+            seed[ys, xs] = True
+    # bounded chamfer distance transform (east-west wraps like the map; ~DMAX texels)
+    d = np.where(seed, 0.0, 1e9).astype(np.float32)
+    a, b = 1.0, 1.41421356
+    for _ in range(int(DMAX) + 2):
+        d = np.minimum(d, np.roll(d, 1, 0) + a);  d = np.minimum(d, np.roll(d, -1, 0) + a)
+        d = np.minimum(d, np.roll(d, 1, 1) + a);  d = np.minimum(d, np.roll(d, -1, 1) + a)
+        d = np.minimum(d, np.roll(np.roll(d, 1, 0), 1, 1) + b);  d = np.minimum(d, np.roll(np.roll(d, 1, 0), -1, 1) + b)
+        d = np.minimum(d, np.roll(np.roll(d, -1, 0), 1, 1) + b); d = np.minimum(d, np.roll(np.roll(d, -1, 0), -1, 1) + b)
+    return (np.clip(d, 0.0, DMAX) / DMAX * 255.0).round().astype(np.uint8)
 
 def write_png(path, gray):
     H, W = gray.shape
-    rgb = np.repeat(gray[:, :, None], 3, axis=2)                      # white lines on black
+    rgb = np.repeat(gray[:, :, None], 3, axis=2)                      # distance field replicated to RGB
     rows = rgb.reshape(H, W * 3)
     raw = np.concatenate([np.zeros((H, 1), np.uint8), rows], axis=1)  # ONE filter byte (0) per scanline
     def chunk(tag, data):
@@ -55,8 +66,7 @@ def write_png(path, gray):
 
 if __name__ == "__main__":
     coast, boundary, out, W, H = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
-    rad = 2 if W <= 2048 else 3
     lines = load_lines(coast) + load_lines(boundary)
-    print(f"{len(lines)} polylines → {W}x{H} (stroke ±{rad}px)")
-    write_png(out, rasterise(lines, W, H, rad))
+    print(f"{len(lines)} polylines → {W}x{H} distance field (DMAX={DMAX})")
+    write_png(out, rasterise(lines, W, H))
     print("wrote", out)

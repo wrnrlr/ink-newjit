@@ -106,7 +106,7 @@ earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v4]; {[vb;ub;vid]
   nx:vb[b+3.]; ny:vb[b+4.]; nz:vb[b+5.]
   uu:vb[b+6.]; vv:vb[b+7.]
   yc:ub[0.]; ys:ub[1.]; pc:ub[2.]; ps:ub[3.]
-  zoom:ub[4.]; asp:ub[7.]; cloudsOn:ub[8.]; atm:ub[9.]; bordersOn:ub[10.]
+  zoom:ub[4.]; asp:ub[7.]; cloudsOn:ub[8.]; atm:ub[9.]; bw:ub[10.]
   Lx:ub[12.]; Ly:ub[13.]; Lz:ub[14.]
   / rotate position: yaw about Y, then pitch about X
   rx:(yc*px)+(ys*pz); rz:(yc*pz)-(ys*px)
@@ -121,7 +121,7 @@ earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v4]; {[vb;ub;vid]
   trx:(yc*Tx)+(ys*Tz); trz:(yc*Tz)-(ys*Tx)
   twx:trx; twy:0.0-(ps*trz); twz:pc*trz
   / orthographic: zoom scales screen XY; depth from wz only → no zoom clipping
-  ((asp*zoom*wx; zoom*wy; 0.5-0.45*wz; 1.0); (nwx;nwy;nwz); (twx;twy;twz); (uu;vv;cloudsOn;atm); (Lx;Ly;Lz;bordersOn))
+  ((asp*zoom*wx; zoom*wy; 0.5-0.45*wz; 1.0); (nwx;nwy;nwz); (twx;twy;twz); (uu;vv;cloudsOn;atm); (Lx;Ly;Lz;bw))
 }]
 
 / ── Fragment shader: PBR-ish earth — bump + specular + day/night + clouds ──────
@@ -136,7 +136,7 @@ earthFrag:shader.fragmentTexN[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v4;out:`v4]; 6; 
   uv:    (wUvF[0]; wUvF[1])
   flag:  wUvF[2]
   atm:   wUvF[3]
-  bordersOn: wSun[3]
+  bw:    wSun[3]                                    / border half-width factor: 0=off, else 1/zoom
   day:sample[0;uv];night:sample[1;uv];cloud:sample[2;uv];
   specM:sample[3;uv];nmap:sample[4;uv];
   / bump: decode tangent-space normal, transform to world with the T,B,N frame
@@ -145,7 +145,7 @@ earthFrag:shader.fragmentTexN[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v4;out:`v4]; 6; 
   B:  cross[N0; T]
   nx: 2.0*nmap[0]-1.0; ny: 1.0-2.0*nmap[1]; nz: 2.0*nmap[2]-1.0
   N:  normalize[(nz*N0)+(0.85*((nx*T)+(ny*B)))]
-  L: normalize (wSun[0];wSun[1];wSun[2])           / arrow-key sun (view space); wSun[3]=bordersOn
+  L: normalize (wSun[0];wSun[1];wSun[2])           / arrow-key sun (view space); wSun[3]=border width
   Vd: 0.0 0.0 1.0
   H: normalize L+Vd
   lit:  dot[N;L]
@@ -167,10 +167,15 @@ earthFrag:shader.fragmentTexN[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v4;out:`v4]; 6; 
   rc: clamp[mix[r0;1.0;cl];0.;1.]
   gc: clamp[mix[g0;1.0;cl];0.;1.]
   bc: clamp[mix[b0;1.0;cl];0.;1.]
-  / country borders + coastlines: bright yellow lines from the overlay mask (texture 5), gated by
-  / the toggle. The mask bilinear-softens to a partial value on-screen, so sharpen it (×3) first.
-  bm: (min[1.0; (sample[5;uv][0])*3.0])*bordersOn
-  (mix[rc;1.0;bm]; mix[gc;0.92;bm]; mix[bc;0.35;bm]; 1.0)
+  / country borders + coastlines: distance field in texture 5 (0 on the line, →1 at DMAX=8 texels).
+  / Draw a yellow line where distance < half-width; half-width ∝ bw (=1/zoom, or 0 off), so the line
+  / holds a constant SCREEN width instead of thickening with zoom (down to the 1-texel data floor).
+  dpx: (sample[5;uv][0])*8.0                        / distance to nearest border, in texels
+  on:  step[0.0001; bw]                             / 1 when borders on, 0 when off
+  hw:  on*max[0.75; 1.3*bw]                          / texel half-width ∝ 1/zoom, floored so it stays continuous past the data floor
+  aa:  (0.4*on)+(0.6*bw)                             / antialias band (texels)
+  cov: clamp[(hw-dpx)%(aa+1e-4); 0.0; 1.0]
+  (mix[rc;1.0;cov]; mix[gc;0.92;cov]; mix[bc;0.35;cov]; 1.0)
 }]
 
 / ── Star / Milky-Way skybox ───────────────────────────────────────────────────
@@ -342,7 +347,8 @@ window.run[{[props]
   gpu.write[starUB; starUni]
   mesh.drawPullT[starPipe; (starVB;starUB); 6; starTex]
   bordersOn: ui.getv[`borders]
-  uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;0.;0.;asp; cloudsOn;atmos;bordersOn;0.; Lx;Ly;Lz;0.)
+  borderW: bordersOn%zoom                            / 0 = off; else 1/zoom → constant screen-width lines
+  uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;0.;0.;asp; cloudsOn;atmos;borderW;0.; Lx;Ly;Lz;0.)
   gpu.write[earthUB; uni]
   mesh.drawPullT[earthPipe; (earthVB;earthUB); earthN; earthTex]
   / HUD last → 2D panel composites on top of the 3D scene
