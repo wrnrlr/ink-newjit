@@ -20,24 +20,23 @@ ui.setFont (font.read "font/FiraCode-Regular.ttf") 0
 todo.DONEFG: 0.55 0.58 0.62 1.                   / muted grey for a completed task
 todo.OPENFG: 0.12 0.13 0.16 1.
 
-/ ── model: one table; row index = list position ──────────────────────────────
+/ ── model: one table; row index = list position (`#todo.T` = row count) ───────
 todo.T: +`text`done!(();0#0b)                    / columns: task text (C…) + done flag (bool)
-todo.n:{[] #todo.T`text}                         / row count
 
 todo.addDo:{[t] todo.T:: todo.T,`text`done!(t;0b); ui.set[`new; ""]}
 todo.add:{[] t:ui.get`new; $[0=#t; 0; todo.addDo t]}
-todo.toggle:{[i] $[i<todo.n[]; todo.T[`done;i]:: ~todo.T[`done;i]; 0]}   / deep in-place amend
-todo.remove:{[i] todo.T:: todo.T[; &~(!todo.n[])=i]}                     / keep every row but i
+todo.toggle:{[i] $[i<#todo.T; todo.T[`done;i]:: ~todo.T[`done;i]; 0]}    / deep in-place amend
+todo.remove:{[i] todo.T:: todo.T[; &~(!#todo.T)=i]}                      / keep every row but i
 
 / per-row action symbols, rebuilt from the current count so the dispatcher can find a click's row.
-todo.togSyms:{[] {`s$"t",$x}'!todo.n[]}
-todo.delSyms:{[] {`s$"d",$x}'!todo.n[]}
+todo.togSyms:{[] {`s$"t",$x}'!#todo.T}
+todo.delSyms:{[] {`s$"d",$x}'!#todo.T}
 todo.act:{[a]
-  ti: (todo.togSyms[])?a                         / row index if a toggle was clicked, else n
+  ti: (todo.togSyms[])?a                         / row index if a toggle was clicked, else #T
   di: (todo.delSyms[])?a
   $[a~`add; todo.add[]
-    ti<todo.n[]; todo.toggle ti
-    di<todo.n[]; todo.remove di
+    ti<#todo.T; todo.toggle ti
+    di<#todo.T; todo.remove di
     0]}
 
 / ── view ─────────────────────────────────────────────────────────────────────
@@ -48,9 +47,9 @@ todo.rowView:{[i] done:todo.T[`done;i]; txt:todo.T[`text;i]
     ui.sized[300.;34.; ui.bg[1. 1. 1. 1.; ui.pad[6.;
       @[ui.label txt; `fg; :; $[done; todo.DONEFG; todo.OPENFG]] ]]]
     ui.button["x"; `s$"d",$i] )]}
-todo.rows:{[] {todo.rowView x}'!todo.n[]}
+todo.rows:{[] {todo.rowView x}'!#todo.T}
 todo.addBar:{[] ui.row[8.; ( ui.input[`new; 320.; "add a task..."] ; ui.button["Add"; `add] )]}
-todo.status:{[] ui.label[($todo.count[])," of ",($todo.n[])," done"]}
+todo.status:{[] ui.label[($todo.count[])," of ",($#todo.T)," done"]}
 todo.view:{[]
   ui.bg[0.96 0.96 0.98 1.; ui.pad[24.; ui.col[12.;
     ((ui.label["TODO"]; todo.addBar[]; todo.status[]), todo.rows[]), (,ui.spacer[]) ]]]}
