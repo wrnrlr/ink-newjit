@@ -29,9 +29,9 @@ todo.DONEFG: 0.55 0.58 0.62 1.                   / muted grey for a completed ta
 todo.OPENFG: 0.12 0.13 0.16 1.
 
 / ── model: one table (id, text, done); `#todo.T` = row count ──────────────────
-todo.T: +`id`text`done!(0#0; (); 0#0b)
-todo.seq: 0
-todo.nextId:{[] n:todo.seq; todo.seq:: todo.seq+1; n}
+todo.T::+`id`text`done!(0#0; (); 0#0b)
+todo.seq::0
+todo.nextId:{n:todo.seq;todo.seq+::1;n}
 
 todo.addDo:{[t] todo.T,::`id`text`done!(todo.nextId[]; t; 0b); ui.set[`new; ""]}
 todo.add:{[] t:ui.get`new; $[0=#t; 0; todo.addDo t]}
@@ -45,8 +45,8 @@ todo.syncRow:{[i] id:todo.T[`id;i]; k:todo.ekey id
 todo.sync:{[] {todo.syncRow x}'!#todo.T}          / call once per frame, before ui.run
 
 / ── action dispatch: symbols carry the task id; `?` finds its current row position ─
-todo.togSyms:{[] {`s$"t",$x}'todo.T`id}
-todo.delSyms:{[] {`s$"d",$x}'todo.T`id}
+todo.togSyms:{{`s$"t",$x}'todo.T`id}
+todo.delSyms:{{`s$"d",$x}'todo.T`id}
 todo.act:{[a]
   ti: (todo.togSyms[])?a                          / row position if a toggle was clicked, else #T
   di: (todo.delSyms[])?a
