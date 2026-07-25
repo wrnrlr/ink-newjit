@@ -172,16 +172,18 @@ earthFrag:shader.fragmentTexN[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v3;out:`v4]; 5; 
 starQuad: -1. -1. 1. -1. 1. 1. -1. -1. 1. 1. -1. 1.
 STARFOV:  0.85      / how much sky fills the view
 
-/ Pulled too: qb = the quad (stride 2), ub = 8 uniform floats (0..3 yaw/pitch, 4=asp, 5=fov).
-starVtx: shader.vertexPull[[wRay:`v2;wRot:`v4]; {[qb;ub;vid]
+/ Pulled too: qb = the quad (stride 2), ub = 12 uniform floats (0..3 yaw/pitch, 4=asp, 5=fov,
+/ 6=zoom, 7=atmos, 8..10=view-space sun).  Extra varyings feed the atmosphere halo (below):
+/ wScr = raw NDC pos, wPar = (zoom;atmos;asp), wSun2 = the sun's screen-plane direction.
+starVtx: shader.vertexPull[[wRay:`v2;wRot:`v4;wScr:`v2;wPar:`v4;wSun2:`v2]; {[qb;ub;vid]
   b:2.*vid
   px:qb[b]; py:qb[b+1.]
   cy:ub[0.]; sy:ub[1.]; cp:ub[2.]; sp:ub[3.]
-  asp:ub[4.]; fov:ub[5.]
-  ((px; py; 0.9999; 1.0); (px*fov%asp; py*fov); (cy;sy;cp;sp))
+  asp:ub[4.]; fov:ub[5.]; zoom:ub[6.]; atm:ub[7.]; Lx:ub[8.]; Ly:ub[9.]
+  ((px; py; 0.9999; 1.0); (px*fov%asp; py*fov); (cy;sy;cp;sp); (px;py); (zoom;atm;asp;0.0); (Lx;Ly))
 }]
 
-starFrag: shader.fragmentTexN[[wRay:`v2; wRot:`v4; out:`v4]; 1; {[wRay;wRot]
+starFrag: shader.fragmentTexN[[wRay:`v2; wRot:`v4; wScr:`v2; wPar:`v4; wSun2:`v2; out:`v4]; 1; {[wRay;wRot;wScr;wPar;wSun2]
   cy:wRot[0]; sy:wRot[1]; cp:wRot[2]; sp:wRot[3]
   dx:wRay[0]; dy:wRay[1]; dz:0.0-1.0
   / rotate the view ray by yaw-about-Y then pitch-about-X (same as the globe)
@@ -193,7 +195,20 @@ starFrag: shader.fragmentTexN[[wRay:`v2; wRot:`v4; out:`v4]; 1; {[wRay;wRot]
   vv: 0.5-(asin[ny])%3.14159265
   s: sample[0; (u;vv)]
   b: 1.6                                           / lift the (very dark) sky map
-  (b*s[0]; b*s[1]; b*s[2]; 1.0)
+  / ── Atmosphere halo: a blue glow OUTSIDE the globe, fading into space ──────────
+  / Globe-space radius: (X;Y) normalize the aspect-corrected screen so X²+Y²=1 at the
+  / silhouette (r>1 outside).  Two exp falloffs (thin bright ring + soft wide glow),
+  / gated by the screen-space sun so the day side glows and the night side is faint.
+  zoom:wPar[0]; atm:wPar[1]; asp:wPar[2]
+  Lx:wSun2[0]; Ly:wSun2[1]
+  X: wScr[0]%(asp*zoom); Y: wScr[1]%zoom
+  r: sqrt[(X*X)+(Y*Y)]
+  edge: max[0.0; r-1.0]
+  gl: atm*(exp[0.0-(edge*20.0)]+(0.5*exp[0.0-(edge*5.0)]))*step[1.0; r]
+  sl: sqrt[(Lx*Lx)+(Ly*Ly)+0.0001]
+  sd: ((X*Lx)+(Y*Ly))%((r+0.0001)*sl)             / cos(pixel-dir, sun-dir) in screen plane
+  gl: gl*(0.28+0.9*max[0.0; sd])
+  (clamp[(b*s[0])+(gl*0.30);0.;1.]; clamp[(b*s[1])+(gl*0.55);0.;1.]; clamp[(b*s[2])+(gl*1.0);0.;1.]; 1.0)
 }]
 
 / ── Controls + window loop ────────────────────────────────────────────────────
@@ -206,6 +221,7 @@ starFrag: shader.fragmentTexN[[wRay:`v2; wRot:`v4; out:`v4]; 1; {[wRay;wRot]
 /     Clouds        toggle the cloud layer
 /     Sun azimuth   time of day (also the ← → keys); Sun elevation = subsolar latitude
 /     Auto-advance  run the day/night cycle; Speed sets its rate
+/     Atmosphere    intensity of the blue scattering halo around the globe
 / Pitch is clamped to ±80° so the globe can't flip.
 PLIM:   1.40                                     / pitch clamp (~80°)
 ZMIN:   0.55; ZMAX: 30.0
@@ -268,7 +284,7 @@ window.run[{[props]
   $[earthTex~0;    earthTex::    {texture.upload x}'(imgDay;imgNight;imgClouds;imgSpec;imgNorm); 0]
   $[starPipe=0;    starPipe::    mesh.compilePull[starVtx; starFrag]; 0]
   $[starVB=0;      starVB::      gpu.buffer[starQuad]; 0]
-  $[starUB=0;      starUB::      gpu.buffer[8#0.];     0]
+  $[starUB=0;      starUB::      gpu.buffer[12#0.];    0]
   $[starTex~0;     starTex::     ,texture.upload[imgStars];              0]
 
   E: props`events
@@ -308,12 +324,13 @@ window.run[{[props]
   ce: cos sunEl
   Lx: (sin sunAz)*ce; Ly: sin sunEl; Lz: (cos sunAz)*ce
   asp: h%w
+  atmos: ui.getv[`atmos]
   / stars first (behind), then the earth depth-tests in front. Each: refresh the
-  / uniform buffer, then one pulled+textured draw (mesh.drawPullT).
-  starUni: (cos yaw; sin yaw; cos pitch; sin pitch; asp;STARFOV;0.;0.)
+  / uniform buffer, then one pulled+textured draw (mesh.drawPullT).  The star pass also
+  / paints the atmosphere HALO outside the globe (needs zoom, atmos and the screen sun).
+  starUni: (cos yaw; sin yaw; cos pitch; sin pitch; asp;STARFOV; zoom;atmos; Lx;Ly;Lz;0.)
   gpu.write[starUB; starUni]
   mesh.drawPullT[starPipe; (starVB;starUB); 6; starTex]
-  atmos: ui.getv[`atmos]
   uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;0.;0.;asp; cloudsOn;atmos;0.;0.; Lx;Ly;Lz;0.)
   gpu.write[earthUB; uni]
   mesh.drawPullT[earthPipe; (earthVB;earthUB); earthN; earthTex]
