@@ -207,3 +207,14 @@ not the layout itself. Minimal non-UI isolation with a dummy `f[g;x]` was inconc
 completion), so the trigger is subtle — likely a compiler pass (constant-fold/DCE) on nested
 list/dict construction, aborting the chunk silently. A silent halt with exit 0 is the dangerous
 part. Workaround in demo/earth.k: build the HUD tree in named locals inside the lambda.
+
+## A 5th vertex→fragment varying isn't delivered by shader.vertexPull/fragmentTexN (demo/earth.k)
+Adding a 5th varying to the earth pipeline (wNor v3, wTan v3, wUvF v4, wSun v3, **wLay v2**) read as
+0 in the fragment even when the vertex hardcoded it to 1.0 — the globe went black when output. The
+first four varyings deliver fine (day/night via wSun, atmos via wUvF[3] both work). Oddly the STAR
+pipeline in the same file has FIVE varyings (wRay v2, wRot v4, wScr v2, wPar v4, wSun2 v2) that all
+deliver (the sun-gated halo uses the 5th). So it isn't a hard 5-varying cap — more likely a
+location/packing interaction with the specific vec sizes (earth's 3+3+4+3+2) or with the 6-texture
+fragmentTexN. Workaround used: pack the flag into a spare lane of an existing varying (wSun v3→v4,
+bordersOn in .w). Worth pinning down the real rule in shader.vertexPull location assignment so
+overlays can add channels without hunting for spare lanes.

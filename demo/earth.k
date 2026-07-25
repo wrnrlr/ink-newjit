@@ -64,6 +64,7 @@ imgClouds: image.read pfx,"clouds.jpg"
 imgSpec:   image.read pfx,"specular_map.tif"   / ocean=white, land=black
 imgNorm:   image.read pfx,"normal_map.tif"     / tangent-space bumps
 imgStars:  image.read "demo/data/",TEXRES,"_stars_milky_way.jpg"   / celestial sky
+imgBorders:image.read pfx,"borders.png"        / country borders + coastlines (white on black); see tools/gen-borders.py
 
 / ── Per-vertex UV (equirectangular), one vectorised pass ──────────────────────
 P: +,/icoTris
@@ -92,19 +93,20 @@ earthMesh: ,/ +(X;Y;Z;X;Y;Z;us;v)
 / depth is independent of zoom (the globe never clips out).  Normal + east tangent
 / get the same rotation for a consistent lighting/bump frame.  The sun rides
 / through unrotated (it lives in view space, set by the arrow keys → arrows move
-/ the day, camera moves the view).  Varyings: wNor, wTan, wUvF=(u;v;cloudsOn;atmos), wSun.
+/ the day, camera moves the view).  Varyings: wNor, wTan, wUvF=(u;v;cloudsOn;atmos),
+/ wSun=(Lx;Ly;Lz;bordersOn).  (Flags ride spare vector lanes — a 5th varying didn't deliver; triage.)
 / VERTEX PULLING (kk2 §5): geometry lives in a resident storage buffer `vb` (stride 8,
 / pos/nor/uv at 8*vid) and the per-frame uniforms in a second storage buffer `ub` (16
 / floats, same layout the old uniform block used) — both PULLED by gl_VertexIndex, no
 / vertex-input state.  ub: [0..3]=yaw/pitch cos/sin, 4=zoom, 7=aspect, 8=cloudsOn,
-/ 9=atmosphere, 12..14=view-space sun.  The math is identical to the attribute version.
-earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v3]; {[vb;ub;vid]
+/ 9=atmosphere, 10=bordersOn, 12..14=view-space sun.  The math is identical to the attribute version.
+earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v4]; {[vb;ub;vid]
   b:8.*vid
   px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
   nx:vb[b+3.]; ny:vb[b+4.]; nz:vb[b+5.]
   uu:vb[b+6.]; vv:vb[b+7.]
   yc:ub[0.]; ys:ub[1.]; pc:ub[2.]; ps:ub[3.]
-  zoom:ub[4.]; asp:ub[7.]; cloudsOn:ub[8.]; atm:ub[9.]
+  zoom:ub[4.]; asp:ub[7.]; cloudsOn:ub[8.]; atm:ub[9.]; bordersOn:ub[10.]
   Lx:ub[12.]; Ly:ub[13.]; Lz:ub[14.]
   / rotate position: yaw about Y, then pitch about X
   rx:(yc*px)+(ys*pz); rz:(yc*pz)-(ys*px)
@@ -119,7 +121,7 @@ earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v3]; {[vb;ub;vid]
   trx:(yc*Tx)+(ys*Tz); trz:(yc*Tz)-(ys*Tx)
   twx:trx; twy:0.0-(ps*trz); twz:pc*trz
   / orthographic: zoom scales screen XY; depth from wz only → no zoom clipping
-  ((asp*zoom*wx; zoom*wy; 0.5-0.45*wz; 1.0); (nwx;nwy;nwz); (twx;twy;twz); (uu;vv;cloudsOn;atm); (Lx;Ly;Lz))
+  ((asp*zoom*wx; zoom*wy; 0.5-0.45*wz; 1.0); (nwx;nwy;nwz); (twx;twy;twz); (uu;vv;cloudsOn;atm); (Lx;Ly;Lz;bordersOn))
 }]
 
 / ── Fragment shader: PBR-ish earth — bump + specular + day/night + clouds ──────
@@ -130,10 +132,11 @@ earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v3]; {[vb;ub;vid]
 / night city lights); the specular mask gates an ocean sun-glint; clouds (white)
 / overlay both, lit by the sun and toggled by wUvF.z.  Output is clamped so the
 / glint/lights can't blow out to a white seam.
-earthFrag:shader.fragmentTexN[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v3;out:`v4]; 5; {[wNor;wTan;wUvF;wSun]
+earthFrag:shader.fragmentTexN[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v4;out:`v4]; 6; {[wNor;wTan;wUvF;wSun]
   uv:    (wUvF[0]; wUvF[1])
   flag:  wUvF[2]
   atm:   wUvF[3]
+  bordersOn: wSun[3]
   day:sample[0;uv];night:sample[1;uv];cloud:sample[2;uv];
   specM:sample[3;uv];nmap:sample[4;uv];
   / bump: decode tangent-space normal, transform to world with the T,B,N frame
@@ -142,7 +145,7 @@ earthFrag:shader.fragmentTexN[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v3;out:`v4]; 5; 
   B:  cross[N0; T]
   nx: 2.0*nmap[0]-1.0; ny: 1.0-2.0*nmap[1]; nz: 2.0*nmap[2]-1.0
   N:  normalize[(nz*N0)+(0.85*((nx*T)+(ny*B)))]
-  L: normalize wSun                                / arrow-key sun (view space)
+  L: normalize (wSun[0];wSun[1];wSun[2])           / arrow-key sun (view space); wSun[3]=bordersOn
   Vd: 0.0 0.0 1.0
   H: normalize L+Vd
   lit:  dot[N;L]
@@ -161,7 +164,13 @@ earthFrag:shader.fragmentTexN[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v3;out:`v4]; 5; 
   r0: r0+glow*0.40; g0: g0+glow*0.60; b0: b0+glow*1.00
   / clouds (grayscale in red): white, lit by the sun, gated by the toggle
   cl: cloud[0]*flag*(0.12+0.88*max[0.0;glit])
-  (clamp[mix[r0;1.0;cl];0.;1.]; clamp[mix[g0;1.0;cl];0.;1.]; clamp[mix[b0;1.0;cl];0.;1.]; 1.0)
+  rc: clamp[mix[r0;1.0;cl];0.;1.]
+  gc: clamp[mix[g0;1.0;cl];0.;1.]
+  bc: clamp[mix[b0;1.0;cl];0.;1.]
+  / country borders + coastlines: bright yellow lines from the overlay mask (texture 5), gated by
+  / the toggle. The mask bilinear-softens to a partial value on-screen, so sharpen it (×3) first.
+  bm: (min[1.0; (sample[5;uv][0])*3.0])*bordersOn
+  (mix[rc;1.0;bm]; mix[gc;0.92;bm]; mix[bc;0.35;bm]; 1.0)
 }]
 
 / ── Star / Milky-Way skybox ───────────────────────────────────────────────────
@@ -218,7 +227,7 @@ starFrag: shader.fragmentTexN[[wRay:`v2; wRot:`v4; wScr:`v2; wPar:`v4; wSun2:`v2
 /   Scroll      zoom (0.55 .. 30, orthographic → never clips)
 /   ← →         rotate the sun (move the day / terminator; independent of the view)
 /   HUD (top-left panel; the "Earth -/+" title button collapses/expands it):
-/     Clouds        toggle the cloud layer
+/     Clouds        toggle the cloud layer;  Borders  toggle country borders + coastlines
 /     Sun azimuth   time of day (also the ← → keys); Sun elevation = subsolar latitude
 /     Auto-advance  run the day/night cycle; Speed sets its rate
 /     Atmosphere    intensity of the blue scattering halo around the globe
@@ -241,7 +250,7 @@ hudMin::0                                     / HUD panel collapsed?
 / ui.hitAny can test); the outer col/row + spacers pin it to the top-left corner.
 ui.setFont (font.read "font/FiraCode-Regular.ttf") 0
 ui.setTheme ui.themeDark
-ui.setv[`clouds; 1.]; ui.setv[`play; 0.]                    / checkbox defaults
+ui.setv[`clouds; 1.]; ui.setv[`play; 0.]; ui.setv[`borders; 1.]   / checkbox defaults
 ui.setv[`sunAz; sunAz]; ui.setv[`sunEl; sunEl]; ui.setv[`speed; 0.02]   / slider defaults
 ui.setv[`atmos; 1.0]                                        / atmosphere intensity
 / The panel title is a button that collapses/expands the body (hudMin). Built in named
@@ -252,6 +261,7 @@ hud: {[]
   title: ui.button[$[hudMin; "Earth  +"; "Earth  -"]; `togglemin]
   body: (
     ui.checkbox[`clouds; "Clouds"]
+    ui.checkbox[`borders; "Borders"]
     ui.label["Sun azimuth"];   ui.slider[`sunAz; SW; 0.; TAU]
     ui.label["Sun elevation"]; ui.slider[`sunEl; SW; -1.4; 1.4]
     ui.checkbox[`play; "Auto-advance"]
@@ -281,7 +291,7 @@ window.run[{[props]
   $[earthPipe=0;   earthPipe::   mesh.compilePull[earthVtx; earthFrag]; 0]
   $[earthVB=0;     earthVB::     gpu.buffer[earthMesh]; 0]
   $[earthUB=0;     earthUB::     gpu.buffer[16#0.];     0]
-  $[earthTex~0;    earthTex::    {texture.upload x}'(imgDay;imgNight;imgClouds;imgSpec;imgNorm); 0]
+  $[earthTex~0;    earthTex::    {texture.upload x}'(imgDay;imgNight;imgClouds;imgSpec;imgNorm;imgBorders); 0]
   $[starPipe=0;    starPipe::    mesh.compilePull[starVtx; starFrag]; 0]
   $[starVB=0;      starVB::      gpu.buffer[starQuad]; 0]
   $[starUB=0;      starUB::      gpu.buffer[12#0.];    0]
@@ -331,7 +341,8 @@ window.run[{[props]
   starUni: (cos yaw; sin yaw; cos pitch; sin pitch; asp;STARFOV; zoom;atmos; Lx;Ly;Lz;0.)
   gpu.write[starUB; starUni]
   mesh.drawPullT[starPipe; (starVB;starUB); 6; starTex]
-  uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;0.;0.;asp; cloudsOn;atmos;0.;0.; Lx;Ly;Lz;0.)
+  bordersOn: ui.getv[`borders]
+  uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;0.;0.;asp; cloudsOn;atmos;bordersOn;0.; Lx;Ly;Lz;0.)
   gpu.write[earthUB; uni]
   mesh.drawPullT[earthPipe; (earthVB;earthUB); earthN; earthTex]
   / HUD last → 2D panel composites on top of the 3D scene
