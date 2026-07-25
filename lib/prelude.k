@@ -29,3 +29,5 @@ parse:{`parse x};exec:{`exec x};depth:{`depth x};epoch:{`epoch x}
 
 / ── misc conveniences ──
 sort:{x@<x}
+
+sum:+/;sums:+\;

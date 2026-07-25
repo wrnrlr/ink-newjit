@@ -42,7 +42,7 @@ todo.remove:{[i] todo.T::todo.T[; &~(!#todo.T)=i]}                       / keep 
 todo.ekey:{[id] `s$"e",$id}
 todo.syncRow:{[i] id:todo.T[`id;i]; k:todo.ekey id
   $[ui.isFocus k; todo.T[`text;i]::ui.get k; ui.set[k; todo.T[`text;i]]]}
-todo.sync:{[] {todo.syncRow x}'!#todo.T}          / call once per frame, before ui.run
+todo.sync:{todo.syncRow'!#todo.T}          / call once per frame, before ui.run
 
 / ── action dispatch: symbols carry the task id; `?` finds its current row position ─
 todo.togSyms:{{`s$"t",$x}'todo.T`id}
@@ -56,15 +56,15 @@ todo.act:{[a]
     0]}
 
 / ── view ─────────────────────────────────────────────────────────────────────
-todo.count:{[] +/todo.T`done}                     / number done
+todo.count:{+/todo.T`done}                     / number done
 todo.rowView:{[i] id:todo.T[`id;i]; done:todo.T[`done;i]
   ui.row[8.; (
     ui.button[$[done;"[x]";"[ ]"]; `s$"t",$id]
     @[ui.input[todo.ekey id; 300.; "task"]; `fg; :; $[done; todo.DONEFG; todo.OPENFG]]
     ui.button["x"; `s$"d",$id] )]}
-todo.rows:{[] {todo.rowView x}'!#todo.T}
-todo.addBar:{[] ui.row[8.; ( ui.input[`new; 300.; "add a task..."] ; ui.button["Add"; `add] )]}
-todo.status:{[] ui.label[($todo.count[])," of ",($#todo.T)," done"]}
+todo.rows:{{todo.rowView x}'!#todo.T}
+todo.addBar:{ui.row[8.; ( ui.input[`new; 300.; "add a task..."] ; ui.button["Add"; `add] )]}
+todo.status:{ui.label[($todo.count[])," of ",($#todo.T)," done"]}
 todo.view:{[]
   ui.bg[0.96 0.96 0.98 1.; ui.pad[24.; ui.col[12.;
     ((ui.label["TODO"]; todo.addBar[]; todo.status[]), todo.rows[]), (,ui.spacer[]) ]]]}
