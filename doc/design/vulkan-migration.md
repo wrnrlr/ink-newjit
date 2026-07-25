@@ -3,14 +3,18 @@
 Status: **DONE — cut over 2026-07-14.** Phase 5 (Dawn/zgpu/zpool/`gpuWgsl`/
 `blit.wgsl`/`fill.wgsl` deleted, vulkan is the only backend, static bundle
 merges gpu+MoltenVK+GLFW) and Phase 6 (dye.k emits SPIR-V **1.4 natively** —
-version word + full-interface `OpEntryPoint` in all four assemblers: `kAsm`,
-`buildMod`, `shader.vertexU`, `lib/instancing.k`; `maybeBump`/`INK_SPV14`
-removed) landed together after the kk emitter consolidation left one `hdr:`
-site per assembler. Verified: `test/spirv.k` golden (version chks now 1.4),
-12/12 kkgold modules `spirv-val --target-env vulkan1.2` clean, walk3/nn
-numerics unchanged, sphere/circle/eyes/earth/clothgpu render stats identical.
-Remaining from the old list: instancing exports are still stubs (subsumed by
-vertex pulling — doc/design/kk.md §4/§5.7); Phase 7 (self-host fill.k) open.
+version word + full-interface `OpEntryPoint` at every `hdr:` site in `lib/dye.k`
+(compute `kAsm`, render `buildMod`, vertex-pull `shader.vertexPull`);
+`maybeBump`/`INK_SPV14` removed) landed together after the kk emitter
+consolidation left one `hdr:` site per assembler. Verified: `test/spirv.k` golden
+(version chks now 1.4), 12/12 kkgold modules `spirv-val --target-env vulkan1.2`
+clean, walk3/nn numerics unchanged, sphere/circle/eyes/earth/clothgpu render stats
+identical. The old instancing exports (`gpuDrawInstanced`/`gpuDrawGeomResident`/
+`gpuDrawInstancedT`/`gpuDrawMeshT`) were NOT ported to the Vulkan backend and are
+gone — vertex pulling (`shader.vertexPull`/`mesh.drawPull`, doc/design/kk.md §4/§5.7;
+see `demo/scene.k`) renders N instances in one draw and subsumes them. Phase 7
+(self-host `fill.vert`) is the only shader-source cleanup left; the tessellation
+`fill.frag` path was deleted 2026-07-25 (`.plan/tasks.md`).
 
 Original document below. Author's note: written after establishing that Dawn's Tint
 SPIR-V *reader* is permanently capped at Vulkan 1.1 / SPIR-V 1.3 (see
@@ -303,10 +307,12 @@ n images + shared sampler @group1); `texSet` per-draw; `gpuUploadMesh` (retained
 vertex buffers) + `gpuDrawGeomT` (retained geom + uniform + textures).
 **Verified pixel-identical to Dawn**: `demo/earth.k` (5 textures, equirectangular,
 retained mesh, uniform camera) at 96.9% coverage, per-channel identical.
-**Still stubbed:** instancing (`gpuDrawInstanced`/`gpuDrawGeomResident`/
-`gpuDrawInstancedT`, instance storage buffer @group0). Its test targets `scene`/
-`clothpull` render all-black even on Dawn in headless snapshot mode, so they're not
-snapshot-verifiable — deferred as low-value/unverifiable.
+**Instancing** (`gpuDrawInstanced`/`gpuDrawGeomResident`/`gpuDrawInstancedT`,
+instance storage buffer @group0) was stubbed here — and SUPERSEDED (see status
+header): it was never ported to Vulkan and is gone. Vertex pulling
+(`shader.vertexPull`/`mesh.drawPull`, `demo/scene.k`) renders N instances in one
+draw and replaces it; `demo/scene.k` is the verifiable target the old `scene`/
+`clothpull` all-black stubs never were.
 
 ### Phase 6 — SPIR-V 1.4 — ✅ ACHIEVED LIVE (2026-07-13), the original goal
 Rather than edit dye.k (which would break Dawn before cutover), the Phase-6

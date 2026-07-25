@@ -73,6 +73,10 @@ ui.regRng:{[k;r] ui.rng[k]:: r}
 ui.box:{[color] ui.KEYS!(`leaf;0.;0.;1.;`row;0.;0.;();`box;color;"";ui.DARK;0.;`nop)}
 ui.label:{[s] ui.KEYS!(`leaf;(ui.measure[18.;s])+4.;26.;0.;`row;0.;0.;();`lbl;();s;ui.DARK;18.;`nop)}
 ui.button:{[s;act] ui.KEYS!(`leaf;(ui.measure[16.;s])+28.;36.;0.;`row;0.;0.;();`btn;ui.BLUE;s;ui.WHITE;16.;act)}
+  / A boolean checkbox labelled `s`, bound to ui.getv/ui.setv[key] (0./1.). Clicking toggles it in
+  / the framework (act=`check) so the app just reads ui.getv[key]; set the initial state with
+  / ui.setv[key;1.] before the first frame. Painted (box+tick+label) by ui.drawCheck.
+ui.checkbox:{[key;s] ui.KEYS!(`leaf;30.+ui.measure[16.;s];26.;0.;`row;0.;0.;();key;();s;ui.DARK;16.;`check)}
 ui.spacer:{[] ui.KEYS!(`leaf;0.;0.;1.;`row;0.;0.;();`sp;();"";ui.DARK;0.;`nop)}
   / A focusable text input `w` px wide, bound to buffer ui.get/ui.set[key]. act=`focus marks it.
 ui.input:{[key;w;ph]
@@ -195,6 +199,11 @@ ui.pickOpt:{[W;i] ui.set[(W`id)@i; (W`txt)@i]; ui.open::`none; `nop}
 ui.slideTo:{[px] r:ui.rng ui.drag; f:0.|1.&(px-ui.dragx)%ui.dragw; ui.setv[ui.drag; (r 0)+f*(r 1)-r 0]}
 ui.doSlide:{[W;i;px] ui.drag::(W`id)@i; ui.dragx::(W`x)@i; ui.dragw::(W`w)@i; ui.slideTo px; `nop}
 ui.hitAct:{[W;i] ui.focus::`none; ui.open::`none; (W`act)@i}
+  / toggle a checkbox's bound value in-framework; the app reads ui.getv[key] afterwards.
+ui.doCheck:{[W;i] k:(W`id)@i; ui.setv[k; 1.-ui.getv k]; `nop}
+  / is (px;py) over ANY emitted widget rect? Use it to gate a 3D interactor under a HUD panel:
+  / give the HUD col a bg (so it emits a full-panel rect) and skip globe drag/zoom when this is true.
+ui.hitAny:{[W;px;py] ~(ui.hit[W;px;py])<0}
   / click a list row → select the item under the cursor (index = row from the top, by geometry).
 ui.ITEMK:1.7                                    / list item height / font size
   / ── list scrolling: offset (px) per id, clamped to [0; content-height − box-height] ──
@@ -207,7 +216,7 @@ ui.setList:{[W;i;py;k;n] ih:ui.ITEMK*(W`sz)@i; off:ui.clampScroll[k;n;ih;(W`h)@i
 ui.doCanvas:{[p] ui.cvx::p 0; ui.cvy::p 1; ui.focus::`none; `canvas}
 ui.onHit:{[W;i;p]
     a:(W`act)@i
-    $[a~`focus; ui.doFocus[W;i;p 0]; a~`open; ui.toggleOpen[W;i]; a~`pick; ui.pickOpt[W;i]; a~`slide; ui.doSlide[W;i;p 0]; a~`list; ui.doList[W;i;p 1]; a~`canvas; ui.doCanvas[p]; ui.hitAct[W;i]]}
+    $[a~`focus; ui.doFocus[W;i;p 0]; a~`open; ui.toggleOpen[W;i]; a~`pick; ui.pickOpt[W;i]; a~`slide; ui.doSlide[W;i;p 0]; a~`list; ui.doList[W;i;p 1]; a~`check; ui.doCheck[W;i]; a~`canvas; ui.doCanvas[p]; ui.hitAct[W;i]]}
 ui.defocus:{[] ui.focus::`none; ui.open::`none; `nop}
 ui.dispatchPt:{[W;p] i:ui.hit[W;p 0;p 1]; $[i<0; ui.defocus[]; ui.onHit[W;i;p]]}
 ui.mouseActs:{[W;E]
@@ -271,6 +280,20 @@ ui.drawSlider:{[key;x;y;w;h]
     ui.fillRect[x; ty; w; 6.; ui.TRACK]
     ui.fillRect[x; ty; (hx-x)+0.5*hw; 6.; ui.BLUE]
     ui.fillRect[hx; y+3.; hw; h-6.; ui.BLUED]}
+  / a checkbox: a square (grey-outlined when off, blue with a white tick when on) then the label.
+ui.checkOn:{[bx;by;bs]
+    ui.fillRect[bx;by;bs;bs;ui.BLUE]
+    cnv.moveTo[bx+0.24*bs; by+0.52*bs]
+    cnv.lineTo[bx+0.42*bs; by+0.72*bs]
+    cnv.lineTo[bx+0.78*bs; by+0.26*bs]
+    cnv.stroke[cnv.rgba[ui.WHITE 0;ui.WHITE 1;ui.WHITE 2;ui.WHITE 3]; 0.14*bs]}
+ui.checkOff:{[bx;by;bs]
+    ui.fillRect[bx;by;bs;bs;ui.GREY]
+    ui.fillRect[bx+0.14*bs;by+0.14*bs;0.72*bs;0.72*bs;ui.INBG]}
+ui.drawCheck:{[x;y;h;sz;s;on;fg]
+    bs:0.72*h; bx:x; by:y+0.5*h-0.5*bs
+    $[on; ui.checkOn[bx;by;bs]; ui.checkOff[bx;by;bs]]
+    ui.drawTxt[bx+bs+0.45*h; y+(0.5*h)+0.34*sz; sz; s; fg]}
 ui.paintRow:{[W;i]
     x:(W`x)i; y:(W`y)i; w:(W`w)i; h:(W`h)i; sz:(W`sz)i
     bg:(W`bg)i; txt:(W`txt)i; a:(W`act)i; id:(W`id)i
@@ -279,10 +302,11 @@ ui.paintRow:{[W;i]
     $[a~`slide; ui.drawSlider[id;x;y;w;h]; 0]
     $[a~`list; ui.drawList[id;x;y;w;h;sz]; 0]
     $[a~`canvas; ui.canvasCB[x;y;w;h]; 0]
+    $[a~`check; ui.drawCheck[x;y;h;sz;txt;ui.getv id;(W`fg)i]; 0]
     center:(~bg~())&(~inp)&~a~`open              / buttons centre; inputs/selects/labels left
     tx:$[center; x+0.5*w-ui.measure[sz;txt]; x+6.]
     by:y+$[h>0.; (0.5*h)+0.34*sz; sz]
-    $[~txt~""; ui.drawTxt[tx; by; sz; txt; (W`fg)i]; 0]
+    $[(~txt~"")&~a~`check; ui.drawTxt[tx; by; sz; txt; (W`fg)i]; 0]
     $[inp&(id~ui.focus); ui.drawCaret[x+6.; y; h; sz; ui.caret]; 0]}
 ui.paintRows:{[W;is] pr:ui.paintRow[W;]; pr'is}
 ui.paint:{[W] ui.paintRows[W; !#W`x]}

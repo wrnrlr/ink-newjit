@@ -86,11 +86,12 @@ dependency** — `fill.vert.spv`/`fill.frag.spv` are committed blobs `@embedFile
    today; `fill.vert` takes `in vec2 pos/uv` + a viewSize UBO). Tiny, stable shader — the
    committed `.spv` is fine to keep, so this is only worth it to reach literally-zero
    non-dye shader source.
-3. **Instancing API** (`gpuDrawInstanced`/`gpuDrawGeomResident`/`gpuDrawInstancedT`/
-   `gpuDrawMeshT`) — still stubs. DECIDE whether to implement or delete: vertex pulling
-   (`shader.vertexPull`/`mesh.drawPull`, see `demo/scene.k`) already renders N entities in
-   one draw with no vertex-input state, subsuming the use case. If kept, needs a verifiable
-   test (the old `scene`/`clothpull` targets rendered all-black in headless `-snap`).
+3. **Instancing API — RESOLVED (won't-do, 2026-07-25).** The old
+   `gpuDrawInstanced`/`gpuDrawGeomResident`/`gpuDrawInstancedT`/`gpuDrawMeshT` exports were
+   never ported to the Vulkan backend (no exports, no bindings, no `lib/instancing.k`), so
+   there was nothing to delete — only stale doc references (now corrected). Vertex pulling
+   (`shader.vertexPull`/`mesh.drawPull`, see `demo/scene.k`) renders N entities in one draw
+   with no vertex-input state and subsumes the use case. Not reviving it.
 4. **Shader-dialect I/O gaps** (see `.plan/triage.md` GPU section): i32/bool as shader
    I/O types; multiple fragment outputs (MRT); user-facing int/float cast syntax; real
    `OpBranchConditional` for side-effect-guarding expressions.

@@ -255,6 +255,9 @@ keyed by widget id: `buf` (text), `val` (numbers), `opts` (select/list items), p
 **Leaves (each returns a node dict).**
 - `ui.label[str]` — text, intrinsic size.
 - `ui.button[str; act]` — clickable; fires `act` on click.
+- `ui.checkbox[key; str]` — boolean toggle labelled `str`, bound to `ui.getv/setv[key]` (0./1.).
+  Clicking toggles it in-framework (act `` `check ``), so the app just reads `ui.getv[key]`; set the
+  initial state with `ui.setv[key;1.]` before the first frame. Painted as box+tick+label.
 - `ui.input[key; w; placeholder]` — focusable text field; buffer `ui.get/set[key]`; caret + editing.
 - `ui.select[key; w; options]` — dropdown popup (overlay); selected value in `ui.get[key]`.
 - `ui.slider[key; w; min; max]` — drag-adjustable; value in `ui.getv/setv[key]`.
@@ -281,6 +284,14 @@ call — `ui.sty[ui.col[18.; kids]; `bg`pad!(Slate50; 40.)]` is byte-identical t
 props]` → app actions (handles focus/menu/slider-drag/list/canvas + keyboard; call
 `{app.act x}'` over the result). `ui.draw[W; w; h]` → render (main pass + overlay pass). Also
 `ui.hit`, `ui.paint`, `ui.solve`, `ui.natSize`, `ui.measure` for lower-level use.
+
+**Overlaying a HUD on a 3D scene.** Both `ui.draw` (2D canvas) and mesh draws composite into the
+same `window.run` frame, so a HUD is just the standard triple run *after* the 3D draws. Gate the
+3D interactor with `ui.hitAny[W; px; py]` (→ 1 if the cursor is over any emitted widget rect) so
+HUD clicks don't reach the scene — give the HUD container a `bg` so it emits a full-panel rect for
+`hitAny` to catch. Pin a panel to a corner with a trailing `ui.spacer[]` on each axis (the layout
+centres the cross axis, so the corner bar needs a large intrinsic `w` to fill it — see
+`demo/earth.k`'s `hud`). Build the tree in named locals, not one nested inline expression (triage).
 
 **The standard frame loop** (every demo):
 ```

@@ -16,7 +16,7 @@
 /   Left-drag   — spin the globe (it follows the cursor); pitch is clamped so it
 /                 never flips over the poles
 /   Scroll      — zoom (orthographic; the globe never clips out)
-/   1           — toggle the cloud layer
+/   Clouds      — the checkbox in the top-left HUD panel toggles the cloud layer
 /
 / The sun is fixed in view space, so the hemisphere facing you is always the lit
 / one; rotating spins the geography under it.
@@ -26,6 +26,7 @@
 2: "lib/dye.k"
 2: "lib/gpu.k"
 2: "lib/geometry.k"                             / Coxeter/Wythoff polyhedra (see demo/geometry.k)
+2: "lib/ui.k"                                   / HUD overlay (checkbox + floating panel)
 
 PI:3.14159265
 / texture.upload resolution: "2k" (fast start) or "8k" (sharp when zoomed in, heavier).
@@ -195,7 +196,7 @@ starFrag: shader.fragmentTexN[[wRay:`v2; wRot:`v4; out:`v4]; 1; {[wRay;wRot]
 /               (window · zoom), so a point tracks the mouse at any zoom
 /   Scroll      zoom (0.55 .. 30, orthographic → never clips)
 /   ← →         rotate the sun (move the day / terminator; independent of the view)
-/   1           toggle clouds
+/   Clouds      HUD checkbox (top-left) toggles the cloud layer
 / Pitch is clamped to ±80° so the globe can't flip.
 PLIM:   1.40                                     / pitch clamp (~80°)
 ZMIN:   0.55; ZMAX: 30.0
@@ -207,6 +208,22 @@ sunAz::0.6                                      / sun azimuth (arrow keys)
 lastMx::0.; lastMy:: 0.
 held::0;hL::0;hR::0                          / held: left-mouse, ←, →
 cloudsOn:: 1.
+
+/ ── HUD (lib/ui.k): a floating top-left panel; the clouds checkbox drives cloudsOn ──
+/ The panel is a padded col with a translucent bg (so it emits a full-panel rect that
+/ ui.hitAny can test); the outer col/row + spacers pin it to the top-left corner.
+ui.setFont (font.read "font/FiraCode-Regular.ttf") 0
+ui.setTheme ui.themeDark
+ui.setv[`clouds; 1.]                            / checkbox default: clouds on
+/ Built in named steps, NOT one nested inline expression: a deeply-nested inline
+/ (ui.col[.;(ui.row[.;(…)];…)]) silently halts the compiler (triage) — locals dodge it.
+hud: {[]
+  inner: ui.col[10.; (ui.label["Earth"]; ui.checkbox[`clouds; "Clouds"])]
+  panel: ui.sty[inner; `bg`pad!((0.06 0.07 0.10 0.82); 16.)]
+  / the bar must span the full width so its trailing spacer left-pins the panel; a huge
+  / intrinsic width makes it fill the col's cross axis (crossSz = min(avail; w) = avail).
+  bar:   @[ui.row[0.; (panel; ui.spacer[])]; `w; :; 1e5]
+  ui.col[0.; (bar; ui.spacer[])]}
 
 / Resident buffers (vertex pulling): geometry + a per-frame uniform buffer each,
 / overwritten with gpu.write and pulled by the vertex shader.
@@ -233,8 +250,14 @@ window.run[{[props]
   E: props`events
   w: props`width; h: props`height
   mx: props`mx; my: props`my
+  / HUD first: solve the panel, note whether the cursor is over it, run its input (checkbox
+  / toggle), then read the clouds state. Controls below are gated so HUD clicks don't spin/zoom.
+  Wh: ui.run[hud[]; props]
+  overHud: ui.hitAny[Wh; mx; my]
+  {0}' ui.frame[Wh; props]
+  cloudsOn:: ui.getv[`clouds]
   / held keys/buttons across frames (last matching down-event wins, else keep)
-  mb:  (E`down)@&(`mouse=E`kind)&(0=E`code);   held:: $[#mb;  *|mb;  held]
+  mb:  (E`down)@&(`mouse=E`kind)&(0=E`code);   held:: $[#mb;  $[overHud; 0; *|mb];  held]
   lk:  (E`down)@&(`key=E`kind)&(263=E`code);   hL::   $[#lk;  *|lk;  hL]
   rk:  (E`down)@&(`key=E`kind)&(262=E`code);   hR::   $[#rk;  *|rk;  hR]
   / drag → spin with the cursor (angle/pixel = ndc/pixel ÷ zoom); clamp pitch
@@ -244,12 +267,9 @@ window.run[{[props]
   lastMx::mx; lastMy::my
   / sun azimuth: arrows move the day (→ ahead, ← back)
   sunAz::sunAz+SUNSPD*(hR-hL)
-  / scroll zoom (clamped)
+  / scroll zoom (clamped) — ignored while the cursor is over the HUD
   sc:(E`amt)@&`scroll=E`kind
-  zoom::ZMIN|ZMAX&(zoom*(1.+0.1*$[#sc;+/sc;0.]))
-  / '1' toggles clouds
-  dn:(E`code)@&(`key=E`kind)&(1=E`down)
-  $[#dn;$[|/49=dn;cloudsOn::1.-cloudsOn;0];0]
+  zoom::ZMIN|ZMAX&(zoom*(1.+0.1*$[(#sc)&~overHud;+/sc;0.]))
 
   / view-space sun direction from azimuth + fixed elevation
   ce: cos SUNEL
@@ -263,4 +283,6 @@ window.run[{[props]
   uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;0.;0.;asp; cloudsOn;0.;0.;0.; Lx;Ly;Lz;0.)
   gpu.write[earthUB; uni]
   mesh.drawPullT[earthPipe; (earthVB;earthUB); earthN; earthTex]
+  / HUD last → 2D panel composites on top of the 3D scene
+  ui.draw[Wh; w; h]
 }; 0]

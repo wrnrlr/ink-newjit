@@ -186,3 +186,24 @@ file-private. Workaround: set members via an internal setter fn. Found building 
 filter was garbage. Fixed to `~(pgaGrd[pgaBj]<pgaGrd[pgaAi])`. Verified: `pgaLDotF` is now a proper
 256-element boolean mask (= `~(gradeB<gradeA)` AND the grade-difference condition); klint clean.
 Surfaced by the `<=`/`>=` linter `tools/klint.k` (`make lint`).
+
+## Deeply-nested INLINE layout expression silently halts execution (found building demo/earth HUD)
+Writing a nested `ui.col`/`ui.row` tree as ONE inline expression silently stops the script at that
+statement — no error, exit 0, and every following top-level statement (incl. `window.run`) never
+runs. Reliable repro (`2:"lib/ui.k"` first):
+```
+`0 0: "A"
+y: ui.col[0.; (ui.row[0.; (ui.col[10.; (,ui.label["E"])]; ui.spacer[])); ui.spacer[])]
+`0 0: "B"        / never prints
+```
+The SAME tree built in named steps works fine:
+```
+x0: ui.col[10.; (,ui.label["E"])]
+x1: ui.row[0.; (x0; ui.spacer[])]
+x2: ui.col[0.; (x1; ui.spacer[])]   / OK, "B" prints
+```
+So it's the inline nesting of bracket-calls inside parenthesized list literals `(call[…(…)…]; …)`,
+not the layout itself. Minimal non-UI isolation with a dummy `f[g;x]` was inconclusive (ran to
+completion), so the trigger is subtle — likely a compiler pass (constant-fold/DCE) on nested
+list/dict construction, aborting the chunk silently. A silent halt with exit 0 is the dangerous
+part. Workaround in demo/earth.k: build the HUD tree in named locals inside the lambda.
