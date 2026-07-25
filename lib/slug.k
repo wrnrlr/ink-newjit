@@ -137,7 +137,8 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
   quad:{[x0;y0;x1;y1] x0,y0,0.,0., x1,y0,1.,0., x1,y1,1.,1., x0,y0,0.,0., x1,y1,1.,1., x0,y1,0.,1.}
   VTX: shader.vertexPull[[wUv:`v2]; {[qb;vid]
     b:4.*vid; px:qb[b]; py:qb[b+1.]
-    ((px;py;0.5;1.0); (qb[b+2.]; qb[b+3.]))}]
+    / z=0 (near plane): a 2D overlay must pass depth (LESS_OR_EQUAL) over any 3D behind it.
+    ((px;py;0.;1.0); (qb[b+2.]; qb[b+3.]))}]
   / Fragment: pick the band from py, then loop only that band's slugMPB slots. For each
   / quadratic (p0, control, p2) count signed horizontal-ray crossings (nonzero winding)
   / with 1px AA. Branchless by |a|: QUAD path solves B_y(t)=py for both roots (turning
@@ -246,7 +247,8 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
   / Vertex pulls the stride-8 quad from binding 0; scene buffer (binding 1) unused here.
   VTXF: shader.vertexPull[[wUvA:`v4; wPos:`v4]; {[qbuf; sbuf; vid]
     b:8.*vid
-    ((qbuf[b]; qbuf[b+1.]; 0.5; 1.0); (qbuf[b+2.]; qbuf[b+3.]; qbuf[b+7.]; qbuf[b+6.]); (qbuf[b+4.]; qbuf[b+5.]; 0.; 0.))}]
+    / z=0 (near plane): a 2D overlay must pass depth (LESS_OR_EQUAL) over any 3D behind it.
+    ((qbuf[b]; qbuf[b+1.]; 0.; 1.0); (qbuf[b+2.]; qbuf[b+3.]; qbuf[b+7.]; qbuf[b+6.]); (qbuf[b+4.]; qbuf[b+5.]; 0.; 0.))}]
   / Fragment: analytic coverage (curves at off+slugPS+band*slugMPB*8) × the fill's PAINT.
   / The paint block (off..off+43) is the NanoVG FragUniforms layout; evaluate scissorMask
   / and the gradient/solid paint at (fx,fy) — the NanoVG uber-shader paint math, now

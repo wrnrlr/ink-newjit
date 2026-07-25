@@ -196,29 +196,45 @@ starFrag: shader.fragmentTexN[[wRay:`v2; wRot:`v4; out:`v4]; 1; {[wRay;wRot]
 /               (window · zoom), so a point tracks the mouse at any zoom
 /   Scroll      zoom (0.55 .. 30, orthographic → never clips)
 /   ← →         rotate the sun (move the day / terminator; independent of the view)
-/   Clouds      HUD checkbox (top-left) toggles the cloud layer
+/   HUD (top-left panel; the "Earth -/+" title button collapses/expands it):
+/     Clouds        toggle the cloud layer
+/     Sun azimuth   time of day (also the ← → keys); Sun elevation = subsolar latitude
+/     Auto-advance  run the day/night cycle; Speed sets its rate
 / Pitch is clamped to ±80° so the globe can't flip.
 PLIM:   1.40                                     / pitch clamp (~80°)
 ZMIN:   0.55; ZMAX: 30.0
-SUNSPD: 0.02                                     / sun radians per held frame
-SUNEL:  0.40                                     / sun elevation above the view horizon
+SUNSPD: 0.02                                     / sun radians per held arrow frame
+TAU:    6.2831853                                / 2π (azimuth wrap)
 
 yaw::0.6;pitch::0.35;zoom::0.9
-sunAz::0.6                                      / sun azimuth (arrow keys)
+sunAz::0.6                                      / sun azimuth   (slider `sunAz / arrows / auto)
+sunEl::0.40                                     / sun elevation (slider `sunEl)
 lastMx::0.; lastMy:: 0.
 held::0;hL::0;hR::0                          / held: left-mouse, ←, →
 cloudsOn:: 1.
+hudMin::0                                     / HUD panel collapsed?
 
 / ── HUD (lib/ui.k): a floating top-left panel; the clouds checkbox drives cloudsOn ──
 / The panel is a padded col with a translucent bg (so it emits a full-panel rect that
 / ui.hitAny can test); the outer col/row + spacers pin it to the top-left corner.
 ui.setFont (font.read "font/FiraCode-Regular.ttf") 0
 ui.setTheme ui.themeDark
-ui.setv[`clouds; 1.]                            / checkbox default: clouds on
-/ Built in named steps, NOT one nested inline expression: a deeply-nested inline
-/ (ui.col[.;(ui.row[.;(…)];…)]) silently halts the compiler (triage) — locals dodge it.
+ui.setv[`clouds; 1.]; ui.setv[`play; 0.]                    / checkbox defaults
+ui.setv[`sunAz; sunAz]; ui.setv[`sunEl; sunEl]; ui.setv[`speed; 0.02]   / slider defaults
+/ The panel title is a button that collapses/expands the body (hudMin). Built in named
+/ steps, NOT one nested inline expression: a deeply-nested inline (ui.col[.;(ui.row[.;(…)];…)])
+/ silently halts the compiler (triage) — locals dodge it. `body` is a FLAT node list (safe).
 hud: {[]
-  inner: ui.col[10.; (ui.label["Earth"]; ui.checkbox[`clouds; "Clouds"])]
+  SW: 190.                                                  / slider width
+  title: ui.button[$[hudMin; "Earth  +"; "Earth  -"]; `togglemin]
+  body: (
+    ui.checkbox[`clouds; "Clouds"]
+    ui.label["Sun azimuth"];   ui.slider[`sunAz; SW; 0.; TAU]
+    ui.label["Sun elevation"]; ui.slider[`sunEl; SW; -1.4; 1.4]
+    ui.checkbox[`play; "Auto-advance"]
+    ui.label["Speed"];         ui.slider[`speed; SW; 0.; 0.06] )
+  kids:  $[hudMin; ,title; (,title),body]
+  inner: ui.col[10.; kids]
   panel: ui.sty[inner; `bg`pad!((0.06 0.07 0.10 0.82); 16.)]
   / the bar must span the full width so its trailing spacer left-pins the panel; a huge
   / intrinsic width makes it fill the col's cross axis (crossSz = min(avail; w) = avail).
@@ -254,7 +270,8 @@ window.run[{[props]
   / toggle), then read the clouds state. Controls below are gated so HUD clicks don't spin/zoom.
   Wh: ui.run[hud[]; props]
   overHud: ui.hitAny[Wh; mx; my]
-  {0}' ui.frame[Wh; props]
+  acts: ui.frame[Wh; props]
+  {$[x~`togglemin; hudMin::1-hudMin; 0]}' acts        / title button collapses/expands
   cloudsOn:: ui.getv[`clouds]
   / held keys/buttons across frames (last matching down-event wins, else keep)
   mb:  (E`down)@&(`mouse=E`kind)&(0=E`code);   held:: $[#mb;  $[overHud; 0; *|mb];  held]
@@ -265,15 +282,23 @@ window.run[{[props]
   yaw::yaw + (2.0*dx)%(w*zoom)
   pitch::(0.0-PLIM)|PLIM&(pitch + (2.0*dy)%(h*zoom))
   lastMx::mx; lastMy::my
-  / sun azimuth: arrows move the day (→ ahead, ← back)
-  sunAz::sunAz+SUNSPD*(hR-hL)
+  / ── Sun / day-night cycle ──────────────────────────────────────────────────
+  / A slider is the source of truth WHILE it is being dragged; otherwise the arrow keys
+  / and the auto-advance toggle drive sunAz and we mirror the state back into the slider
+  / so its handle tracks. Elevation follows its slider (season / subsolar latitude).
+  sunEl:: $[ui.drag~`sunEl; ui.getv[`sunEl]; sunEl]
+  spd:  ui.getv[`speed]
+  auto: 0.<ui.getv[`play]
+  sunAz:: $[ui.drag~`sunAz; ui.getv[`sunAz]; sunAz+(SUNSPD*(hR-hL))+$[auto; spd; 0.]]
+  sunAz:: sunAz - TAU*_ sunAz%TAU                    / wrap into [0;2π)
+  $[ui.drag~`sunAz; 0; ui.setv[`sunAz; sunAz]]       / keep the slider tracking arrows/auto
   / scroll zoom (clamped) — ignored while the cursor is over the HUD
   sc:(E`amt)@&`scroll=E`kind
   zoom::ZMIN|ZMAX&(zoom*(1.+0.1*$[(#sc)&~overHud;+/sc;0.]))
 
-  / view-space sun direction from azimuth + fixed elevation
-  ce: cos SUNEL
-  Lx: (sin sunAz)*ce; Ly: sin SUNEL; Lz: (cos sunAz)*ce
+  / view-space sun direction from azimuth + elevation
+  ce: cos sunEl
+  Lx: (sin sunAz)*ce; Ly: sin sunEl; Lz: (cos sunAz)*ce
   asp: h%w
   / stars first (behind), then the earth depth-tests in front. Each: refresh the
   / uniform buffer, then one pulled+textured draw (mesh.drawPullT).

@@ -286,7 +286,11 @@ props]` → app actions (handles focus/menu/slider-drag/list/canvas + keyboard; 
 `ui.hit`, `ui.paint`, `ui.solve`, `ui.natSize`, `ui.measure` for lower-level use.
 
 **Overlaying a HUD on a 3D scene.** Both `ui.draw` (2D canvas) and mesh draws composite into the
-same `window.run` frame, so a HUD is just the standard triple run *after* the 3D draws. Gate the
+same `window.run` frame, so a HUD is just the standard triple run *after* the 3D draws. The 2D
+canvas shares the depth-tested mesh pipeline (`mesh.compilePull`), so its quads emit `gl_Position.z
+= 0` (the near plane) in `lib/slug.k`'s `VTX`/`VTXF` — that makes the overlay pass `LESS_OR_EQUAL`
+against any 3D depth and always draw on top. (Before that fix a HUD was clipped along the 3D
+silhouette wherever the scene was nearer than the old z=0.5.) Gate the
 3D interactor with `ui.hitAny[W; px; py]` (→ 1 if the cursor is over any emitted widget rect) so
 HUD clicks don't reach the scene — give the HUD container a `bg` so it emits a full-panel rect for
 `hitAny` to catch. Pin a panel to a corner with a trailing `ui.spacer[]` on each axis (the layout
