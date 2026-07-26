@@ -76,57 +76,14 @@ imgBorders:image.read pfx,"borders.png"        / country borders + coastlines (w
 MODISDATE: "2023-06-01"                         / a clear-ish global day (imagery is daily)
 / VIIRS (SNPP) true-color: a ~3000km swath gives near-complete daily global coverage — unlike
 / MODIS Terra, whose single-satellite daily swaths leave black wedges between orbit tracks.
-/ One WMS GetMap = one composited equirect image for any BBOX (whole globe, or a zoomed tile).
-GIBSBASE: ,/("https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=VIIRS_SNPP_CorrectedReflectance_TrueColor&CRS=EPSG:4326&FORMAT=image/jpeg&TIME=";MODISDATE)
-gibsURL:{[bbox;w;h] ,/(GIBSBASE; "&BBOX="; bbox; "&WIDTH="; ($w); "&HEIGHT="; $h)}
+modisURL:{[w;h] ,/("https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=VIIRS_SNPP_CorrectedReflectance_TrueColor&CRS=EPSG:4326&BBOX=-90,-180,90,180&FORMAT=image/jpeg&TIME=";MODISDATE;"&WIDTH=";($w);"&HEIGHT=";$h)}
 modisPath: "demo/data/modis.jpg"                / disk cache (per-machine; not committed)
-/ write the fetched bytes to a file, then decode them (two statements, not a $-branch block).
-saveImg:{[path;b] path 1: b; image.read path}
-/ fetch a GIBS GetMap → cache path → decode; returns an image dict, or `err on any failure.
-fetchGibs:{[bbox;w;h;path] r: http.get gibsURL[bbox;w;h]; $[(r`status)=200; saveImg[path;r`body]; `err]}
-/ full-globe base map (cache hit, else fetch); `err if unavailable (e.g. offline).
-loadModis:{[] im: image.read modisPath; $[(@im)~`m; im; fetchGibs["-90,-180,90,180"; 4096; 2048; modisPath]]}
-
-/ ── Deep-zoom detail tiles ────────────────────────────────────────────────────
-/ When zoomed in and the view settles, fetch a high-res GetMap of just the VISIBLE region and
-/ overlay it on the day map (texture 6). The visible-region UV bbox is found by inverse-projecting
-/ a grid of screen points onto the front hemisphere, un-rotating to the base sphere, and taking
-/ min/max equirect UV. Off when zoomed out or the region wraps the ±180° seam.
-NG: 7                                           / bbox sample grid (NG×NG screen points)
-ZDETAIL: 2.0                                     / zoom past which detail tiles kick in
-SETTLE:  12                                      / frames the view must hold still before a fetch
-tilePath: "demo/data/tile.jpg"                  / detail-tile cache (overwritten each fetch)
-visBBox:{[yaw;pitch;zoom;asp]                    / → (u0;u1;v0;v1) equirect-UV bbox of the visible cap
-  yc:cos yaw; ys:sin yaw; pc:cos pitch; ps:sin pitch
-  g:(-1.0)+(2.0%NG-1)*!NG
-  ix:!NG*NG; sx:g@ix mod NG; sy:g@ix div NG
-  wx:sx%(asp*zoom); wy:sy%zoom
-  r2:(wx*wx)+wy*wy; on:~r2>1.0; wz:sqrt 0.0|1.0-r2
-  ry:(pc*wy)+ps*wz; rz:(pc*wz)-ps*wy; rx:wx        / inverse pitch (about X)
-  px:(yc*rx)-ys*rz; py:ry; pz:(ys*rx)+yc*rz        / inverse yaw (about Y)
-  u:0.5-(`atan2@(pz;px))%(2.0*PI); v:0.5-(`asin@(-1.0|1.0&py))%PI
-  uu:u@&on; vv:v@&on
-  (&/uu; |/uu; &/vv; |/vv)}
-/ UV bbox → WMS 1.3.0 EPSG:4326 BBOX string (minLat,minLon,maxLat,maxLon).
-tileBBOX:{[bb]
-  lonw:((bb 0)*360.0)-180.0; lone:((bb 1)*360.0)-180.0
-  latn:90.0-((bb 2)*180.0);  lats:90.0-((bb 3)*180.0)
-  ,/(($lats);",";($lonw);",";($latn);",";$lone)}
-/ fetch+upload the detail tile for the current view; on success set the detail globals, else clear.
-tryDetail:{[yaw;pitch;zoom;asp]
-  bb: visBBox[yaw;pitch;zoom;asp]
-  $[((bb 1)-bb 0)>0.5; detOn::0;                   / region wraps the seam → skip detail
-    tryTile[bb]]}
-tryTile:{[bb]
-  im: fetchGibs[tileBBOX[bb]; 1024; 1024; tilePath]
-  $[(@im)~`m; setDetail[bb; texture.upload im]; detOn::0]}
-setDetail:{[bb;tex]
-  detailTex:: tex
-  detBox:: ((bb 0); (bb 2); 1.0%(bb 1)-bb 0; 1.0%(bb 3)-bb 2)   / (u0;v0;1/uspan;1/vspan)
-  detOn:: 1}
-/ reset the settle timer to a fresh view (helper because a `[a::0;b::v]` multi-statement
-/ $-branch is misparsed — the assignments don't take; use a lambda body instead).
-resetSettle:{[vkey] settle:: 0; lastVkey:: vkey; 0}
+/ write the fetched bytes to the cache file, then decode them (two statements, not a $-branch block).
+saveModis:{[b] modisPath 1: b; image.read modisPath}
+/ fetch MODIS → cache file → decode; returns an image dict, or `err on any failure.
+fetchModis:{[] r: http.get modisURL[4096;2048]; $[(r`status)=200; saveModis[r`body]; `err]}
+/ load the MODIS image (cache hit, else fetch); `err if unavailable (e.g. offline).
+loadModis:{[] im: image.read modisPath; $[(@im)~`m; im; fetchModis[]]}
 
 / ── Per-vertex UV (equirectangular), one vectorised pass ──────────────────────
 P: +,/icoTris
@@ -161,11 +118,8 @@ earthMesh: ,/ +(X;Y;Z;X;Y;Z;us;v)
 / pos/nor/uv at 8*vid) and the per-frame uniforms in a second storage buffer `ub` (16
 / floats, same layout the old uniform block used) — both PULLED by gl_VertexIndex, no
 / vertex-input state.  ub: [0..3]=yaw/pitch cos/sin, 4=zoom, 7=aspect, 8=cloudsOn,
-/ 9=atmosphere, 10=bordersOn, 12..14=view-space sun; 5,6,11,15 = detail-tile UV bbox
-/ (u0;v0;1/uspan;1/vspan) — off when it maps the whole globe outside [0;1]². The math is
-/ identical to the attribute version.  (Bump mapping was dropped to free a varying slot for
-/ wDet; the geometric normal drives lighting, which reads fine at globe scale.)
-earthVtx: shader.vertexPull[[wNor:`v3;wUvF:`v4;wSun:`v4;wDet:`v2]; {[vb;ub;vid]
+/ 9=atmosphere, 10=bordersOn, 12..14=view-space sun.  The math is identical to the attribute version.
+earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v4]; {[vb;ub;vid]
   b:8.*vid
   px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
   nx:vb[b+3.]; ny:vb[b+4.]; nz:vb[b+5.]
@@ -173,39 +127,43 @@ earthVtx: shader.vertexPull[[wNor:`v3;wUvF:`v4;wSun:`v4;wDet:`v2]; {[vb;ub;vid]
   yc:ub[0.]; ys:ub[1.]; pc:ub[2.]; ps:ub[3.]
   zoom:ub[4.]; asp:ub[7.]; cloudsOn:ub[8.]; atm:ub[9.]; bw:ub[10.]
   Lx:ub[12.]; Ly:ub[13.]; Lz:ub[14.]
-  du0:ub[5.]; dv0:ub[6.]; diU:ub[11.]; diV:ub[15.]  / detail-tile bbox → per-vertex tile UV
   / rotate position: yaw about Y, then pitch about X
   rx:(yc*px)+(ys*pz); rz:(yc*pz)-(ys*px)
   wx:rx; wy:(pc*py)-(ps*rz); wz:(ps*py)+(pc*rz)
   / rotate normal the same way
   mrx:(yc*nx)+(ys*nz); mrz:(yc*nz)-(ys*nx)
   nwx:mrx; nwy:(pc*ny)-(ps*mrz); nwz:(ps*ny)+(pc*mrz)
-  dtu:(uu-du0)*diU; dtv:(vv-dv0)*diV                 / detail-tile local UV (in [0;1] inside the tile)
+  / east tangent = normalize(cross(nor,(0,1,0))) = (nor.z;0;-nor.x), then rotated
+  t0x:nz; t0z:0.0-nx
+  til:1.0%sqrt[(t0x*t0x)+(t0z*t0z)+0.0001]
+  Tx:t0x*til; Tz:t0z*til
+  trx:(yc*Tx)+(ys*Tz); trz:(yc*Tz)-(ys*Tx)
+  twx:trx; twy:0.0-(ps*trz); twz:pc*trz
   / orthographic: zoom scales screen XY; depth from wz only → no zoom clipping
-  ((asp*zoom*wx; zoom*wy; 0.5-0.45*wz; 1.0); (nwx;nwy;nwz); (uu;vv;cloudsOn;atm); (Lx;Ly;Lz;bw); (dtu;dtv))
+  ((asp*zoom*wx; zoom*wy; 0.5-0.45*wz; 1.0); (nwx;nwy;nwz); (twx;twy;twz); (uu;vv;cloudsOn;atm); (Lx;Ly;Lz;bw))
 }]
 
-/ ── Fragment shader: earth — specular + day/night + clouds + borders + detail tile ──
-/ Textures: 0 day, 1 night lights, 2 clouds, 3 specular mask, 4 normal map (unused now),
-/ 5 borders distance field, 6 deep-zoom detail tile.  Sun L is fixed toward the viewer, so
+/ ── Fragment shader: PBR-ish earth — bump + specular + day/night + clouds ──────
+/ Textures: 0 day, 1 night lights, 2 clouds, 3 specular mask, 4 normal map.
+/ The normal map perturbs the surface normal in tangent space (T=wTan, B=N×T) so
+/ relief catches light near the terminator.  Sun L is fixed toward the viewer, so
 / the facing hemisphere is lit; N·L drives a soft terminator (shaded day over
 / night city lights); the specular mask gates an ocean sun-glint; clouds (white)
 / overlay both, lit by the sun and toggled by wUvF.z.  Output is clamped so the
 / glint/lights can't blow out to a white seam.
-earthFrag:shader.fragmentTexN[[wNor:`v3;wUvF:`v4;wSun:`v4;wDet:`v2;out:`v4]; 7; {[wNor;wUvF;wSun;wDet]
+earthFrag:shader.fragmentTexN[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v4;out:`v4]; 6; {[wNor;wTan;wUvF;wSun]
   uv:    (wUvF[0]; wUvF[1])
   flag:  wUvF[2]
   atm:   wUvF[3]
   bw:    wSun[3]                                    / border half-width factor: 0=off, else 1/zoom
-  day:sample[0;uv];night:sample[1;uv];cloud:sample[2;uv];specM:sample[3;uv];
-  N0: normalize wNor                               / geometric normal (bump dropped for a varying slot)
-  N:  N0
-  / deep-zoom detail: where the fragment falls inside the loaded detail tile (texture 6), replace the
-  / day albedo with the sharper tile sample. wDet is (0;0)-based tile UV; outside [0;1]² ⇒ no detail.
-  dtu: wDet[0]; dtv: wDet[1]
-  det: sample[6; (dtu;dtv)]
-  inD: (step[0.0;dtu]*step[dtu;1.0])*(step[0.0;dtv]*step[dtv;1.0])
-  dyr: mix[day[0]; det[0]; inD]; dyg: mix[day[1]; det[1]; inD]; dyb: mix[day[2]; det[2]; inD]
+  day:sample[0;uv];night:sample[1;uv];cloud:sample[2;uv];
+  specM:sample[3;uv];nmap:sample[4;uv];
+  / bump: decode tangent-space normal, transform to world with the T,B,N frame
+  N0: normalize wNor
+  T:  normalize wTan
+  B:  cross[N0; T]
+  nx: 2.0*nmap[0]-1.0; ny: 1.0-2.0*nmap[1]; nz: 2.0*nmap[2]-1.0
+  N:  normalize[(nz*N0)+(0.85*((nx*T)+(ny*B)))]
   L: normalize (wSun[0];wSun[1];wSun[2])           / arrow-key sun (view space); wSun[3]=border width
   Vd: 0.0 0.0 1.0
   H: normalize L+Vd
@@ -215,9 +173,9 @@ earthFrag:shader.fragmentTexN[[wNor:`v3;wUvF:`v4;wSun:`v4;wDet:`v2;out:`v4]; 7; 
   sh:   0.32+0.85*max[0.0; lit]                    / day-side shading (ambient+diffuse)
   / ocean sun-glint from the specular mask (bright over water)
   spc: pow[max[0.0; dot[N;H]]; 50.0]*(0.04+0.7*specM[0])*max[0.0;glit]
-  r0: spc+mix[night[0]; dyr*sh; dayF]
-  g0: spc+mix[night[1]; dyg*sh; dayF]
-  b0: spc+mix[night[2]; dyb*sh; dayF]
+  r0: spc+mix[night[0]; day[0]*sh; dayF]
+  g0: spc+mix[night[1]; day[1]*sh; dayF]
+  b0: spc+mix[night[2]; day[2]*sh; dayF]
   / atmosphere: a sun-lit blue Fresnel rim at the view-grazing limb (Vd=(0,0,1) ⇒ dot=N0.z).
   / atm is the HUD slider; the terminator term keeps the day limb bright and the night limb faint.
   fres: pow[1.0-max[0.0; N0[2]]; 2.5]
@@ -355,11 +313,6 @@ starVB::      0
 starUB::      0
 starTex::     0
 modisTex::    0                                  / MODIS satellite texture: 0=untried, -1=failed, >0=loaded
-detailTex::   0                                  / deep-zoom detail tile texture (0 until first fetch)
-detOn::       0                                  / is a detail tile currently active?
-detBox::      0. 0. 1. 1.                         / detail tile UV bbox (u0;v0;1/uspan;1/vspan)
-lastVkey::    -999.                               / last frame's view key (yaw+pitch+zoom) for settle detection
-settle::      0                                  / frames the view has held still
 
 window.run[{[props]
   $[earthPipe=0;   earthPipe::   mesh.compilePull[earthVtx; earthFrag]; 0]
@@ -417,23 +370,14 @@ window.run[{[props]
   mesh.drawPullT[starPipe; (starVB;starUB); 6; starTex]
   bordersOn: ui.getv[`borders]
   borderW: bordersOn%zoom                            / 0 = off; else 1/zoom → constant screen-width lines
-  / Deep-zoom detail: when zoomed past ZDETAIL and the view has held still for SETTLE frames, fetch a
-  / high-res tile of the visible region once (blocks that frame). Zooming/rotating resets the timer;
-  / zooming back out drops the tile. The tile's UV bbox rides ub slots 5,6,11,15.
-  vkey: yaw+pitch+zoom
-  $[vkey=lastVkey; settle::settle+1; resetSettle vkey]
-  detActive: zoom>ZDETAIL
-  $[~detActive; detOn::0; $[settle=SETTLE; tryDetail[yaw;pitch;zoom;asp]; 0]]
-  db: $[detOn&(detailTex>0); detBox; 9. 9. 1. 1.]    / off-state pushes the tile UV outside [0;1]²
-  uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;db 0;db 1;asp; cloudsOn;atmos;borderW;db 2; Lx;Ly;Lz;db 3)
+  uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;0.;0.;asp; cloudsOn;atmos;borderW;0.; Lx;Ly;Lz;0.)
   gpu.write[earthUB; uni]
   / Satellite layer: on first enable, lazily fetch+upload MODIS (blocks one frame; cached to disk
   / after). modisTex: 0=untried → try once (‑1 on failure so we don't refetch every frame). When
   / loaded, bind it as texture 0 in place of the artist day map — no shader change.
   satOn: 0.<ui.getv[`satellite]
   $[satOn&(modisTex=0); modisTex:: {[im] $[(@im)~`m; texture.upload im; -1]} loadModis[]; 0]
-  base: $[satOn&(modisTex>0); @[earthTex; 0; :; modisTex]; earthTex]
-  texList: base,$[detailTex>0; detailTex; *earthTex]   / 6 base layers + detail tile (or a placeholder) = 7
+  texList: $[satOn&(modisTex>0); @[earthTex; 0; :; modisTex]; earthTex]
   mesh.drawPullT[earthPipe; (earthVB;earthUB); earthN; texList]
   / HUD last → 2D panel composites on top of the 3D scene
   ui.draw[Wh; w; h]
