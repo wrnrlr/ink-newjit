@@ -97,6 +97,13 @@ Extensions are shared libraries loaded at runtime via `src/ffi.zig`. Available: 
 
 - `AGENT.md` — language tips, known gotchas, full operator reference
 - `doc/reference.md` — language specification (WIP, most up-to-date)
+- `doc/api.md` — library apis for graphics, data loading, audio and more
+- `doc/design/ui.md` — UI library design docs
+- `doc/design/kk2.md` — UI library design docs
+- `doc/design/canvas-slug.md` — canvas and slug library design docs
 - `.plan/triage.md` — open correctness issues
 - `.plan/tasks.md` — future work 
 - `.plan/ideas.md` — Open questions and research ideas
+
+- `tools/zed-ink/` — Zed IDE extension
+- `tools/prosemirror-ink/` — Prosemirror grammar and syntax queries

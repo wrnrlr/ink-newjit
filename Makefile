@@ -45,6 +45,8 @@ test:
 	time zig build test
 	$(INK) lib/stats.k
 	$(INK) test/regex.k
+	$(INK) test/rope.k
+	$(INK) test/syntax.k
 	$(INK) test/fbx.k
 	$(INK) test/usd.k
 	zig build json

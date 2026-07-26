@@ -1,5 +1,59 @@
 # Changelog
 
+## 2026-07-26
+- **Syntax highlighting in `demo/edit.k`, driven by `parse` itself.** The editor is
+  rebuilt on two new libraries and the Iosevka font.
+  - **`lib/syntax.k` — configurable highlighting.** A highlighter is a function
+    `codepoints → role index per codepoint`; a THEME maps each role
+    (`num str sym bool dyad mono over scan assign bracket cond …`) to an rgba from
+    `lib/color.k`'s Tailwind/OKLCh palette. Both halves swap: register another
+    language with `syn.reg[name;fn]`, hand `syn.setTheme` another role→colour dict
+    (`syn.themeDark` / `syn.themeLight` ship, matching the Zed extension's colours).
+    `syn.runs` collapses the role vector into the runs a renderer draws.
+  - **The ink highlighter has no lexer of its own.** `parse` returns the CST as a
+    column table with CODEPOINT ranges, so a highlight is "paint each node's range,
+    let children overwrite their parents" — whatever a container still owns is
+    exactly its own punctuation (a call's `[`/`]`, an assignment's `:`, a fold's
+    `/`). Valence comes from the tree, so `+` is purple in `1+2` and blue-adjacent
+    rules fall out: `*` monadic in `*1 2 3`, `@` red in `@[x;i;:;v]`, `\` pink as
+    the scan digram. `parse` tolerates half-typed source, so this re-runs on every
+    keystroke; no second parser, no LSP round trip (and so no UTF-16 offsets).
+    `syn.enc`/`syn.dec` bridge UTF-8 source text and codepoints.
+  - **`lib/rope.k` — a SumTree rope.** Text lives in a B-tree of ~64-codepoint
+    chunks, each node carrying a `(codepoints; newlines)` summary, so offset→row,
+    row→offset and line fetch are O(log n) descents. A leaf-local edit rewrites one
+    chunk and pushes a summary delta up the parent chain; an edit that would
+    over/underflow a leaf re-chunks and rebuilds bottom-up from the leaf list
+    (O(#leaves), vectorised, re-using untouched chunks by reference).
+  - **The editor**: Iosevka (a TTC — `font.read` returns every face), line-number
+    gutter, current-line highlight, wheel scrolling, page up/down, sticky-column
+    vertical motion, a status bar, and F1 to flip the theme live.
+  - **`slug.SCCAP` 262144 → 1048576 floats.** The old scene buffer stopped a text
+    editor at ~600 glyphs — half a screen — and truncated silently; `sceneFlush`
+    now clamps to capacity instead of overrunning.
+- **Canvas text is ~125× cheaper per frame** (~310 ms → ~2.5 ms for a screenful of
+  1392 glyphs), which is what made typing in the editor feel laggy. Two causes, both
+  fixed in `lib/canvas.k` + `lib/slug.k`:
+  - **A persistent glyph cache.** A glyph's banded curve data depends only on
+    (face; size; gid), never on colour or position, so it is built once and reused
+    instead of re-extracting the outline (`font.quads`) and re-binning it every frame.
+    Face and size resolve to registry indices ONCE per `cnv.text` call, packed with the
+    gid into an int cache key. The registries are keyed by face NAME: `?` cannot look up
+    a face value (given a non-atomic right argument it vectorises over it instead of
+    matching it whole) and `~` on two faces deep-compares the whole font, ~2 ms a go.
+    Bounded, with a frame-start sweep, so animating text size recycles rather than leaks.
+  - **`slug.addFillN`** appends a whole batch of pre-banded fills in ONE join. Adding
+    a screenful of glyphs one at a time re-copied the accumulator each time — quadratic,
+    ~170 ms of the old cost.
+  Text now records less per glyph too: the clip-baked paint block is built once per
+  `cnv.text` call rather than per glyph (`TXCOL`/`TXCLM`/`TXCLE`/`TXFACE`/`TXSZ` are gone).
+- **`demo/edit.k` lays out in framebuffer pixels.** `props`width/height/mx/my` are
+  framebuffer px and `props`dpr` is the ratio, so sizes written straight into draw calls
+  came out half-size on a retina display. Layout constants are now logical points scaled
+  by `dpr` each frame (as `lib/ui.k` already did).
+  - Tests: `test/rope.k` (59 assertions) and `test/syntax.k` (51, pinning the role
+    of every codepoint of each sample line); both wired into `make test`.
+
 ## 2026-07-21
 - **Canvas/Slug 2D renderer → ONE analytic backend.** Fills, gradients, clips,
   strokes, text, and image paint all render through the Slug scene buffer

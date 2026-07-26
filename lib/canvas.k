@@ -68,7 +68,8 @@
     KIND::0#0; PIDX::0#0; WIDTH::0#0.; RULE::0#0
     CSTART::0#0; CCOUNT::0#0; CONSTART::0#0; CONCOUNT::0#0
     XF::0#0.; CURVES::0#0.; CONLEN::0#0; PAINTS::()
-    TXFACE::(); TXGID::0#0; TXPX::0#0.; TXPY::0#0.; TXSZ::0#0.; TXCOL::(); TXXF::(); TXCLM::(); TXCLE::()}
+    TXGID::0#0; TXKEY::0#0; TXPB::(); TXPX::0#0.; TXPY::0#0.; TXXF::()
+    gcSweep[]}
 
   / ── Affine transform ─────────────────────────────────────────────────────────
   / compose m∘n: the matrix that applies n first, then m (post-multiply for nesting).
@@ -133,25 +134,48 @@
   / lib/slug.k's SCENE-BUFFER path (same as the solid fills): each glyph's raw quadratic
   / outline bins into the frame's shared curve buffer and draws as a bbox quad with
   / per-pixel Bézier coverage + AA. No kerning/ligatures.
-  TXFACE: ()     / per-glyph face
+  / Per-glyph state is deliberately thin. Face, size, colour and clip are CONSTANT across
+  / one cnv.text call, so they are resolved ONCE here — the face and size to small registry
+  / indices (matching a face value costs ~2 ms, far too much to do per glyph), the paint to
+  / its finished 44-float block. What each glyph then carries is an int CACHE KEY and a
+  / reference to that shared block, which is what lets the render pass run vectorised.
   TXGID:  0#0    / per-glyph glyph id
+  TXKEY:  0#0    / per-glyph glyph-cache key = gid + 65536*(sizeIdx + NSIZE*faceIdx)
+  TXPB:   ()     / per-glyph paint block (shared per cnv.text call)
   TXPX:   0#0.   / per-glyph pen x (local)
   TXPY:   0#0.   / per-glyph pen y (local baseline)
-  TXSZ:   0#0.   / per-glyph pixel size
-  TXCOL:  ()     / per-glyph rgba
   TXXF:   ()     / per-glyph transform (2×3)
-  TXCLM:  ()     / per-glyph clip scissor matrix (live at record time)
-  TXCLE:  ()     / per-glyph clip scissorExt/scale
+  TXFACES: ()    / face registry (persistent; the cache key indexes it)
+  TXFIDS: 0#`    / …keyed by face NAME, because `?` cannot look up a face value: given a
+  TXSIZES: 0#0.  / non-atomic right argument it VECTORISES over it instead of matching it
+                 / whole (and `~` on two faces deep-compares the font — ~2 ms a go).
+  / The key packs (faceIdx<16; sizeIdx<1024; gid<65536) into an i32, so both registries
+  / are capped; a full one reuses its last slot rather than overflowing into another
+  / field's bits. gcSweep (at frame start, where nothing is recorded yet) drops the whole
+  / cache once it or the size registry grows large, so an app that animates text size
+  / continuously recycles instead of leaking.
+  NFACE: 16
+  NSIZE: 1024
+  GCAP:  4096                                   / cached glyphs before a sweep
+  regFace:{[f] nm:`s$font.fullName f; i:TXFIDS?nm; $[i<#TXFIDS; i; regFaceAdd[f;nm]]}
+  regFaceAdd:{[f;nm] $[NFACE>#TXFIDS; facePush[f;nm]; NFACE-1]}
+  facePush:{[f;nm] TXFIDS::TXFIDS,nm; TXFACES::TXFACES,,f; (#TXFIDS)-1}
+  regSize:{[s] i:TXSIZES?s; $[i<#TXSIZES; i; regSizeAdd s]}
+  regSizeAdd:{[s] $[NSIZE>#TXSIZES; sizePush s; NSIZE-1]}
+  sizePush:{[s] TXSIZES::TXSIZES,s; (#TXSIZES)-1}
+  gcSweep:{[] $[(GCAP<#GKEY)|(NSIZE-1)<#TXSIZES; gcReset[]; 0]}
+  gcReset:{[] GKEY::0#0; GBLOB::(); GRECT::(); TXSIZES::0#0.; TXFIDS::0#`; TXFACES::()}
   slugText:{[face;sz;gids;paint]
     n:#gids; sc:font.scale[face;sz]; adv:(face`hmtx)`adv; na:#adv
     advPx: sc*adv@(gids & na-1)
     ox:PEN 0; oy:PEN 1
     penXs: ox+0.,+\-1_advPx
     rgba: 4#24_paint                              / paint's inner colour (frag[6])
-    TXFACE::TXFACE,(n#,face); TXGID::TXGID,gids
-    TXPX::TXPX,penXs; TXPY::TXPY,n#oy; TXSZ::TXSZ,n#sz
-    TXCOL::TXCOL,(n#,rgba); TXXF::TXXF,(n#,CTM)
-    TXCLM::TXCLM,(n#,CLIPM); TXCLE::TXCLE,(n#,CLIPE)
+    blk: applyClipM[gpu.solid[rgba 0; rgba 1; rgba 2; rgba 3]; CLIPM; CLIPE]
+    base: 65536*(regSize sz)+NSIZE*regFace face
+    TXGID::TXGID,gids; TXKEY::TXKEY,base+gids
+    TXPX::TXPX,penXs; TXPY::TXPY,n#oy
+    TXPB::TXPB,(n#,blk); TXXF::TXXF,(n#,CTM)
     PEN::(ox++/advPx),oy}
   / 1_0,… normalises a single-char string (a char ATOM) to a 1-glyph vector.
   text:{[face;sz;s;paint] g:1_0,font.shape[face;s]; $[0<#g; slugText[face;sz;g;paint]; 0]}
@@ -312,25 +336,31 @@
 
   / ── Slug text pass — glyphs ride the SAME scene buffer as fills/strokes ─────────
   / Each glyph's raw quadratic outline (font.quads) is just another fill (a SOLID paint of
-  / the glyph colour): addGlyph bins it during the accumulate phase, drawGlyphS draws its
-  / bbox quad, the fragment reads the curves back for analytic coverage + holes + AA.
+  / the glyph colour): scanText bins the whole frame's glyphs during the accumulate phase,
+  / drawGlyphS draws each bbox quad, the fragment reads the curves back for coverage + AA.
   / Coverage quads are SQUARES (aspect-preserving normalise) that overlap when packed, so
   / correct text needed the pull pipeline's depth relaxed to LESS_OR_EQUAL (see vk.zig).
   TXOFF:  0#0.   / per-glyph scene-buffer offset (-1 = empty glyph, e.g. space: skip)
   TXRECT: ()     / per-glyph uv-square rect in glyph pixel space (from addFill)
-  / A space/empty glyph has no contours — addFill would bin garbage (min/max over an empty
-  / point set) and poison the shared buffer; record a -1 sentinel and skip its draw. NB:
-  / the skip branch is a NAMED helper, not an inline [..;..] block — a bracket block in a
-  / $[...] branch parses as a DICT literal (runs nothing), which would desync TXOFF/TXRECT.
-  / glyph = a solid-colour fill with the record-time clip baked in (so text-in-a-clip crops).
-  txPaint:{[i] c:TXCOL i; applyClipM[gpu.solid[c 0; c 1; c 2; c 3]; TXCLM i; TXCLE i]}
-  addGlyph:{[i]
-    cs: font.quads[TXFACE i; TXGID i; TXSZ i]
-    $[0<#cs; addGlyphC[i;cs]; addGlyphSkip[]]}
-  addGlyphC:{[i;cs] r:slug.addFill[cs; 0.14; txPaint i]; TXOFF::TXOFF,r 0; TXRECT::TXRECT,,r 1}
-  addGlyphSkip:{[] TXOFF::TXOFF,-1.; TXRECT::TXRECT,,0. 0. 0. 0.}
-  scanTStep:{[i] addGlyph i; scanText i+1}
-  scanText:{[i] $[i<#TXGID; scanTStep i; 0]}
+  / GLYPH CACHE (persistent across frames). A glyph's banded curve data depends only on
+  / (face; size; gid) — never on colour or position — so it is built once and reused. Without
+  / it every frame re-extracts each outline (font.quads) and re-bins it into bands: ~310 ms
+  / for a screenful of text, which is what made a text editor feel laggy to type in.
+  / A space/empty glyph has no contours — banding it would fold min/max over an empty point
+  / set and poison the buffer — so it caches an EMPTY blob and addFillN gives it the -1 skip
+  / sentinel. Cache misses are built from the key, which carries the registry indices.
+  GKEY:  0#0     / cache keys
+  GBLOB: ()      / banded curve data per key (empty ⇒ blank glyph)
+  GRECT: ()      / uv-square rect per key
+  keyFace:{[k] TXFACES[(k div 65536) div NSIZE]}
+  keySize:{[k] TXSIZES[(k div 65536) mod NSIZE]}
+  cacheAdd:{[k] cs: font.quads[keyFace k; k mod 65536; keySize k]
+    GKEY::GKEY,k; GRECT::GRECT,,$[0<#cs; slug.rectOf[cs;0.14]; 0. 0. 0. 0.]
+    GBLOB::GBLOB,,$[0<#cs; slug.bandDataC[cs;0.14]; 0#0.]}
+  / Whole text pass at once: fill the cache for keys it has not seen, then look every glyph
+  / up and hand the batch to slug.addFillN, which joins the frame's glyph data in ONE go.
+  scanText:{[] u:?TXKEY; m:u@&(GKEY?u)=#GKEY; z:cacheAdd'm; scanTextJ GKEY?TXKEY}
+  scanTextJ:{[j] TXRECT::GRECT@j; TXOFF::slug.addFillN[TXPB; GBLOB@j]}
   drawGlyphS:{[i] drawQuad[TXOFF i; TXRECT i; TXXF i; TXPX i; TXPY i]}
   drawTStep:{[i] $[(TXOFF i)<0.; 0; drawGlyphS i]; drawText i+1}
   drawText:{[i] $[i<#TXGID; drawTStep i; 0]}
@@ -372,7 +402,7 @@
     DOFF::0#0.; DRECT::(); DXF::(); DTEX::0#0; TXOFF::0#0.; TXRECT::(); SFW::w; SFH::h
     slug.sceneBegin[]
     $[0<ndraws[]; scanDraws 0; 0]
-    $[0<#TXGID; scanText 0; 0]
+    $[0<#TXGID; scanText[]; 0]
     $[(0<#DOFF)|(0<#TXGID); slug.sceneFlush[]; 0]
     $[0<#DOFF; drawFrom 0; 0]
     $[0<#TXGID; drawText 0; 0]}

@@ -61,7 +61,7 @@ slugTW:  48.       / texture width in texels = 2*slugMPB
 slugAA:  0.004     / antialias ramp width (uv)
 slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUniforms floats)
 
-\d slug glyph upload pipe draw quad rectOf sceneBegin addFill sceneFlush fillDraw fillDrawImg
+\d slug glyph upload pipe draw quad rectOf sceneBegin addFill addFillN bandDataC sceneFlush fillDraw fillDrawImg
 
   / ── Per-glyph band-build scratch (globals: the mapped builders can't close) ───
   BC:  ()          / list of 8-float texel records, one per curve
@@ -195,7 +195,12 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
   / scene buffer at the fill's offset — enabled by shader.fragmentBuf (fragment reads a
   / StorageBuffer). No per-shape textures, no cache: one gpu.write per frame.
   SCACC:  0#0.       / this frame's concatenated banded curve data (host side)
-  SCCAP:  262144     / scene buffer capacity (floats)
+  / Scene buffer capacity, in floats. A glyph costs its 44-float paint block + a
+  / slugNB×2 band index + its banded curves — call it ~450 floats — so this is the cap
+  / on glyphs per frame. 262144 stopped a text editor at ~600 glyphs (half a screen);
+  / 1M floats (4 MB, ×SCNF) carries a few thousand. sceneFlush clamps rather than
+  / overrunning the buffer, so exceeding it drops the tail of the frame, never crashes.
+  SCCAP:  1048576
   SCPIPE: 0          / buffer-based fill pipeline
   / DOUBLE-BUFFERED (avoids a data race): with FRAMES=2 frames in flight, one shared scene
   / buffer would let frame N's host write clobber frame N-1's in-flight GPU read. So keep
@@ -228,7 +233,19 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
   / Layout per fill: [paint: slugPS][band index: slugNB×2][curve pool]. off → paint;
   / the fragment reads the index at off+slugPS and the pool at off+slugPS+slugNB*2.
   addFill:{[cs;pad;paint] off:0.+#SCACC; SCACC:: SCACC,paint,bandDataC[cs;pad]; (off; rectOf[cs;pad])}
-  sceneFlush:{[] gpu.write[SCENE; SCACC]}                / upload the whole frame's curves
+  / addFillN[paints; blobs] → one offset per item, appending the whole batch in ONE join.
+  / `blobs` are PRE-BANDED (bandDataC output), so a caller that can cache them — text, where
+  / the same glyph at the same size recurs constantly — pays neither the outline extraction
+  / nor the band binning again. Appending one fill at a time re-copies the accumulator every
+  / time (quadratic: ~170 ms for a screenful of glyphs); this joins once. An EMPTY blob (a
+  / space) contributes nothing and gets the -1 skip sentinel.
+  addFillN:{[paints;blobs] emp:&0=#'blobs
+    parts: mergeFill'[paints;blobs]
+    offs: (0.+#SCACC)+0.,-1_+\0.+#'parts
+    SCACC:: SCACC,,/parts
+    offs[emp]:-1.; offs}
+  mergeFill:{[p;b] $[0=#b; 0#0.; p,b]}
+  sceneFlush:{[] gpu.write[SCENE; (SCCAP&#SCACC)#SCACC]} / upload the whole frame's curves
   scGrow:{[] SCQPOOL:: SCQPOOL,gpu.buffer[48#0.]; SCQPV[SLFR]:: SCQPOOL}   / grow + persist this parity's pool
   scNext:{[] $[SCQI<#SCQPOOL; 0; scGrow[]]; b:SCQPOOL SCQI; SCQI::SCQI+1; b}
   / stride-8 vertex [clipX clipY u v fx fy off aa]: clip pos for gl_Position, uv for

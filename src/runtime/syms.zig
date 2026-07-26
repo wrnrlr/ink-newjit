@@ -69,6 +69,7 @@ pub fn apply(vm: *VM, sym_idx: u32, args: []const V) !V {
   if (eql(u8, name, "asin")) return mapUnary(vm, args, fAsin);
   if (eql(u8, name, "acos")) return mapUnary(vm, args, fAcos);
   if (eql(u8, name, "atan")) return mapUnary(vm, args, fAtan);
+  if (eql(u8, name, "tan")) return mapUnary(vm, args, fTan);
   if (eql(u8, name, "atan2")) return atan2Apply(vm, args);
   // cube root: f32-widening (cbrt of an int isn't an int), signed like std.math.cbrt.
   if (eql(u8, name, "cbrt")) return mapUnary(vm, args, fCbrt);
@@ -78,6 +79,7 @@ pub fn apply(vm: *VM, sym_idx: u32, args: []const V) !V {
 fn fAsin(x: f32) f32 { return std.math.asin(x); }
 fn fAcos(x: f32) f32 { return std.math.acos(x); }
 fn fAtan(x: f32) f32 { return std.math.atan(x); }
+fn fTan(x: f32) f32 { return std.math.tan(x); }
 fn fCbrt(x: f32) f32 { return std.math.cbrt(x); }
 
 // A scalar V as f32, or null if it isn't a numeric atom.
