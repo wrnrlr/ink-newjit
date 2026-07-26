@@ -27,7 +27,6 @@
 2: "lib/gpu.k"
 2: "lib/geometry.k"                             / Coxeter/Wythoff polyhedra (see demo/geometry.k)
 2: "lib/ui.k"                                   / HUD overlay (checkbox + floating panel)
-2: "lib/http.k"                                 / NASA GIBS satellite-imagery fetch (Satellite toggle)
 
 PI:3.14159265
 / texture.upload resolution: "2k" (fast start) or "8k" (sharp when zoomed in, heavier).
@@ -66,24 +65,6 @@ imgSpec:   image.read pfx,"specular_map.tif"   / ocean=white, land=black
 imgNorm:   image.read pfx,"normal_map.tif"     / tangent-space bumps
 imgStars:  image.read "demo/data/",TEXRES,"_stars_milky_way.jpg"   / celestial sky
 imgBorders:image.read pfx,"borders.png"        / country borders + coastlines (white on black); see tools/gen-borders.py
-
-/ ── Real satellite imagery (NASA GIBS, MODIS Terra true-color) ────────────────
-/ The "Satellite" HUD toggle swaps texture 0 (the artist day map) for a real MODIS
-/ equirectangular image fetched from GIBS at runtime — no shader change, just a
-/ different texture-0 handle. Fetched lazily on first enable and cached to disk, so
-/ the demo runs offline on the artist map by default and only hits the network when
-/ you ask for satellite. GIBS WMS returns one composited equirect image per request.
-MODISDATE: "2023-06-01"                         / a clear-ish global day (imagery is daily)
-/ VIIRS (SNPP) true-color: a ~3000km swath gives near-complete daily global coverage — unlike
-/ MODIS Terra, whose single-satellite daily swaths leave black wedges between orbit tracks.
-modisURL:{[w;h] ,/("https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=VIIRS_SNPP_CorrectedReflectance_TrueColor&CRS=EPSG:4326&BBOX=-90,-180,90,180&FORMAT=image/jpeg&TIME=";MODISDATE;"&WIDTH=";($w);"&HEIGHT=";$h)}
-modisPath: "demo/data/modis.jpg"                / disk cache (per-machine; not committed)
-/ write the fetched bytes to the cache file, then decode them (two statements, not a $-branch block).
-saveModis:{[b] modisPath 1: b; image.read modisPath}
-/ fetch MODIS → cache file → decode; returns an image dict, or `err on any failure.
-fetchModis:{[] r: http.get modisURL[4096;2048]; $[(r`status)=200; saveModis[r`body]; `err]}
-/ load the MODIS image (cache hit, else fetch); `err if unavailable (e.g. offline).
-loadModis:{[] im: image.read modisPath; $[(@im)~`m; im; fetchModis[]]}
 
 / ── Per-vertex UV (equirectangular), one vectorised pass ──────────────────────
 P: +,/icoTris
@@ -252,7 +233,6 @@ starFrag: shader.fragmentTexN[[wRay:`v2; wRot:`v4; wScr:`v2; wPar:`v4; wSun2:`v2
 /   ← →         rotate the sun (move the day / terminator; independent of the view)
 /   HUD (top-left panel; the "Earth -/+" title button collapses/expands it):
 /     Clouds        toggle the cloud layer;  Borders  toggle country borders + coastlines
-/     Satellite     swap the artist day map for live NASA GIBS/VIIRS imagery (fetched once, cached)
 /     Sun azimuth   time of day (also the ← → keys); Sun elevation = subsolar latitude
 /     Auto-advance  run the day/night cycle; Speed sets its rate
 /     Atmosphere    intensity of the blue scattering halo around the globe
@@ -275,7 +255,7 @@ hudMin::0                                     / HUD panel collapsed?
 / ui.hitAny can test); the outer col/row + spacers pin it to the top-left corner.
 ui.setFont (font.read "font/FiraCode-Regular.ttf") 0
 ui.setTheme ui.themeDark
-ui.setv[`clouds; 1.]; ui.setv[`play; 0.]; ui.setv[`borders; 1.]; ui.setv[`satellite; 0.]   / checkbox defaults
+ui.setv[`clouds; 1.]; ui.setv[`play; 0.]; ui.setv[`borders; 1.]   / checkbox defaults
 ui.setv[`sunAz; sunAz]; ui.setv[`sunEl; sunEl]; ui.setv[`speed; 0.02]   / slider defaults
 ui.setv[`atmos; 1.0]                                        / atmosphere intensity
 / The panel title is a button that collapses/expands the body (hudMin). Built in named
@@ -287,7 +267,6 @@ hud: {[]
   body: (
     ui.checkbox[`clouds; "Clouds"]
     ui.checkbox[`borders; "Borders"]
-    ui.checkbox[`satellite; "Satellite"]
     ui.label["Sun azimuth"];   ui.slider[`sunAz; SW; 0.; TAU]
     ui.label["Sun elevation"]; ui.slider[`sunEl; SW; -1.4; 1.4]
     ui.checkbox[`play; "Auto-advance"]
@@ -312,7 +291,6 @@ starPipe::    0
 starVB::      0
 starUB::      0
 starTex::     0
-modisTex::    0                                  / MODIS satellite texture: 0=untried, -1=failed, >0=loaded
 
 window.run[{[props]
   $[earthPipe=0;   earthPipe::   mesh.compilePull[earthVtx; earthFrag]; 0]
@@ -372,13 +350,7 @@ window.run[{[props]
   borderW: bordersOn%zoom                            / 0 = off; else 1/zoom → constant screen-width lines
   uni: (cos yaw; sin yaw; cos pitch; sin pitch; zoom;0.;0.;asp; cloudsOn;atmos;borderW;0.; Lx;Ly;Lz;0.)
   gpu.write[earthUB; uni]
-  / Satellite layer: on first enable, lazily fetch+upload MODIS (blocks one frame; cached to disk
-  / after). modisTex: 0=untried → try once (‑1 on failure so we don't refetch every frame). When
-  / loaded, bind it as texture 0 in place of the artist day map — no shader change.
-  satOn: 0.<ui.getv[`satellite]
-  $[satOn&(modisTex=0); modisTex:: {[im] $[(@im)~`m; texture.upload im; -1]} loadModis[]; 0]
-  texList: $[satOn&(modisTex>0); @[earthTex; 0; :; modisTex]; earthTex]
-  mesh.drawPullT[earthPipe; (earthVB;earthUB); earthN; texList]
+  mesh.drawPullT[earthPipe; (earthVB;earthUB); earthN; earthTex]
   / HUD last → 2D panel composites on top of the 3D scene
   ui.draw[Wh; w; h]
 }; 0]
