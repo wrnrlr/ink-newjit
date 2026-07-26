@@ -124,6 +124,9 @@ setDetail:{[bb;tex]
   detailTex:: tex
   detBox:: ((bb 0); (bb 2); 1.0%(bb 1)-bb 0; 1.0%(bb 3)-bb 2)   / (u0;v0;1/uspan;1/vspan)
   detOn:: 1}
+/ reset the settle timer to a fresh view (helper because a `[a::0;b::v]` multi-statement
+/ $-branch is misparsed — the assignments don't take; use a lambda body instead).
+resetSettle:{[vkey] settle:: 0; lastVkey:: vkey; 0}
 
 / ── Per-vertex UV (equirectangular), one vectorised pass ──────────────────────
 P: +,/icoTris
@@ -418,7 +421,7 @@ window.run[{[props]
   / high-res tile of the visible region once (blocks that frame). Zooming/rotating resets the timer;
   / zooming back out drops the tile. The tile's UV bbox rides ub slots 5,6,11,15.
   vkey: yaw+pitch+zoom
-  $[vkey=lastVkey; settle::settle+1; [settle::0; lastVkey::vkey]]
+  $[vkey=lastVkey; settle::settle+1; resetSettle vkey]
   detActive: zoom>ZDETAIL
   $[~detActive; detOn::0; $[settle=SETTLE; tryDetail[yaw;pitch;zoom;asp]; 0]]
   db: $[detOn&(detailTex>0); detBox; 9. 9. 1. 1.]    / off-state pushes the tile UV outside [0;1]²
