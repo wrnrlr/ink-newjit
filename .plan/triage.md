@@ -1,5 +1,67 @@
 # Issues
 
+## 24. kk elementwise chains: SILENTLY WRONG at exactly 28 ops, fail from 29
+
+Found while building `bench/tropical.k` (see `doc/research/tropical.md`). A chained
+elementwise kernel compiles and computes correctly up to 27 ops, returns a **wrong
+result with no diagnostic** at exactly 28, and fails to compile from 29 up.
+
+```sh
+# repro: chain of K fused multiply-adds, GPU vs CPU on the same lambda
+python3 - <<'PY'
+import subprocess
+for k in range(24,33):
+  body="0.0001+1.0001*"*k+"x"
+  open("/tmp/k.k","w").write(f'''2: "lib/kk.k"
+TK: {{{body}}}
+gpu.computeRun[{{[_]
+  a: 9: `f$ 3#1000.
+  r: kk.run[kk.plan[TK; ,a]; ,a]
+  `0 0: "k={k} gpu=",($ *| 8: r)," cpu=",($ TK 1000.),"\\n"
+  0}}]''')
+  print(subprocess.run(["./zig-out/bin/ink","/tmp/k.k"],capture_output=True,text=True).stdout.strip())
+PY
+```
+
+```
+k=27 gpu=1002.7067  cpu=1002.7072     ok
+k=28 gpu=2005.4108  cpu=1002.8076     WRONG (~2x)
+k=29 (no gpu value)                   compile fails
+```
+
+`kkClassify` returns clean (`` ` ``) at k=28 and `shader.map` emits a plausible
+455-word module, so the fault is downstream of classification — most likely an id/slot
+limit in the dye emitter or its IR arrays (55 ops at k=27 vs 57 at k=28 hints at a
+56-entry bound). Priority: the silent-wrong case matters more than the hard failure —
+a kernel that quietly computes something else defeats the whole oracle ladder.
+
+## 23. `$lambda` drops parentheses when the lambda comes out of a list
+
+Also found via `bench/tropical.k`. At the top level `$g` round-trips a parenthesised
+body faithfully, but the same lambda stored in a general list does not:
+
+```k
+TK1: {(x*1.0001)+0.0001}
+FS: (TK1;TK2)
+$ FS 0   / -> {(x*1.0001)+0.0001*1.0001)+0.0001}   parens gone
+```
+
+This is not cosmetic. `kk.plan` reconstructs the kernel by re-parsing `$fn`
+(`lamOf` → `parse[$fn]`), and k is right-to-left, so dropping the grouping compiles a
+**different expression** — silently, with no error. Any kk kernel selected out of a
+list of lambdas is suspect. Workaround in the bench harness: write chains that need no
+parentheses (`a+b*a+b*x` nests correctly on its own) and select with `$[...]` rather
+than list indexing.
+
+Two smaller kk usability defects noticed alongside, not yet minimised:
+
+- A `kk.plan` cached inside one `gpu.computeRun` and reused in a *later* one returns
+  all zeros — the plan cache holds pipeline handles belonging to a destroyed device
+  and is not keyed on the device generation.
+- kk binds lambda params positionally to `x`/`y`/`z`; a lambda whose params are named
+  otherwise (`{[a] a+a}`) compiles happily and returns zeros instead of being rejected
+  by `kkWarn`.
+
 ## 22. `lib/color.k` legacy HSL/pct helpers are broken (disabled) + a `\`-swallow lexer bug
 
 `lib/color.k` could never be loaded (`2:"lib/color.k"`) because two legacy lines
