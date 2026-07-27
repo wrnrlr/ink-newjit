@@ -14,11 +14,19 @@
     column table with CODEPOINT ranges, so a highlight is "paint each node's range,
     let children overwrite their parents" — whatever a container still owns is
     exactly its own punctuation (a call's `[`/`]`, an assignment's `:`, a fold's
-    `/`). Valence comes from the tree, so `+` is purple in `1+2` and blue-adjacent
-    rules fall out: `*` monadic in `*1 2 3`, `@` red in `@[x;i;:;v]`, `\` pink as
-    the scan digram. `parse` tolerates half-typed source, so this re-runs on every
-    keystroke; no second parser, no LSP round trip (and so no UTF-16 offsets).
-    `syn.enc`/`syn.dec` bridge UTF-8 source text and codepoints.
+    `/`). Valence comes from the tree, so `+` is purple in `1+2` and the rest falls
+    out: `*` monadic in `*1 2 3`, `@` red in `@[x;i;:;v]`. `parse` tolerates
+    half-typed source, so this re-runs on every keystroke; no second parser, no LSP
+    round trip (and so no UTF-16 offsets). `syn.enc`/`syn.dec` bridge UTF-8 source
+    text and codepoints.
+  - **Adverbs are coloured by ARITY, not by glyph.** An adverb taking one left
+    argument (`+/1 2 3` fold, `f'x` each, `24 60 60\n` encode) is an ordinary
+    adverb; the DIGRAM forms that take two (seeded fold `10+/`, zip `x f'`, stencil
+    `3 f'`, n-do `5 f/`, while `f f/`, seeded eachprior `10-':`, eachright `x f/:`)
+    get their own colour — any of `' / \` can be either. In the CST that is exactly
+    "the term sits in the dyadic verb slot", so it reads straight off `field`. The
+    verb underneath follows: only plain Each applies its verb monadically, so `#`
+    is dyadic in the zip `2 3#'"ab"` but monadic in `#'x`.
   - **`lib/rope.k` — a SumTree rope.** Text lives in a B-tree of ~64-codepoint
     chunks, each node carrying a `(codepoints; newlines)` summary, so offset→row,
     row→offset and line fetch are O(log n) descents. A leaf-local edit rewrites one
@@ -27,7 +35,8 @@
     (O(#leaves), vectorised, re-using untouched chunks by reference).
   - **The editor**: Iosevka (a TTC — `font.read` returns every face), line-number
     gutter, current-line highlight, wheel scrolling, page up/down, sticky-column
-    vertical motion, a status bar, and F1 to flip the theme live.
+    vertical motion, a status bar, `cmd+shift+=`/`cmd+shift+-` to change the font
+    size, and `cmd+shift+T` (or F1) to flip the theme live.
   - **`slug.SCCAP` 262144 → 1048576 floats.** The old scene buffer stopped a text
     editor at ~600 glyphs — half a screen — and truncated silently; `sceneFlush`
     now clamps to capacity instead of overrunning.

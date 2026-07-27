@@ -22,23 +22,25 @@
 2: "lib/color.k"
 
 / ── roles ────────────────────────────────────────────────────────────────────
-syn.ROLES: `text`comment`num`bool`str`sym`name`param`op`mono`dyad`over`scan`each`assign`bracket`brace`paren`cond`key`sep`cmd
+syn.ROLES: `text`comment`num`bool`str`sym`name`param`op`mono`dyad`adv`digram`assign`bracket`brace`paren`cond`key`sep`cmd
 syn.RTEXT:   syn.ROLES?`text
 syn.RDYAD:   syn.ROLES?`dyad
 syn.RMONO:   syn.ROLES?`mono
+syn.RADV:    syn.ROLES?`adv
+syn.RDIGRAM: syn.ROLES?`digram
 syn.RASSIGN: syn.ROLES?`assign
 
 / ── themes (Tailwind OKLCh via lib/color.k, tuned to match the Zed extension) ─
 / Order matches syn.ROLES:
-/   text comment num bool str sym name param op mono dyad over scan each
+/   text comment num bool str sym name param op mono dyad adv digram
 /   assign bracket brace paren cond key sep cmd
 syn.themeDark: syn.ROLES! oklch'(
   Zinc200; Slate500; Orange300; Amber300; Lime300; Teal300; Zinc200; Zinc300
-  Teal300; Blue400; Purple400; Purple400; Pink400; Teal300
+  Teal300; Blue400; Purple400; Purple400; Pink400
   Red400; Slate500; Zinc400; Zinc400; Amber300; Rose400; Slate500; Purple400 )
 syn.themeLight: syn.ROLES! oklch'(
   Zinc800; Slate400; Orange700; Amber600; Lime700; Teal600; Zinc800; Zinc600
-  Teal600; Blue600; Purple600; Purple600; Pink600; Teal600
+  Teal600; Blue600; Purple600; Purple600; Pink600
   Red600; Slate400; Zinc500; Zinc500; Amber600; Rose600; Slate400; Purple600 )
 
 syn.THEME: syn.themeDark
@@ -134,14 +136,14 @@ syn.KAPPLY: syn.KIND?`apply
 
 syn.PUNCTC: 40 41 91 93 59 36                          / ( ) [ ] ; $
 syn.BRACEC: 123 125                                    / { }
-syn.ADVC:   47 92 39                                   / / \ '
-syn.ADVR:   (syn.ROLES?`over`scan`each),syn.ROLES?`op
+syn.EACH:   39                                         / the ' glyph
 
 / A node's `value` is its literal payload for literals and its GLYPH for verbs and
-/ adverbs; reduce it to that glyph's first character code (0 when it is not a symbol).
-/ `$` on a symbol keeps the leading backtick, hence the 1_.
+/ adverbs; reduce it to that glyph's first character code and its length (0 when it is
+/ not a symbol). `$` on a symbol keeps the leading backtick, hence the 1_.
 syn.gl1:{[s] $[0=#s; 0; `i$*s]}
 syn.gl:{[v] $[`s~@v; syn.gl1 1_$v; 0]}
+syn.gn:{[v] $[`s~@v; #1_$v; 0]}
 / How many `arg children each row has (i.e. the arity of a call), per row index.
 syn.argc:{[pr;fd;n] c:n#0; ai:pr@&fd=`arg; $[0=#ai; c; syn.argc1[c;ai]]}
 syn.argc1:{[c0;ai] c:c0; u:?ai; c[u]:{+/x}'ai=/:u; c}
@@ -155,19 +157,29 @@ syn.ink1:{[cps;t]
   vv:t`value
   pr:0|t`parent                                       / root's -1 folds onto itself
   gl:syn.gl'vv
+  gn:syn.gn'vv
   ki:syn.KIND?kn
   rl:syn.KBASE@ki
   pk:ki@pr                                            / parent's kind index
   pg:gl@pr                                            / parent's glyph code
+  pn:gn@pr                                            / parent's glyph length
   na:(syn.argc[t`parent;fd;#kn])@pr                   / arity of the call this row sits in
-  / a `term` IS its adverb: +/ folds (purple), \ scans (pink), ' maps
-  tm:&kn=`term
-  rl[tm]:syn.ADVR@syn.ADVC?gl tm
+  / A `term` IS its adverb, and an adverb's colour is how many LEFT-hand arguments the
+  / derived verb takes. One (`+/1 2 3` fold, `f'x` each, `24 60 60\n` encode) is an
+  / ordinary adverb; TWO — the DIGRAM forms: seeded fold `10+/`, zip `x f'`, stencil
+  / `3 f'`, n-do `5 f/`, while `f f/`, eachprior-with-seed `10-':`, eachright `x f/:` —
+  / read differently and get their own colour. Two left arguments is exactly "the term
+  / sits in the dyadic verb slot", i.e. field `v`, or is called with 2+ arguments.
+  tmd:(kn=`term)&(fd=`v)|(fd=`f)&(pk=syn.KAPPLY)&na>1
+  rl[&kn=`term]:syn.RADV
+  rl[&tmd]:syn.RDIGRAM
   / a primitive's colour is its VALENCE. `v` of a transit is dyadic; `f` is monadic
-  / unless it feeds a fold/scan or a call with more than one argument.
+  / unless it feeds an adverb that folds it over pairs, or a call with 2+ arguments.
+  / Only plain Each (`'`, not `':`, not a digram) applies its verb monadically.
+  pdg:tmd@pr                                          / is the enclosing term a digram?
+  eo:(pk=syn.KTERM)&(pg=syn.EACH)&(pn=1)&~pdg
   isop:(kn=`op)|kn=`io
-  dv:(pk=syn.KTERM)&(pg=47)|pg=92
-  dv:dv|(pk=syn.KAPPLY)&na>1
+  dv:((pk=syn.KTERM)&~eo)|(pk=syn.KAPPLY)&na>1
   rl[&isop&(fd=`v)|(fd=`f)&dv]:syn.RDYAD
   rl[&isop&(fd=`f)&~dv]:syn.RMONO
   / amend @[x;i;:;v] and drill .[x;p;:;v] read as assignment, like their `:` does

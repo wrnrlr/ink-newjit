@@ -6,7 +6,8 @@
 / Snapshot:     ink -snap 0.4 demo/edit.k     (writes edit-snap.png)
 /
 / Keys: arrows / home / end / page up / page down move, enter / backspace / delete /
-/ tab edit, click places the caret, the wheel scrolls, F1 flips the theme.
+/ tab edit, click places the caret, the wheel scrolls. cmd+shift+= / cmd+shift+-
+/ change the font size, cmd+shift+T (or F1) flips the theme.
 /
 / Four things worth reusing elsewhere:
 /
@@ -119,8 +120,9 @@ SEED: (
   "n:1 2 3             / an assign operator is red"
   "N::0N               / the double bind is red too"
   "@[x;I;:;1.+.25*+/x@W]"
-  "sum:+/              / dyadic + folded by / — both purple"
-  "bounds wander\\5 5    / \\ is the scan digram of / — pink"
+  "sum:+/              / an adverb with ONE left arg is purple"
+  "10+/1 2 3           / …with TWO — a digram — it is pink"
+  "bounds wander\\5 5    / any glyph: ' / \\ — the arity is what counts"
   ""
   "hilbert:{[n;p] $[n=0; ,p; ,/hilbert[n-1;]'quad p]}"
   "walk:{[t] +/{x*x}'t@!#t}"
@@ -175,12 +177,26 @@ mDown:{[] goRow row[]+1}
 mPgUp:{[] goRow row[]-NVIS-1}
 mPgDn:{[] goRow row[]+NVIS-1}
 
+/ ── zoom ────────────────────────────────────────────────────────────────────
+/ Font size is a LOGICAL size, so a zoom just moves SZL and re-derives the pixel
+/ metrics at the current dpr. The canvas glyph cache is keyed by size, so a new size
+/ costs one outline extraction per distinct glyph and is free from then on.
+zoom:{[d] SZL:: 8.|32.&SZL+d; setScale DPR; follow[]}
+
 / GLFW key codes → action. Printable keys arrive separately as text events, so
-/ doKey only claims the editing keys and ignores everything else.
-doKey:{[k] $[k=257; kEnter[]; k=259; kBack[]; k=261; kDel[]
+/ doKey only claims the editing keys and ignores everything else. `mods` bits are
+/ 1=shift 2=ctrl 4=alt 8=super — extracted by division, since `&` on ints is MIN,
+/ not a bitwise and.
+modBit:{[m;b] 1=(m div b) mod 2}
+/ cmd (+shift) with the +/- keys zooms; cmd+shift+T flips the theme. F1 also flips it,
+/ but macOS eats F1 for screen brightness unless "use F1, F2 as function keys" is on,
+/ hence the cmd binding. NB `setTheme ~DARK` would parse as Match — bracket the call.
+doCmd:{[k] $[(k=61)|k=334; zoom[1.]; (k=45)|k=333; zoom[-1.]; k=84; setTheme[~DARK]; 0]}
+doEdit:{[k] $[k=257; kEnter[]; k=259; kBack[]; k=261; kDel[]
   k=263; mLeft[];  k=262; mRight[]; k=265; mUp[];   k=264; mDown[]
   k=268; mHome[];  k=269; mEnd[];   k=266; mPgUp[]; k=267; mPgDn[]
-  k=258; kTab[];   k=290; setTheme ~DARK; 0]}
+  k=258; kTab[];   k=290; setTheme[~DARK]; 0]}
+doKey:{[k;m] $[modBit[m;8]; doCmd k; doEdit k]}
 
 / ── viewport ────────────────────────────────────────────────────────────────
 scrollTo:{[t] TOP:: 0|t&(rope.rows BUF)-1}
@@ -196,8 +212,10 @@ setCaret:{[x;y] r: 0|(TOP + _ (y-TOPY)%LINEH)&(rope.rows BUF)-1
 / ── per-frame input ─────────────────────────────────────────────────────────
 / Text and key codes are copied into VM memory (0+…) before use so nothing from the
 / C-allocated event columns is parked in a global.
-procText:{[E] {insCh x}' 0 + (E`code)@&KTEXT=(E`kind)}
-procKeys:{[E] {doKey x}' 0 + (E`code)@&(KKEY=(E`kind))&1=(E`down)}
+/ A cmd-modified key still emits a text event on some platforms, so text events drop
+/ anything typed with super held — otherwise cmd+= would zoom AND insert a '='.
+procText:{[E] i: &(KTEXT=(E`kind))&~modBit[E`mods;8]; {insCh x}' 0 + (E`code)@i}
+procKeys:{[E] i: &(KKEY=(E`kind))&1=(E`down); {doKey[x;y]}'[0+(E`code)@i; 0+(E`mods)@i]}
 clickAt:{[E;j] setCaret[(E`x)@j; (E`y)@j]}
 procMouse:{[E] m: &(KMOUSE=(E`kind))&1=(E`down); $[#m; clickAt[E; *|m]; 0]}
 procScroll:{[E] s: &KSCROLL=(E`kind); $[#s; scrollTo TOP - _ +/3.*(E`amt)@s; 0]}
@@ -224,7 +242,7 @@ drawCurLn:{[w] cnv.rect[GUTW; (TOPY+LINEH*row[]-TOP)+2.*DPR; w-GUTW; LINEH]; cnv
 drawCaret:{[] cnv.rect[(GUTW+PADX)+ADV*col[]; (TOPY+LINEH*row[]-TOP)+3.*DPR; 2.*DPR; LINEH-6.*DPR]
   cnv.fill CARET}
 / Status bar: caret position, document size, language, theme.
-status:{[] ($1+row[]),":",($1+col[])," ",($rope.rows BUF)," lines  ",(1_$LANG),"  ",$[DARK;"dark";"light"]}
+status:{[] ($1+row[]),":",($1+col[])," ",($rope.rows BUF)," lines  ",(1_$LANG),"  ",($[DARK;"dark";"light"]),"  ",($`i$SZL),"pt"}
 drawFoot:{[w;h] cnv.rect[0.; h-FOOT; w; FOOT]; cnv.fill GUTBG
   cnv.moveTo[PADX; (h-FOOT)+ASC+2.*DPR]; cnv.text[FONT; SZ*0.85; `i$status[]; GUTFG]}
 

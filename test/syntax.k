@@ -4,7 +4,7 @@
 / Each case pins the role of EVERY codepoint of a line, written as one initial per
 / column so the expectation reads like the source it describes:
 /   . text   # comment  N num   B bool  S str   Y sym   v name  p param
-/   o op     m mono     D dyad  / over  \ scan  ' each
+/   o op     m mono     D dyad  / adverb  \ digram (an adverb with TWO left arguments)
 /   =assign  [ bracket  { brace ( paren ? cond  k key   ; sep   C cmd
 2:"lib/syntax.k"
 
@@ -13,7 +13,7 @@ fail: 0
 chkN: 0
 chk: {[name;got;want] chkN::chkN+1; $[got~want; pass::pass+1; {[n;g;w] fail::fail+1; `0 0:"FAIL #",($chkN)," ",n; `0 0:"  got  ",g; `0 0:"  want ",w}[name;got;want]]; 0}
 
-INI: ".#NBSYvpomD/\\'=[{(?k;C"
+INI: ".#NBSYvpomD/\\=[{(?k;C"
 hl: {[s] `c$INI@syn.hl[`ink; syn.dec s]}
 row:{[src;want] chk[src; hl src; want]}
 
@@ -32,10 +32,23 @@ row["f[1;2]";             "v[N[N["]      / call brackets are grey
 row["2:\"lib/x.k\"";      "mmSSSSSSSSS"] / monadic io verb
 row["x 1: y";             "v.DD.v"]      / dyadic io verb
 
-/ ── adverbs: / folds (purple), \ scans (pink), ' maps ───────────────────────
-row["sum:+/";             "vvv=D/"]      / the + under a fold reads as dyadic
-row["x'y";                "v'v"]
-row["+/'x";               "D/'v"]
+/ ── adverbs: coloured by how many LEFT arguments the derived verb takes ─────
+/ ONE left argument — an ordinary adverb.
+row["sum:+/";             "vvv=D/"]      / fold; the + under it reads as dyadic
+row["+\\1 2 3";           "D/NNNNN"]     / scan
+row["f'x";                "v/v"]         / each
+row["#'x";                "m/v"]         / …and only plain each applies its verb monadically
+row["+/'x";               "D//v"]        / each over a fold
+row["-':12 13 11";        "D//NNNNNNNN"] / eachprior: `': is not plain each, so - is dyadic
+row["24 60 60\\3723";     "NNNNNNNN/NNNN"]  / encode
+/ TWO left arguments — the DIGRAM forms.
+row["10+/1 2 3";          "NND\\NNNNN"]  / seeded fold
+row["2 3#'\"ab\"";        "NNND\\SSSS"]  / zip — and its verb IS dyadic
+row["x f'y";              "v.v\\v"]      / zip over names
+row["1 2*/:3 4";          "NNND\\\\NNN"] / eachright (both glyph chars)
+row["10-':12 13";         "NND\\\\NNNNN"]  / seeded eachprior
+row["5(2*)/1";            "N(ND(\\N"]    / n-do
+row["{x+y}/[1;2]";        "{vDv{\\[N[N["]  / seeded fold, written as a call
 row["bounds wander\\5 5"; "vvvvvv.vvvvvv\\NNN"]
 
 / ── structure: containers own whatever their children don't ─────────────────
