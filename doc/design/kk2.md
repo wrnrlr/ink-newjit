@@ -703,7 +703,9 @@ spirv-val'd via kkgold dumps):**
 coordinates from the 1-D index (`wgId=d div wgsz`, `lr=lid div 8`, `lc=lid mod 8`,
 `brow/bcol` from `wgId` and `n div 8`) and stores at a *computed* index (`row*n+col`). With
 TWO shared arrays it loads an 8×8 tile of BOTH A and B per K-tile, so each A/B element is
-fetched from global once per tile (8× fewer loads) — the real reuse win. `nn.k`'s `gemm2dK`
+fetched from global once per tile (8× fewer loads) — the real reuse win. Measured
+end-to-end that is 1.7-2.5x, not 8x (bench/nnshapes.py at M=N=K=64/128/512): the cache
+recovers much of the avoided traffic, so treat the load ratio as an upper bound. `nn.k`'s `gemm2dK`
 does exactly this; `GemmR` dispatches it when `M,N,K` are all multiples of 8 (then `M*N` is
 a multiple of 64, so the launch is exact — no over-dispatch), else falls back to the
 per-element `gemmK`. The nn GEMM test (3×4×2) stays on `gemmK`, bit-identical. Verified

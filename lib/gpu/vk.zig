@@ -137,6 +137,11 @@ const MAX_MCALLS = 1024; // max uniform mesh draws per frame
 // command buffer lets Metal's automatic hazard tracking order it. POOL_SETS caps
 // how many descriptor sets one batch may record before we must flush and reset.
 const POOL_SETS = 512;
+// Distinct buffers tracked per batch before falling back to "assume all pending".
+const PENDING_MAX = 128;
+// Buffers freed by the host while recorded work may still reference them; their
+// vkDestroyBuffer is deferred to the next sync rather than forcing one.
+const DEAD_MAX = 512;
 
 pub const Buffer = struct {
   buf: c.VkBuffer,
@@ -245,6 +250,15 @@ pub const Vk = struct {
   cur: c.VkCommandBuffer, // the open recording command buffer (when recording)
   recording: bool, // is there un-submitted recorded work
   nsets: u32, // descriptor sets recorded into the current batch
+  // Buffers bound by dispatches recorded into the CURRENT unsubmitted batch. A
+  // host write to a buffer absent from this set cannot race pending GPU work, so
+  // it needs no queue drain. Overflow degrades to "assume everything is pending",
+  // which is the old conservative behaviour.
+  pending: [PENDING_MAX]c.VkBuffer = undefined,
+  pending_len: usize = 0,
+  pending_all: bool = false,
+  dead: [DEAD_MAX]Buffer = undefined,
+  dead_len: usize = 0,
 
   // ── windowed rendering (undefined/zero when headless) ──
   windowed: bool,
@@ -399,6 +413,14 @@ pub const Vk = struct {
 
     self.recording = false;
     self.nsets = 0;
+    // `var self: Vk = undefined` above means struct-field defaults do NOT apply —
+    // every field must be set here. Leaving dead_len uninitialised made sync() walk
+    // garbage and call vkDestroyBuffer on junk handles (it hung at the first readback,
+    // before any free was issued). pending_* were safe only because every read is
+    // gated behind `recording`; initialise them anyway rather than rely on that.
+    self.pending_len = 0;
+    self.pending_all = false;
+    self.dead_len = 0;
     self.windowed = false;
     return self;
   }
@@ -509,6 +531,14 @@ pub const Vk = struct {
     if (!ok(vkCreateDescriptorPool(self.dev, &dpci, null, &self.desc_pool))) return Error.VulkanInit;
     self.recording = false;
     self.nsets = 0;
+    // `var self: Vk = undefined` above means struct-field defaults do NOT apply —
+    // every field must be set here. Leaving dead_len uninitialised made sync() walk
+    // garbage and call vkDestroyBuffer on junk handles (it hung at the first readback,
+    // before any free was issued). pending_* were safe only because every read is
+    // gated behind `recording`; initialise them anyway rather than rely on that.
+    self.pending_len = 0;
+    self.pending_all = false;
+    self.dead_len = 0;
 
     // surface format (prefer BGRA8_UNORM, matching the Dawn swapchain)
     var nfmt: u32 = 0;
@@ -1373,7 +1403,40 @@ pub const Vk = struct {
       _ = vkBeginCommandBuffer(self.cur, &bi);
       self.recording = true;
       self.nsets = 0;
+      self.pending_len = 0;
+      self.pending_all = false;
     }
+  }
+
+  fn markPending(self: *Vk, b: c.VkBuffer) void {
+    if (self.pending_all) return;
+    for (self.pending[0..self.pending_len]) |p| if (p == b) return;
+    if (self.pending_len == PENDING_MAX) { self.pending_all = true; return; }
+    self.pending[self.pending_len] = b;
+    self.pending_len += 1;
+  }
+
+  // Destroy a buffer once the GPU is finished with it. Freeing a buffer that recorded
+  // work still references used to call sync() — vkQueueSubmit + vkQueueWaitIdle — and
+  // lib/nn.k releases 6-11 scratch buffers at the end of EVERY block (~36 per Conformer
+  // block), so an encoder was drained dozens of times per layer purely to reclaim
+  // scratch. Queue the destroy for the next sync instead; if nothing pending references
+  // it, destroy now. A full list forces the sync the next readback would do anyway.
+  pub fn destroyLater(self: *Vk, b: Buffer) void {
+    if (!self.hasPendingWork(b)) { self.destroyBuffer(b); return; }
+    if (self.dead_len == DEAD_MAX) self.sync();
+    if (self.dead_len < DEAD_MAX) {
+      self.dead[self.dead_len] = b;
+      self.dead_len += 1;
+    } else self.destroyBuffer(b);
+  }
+
+  // Does recorded-but-unsubmitted work reference this buffer?
+  pub fn hasPendingWork(self: *Vk, b: Buffer) bool {
+    if (!self.recording) return false;
+    if (self.pending_all) return true;
+    for (self.pending[0..self.pending_len]) |p| if (p == b.buf) return true;
+    return false;
   }
 
   // Submit the recorded batch and block until done; then reset the transient
@@ -1387,8 +1450,12 @@ pub const Vk = struct {
     _ = vkQueueWaitIdle(self.queue);
     _ = vkResetCommandPool(self.dev, self.cmd_pool, 0);
     _ = vkResetDescriptorPool(self.dev, self.desc_pool, 0);
+    for (self.dead[0..self.dead_len]) |d| self.destroyBuffer(d);
+    self.dead_len = 0;
     self.recording = false;
     self.nsets = 0;
+    self.pending_len = 0;
+    self.pending_all = false;
   }
 
   // compute→compute barrier so a prior dispatch's storage writes feed this one.
@@ -1407,6 +1474,7 @@ pub const Vk = struct {
     vkCmdBindPipeline(self.cur, c.VK_PIPELINE_BIND_POINT_COMPUTE, p.pipe);
     vkCmdBindDescriptorSets(self.cur, c.VK_PIPELINE_BIND_POINT_COMPUTE, p.layout, 0, 1, @ptrCast(&set), 0, null);
     vkCmdDispatch(self.cur, groups(nthreads, p.wgx), 1, 1);
+    for (bufs) |b| self.markPending(b.buf);
     self.nsets += 1;
   }
 
@@ -1425,6 +1493,8 @@ pub const Vk = struct {
       vkCmdBindDescriptorSets(self.cur, c.VK_PIPELINE_BIND_POINT_COMPUTE, p.layout, 0, 1, @ptrCast(&set), 0, null);
       vkCmdDispatch(self.cur, g, 1, 1);
     }
+    for (bufsA) |b| self.markPending(b.buf);
+    for (bufsB) |b| self.markPending(b.buf);
     self.nsets += 2;
   }
 };

@@ -28,10 +28,17 @@ runGemm: {[pipe;A;B;M;K;N]
   (M*N) # gpu.read bc}
 
 / 2-D scatter kernel: transpose via integer decomposition (out[j*M+i] = in[i*N+j])
+/ The launch is P*Q threads but the workgroup is 64 wide, so 64 threads RUN and the
+/ d>=P*Q ones compute i=d div nn well past the live range — their stores landed back
+/ inside o[0..P*Q-1] and clobbered real outputs. That made this check pass only ~5 of
+/ 6 runs, depending on execution order. Park the strays in o's tail (bo is 64 long,
+/ the live range is 12) — the same guard kkGrpK uses.
 transI: {[o;x;g;d]
   m:`i$g[0]; nn:`i$g[1]
+  n: m*nn
   i:d div nn; j:d mod nn
-  set[o; (j*m)+i; x[d]]}
+  slot: $[d<n; (j*m)+i; d]
+  set[o; slot; x[d]]}
 / Globals (not demo locals) so the CPU-ref lambdas can reference them — ink lambdas
 / do not close over a caller's locals.
 GM::5; GK::6; GN::4

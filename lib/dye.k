@@ -991,7 +991,45 @@ kkChk: {[i]
     k~`apposit; kkA i
     k~`apply;   kkP i
     k]}
-kkClassify: {[fn] lam: lamOf fn; kkAny lamBody lam}
+kkClassifyRec: {[fn] lam: lamOf fn; kkAny lamBody lam}
+
+/ ── kkClassify as a TABLE SCAN (no recursion, no depth budget) ────────────────
+/ The recursive descent above costs one VM call frame per operator, so a long kernel
+/ expression could exhaust the frame stack — that is what capped elementwise chains at
+/ 27 ops and, because a nested run swallowed the overflow, returned a wrong number
+/ rather than an error (.plan/triage.md #24). Raising FRAMES_MAX papered over it; this
+/ removes the dependence entirely.
+/
+/ The CST is a TABLE, and every rule in kkChk is LOCAL: a node's verdict depends only
+/ on its own kind plus, for the three apply-ish kinds, the operator slot it consumes.
+/ So the whole classification is one pass over the rows. Row order is pre-order
+/ (parent before children, siblings in source order), which is exactly the order the
+/ recursion reported offenders in — including kkT testing the `v` slot before
+/ descending into a/b, since the transit row precedes its own children.
+/
+/ Rows to skip: the `terse` root and the lambda row itself (scanning them would report
+/ their own kinds as offending), the params, and the `v`/`f` operator slots that their
+/ parent already consumed — an `op` row scanned on its own would be rejected as kind
+/ `op`. A NESTED lambda is still rejected, because only the root lambda row is skipped.
+kkVT: {[i] v: kF1[i;`v]; $[(kKind v)~`term; `adverb; ~(kVal v) in kkEwOps; kVal v; `]}
+kkVA: {[i] f: kF1[i;`f]; $[(kKind f)~`term; `adverb; ~((kVal f) in mathFns)|((kVal f) in `"-"`"~"); kVal f; `]}
+kkVP: {[i] f: kF1[i;`f]; $[~(kVal f) in mathFns; kVal f; `]}
+kkVerdict: {[i]
+  k: kKind i
+  $[k in `int`float`ints`floats`bool`var`list`cond`right`group`bind; `
+    k~`transit; kkVT i
+    k~`apposit; kkVA i
+    k~`apply;   kkVP i
+    k]}
+kkClassify: {[fn]
+  lam: lamOf fn
+  fs: Cst`field
+  rs: (!#fs) @ & ~ fs in `v`f`param
+  rs: rs @ & ~ rs in 0,lam
+  / bracket the each: `kkFirstBad kkVerdict' rs` parses as `(kkFirstBad kkVerdict)' rs`
+  / — the adverb binds the TRAIN, not the inner function (AGENT.md).
+  $[0=#rs; `; kkFirstBad[kkVerdict' rs]]}
+kkFirstBad: {[cs] b: & ~ cs ~\: `; $[#b; *(cs@b); `]}
 
 / ── Gather map kernel (kk2 §2.4-3): x@w → out[d] = src[idx[d]] ─────────────────
 / Some args are `buf gather SOURCES (indexed by @), others are `elem indices/values

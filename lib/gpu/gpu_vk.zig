@@ -267,8 +267,7 @@ export fn gpuBufferFree(h_k: ?K) callconv(.c) ?K {
   const idx: usize = @intCast(h - 1);
   const b = g_bufs.items[idx];
   if (b.size == 0) return ki(0); // already freed
-  v.sync();
-  v.destroyBuffer(b);
+  v.destroyLater(b);   // deferred to the next sync — no queue drain here
   g_bufs.items[idx].size = 0; // tombstone
   g_bfree.append(alloc, idx) catch {};
   return ki(0);
@@ -281,13 +280,31 @@ export fn gpuBufferWrite(h_k: ?K, data_k: ?K) callconv(.c) ?K {
   const fp = kfp(data_k) orelse return ki(0);
   const n = kn(data_k);
   if (n <= 0) return ki(0);
-  v.sync(); // finish recorded work touching this buffer before host overwrites it
   var nn: usize = @intCast(n);
   const b = g_bufs.items[@intCast(h - 1)];
   if (b.size == 0) return ki(0); // freed slot
   const cap: usize = @intCast(b.size / @sizeOf(f32));
   if (nn > cap) nn = cap;
-  v.write(b, std.mem.sliceAsBytes(fp[0..nn]));
+  const bytes = std.mem.sliceAsBytes(fp[0..nn]);
+
+  // A host write only has to drain the queue when recorded-but-unsubmitted work
+  // actually references THIS buffer; otherwise there is nothing to race with.
+  // And when the bytes already match what the buffer holds, the write changes
+  // nothing, so neither the drain nor the copy is needed.
+  //
+  // That second case is the one that matters in practice. lib/nn.k's resident ops
+  // (GemmR, SoftmaxR, LayerNormR, AttnScoresR, Conv2dR, …) rewrite the SAME dims
+  // into their small params buffer on every call, and the unconditional sync here
+  // turned each call into a vkQueueSubmit + vkQueueWaitIdle — a full pipeline
+  // stall per op, which defeats the deferred batching the resident-buffer design
+  // is built on. Measured by bench/nnshapes.k (doc/research/tropical.md, Exp 2):
+  // the params-writing ops ran 3-10x slower than their kernels account for, while
+  // ops without a params write matched the cost model to ~10%.
+  if (v.hasPendingWork(b)) {
+    if (std.mem.eql(u8, b.mapped[0..bytes.len], bytes)) return ki(0);
+    v.sync();
+  }
+  v.write(b, bytes);
   return ki(0);
 }
 

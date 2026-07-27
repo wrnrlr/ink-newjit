@@ -344,3 +344,12 @@ Each increment independently shippable; oracle in parentheses.
 - **Cost model honesty** (`columnar-execution.md` lesson): every scheduling
   default gets measured against the dumb path via `make bench` before it
   becomes default.
+- **Benchmark validity — the arithmetic may not be there.** A synthetic compute
+  load written as an affine chain (`c0 + c1*(c0 + c1*(... x)))`) is still `a*x+b`,
+  and the Metal compiler folds it to a single FMA. A 256-op chain measured
+  *identically* to a 1-op chain while `spirv-dis` confirmed dye had emitted all 256
+  operations, so an entire intensity sweep measured nothing. Chained transcendentals
+  (`sin`, `sqrt`) survive folding; affine chains do not. Verified 2026-07-27; the
+  harness that fell for it (`bench/tropical.k`) was deleted. The CPU benchmarks in
+  `bench/` are unaffected — a discarded top-level expression is NOT eliminated
+  (`\t:1000 a+b` at n=1e6 costs 347ms, at n=10 costs 0ms).

@@ -1,66 +1,129 @@
 # Issues
 
-## 24. kk elementwise chains: SILENTLY WRONG at exactly 28 ops, fail from 29
+## 24. FIXED — VM stack limits, and a nested-call unwind that corrupted `current_chunk`
 
-Found while building `bench/tropical.k` (see `doc/research/tropical.md`). A chained
-elementwise kernel compiles and computes correctly up to 27 ops, returns a **wrong
-result with no diagnostic** at exactly 28, and fails to compile from 29 up.
+Originally filed as "kk elementwise chains are silently wrong at 28 ops". The emitter
+was never at fault: `spirv-dis` showed the modules at 27/28/29 ops were valid and had
+exactly the right `OpFAdd`/`OpFMul` counts. Three separate runtime defects, found by
+following the chain-length cliff (`doc/research/tropical.md` §7):
 
-```sh
-# repro: chain of K fused multiply-adds, GPU vs CPU on the same lambda
-python3 - <<'PY'
-import subprocess
-for k in range(24,33):
-  body="0.0001+1.0001*"*k+"x"
-  open("/tmp/k.k","w").write(f'''2: "lib/kk.k"
-TK: {{{body}}}
-gpu.computeRun[{{[_]
-  a: 9: `f$ 3#1000.
-  r: kk.run[kk.plan[TK; ,a]; ,a]
-  `0 0: "k={k} gpu=",($ *| 8: r)," cpu=",($ TK 1000.),"\\n"
-  0}}]''')
-  print(subprocess.run(["./zig-out/bin/ink","/tmp/k.k"],capture_output=True,text=True).stdout.strip())
-PY
+1. **`FRAMES_MAX = 64` was far too shallow.** `kkClassify` (lib/dye.k) walks the CST by
+   recursion, once per operator, so a 28-op kernel expression exhausted the VM's call
+   frames. Raised to 4096 (a Frame is 32 bytes → 128 KB).
+2. **A nested run swallowed its error and popped garbage.** `callLambdaAndRun`/`…Move`
+   did `vm.runUntil(prev_frames) catch {}` and then `vm.pop()` — so a `StackOverflow`
+   became a plausible-looking wrong number instead of an error. This is what made the
+   28-op case return ~2x the right answer rather than failing. Now routed through
+   `abortNested`, which returns an error VALUE (`!StackOverflow`).
+3. **The unwind never restored `vm.current_chunk`** (neither the old `catch {}` nor the
+   first version of `abortNested`). Execution resumed in the caller's frame while
+   pointing at the abandoned callee's chunk, so the caller's ip indexed a foreign
+   constant array — surfacing as `panic: index out of bounds: index 260, len 2` in
+   `runUntil`, arbitrarily far from the real fault. `abortNested` now restores the
+   parent's chunk by the same rule `doReturn` uses.
+4. **`STACK_MAX = 2048` was the next wall.** With frames fixed, deep expressions ran the
+   VALUE stack out instead; the emitter then silently produced a 167-word stub kernel.
+   Raised to 16384.
+
+Result: kk elementwise chains went from a hard cap of 27 ops (silently wrong at 28) to
+correct GPU-vs-CPU agreement at 300 ops, verified across 27/28/32/64/100/128/200/300.
+All oracle rungs stay green including kkgold byte-identity and spirv-val.
+
+**Follow-up DONE: `kkClassify` is now a table scan** (lib/dye.k), so the classifier no
+longer consumes a VM frame per operator and has no depth budget at all. Every rule in
+the old `kkChk` was local — a node's verdict depends only on its own kind plus, for the
+three apply-ish kinds, the operator slot it consumes — so the whole classification is
+one pass over the CST rows. Row order is pre-order, which is exactly the order the
+recursion reported offenders in.
+
+Measured at 3000 ops: the recursive version produces no result; the scan returns in
+~125ms. `kkClassifyRec` is retained purely as the reference implementation, and
+`test/kkscan.k` (29 checks, wired into `test/oracles.sh`) asserts the two agree across
+every CST shape plus a 200-op chain — a silent divergence would make kk accept or reject
+the wrong kernels.
+
+The raised `FRAMES_MAX`/`STACK_MAX` are still there and still worth keeping (other
+recursive k code benefits), but kk no longer depends on them.
+
+## 23. RETRACTED — `$lambda` does NOT drop parentheses (bad repro)
+
+Filed during the tropical work as "a lambda taken out of a list loses its
+parentheses when stringified, so kk.plan re-parses a different expression". **It is
+not a bug.** The generator that produced the bench kernels was wrong:
+
+```python
+e = "x"
+for i in range(k): e = f"({e}*1.0001)+0.0001"   # WRONG: e already ends in +0.0001
+# k=2 emits ((x*1.0001)+0.0001*1.0001)+0.0001
+# intended  (((x*1.0001)+0.0001)*1.0001)+0.0001
 ```
 
-```
-k=27 gpu=1002.7067  cpu=1002.7072     ok
-k=28 gpu=2005.4108  cpu=1002.8076     WRONG (~2x)
-k=29 (no gpu value)                   compile fails
-```
-
-`kkClassify` returns clean (`` ` ``) at k=28 and `shader.map` emits a plausible
-455-word module, so the fault is downstream of classification — most likely an id/slot
-limit in the dye emitter or its IR arrays (55 ops at k=27 vs 57 at k=28 hints at a
-56-entry bound). Priority: the silent-wrong case matters more than the hard failure —
-a kernel that quietly computes something else defeats the whole oracle ladder.
-
-## 23. `$lambda` drops parentheses when the lambda comes out of a list
-
-Also found via `bench/tropical.k`. At the top level `$g` round-trips a parenthesised
-body faithfully, but the same lambda stored in a general list does not:
+The round-trip was compared against the string I *meant* to emit rather than the one
+actually emitted, so a faithful `$lambda` looked like it was dropping parens. Verified
+directly on a ReleaseFast build — a parenthesised body round-trips identically whether
+taken directly, out of a list, or out of a dict:
 
 ```k
-TK1: {(x*1.0001)+0.0001}
+TK2: {(((x*1.0001)+0.0001)*1.0001)+0.0001}
 FS: (TK1;TK2)
-$ FS 0   / -> {(x*1.0001)+0.0001*1.0001)+0.0001}   parens gone
+(,/$ FS 1) ~ ,/$ TK2     / 1b
 ```
 
-This is not cosmetic. `kk.plan` reconstructs the kernel by re-parsing `$fn`
-(`lamOf` → `parse[$fn]`), and k is right-to-left, so dropping the grouping compiles a
-**different expression** — silently, with no error. Any kk kernel selected out of a
-list of lambdas is suspect. Workaround in the bench harness: write chains that need no
-parentheses (`a+b*a+b*x` nests correctly on its own) and select with `$[...]` rather
-than list indexing.
+The two defects noticed alongside it ARE real and were verified independently — they
+keep their own entry as #25.
 
-Two smaller kk usability defects noticed alongside, not yet minimised:
+## 26. FIXED — `gpuBufferFree` queue drain, and uninitialised `Vk` fields
 
-- A `kk.plan` cached inside one `gpu.computeRun` and reused in a *later* one returns
-  all zeros — the plan cache holds pipeline handles belonging to a destroyed device
-  and is not keyed on the device generation.
-- kk binds lambda params positionally to `x`/`y`/`z`; a lambda whose params are named
-  otherwise (`{[a] a+a}`) compiles happily and returns zeros instead of being rejected
-  by `kkWarn`.
+Two things, one of which matters much more than the other.
+
+**The real bug: `Vk` fields were never initialised.** Both constructors do
+`var self: Vk = undefined` and then assign field by field, so struct-field DEFAULTS IN
+THE DECLARATION ARE NEVER APPLIED. The `pending_len`/`pending_all` added for the
+`gpuBufferWrite` fix were therefore garbage at startup — safe only because every read of
+them is gated behind `recording`, which *is* explicitly set to false. That is luck, not
+design. Adding a `dead_len` with no such gate turned the latent problem into a hang:
+`sync()` walked `self.dead[0..garbage]` calling `vkDestroyBuffer` on junk handles, and it
+hung at the first READBACK, before any free was issued. Both constructors now set every
+field explicitly.
+
+**The drain itself: real but small.** `gpuBufferFree` called `v.sync()` before destroying.
+It now defers the destroy to the next `sync()` (`destroyLater`), so a free never drains.
+
+Measured on an MHSA block (T=64, D=256, interleaved best-of, 3 rounds):
+**1.03x** — inside the noise (rounds: 1.03x, 1.06x, 0.97x).
+
+**The earlier estimate in this entry was wrong** and the reason is worth recording:
+`sync()` opens with `if (!self.recording) return`, so a RUN of consecutive frees costs
+ONE drain, not one per buffer. `lib/nn.k` frees its scratch in single `gpu.free'(...)`
+batches, so a Conformer block was paying ~4 drains (one per batch), not the ~36 this
+entry originally claimed. At ~250us a drain against a ~4800us block, that is ~3% — which
+is what the measurement shows.
+
+Kept anyway: the fix is correct, low-risk, and the field-initialisation half is a genuine
+correctness fix independent of performance. But it is NOT the second 2x — the
+`gpuBufferWrite` drain was expensive because it sat between dispatches and broke
+pipelining; this one sits at a block boundary where a drain was about to happen anyway.
+
+## 25. FIXED — kk silently returned ZEROS in two cases instead of failing
+
+Both found while building the tropical benchmark harness. Neither errored; both handed
+back a buffer of zeros that looked like a legitimate result. Both now fixed (lib/kk.k).
+
+1. **A plan cached in one `gpu.computeRun` and reused in a later one.** `kkPlanCache`
+   is keyed on (lambda source; #inputs; placement signatures) but NOT on the device, so
+   the second session gets a plan holding pipeline handles from the destroyed first
+   device. Repro: run the same `kk.plan` + `kk.run` in two consecutive
+   `gpu.computeRun` blocks — the first is correct, the second is all zeros.
+   **Fixed**: `kk.plan` now checks `gpu.gen` (the device generation counter lib/slug.k
+   already uses) and drops `kkPlanCache`/`kkCache`/`kkGrpPipe`/caps on a change.
+
+2. **A lambda whose params are not named `x`/`y`/`z`.** kk maps params positionally
+   (`pn: nIn # \`x\`y\`z`), so `{[a] a+a}` compiles happily, binds nothing, and returns
+   zeros. `kkClassify` reports clean, so `kkWarn` never fires. It should reject any
+   lambda whose declared params are not the expected positional names.
+   **Fixed**: `kkBadParams` rejects any lambda whose declared params are not `x`/`y`/`z`
+   positionally, naming the offenders. Implicit-param bodies (no declared params) stay
+   legal. Note `:expr` is not an early return in this dialect — the guard is a branch.
 
 ## 22. `lib/color.k` legacy HSL/pct helpers are broken (disabled) + a `\`-swallow lexer bug
 

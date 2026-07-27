@@ -36,7 +36,10 @@ gemmK: gpu.kernel[{[c;a;b;g;d]
 / 8×8-tiled GEMM with workgroup shared memory (kk.md finding 3). A 1-D workgroup of 64
 / threads computes an 8×8 block of C, cooperatively loading an 8×8 tile of BOTH A and B
 / into shared memory per K-tile — each A/B element is fetched from global once per tile
-/ (8× fewer global loads) instead of once per output. Block coords derive from the 1-D
+/ (8× fewer global loads) instead of once per output. That load count is exact, but the
+/ MEASURED speedup is 1.7-2.5x, not 8x (bench/nnshapes.py, M=N=K=64/128/512): the cache
+/ already recovers most of the traffic the tiling avoids, so the analytic ratio is an
+/ upper bound on the win, not a prediction of it. Block coords derive from the 1-D
 / index; the store index is computed (row*n+col). Requires M,N,K all multiples of 8 (then
 / M*N is a multiple of 64, so the launch is exact — no over-dispatch to guard). Same
 / params buffer (M;N;K) and thread count (M*N) as gemmK, so GemmR just swaps the pipeline.

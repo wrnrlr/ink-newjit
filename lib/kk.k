@@ -49,11 +49,36 @@ kkArgSig: {[a] k: !a
   s: s,$[`keys in k; "~k",(","/$'a`keys); ""]
   s}
 kkPlanKey: {[fn;args] `$ ($fn),"|",($kkScatForceI),"|",("^"/{[a] kkArgSig a}' args)}
-kk.plan: {[fn;args] key: kkPlanKey[fn;args]; $[key in !kkPlanCache; kkPlanCache key; kkPlanFresh[key;fn;args]]}
+/ Every cached pipeline/plan holds handles that belong to ONE device. A plan built
+/ inside one gpu.computeRun and reused in a later one pointed at a destroyed device
+/ and quietly produced a buffer of zeros. gpu.gen is the device generation counter
+/ (lib/slug.k resets its own caches the same way); bump it and everything device-
+/ specific here is dropped. Cheap: one FFI read per kk.plan, and the reset only runs
+/ when the generation actually changed.
+kkGen:: -1
+kkResetDev: {[g] kkGen:: g; kkPlanCache:: ()!(); kkCache:: ()!(); kkGrpPipe:: 0; kkCaps:: (); kkFA:: -1; 0}
+kkCheckGen: {[] g: `i$ gpu.gen[0]; $[g = kkGen; 0; kkResetDev g]}
+kk.plan: {[fn;args]
+  kkCheckGen[]
+  key: kkPlanKey[fn;args]; $[key in !kkPlanCache; kkPlanCache key; kkPlanFresh[key;fn;args]]}
 / Rejections (kkWarn's err value) are NOT cached — they carry no reusable pipeline.
 kkPlanFresh: {[key;fn;args] p: kkPlanBuild[fn;args]; $[(@p)~`"!"; p; kkStorePlan[key;p]]}
 kkStorePlan: {[key;p] kkPlanCache[key]:: p; p}
+/ kk binds a lambda's params POSITIONALLY to x/y/z (kkPlanGath's `pn`, shader.map's
+/ env). A lambda declaring any other name compiled happily, bound nothing, and
+/ returned a buffer of ZEROS — no error, no kkWarn. Reject it up front instead.
+/ (Implicit-param bodies declare no params at all, which stays legal.)
+kkArgNames: {[fn] lamArgs lamOf fn}
+kkBadParams: {[fn;nIn]
+  an: kkArgNames fn
+  $[0=#an; 0; ~ an ~ (#an) # `x`y`z; 1; 0]}
+/ `:expr` is not an early return in this dialect, so the guard is a branch: a bad
+/ lambda returns kkBadParamErr's error value, everything else falls through to
+/ kkPlanBuild2 (the original body).
+kkBadParamErr: {[fn] !"kk.compile: params must be named x/y/z positionally, got ",","/$'kkArgNames fn}
 kkPlanBuild: {[fn;args]
+  $[kkBadParams[fn; #args]; kkBadParamErr fn; kkPlanBuild2[fn;args]]}
+kkPlanBuild2: {[fn;args]
   kkPlanMisses:: kkPlanMisses + 1
   nIn: #args
   lamOf fn                                  / set Cst for the classify scans
@@ -361,7 +386,9 @@ kkRunDict: {[plan;args]
   [gpu: ob; t:`f; n: n; s: ,n]}
 kkPlanMap: {[fn;args;nIn]
   bad: kkClassify fn
-  $[(bad~`) & ~3<nIn; [kind:`map; pipe: kkMapPipe[fn;nIn]]; kkWarn[bad;nIn]]}
+  $[(bad~`) & ~3<nIn
+    ; [kind:`map; pipe: kkMapPipe[fn;nIn]]
+    ; kkWarn[bad;nIn]]}
 
 / ── Whole-buffer reduce (kk2 §6): +/d over a placement → a host scalar ─────────
 / Two-stage fallback (dye's shader.reduce): stage 1 dispatches P grid-strided

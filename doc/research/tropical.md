@@ -1,11 +1,45 @@
 # Tropical / max-plus methods in the Ink compiler
 
-**Status:** Experiment 1 (Task 1, phase 0) **run and measured** — see [Results](#results).
-Tasks 2–4 specified, not started. Companion to `doc/research/columnar-execution.md`
-(roofline / cost-model honesty) and `doc/design/kk.md` §2 "Scheduling decisions".
+**Status: CLOSED — negative result.** A three-monomial max-plus cost model is a decent
+regime classifier on uniform kernel shapes and **cannot rank schedules on real ones**.
+Task 1 phase 2 (using cost to choose plans) was dropped; Tasks 2-4 were never started
+and should not be. `kk.cost`/`kk.why` and the synthetic `bench/tropical.*` harness have
+been REMOVED from the tree. This document is kept as the record of what was measured
+and what it cost, because the negative result is the useful part.
 
-Harness: `bench/tropical.k` (generated kernels) + `bench/tropical.py` (driver, fitting).
-Raw data reproducible with `python3 bench/tropical.py --reps 2 --json out.json`.
+What the work produced, and it was not the cost model:
+
+- **Four VM correctness fixes** (`.plan/triage.md` #24), including a swallowed
+  `StackOverflow` that returned a plausible wrong number instead of an error, and an
+  unwind path that left `vm.current_chunk` pointing at an abandoned callee. Chain-length
+  cap went from 27 ops to 300.
+- **A 4-7.4x speedup** in `lib/nn.k`'s resident GPU ops: `gpuBufferWrite` drained the
+  queue (`vkQueueSubmit` + `vkQueueWaitIdle`) on every call, defeating the deferred
+  batching the resident-buffer design is built on.
+- **Two silent-zero defects fixed** in kk (`.plan/triage.md` #25).
+- **A reliable in-process benchmark harness** (`bench/nnshapes.*`), after the
+  subprocess-timing approach was shown to be wrong four different ways.
+- **One retracted bug report** (#23) that turned out to be a broken test generator.
+- **A flaky oracle traced to a real bug**: `test/kkint.k`'s `transI` had no
+  over-dispatch guard, so 52 stray threads wrote back into the live output range and
+  the check passed only ~5 runs in 6.
+- **A second unconditional drain** in `gpuBufferFree`, now fixed (`.plan/triage.md` #26)
+  — worth only 1.03x, because consecutive frees share one drain; the value in that fix
+  turned out to be the uninitialised `Vk` fields it exposed.
+
+End-to-end payoff of the one drain that IS fixed: **2.04x on an MHSA block** (T=64,
+D=256, interleaved best-of over 3 rounds). Microbenchmarks showed 4-7.4x; the smaller
+end-to-end figure is the honest one.
+
+The method that produced all of it: demand that the compiler predict its own
+performance, then chase every residual. The max-plus formalism supplied the discipline
+of asking "which monomial should dominate here, and does it?" — not a usable ranker.
+
+A caution recorded here because it invalidated a chunk of the work: **affine arithmetic
+chains are folded away by the Metal compiler.** `0.0001+1.0001*(...)` composed K times
+is still `a*x+b`, so a 256-op chain measured identically to a 1-op chain while
+`spirv-dis` confirmed dye emitted all 256 operations. Any benchmark that simulates
+compute load with affine arithmetic is measuring nothing.
 
 ---
 
@@ -169,20 +203,147 @@ The consequence for the programme is specific and slightly uncomfortable:
 That is a usable result either way — a regime classifier is worth having, and it is
 honest about what it cannot do.
 
-### Phase 1 (next)
+### Phase 1 (built, then REMOVED): `kk.cost` / `kk.why`
 
-1. Attach the symbolic triple `(bytes, ops, dispatches)` to the plan dict built by
-   `kkPlanBuild` (lib/kk.k:56). Every path already knows its binding count and element
-   count; this is bookkeeping, not analysis.
-2. Calibrate `L`, `BW`, `F` **once per device** from `gpu.caps` plus a short probe, cached
-   like `kkCaps` (lib/kk.k:414).
-3. Expose `kk.cost[plan; args]` → the three monomials plus which one dominates. First
-   consumer is a diagnostic, not a decision: `kk.why` telling the user why their kernel is
-   slow. That is shippable on its own and needs no optimiser.
-4. Only then: use it to choose between two legal plans, and gate that on the vertex
-   caveat above.
+*Kept below as the record of what was built and why it did not survive Finding 6.*
+
+Every plan constructor now records a static cost **shape** — `bpe` bytes/element, `ope`
+weighted flops/element, `nd` dispatches, and `cx` (`` `exact `` or `` `coarse ``) marking
+how trustworthy the byte accounting is for that path. `bpe` is per-path and real, not a
+guess: a planar table charges only the columns the body reads, an interleaved one charges
+the whole packed row, a gather charges source + index + output. `ope` is read off the CST
+once in `kkPlanBuild`, before the pipe builders re-parse and clobber `Cst`.
+
+`kk.cost[plan; n]` evaluates the three monomials; `kk.why[fn; args]` runs the kernel once
+(so the extent is the true one for every plan kind) and prints the breakdown:
+
+```
+kk.why  {sin sin … x}
+  plan     `map n=4194304 bytes/elem=8 flops/elem=384 (`exact)
+  launch   36 us  (5%)
+  memory   205 us  (30%)
+  compute  682 us  (100%)
+  => `compute-bound, 682 us, runner-up at 30% of it
+```
+
+Against measurement: 205 µs predicted vs 178 µs measured for the cheap kernel at 2^22
+(+15%), 682 vs 523 for `sin`×16 (+31%). For a three-constant model with no per-kernel
+tuning that is fine — and note the design decision that falls out of Finding 4: **the
+model reports its own reliability.** `tie` (runner-up / winner) is the normalised
+distance to the tropical hypersurface, and `kk.why` prints a warning past 0.75, where
+Experiment 1 measured ~25% error. A cost model that says "I am in the regime where I am
+wrong" is more useful than one that is silently confident.
+
+`kk.calibrate[L; bytes_per_us; flops_per_us]` replaces the constants;
+`python3 bench/tropical.py --calibrate` fits this machine and prints the line to paste.
+
+**A caveat that only surfaced on the second calibration run.** Refitting independently
+gave L = 35.8 µs and BW = 179 GB/s (vs 35.5 and 164 — reproducible), but F = 0.75 Tflop/s
+with sin = 4× FMA, against the first fit's 2.36 Tflop/s with sin = 12×. Those are not in
+conflict: the *products* agree to 5% (0.188 vs 0.197). **F and the op-weight table are
+only jointly identifiable**, because no kernel in the grid is compute-bound with a
+*known* flop count — the FMA family, the one whose arithmetic we know exactly, cannot
+reach the ridge while chains are capped at 27 ops by §7's bug. So Finding 3's claim needs
+qualifying: max recovers `L` and `BW` as physical constants; `F` is pinned only up to the
+op weights, and the two must be recalibrated together or not at all. Fixing the
+chain-length bug would close this directly, which makes it the highest-value follow-up.
+
+### Phase 2 (next)
+
+Use the cost to *choose*, not just report — the obvious first case is planar vs
+interleaved table layout, where `bpe` already differs by construction and the decision is
+currently made at placement time by hand. Gate it on `tie`: fall back to the existing
+default whenever the two candidate plans land near the hypersurface, since that is
+precisely where the model cannot tell them apart.
 
 ---
+
+## 2b. Experiment 2 — real kernel shapes (lib/nn.k)
+
+Experiment 1 measured ONE shape (elementwise map) very thoroughly: same 8 bytes/element
+and one dispatch at every point, with only arithmetic varying. That is a weak test.
+Experiment 2 runs eight of `lib/nn.k`'s production kernels — the ones the Parakeet
+pipeline executes — over shapes the elementwise grid says nothing about: reductions per
+output, shared-memory tiling, and multi-dispatch ops.
+Harness `bench/nnshapes.k` + `bench/nnshapes.py`; model comparison `bench/nnfit.py`.
+
+**Everything below is ReleaseFast.** Experiments run during development were built with a
+plain `zig build`, which is DEBUG — the mistake this repo's notes explicitly warn about.
+Re-measuring changed the picture materially at the cheap end (elementwise agreement went
+from ~0.7x to ~1.0x) while leaving the launch floor alone (38.7us Release vs 36-45us
+Debug — it is genuine Vulkan descriptor/recording cost, not interpreter overhead).
+
+### Finding 5 — the model is excellent on uniform shapes and poor on real ones
+
+| kernel | model / measured |
+|---|---|
+| silu, gelu (elementwise) | 0.82-1.02x |
+| gemm, gemmt (launch-bound) | 0.88-0.93x |
+| gemm S=512 | **5.49x** (model far too slow) |
+| attnctx S=128/512 | 2.38x / 3.90x (too slow) |
+| attnsc | 0.42-0.58x (too fast) |
+| softmax, layernorm | 0.43-0.72x (too fast) |
+
+Median error 53% over 36 points (51% on the stall-free subset), against ~3% for
+Experiment 1 — and note the direction of travel: every harness improvement has made
+the model look WORSE, because the earlier noise was flattering it. The failures are systematic and go in BOTH directions: too optimistic
+where access is strided or serial, too pessimistic where there is cache reuse. Fitting
+an occupancy floor `max(threads, P)` recovers nothing (P fits to 1-3); fitting a reuse
+divisor for GEMM helps that kernel (5.8x) and cuts the worst case but not the median.
+
+### Finding 6 — the model cannot rank two schedules for the same computation
+
+This is the result that matters, because ranking schedules is the whole point of a
+compiler cost model. Plain vs 8x8-tiled GEMM: identical flops, ~8x different analytic
+traffic, and `lib/nn.k` chooses between them today with a hand-written 8-alignment test.
+
+| S | predicted speedup | measured |
+|---|---|---|
+| 64 | 7.59x | **1.74x** |
+| 128 | 7.79x | 1.71x |
+| 512 | 7.95x | 2.46x |
+
+Off by 3-4.5x (in-process timing; earlier Debug and subprocess runs put it anywhere
+from 0.68x to 2.4x, which is its own comment on those harnesses). The hardware cache
+already recovers most of what tiling buys, and the model has no notion of a cache. **Task 1 phase 2 — using kk.cost to choose
+between plans — should be dropped, not deferred.** A three-monomial max-plus model is a
+serviceable regime classifier on uniform shapes and is not fit to pick schedules.
+
+### Finding 7 — the residuals located a real performance bug
+
+The first Experiment 2 run showed the params-writing ops (softmax, layernorm, attnsc,
+attnctx) running 3-10x slower than their kernels could account for, while ops without a
+params write matched the model. The split was not by shape but by INVOCATION: those four
+call `gpu.write` on a small params buffer every invocation, and `gpuBufferWrite` called
+`v.sync()` unconditionally — `vkQueueSubmit` + `vkQueueWaitIdle`. Every call drained the
+queue, defeating the deferred batching the resident-buffer design is built on.
+
+Fixed in `lib/gpu/vk.zig` + `gpu_vk.zig`: track which buffers the current unsubmitted
+batch references and drain only on a real conflict; and when the bytes already match
+what the buffer holds, skip the write entirely (the dims are constant across calls, so
+a `vkQueueWaitIdle` becomes a `memcmp`). Same-build ReleaseFast A/B:
+
+| op | pre-fix | post-fix | speedup |
+|---|---|---|---|
+| softmax S=64 | 698.7us | 172.4us | 4.05x |
+| softmax S=1024 | 727.7us | 181.6us | 4.01x |
+| layernorm S=64 | 668.7us | 154.6us | 4.33x |
+| attnsc S=64 | 625.6us | 84.4us | **7.41x** |
+| attnctx S=64 | 490.1us | 68.9us | **7.11x** |
+
+Same build, same session, revert-and-restore of that one hunk, timed IN-PROCESS.
+An earlier subprocess-timed version of this A/B reported 2.7-5.2x — it UNDERSTATED
+the win, because whole-process wall time buries a per-call stall under start-up and
+device-creation noise. Residual wrapper overhead versus a hoisted params write is now
+1.00-1.09x, i.e. the drain is gone rather than merely reduced.
+
+### What Experiment 2 says about the programme
+
+The tropical framing has paid for itself, but as a **forcing function for measurement**
+rather than as a predictor. Demanding that the compiler predict its own performance, and
+then chasing every residual, produced four VM correctness fixes and a 2.7-5.2x speedup in
+shipped code. The max-plus formalism contributed the discipline of asking "which
+monomial should dominate here, and does it?" — not a usable schedule ranker.
 
 ## 3. Task 2 — max-plus critical path over the dispatch DAG
 
@@ -233,33 +394,66 @@ language.
 
 ## 7. Bugs found while building the harness
 
-Both are in `.plan/triage.md` with repros. Both were found *because* the experiment forced
-unusual kernel shapes, which is an argument for keeping this harness around.
+The experiment forced kernel shapes nobody had written before, and that flushed out four
+runtime defects — one of which was silently corrupting numeric results. Full write-up in
+`.plan/triage.md` #24 and #23.
 
-- **Chained-op cliff.** A kk elementwise chain is correct to 27 ops, **silently wrong at
-  exactly 28** (returns ~2× the right answer), and fails to compile from 29. Silent
-  miscompilation, not a diagnostic. This is what caps the FMA family's intensity and
-  forced the `sin` family into the experiment.
-- **`$lambda` drops parentheses out of a list.** `kk.plan` re-parses `$fn`, so a
-  parenthesised body stored in a list compiles to a *different expression* on the GPU —
-  right-to-left re-association, no error. All `bench/tropical.k` chains are paren-free to
-  dodge it.
+**The chain-length cliff was never an emitter bug.** `spirv-dis` on the modules at 27, 28
+and 29 ops showed all three valid with exactly the right `OpFAdd`/`OpFMul` counts. The
+real causes, in the order they surfaced:
 
-Also worth noting, not yet filed as bugs:
+1. `FRAMES_MAX = 64` — `kkClassify` walks the CST by recursion, once per operator, so a
+   28-op expression exhausted the VM call stack. Now 4096.
+2. `callLambdaAndRun` did `runUntil(...) catch {}` then `pop()` — a `StackOverflow`
+   became a **plausible-looking wrong number** instead of an error. That is the whole
+   explanation for "silently wrong at exactly 28". Now returns an error value.
+3. Neither the old `catch {}` nor the first fix restored `vm.current_chunk` on unwind, so
+   the caller resumed against the abandoned callee's chunk and the VM panicked with an
+   out-of-bounds constant index far from the real fault.
+4. `STACK_MAX = 2048` was the next wall; past it the emitter silently produced a
+   167-word stub kernel. Now 16384.
 
-- A `kk.plan` cached in one `gpu.computeRun` and reused in the next returns **zeros** —
-  the plan cache holds pipeline handles from a destroyed device and is not keyed on it.
-- `kk` maps lambda parameters positionally to `x`/`y`/`z`; a lambda with differently-named
-  params (`{[a] a+a}`) compiles and returns zeros instead of being rejected.
+**Result: the cap went from 27 ops to 300**, GPU matching CPU at 27/28/32/64/100/128/200/
+300, with every oracle rung still green (including `kkgold` byte-identity and
+`spirv-val`). This directly unblocks the science — see below.
+
+Still open: **`$lambda` drops parentheses out of a list**, and `kk.plan` re-parses `$fn`,
+so a parenthesised body stored in a list compiles to a *different* expression on the GPU
+with no error. All `bench/tropical.k` chains stay paren-free to dodge it. Also unfiled: a
+plan cached across `gpu.computeRun` sessions returns zeros (cache not keyed on device),
+and a lambda whose params are not named `x`/`y`/`z` returns zeros instead of being
+rejected.
+
+### What the fix bought the experiment
+
+With chains capped at 27 ops the FMA family could only reach ~4 flop/byte against a ~25
+machine balance, so it never crossed the ridge — which is exactly why `F` was identifiable
+only as a product with the transcendental weight (§2, Finding 3's caveat). At 256 ops the
+FMA family reaches **64 flop/byte**, comfortably past the ridge, with an exactly known
+flop count. The grid is now 12 kernels (FMA K = 1…256, sin K = 1,4,16) and `F` is measured
+directly rather than inferred, with the sin chains demoted to an independent cross-check
+on the op weight.
 
 ## 8. Reproducing
 
+The synthetic harness (`bench/tropical.*`), the cost model (`kk.cost`/`kk.why`) and
+`test/kkcost.k` were all REMOVED when this line of work closed — the commands that used
+them are gone with them. What survives and still runs:
+
 ```sh
-zig build && zig build gpu
-python3 bench/tropical.py --quick            # 3 sizes x 4 kernels, ~1 min
-python3 bench/tropical.py --reps 2 --json /tmp/trop.json   # full 80-point grid, ~6 min
+zig build -Doptimize=ReleaseFast && zig build gpu -Doptimize=ReleaseFast
+python3 bench/nnshapes.py --quick      # lib/nn.k's real kernels, in-process timing
+python3 bench/nnshapes.py --reps 3     # full grid + wrapper-vs-hoisted + tiled GEMM
+INK=zig-out/bin/ink sh test/oracles.sh
 ```
 
-`bench/tropical.k` was generated (unrolled chains + a `$[...]` family selector) and is
-checked in as plain text — extend it by editing the chain bodies and the `KS`/`FAM`
-tables directly. Keep chains ≤27 ops and parenthesis-free until §7's two bugs are fixed.
+**Benchmark on a ReleaseFast build.** A plain `zig build` is Debug, and every number in
+this document was initially taken that way. It left the launch floor alone (38.7us vs
+36-45us) but distorted the cheap end badly — elementwise agreement moved from ~0.7x to
+~1.0x on re-measurement.
+
+**Time in-process.** `` `t[] `` (src/runtime/syms.zig) is a microsecond CLOCK_MONOTONIC
+counter that works inside a lambda, so the timed region can sit inside `gpu.computeRun`
+around the dispatch loop alone. Differencing whole-subprocess wall times charges every
+point with process start-up, device creation, allocation, upload and readback; porting
+away from it took reproducibility from ~80% to ~1% and removed a 65% inflation.

@@ -11,6 +11,7 @@ const home = @import("../home.zig");
 const FnTables = @import("fntable.zig").FnTables;
 const call = @import("call.zig");
 const V = @import("../noun/value.zig").V;
+const Err = @import("../noun/value.zig").Err;
 const N = @import("../noun/array.zig").N;
 const K = @import("../noun/class.zig").K;
 const opmod = @import("../noun/operator.zig");
@@ -26,8 +27,12 @@ const MockWriter = @import("../util.zig").MockWriter;
 const SlabAlloc = @import("../noun/slab.zig").SlabAlloc;
 const Partials = std.heap.MemoryPool(Partial);
 
-const STACK_MAX = 2048;
-const FRAMES_MAX = 64;
+const STACK_MAX = 16384;
+// A Frame is 32 bytes, so this budget costs FRAMES_MAX*32 bytes in the VM struct.
+// 64 was too shallow for recursive algorithms written in k — lib/kk.k's CST
+// classifier recurses once per operator in a chain, so a 28-op kernel expression
+// exhausted it (doc/research/tropical.md §7).
+const FRAMES_MAX = 4096;
 // Global slots. Indexed by a u16 in the bytecode (.Global/.AssignGlobal/list-assign),
 // so a program may define up to this many distinct global names (was 256).
 pub const MAX_GLOBALS = 4096;
@@ -278,6 +283,26 @@ pub const VM = struct {
     try vm.push(fc.apply(func, incoming, mode == .bracket));
   }
 
+  // A nested run (callLambdaAndRun*) that errors must unwind its frames and hand
+  // back an ERROR VALUE — `catch {}` + pop() would return whatever happened to be
+  // on the stack, turning a StackOverflow into a plausible-looking wrong answer.
+  fn abortNested(vm: *VM, prev_frames: usize, res_slot: usize, e: anyerror) V {
+    vm.frames_len = prev_frames;
+    // Restore the chunk the frame we are returning INTO belongs to — same rule as
+    // doReturn. Skipping this leaves current_chunk pointing at the abandoned
+    // callee, so the caller's ip then indexes a foreign constant/code array and
+    // the VM panics with an out-of-bounds index far from the real fault.
+    if (vm.frames_len > 0) {
+      const parent_idx = vm.currentFrame().lambda_idx;
+      vm.current_chunk = if (parent_idx == NO_LAMBDA) vm.chunk
+                         else vm.fn_tables.lambdaAt(parent_idx).chunk;
+    } else vm.current_chunk = vm.chunk;
+    for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
+    vm.stack_len = res_slot;
+    const idx = vm.intern(@errorName(e)) catch return V{ .err = .memory };
+    return V{ .err = Err.from(idx) };
+  }
+
   fn cleanStack(vm: *VM, res_slot:usize) V {
     for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
     vm.stack_len = res_slot;
@@ -291,7 +316,7 @@ pub const VM = struct {
     vm.push(.blank) catch return V{ .err = .memory };
     for (args) |arg| vm.push(arg.ref()) catch return vm.cleanStack(res_slot);
     vm.callLambda(ref, args.len, res_slot) catch return vm.cleanStack(res_slot);
-    vm.runUntil(prev_frames) catch {};
+    vm.runUntil(prev_frames) catch |e| return vm.abortNested(prev_frames, res_slot, e);
     return vm.pop();
   }
 
@@ -306,7 +331,7 @@ pub const VM = struct {
     vm.push(.blank) catch return V{ .err = .memory };
     for (args) |arg| vm.push(arg) catch return vm.cleanStack(res_slot);
     vm.callLambda(ref, args.len, res_slot) catch return vm.cleanStack(res_slot);
-    vm.runUntil(prev_frames) catch {};
+    vm.runUntil(prev_frames) catch |e| return vm.abortNested(prev_frames, res_slot, e);
     return vm.pop();
   }
 
