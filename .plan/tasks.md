@@ -47,8 +47,6 @@ Add skills for the following task profiles.
 
 ## Remove `.blank` type
 
-## New operators for colors: cube-root `cbrt`
-
 ## Paralle each adverb
 Maybe we can use the digram form of the each adverb for parallel each.
 There is already stencil and window, we can add `` `ncpu f'!1000 `` to mean
@@ -198,3 +196,18 @@ inside readers when file-loaded.
   analytic through lib/canvas.k; triangulate.zig / fill.frag / gpuFill / gpuTess deleted.
 - **OKLab colormaps for dataviz** — generate perceptually-uniform colormap textures (the `texType 3` path) CPU-side; pairs naturally with the OKLab work.
 - **Self-host `fill.vert`** — the last GLSL blob; needs a vertex-attribute path in dye. Low value (build no longer depends on glslang; it's a committed `.spv`).
+
+## rework the namespace module system.
+
+I want to only use fully qualified names when declaring and using identifiers.
+We currently use the `\d` declare command together with a lookup strategy where we match a identifier with the local namespace before looking for that name in the global namespace.
+
+This is confusing the follow, makes tooling lsp hard and is brittle because some local namespace can shadow the global namespace, The namespace is also nothing more then a naming convention for identifiers using a dot in their name.
+
+So I want to just use the fully qualified names in the library and examples. [@lib](file:///Users/werner/Code/ink/lib/) [@demo](file:///Users/werner/Code/ink/demo/) 
+
+Remove the module logic from the VM but keep the autoloading (it should be easier) and update all the library code. The autoloading should keep working.
+
+this should also get rit of the visibility rules for namespaces.
+
+Try to keep the namespace clean by putting helper functions that are only used inside of a lambda in that namespace

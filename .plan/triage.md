@@ -180,13 +180,6 @@ or run as the main script. Repro: file `\d world; el:0.; probe:{[] el}; \d`; the
 namespace fn) makes both align. Likely compile-time name-mangling treating read-only members as
 file-private. Workaround: set members via an internal setter fn. Found building demo/timer.k.
 
-## `>=` misparse in lib/pga.k:39 (found by tools/klint.k) — FIXED 2026-07-23
-`pgaLDotF: … & pgaGrd[pgaBj]>=pgaGrd[pgaAi]` — k has no `>=`; this parsed as
-`pgaGrd[pgaBj] > (=pgaGrd[pgaAi])` (a monadic `=` group of the RHS), so the left-contraction grade
-filter was garbage. Fixed to `~(pgaGrd[pgaBj]<pgaGrd[pgaAi])`. Verified: `pgaLDotF` is now a proper
-256-element boolean mask (= `~(gradeB<gradeA)` AND the grade-difference condition); klint clean.
-Surfaced by the `<=`/`>=` linter `tools/klint.k` (`make lint`).
-
 ## Deeply-nested INLINE layout expression silently halts execution (found building demo/earth HUD)
 Writing a nested `ui.col`/`ui.row` tree as ONE inline expression silently stops the script at that
 statement — no error, exit 0, and every following top-level statement (incl. `window.run`) never
