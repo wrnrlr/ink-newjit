@@ -305,7 +305,7 @@ or run as the main script. Repro: file `\d world; el:0.; probe:{[] el}; \d`; the
 namespace fn) makes both align. Likely compile-time name-mangling treating read-only members as
 file-private. Workaround: set members via an internal setter fn. Found building demo/timer.k.
 
-## Deeply-nested INLINE layout expression silently halts execution (found building demo/earth HUD)
+## Deeply-nested INLINE layout expression silently halts execution — FIXED 2026-07-30
 Writing a nested `ui.col`/`ui.row` tree as ONE inline expression silently stops the script at that
 statement — no error, exit 0, and every following top-level statement (incl. `window.run`) never
 runs. Reliable repro (`2:"lib/ui.k"` first):
@@ -326,6 +326,17 @@ completion), so the trigger is subtle — likely a compiler pass (constant-fold/
 list/dict construction, aborting the chunk silently. A silent halt with exit 0 is the dangerous
 part. Workaround in demo/earth.k: build the HUD tree in named locals inside the lambda.
 
+**Root cause + fix (2026-07-30):** the repro expression is genuinely UNBALANCED (an extra
+`)`), and every closing bracket in the parser was consumed with `_ = self.eat(…)` — the
+result discarded. A missing closer left the cursor parked on someone else's token, so the
+production returned "successfully" and the rest of the file was swallowed: exit 0, no error.
+All 12 sites now go through `Parser.close()`, which errors mid-source but stays lenient at
+EOF (lib/syntax.k re-parses half-typed source on every keystroke to highlight, so `f:{[a;`
+must still yield a partial tree). The repro now reports
+`!parse_error: UnexpectedToken at 2:42` with a caret. No workaround needed — but note the
+expression was malformed all along, so the "named steps" version was not just a workaround,
+it was the correct code.
+
 ## A 5th vertex→fragment varying isn't delivered by shader.vertexPull/fragmentTexN (demo/earth.k)
 Adding a 5th varying to the earth pipeline (wNor v3, wTan v3, wUvF v4, wSun v3, **wLay v2**) read as
 0 in the fragment even when the vertex hardcoded it to 1.0 — the globe went black when output. The
@@ -337,7 +348,7 @@ fragmentTexN. Workaround used: pack the flag into a spare lane of an existing va
 bordersOn in .w). Worth pinning down the real rule in shader.vertexPull location assignment so
 overlays can add channels without hunting for spare lanes.
 
-## `test/llm.k` fails to parse (`!parse_error: UnexpectedToken`)
+## `test/llm.k` fails to parse (`!parse_error: UnexpectedToken`) — FIXED 2026-07-30
 `make test` runs `$(INK) test/llm.k` and it aborts immediately with
 `!parse_error: UnexpectedToken`; nothing in the file is exercised. Pre-existing —
 reproduces with an otherwise clean tree (confirmed by stashing unrelated changes),
@@ -345,7 +356,13 @@ so it is not fallout from the nn/ASR work. `make test` does not stop on it becau
 the recipe lines aren't `set -e`-guarded, so the failure is easy to miss.
 Unrelated to this task; found while running the suite for demo/asr.k.
 
-## A SPACED `\` is the scan adverb, never the split verb
+**FIXED:** once parse errors carried a location it took one line to see — the file had
+`{[in] "You rolled a 4"}`, a lambda parameter named after the keyword verb `in`, which
+the grammar rejects. Renamed to `arg`; the test now runs (18 assertions pass). Note the
+`make test` recipe still isn't `set -e`-guarded, so a future failure there is still easy
+to miss — worth fixing separately.
+
+## A SPACED `\` is the scan adverb, never the split verb — FIXED 2026-07-30
 `sep \ str` silently means "scan", so `"\n" \ 1: path` returned the whole file as a
 ONE-element list instead of splitting it into lines. This is what made
 `nnLoadVocab` (lib/nn.k) return a 1-entry vocab, so every detokenized transcript
@@ -353,3 +370,9 @@ came out empty. The glued forms `"\n"\s` and `NL\s` both split correctly; only t
 spaced form is wrong. It is a silent wrong-answer rather than an error, which makes
 it nasty — worth either rejecting `verb-adverb` where a dyad was clearly intended,
 or at least calling it out in AGENT.md next to the other adverb-glue gotchas.
+
+**FIXED:** the lexer tested `had_space` when deciding adverb-vs-adverb_val for `'` and
+`\`. It no longer does — only the operand to the LEFT decides, so `sep \ str` means the
+same as `sep\str` and `f ' xs` the same as `f'xs`. `/` deliberately KEEPS its spacing
+rule, because ` / ` after a noun or verb is a comment; that asymmetry is now documented
+in AGENT.md rather than being a silent trap.

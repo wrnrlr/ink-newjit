@@ -20,11 +20,18 @@
   transcript come out empty), and `f ' xs` errored where `f'xs` worked. Only the
   operand to the LEFT decides now. `/` deliberately keeps its spacing rule — ` / ` is
   a comment.
-- **A malformed dict entry is refused instead of desyncing the parser.** `parseItems`
-  used to `break` silently on a missing `key:`, and `parseDictOrArgs` discarded the
-  result of `eat(.@"]")`, leaving the cursor mid-bracket. `[3;4]` produced an EMPTY
-  dict plus a stray `4` statement; inside `$[…]` it ate the `]` and absorbed the
-  following statement, so trailing code vanished with exit 0.
+- **Every closing bracket is now checked.** All 12 sites consumed their closer as
+  `_ = self.eat(…)`, discarding the result, so a missing one left the cursor parked on
+  someone else's token and the production returned "successfully" — swallowing the rest
+  of the file with exit 0. `[3;4]` yielded an EMPTY dict plus a stray `4` statement;
+  inside `$[…]` it ate the `]` and absorbed the following statement. This also explains
+  the long-standing "deeply-nested inline layout silently halts execution" report from
+  demo/earth.k (`.plan/triage.md`): that expression has an extra `)`, and the parser
+  simply stopped without saying so.
+  The new `Parser.close()` errors mid-source but stays lenient at EOF, because
+  `parse` must tolerate HALF-TYPED source — lib/syntax.k re-parses on every keystroke
+  to highlight, so `f:{[a;` still has to yield a partial tree. (The syntax suite caught
+  exactly that when the first cut was strict everywhere.)
 
 **Runtime** error locations are NOT included. Every hook lands on the hot path: the
 dispatch loop has no error branch at all today, and adding `if (r == .err)` to
