@@ -44,6 +44,16 @@ pub const Parser = struct {
     if (self.tok.tt == tt) { self.advance(); return true; }
     return false;
   }
+  // Consume a closing bracket. Missing it MID-SOURCE is a real desync — the
+  // production would otherwise return with the cursor parked on someone else's
+  // token, silently swallowing the statements that follow (an extra `)` used to
+  // truncate the rest of the file with exit 0). Missing it at EOF is just
+  // half-typed input, which `parse` must tolerate: lib/syntax.k re-parses on every
+  // keystroke to highlight, so `f:{[a;` has to yield a partial tree, not an error.
+  fn close(self: *Parser, tt: TT) ParseError!void {
+    if (self.eat(tt) or self.is(.eof)) return;
+    return error.UnexpectedToken;
+  }
   pub fn deinit(self: *Parser) void { self.arena.deinit(); }
   pub fn free(_: Parser, _: *Node) void {}
   fn al(self: *Parser) Alloc { return self.arena.allocator(); }
@@ -424,11 +434,11 @@ pub const Parser = struct {
     self.advance(); // consume '('
     if (self.eat(.@")")) return self.node(.{ .list = .{ .seq = null } });
     if (self.is(.adverb_val) and self.lex.peekNext().tt == .@")") {
-      const adv = self.slice(); self.advance(); _ = self.eat(.@")");
+      const adv = self.slice(); self.advance(); try self.close(.@")");
       return self.node(.{ .group = .{ .stmt = try self.node(.{ .adverb_val = adv }) } });
     }
     const seq = try self.parseSeq(.@")");
-    _ = self.eat(.@")");
+    try self.close(.@")");
     if (seq.len == 1) {
       defer self.al().free(seq);
       return self.node(.{ .group = .{ .stmt = seq[0] } });
@@ -482,7 +492,7 @@ pub const Parser = struct {
     var seq: ?ast.Seq = null;
     if (!self.is(.@"}")) seq = try self.parseSeq(.@"}");
     const end = self.tok.end;
-    _ = self.eat(.@"}");
+    try self.close(.@"}");
     return self.node(.{ .lambda = .{ .a = args, .b = seq, .start = start, .end = end } });
   }
 
@@ -507,7 +517,7 @@ pub const Parser = struct {
     }
     if (awaiting and args.items.len > 0)
       try args.append(self.al(), .{ .is_some = false, .value = "", .start = self.tok.start, .end = self.tok.start });
-    _ = self.eat(.@"]");
+    try self.close(.@"]");
     return args.toOwnedSlice(self.al());
   }
 
@@ -515,23 +525,23 @@ pub const Parser = struct {
     self.advance(); // consume '['
     if (self.is(.@"]")) { self.advance(); return self.node(.{ .dict = .{ .items = null } }); }
     const items = try self.parseItems(.@"]");
-    if (!self.eat(.@"]")) return error.UnexpectedToken;   // don't leave the cursor mid-bracket
+    try self.close(.@"]");   // don't leave the cursor mid-bracket
     return self.node(.{ .dict = .{ .items = if (items.len > 0) items else null } });
   }
 
   fn parseTable(self: *Parser) ParseError!*Node {
     self.advance(); // consume '[[]'
     const items = try self.parseItems(.@"]");
-    _ = self.eat(.@"]");
+    try self.close(.@"]");
     return self.node(.{ .table = .{ .items = if (items.len > 0) items else null } });
   }
 
   fn parseUTable(self: *Parser) ParseError!*Node {
     self.advance(); // consume '[['
     const keys = try self.parseItems(.@"]");
-    _ = self.eat(.@"]");
+    try self.close(.@"]");
     const vals = try self.parseItems(.@"]");
-    _ = self.eat(.@"]");
+    try self.close(.@"]");
     return self.node(.{ .utable = .{
       .keys = if (keys.len > 0) keys else null,
       .items = if (vals.len > 0) vals else null,
@@ -548,8 +558,9 @@ pub const Parser = struct {
       // `[3;4]` yielded an EMPTY dict plus a stray `4` statement, and inside `$[…]`
       // it swallowed the `]` and absorbed the following statement, so trailing code
       // vanished with exit 0. Refuse it instead — a dict entry is always `key: value`.
-      const key = try self.parseItemKey() orelse return error.UnexpectedToken;
-      if (!self.eat(.@":")) return error.UnexpectedToken;
+      const key = try self.parseItemKey() orelse
+        { if (self.is(.eof)) break; return error.UnexpectedToken; };
+      if (!self.eat(.@":")) { if (self.is(.eof)) break; return error.UnexpectedToken; }
       const val: *Node = if (self.is(end_tt) or self.is(.sep) or self.is(.eof))
         try self.node(.blank) else try self.parseStmt();
       try items.append(self.al(), .{ .k = key, .v = val });
@@ -574,7 +585,7 @@ pub const Parser = struct {
     self.advance(); // consume '['
     if (self.eat(.@"]")) return self.recEnd(try self.node(.{ .apply = .{ .f = f, .a = null } }), st, self.prev_end);
     const seq = try self.parseSeq(.@"]");
-    _ = self.eat(.@"]");
+    try self.close(.@"]");
     return self.recEnd(try self.node(.{ .apply = .{ .f = f, .a = seq } }), st, self.prev_end);
   }
 
@@ -583,10 +594,10 @@ pub const Parser = struct {
   fn parseApplyWithDict(self: *Parser, f: *Node) ParseError!*Node {
     self.advance(); // consume '[['
     const dict_items = try self.parseItems(.@"]");
-    _ = self.eat(.@"]");
+    try self.close(.@"]");
     const first_arg = try self.node(.{ .dict = .{ .items = if (dict_items.len > 0) dict_items else null } });
     const rest = try self.parseSeq(.@"]");
-    _ = self.eat(.@"]");
+    try self.close(.@"]");
     var seq = try std.ArrayList(*Node).initCapacity(self.al(), rest.len + 1);
     try seq.append(self.al(), first_arg);
     for (rest) |r| try seq.append(self.al(), r);
@@ -608,7 +619,7 @@ pub const Parser = struct {
       // block written as a $[] branch. Stop on no forward progress.
       if (self.tok.start == before) break;
     }
-    _ = self.eat(.@"]");
+    try self.close(.@"]");
     return self.node(.{ .cond = .{ .stmts = try stmts.toOwnedSlice(self.al()) } });
   }
 

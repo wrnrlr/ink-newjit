@@ -1452,6 +1452,15 @@ test "a malformed dict entry is refused, not silently desynced" {
   // statement — trailing code vanished with exit 0.
   try testing.expectError(error.UnexpectedToken, t.vm.parser.?.parse("[3;4]"));
   try testing.expectError(error.UnexpectedToken, t.vm.parser.?.parse("$[1;2;[3;4]]"));
+  // An unmatched closer mid-source used to truncate the REST OF THE FILE silently
+  // (exit 0) — this is the demo/earth.k "deeply-nested inline layout halts" report.
+  try testing.expectError(error.UnexpectedToken,
+    t.vm.parser.?.parse("a:1\ny: f[0.; (g[0.; (h[1.; (,i[\"EE\"])]; j[])); k[])]\nb:2\n"));
+  // But HALF-TYPED source must still parse — lib/syntax.k re-parses on every
+  // keystroke to highlight, so a missing closer at EOF is tolerated, not an error.
+  _ = try t.vm.parser.?.parse("f:{[a;");
+  _ = try t.vm.parser.?.parse("[a:1;b");
+  _ = try t.vm.parser.?.parse("f[1;2");
   // Valid dict/table forms are unaffected.
   try t.check("[x:1;y:2]", "[x:1;y:2]");
   try t.check("a:[]; #a", "0");
