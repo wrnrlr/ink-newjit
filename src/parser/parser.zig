@@ -30,6 +30,10 @@ pub const Parser = struct {
   // comments from the tree, so they are captured here for the CST table / doc
   // tooling. Arena-backed, cleared each parse().
   comments: std.ArrayList([2]u32) = .empty,
+  // Byte offset of the token a failed parse stopped on. Set by parse()'s errdefer,
+  // so every error site gets a position for free without threading one through.
+  // Compile-time only — nothing here reaches the VM.
+  err_pos: u32 = 0,
 
   pub fn init(backing: Alloc) Parser {
     var l = Lexer.init("");
@@ -119,6 +123,10 @@ pub const Parser = struct {
     self.src = src;
     self.lex = Lexer.init(src);
     self.tok = self.lex.next();
+    self.err_pos = 0;
+    // Errors propagate without touching parser state, so on the way out `tok` is
+    // still sitting on the token that could not be consumed.
+    errdefer self.err_pos = self.tok.start;
     return self.parseTerse();
   }
 
@@ -507,7 +515,7 @@ pub const Parser = struct {
     self.advance(); // consume '['
     if (self.is(.@"]")) { self.advance(); return self.node(.{ .dict = .{ .items = null } }); }
     const items = try self.parseItems(.@"]");
-    _ = self.eat(.@"]");
+    if (!self.eat(.@"]")) return error.UnexpectedToken;   // don't leave the cursor mid-bracket
     return self.node(.{ .dict = .{ .items = if (items.len > 0) items else null } });
   }
 
@@ -536,8 +544,12 @@ pub const Parser = struct {
       self.skipComments();
       if (self.is(end_tt) or self.is(.eof)) break;
       if (self.is(.sep)) { self.advance(); continue; }
-      const key = try self.parseItemKey() orelse break;
-      if (!self.eat(.@":")) break;
+      // A malformed entry used to `break` silently, leaving the cursor mid-bracket:
+      // `[3;4]` yielded an EMPTY dict plus a stray `4` statement, and inside `$[…]`
+      // it swallowed the `]` and absorbed the following statement, so trailing code
+      // vanished with exit 0. Refuse it instead — a dict entry is always `key: value`.
+      const key = try self.parseItemKey() orelse return error.UnexpectedToken;
+      if (!self.eat(.@":")) return error.UnexpectedToken;
       const val: *Node = if (self.is(end_tt) or self.is(.sep) or self.is(.eof))
         try self.node(.blank) else try self.parseStmt();
       try items.append(self.al(), .{ .k = key, .v = val });

@@ -37,7 +37,7 @@ ok["xai no max_tokens"; 0>llm.idx[xb; "max_tokens"]]
 ok["xai bearer hdr"; 0<=llm.idx[(","/llm.headers g); "Bearer"]]
 
 / ── agent: tool schema, response parsing, dispatch (offline) ────────────────
-die: llm.tool["roll_die"; "roll"; llm.obj[(,`sides)!,llm.prop["integer";"n"]; ,"sides"]; {[in] "You rolled a 4"}]
+die: llm.tool["roll_die"; "roll"; llm.obj[(,`sides)!,llm.prop["integer";"n"]; ,"sides"]; {[arg] "You rolled a 4"}]
 / tool declaration serialises to valid JSON schema (object property, not array)
 xt: json.gen llm.wiretools[g; ,die]
 ok["tool schema object"; 0<=llm.idx[xt; "\"sides\":{\"type\":\"integer\""]]

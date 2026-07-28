@@ -47,6 +47,57 @@ Add skills for the following task profiles.
 
 ## Remove `.blank` type
 
+## Runtime error locations
+Parse errors carry `line:col` + a caret as of 2026-07-30 (compile-time only, no VM
+cost). RUNTIME errors still don't: `!type` tells you nothing about where.
+
+The blocker is that ink returns errors as VALUES, so there is no single raise point to
+hook — the error is minted deep in a primitive and flows back through the dispatch
+loop like any other value. Measured: adding `if (r == .err) vm.err_pc = …` to
+`doApply` costs **+3.7% (dot), +7.7% (fibonacci)** in ReleaseFast. Rejected on the
+"don't make the VM slower" rule; the prototype was reverted.
+
+Options that avoid the hot path:
+- **A comptime flag** (`-Ddebug-locs`) that compiles the hook in only for debug
+  builds. Zero cost in release, locations when you're actually debugging. Probably the
+  answer, and cheap — the prototype is 2 lines plus a `pc → span` side table per chunk
+  (sorted, binary-searched only when an error is formatted, so nothing on the happy
+  path even when enabled).
+- Re-run a failing statement with tracing on. Deterministic only for pure code, so it
+  lies exactly where it would help most. Not recommended.
+Whatever lands must not widen `V` — errors are minted constantly in dispatch.
+
+## Diagnostics for silent blanks (DX)
+The costliest debugging in the ASR/perf session was never a wrong result — it was a
+blank flowing on quietly. Two ways to produce one, both silent:
+1. **A nested lambda reads an enclosing lambda's local.** Lambdas don't capture, so
+   `go:{[] p: …; {[i] gpu.dispatch[p; …]}' !n}` sees `p` as blank; handed to an FFI
+   call it becomes a null handle that no-ops. A whole GPU benchmark "ran" for an hour
+   while dispatching nothing.
+2. **GPU resources built outside `gpu.computeRun`.** No device exists yet, so
+   `gpu.buffer` returns handle `0` and every later dispatch silently does nothing.
+
+Two fixes were built and BACKED OUT (2026-07-29), so don't re-derive them:
+- **Compile-time error** when a name resolves to an enclosing lambda's param/local:
+  100% false positives across lib/. GPU kernel and shader bodies (`gpu.kernel`,
+  `shader.*`) are ordinary lambdas to this compiler but are INLINED by dye, where
+  enclosing locals are legitimately in scope (`gemmK` in lib/nn.k, the slug fragment
+  shader). lib/fbx.k also mirrors a param into a same-named global on purpose
+  (`target::target`). The compiler cannot tell host lambdas from shader lambdas.
+- **A `GlobalCk` opcode** that read the global and raised only when it was actually
+  blank. Precise (shaders never execute it, the mirror idiom resolves normally) and
+  free (ordinary `.Global` untouched, benchmarks unchanged) — but too specific a
+  mechanism to carry in the opcode set, and it leans on `.blank`, which is going away.
+
+So this wants a general answer, not another special case. Ideas, once `.blank` is
+replaced by monadic `::`:
+- Make "identity/right applied to nothing" visibly distinct at the point of USE rather
+  than at the point of read — e.g. FFI marshalling rejects it instead of coercing to a
+  null handle, which fixes cause 2 as well.
+- A `--strict`/debug build mode that reports blank reads, off in normal runs, so
+  shader compilation and the mirror idiom are unaffected.
+- Whatever lands should keep the shader-inlining case working and cost the VM nothing.
+
 ## Paralle each adverb
 Maybe we can use the digram form of the each adverb for parallel each.
 There is already stencil and window, we can add `` `ncpu f'!1000 `` to mean

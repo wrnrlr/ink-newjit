@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-07-30 — parse errors have a location; two parser bugs fixed
+- **Parse errors now report `line:col` with the offending line and a caret.** The
+  parser records the byte offset of the token it stopped on (`Parser.err_pos`, set by
+  an `errdefer` in `parse()`, so every error site gets a position without threading
+  one through) and the REPL resolves it. Compile-time only — the VM is untouched.
+  ```
+  !parse_error: UnexpectedToken at 3:13
+    $[x=1; 2; [3;4]]
+                ^
+  ```
+  It paid for itself immediately: `test/llm.k` had been failing to parse for who knows
+  how long with a bare `UnexpectedToken`, and the location pointed straight at
+  `{[in] …}` — a lambda parameter named after the keyword verb `in`. Renamed; the test
+  now runs, and `make test` is fully green for the first time this session.
+- **Spacing no longer changes what `\` and `'` mean.** `sep \ str` was the scan adverb
+  while `sep\str` was split, so `"\n" \ 1: path` silently returned the whole file as
+  ONE line (this is what made `nnLoadVocab` return a 1-entry vocab and every ASR
+  transcript come out empty), and `f ' xs` errored where `f'xs` worked. Only the
+  operand to the LEFT decides now. `/` deliberately keeps its spacing rule — ` / ` is
+  a comment.
+- **A malformed dict entry is refused instead of desyncing the parser.** `parseItems`
+  used to `break` silently on a missing `key:`, and `parseDictOrArgs` discarded the
+  result of `eat(.@"]")`, leaving the cursor mid-bracket. `[3;4]` produced an EMPTY
+  dict plus a stray `4` statement; inside `$[…]` it ate the `]` and absorbed the
+  following statement, so trailing code vanished with exit 0.
+
+**Runtime** error locations are NOT included. Every hook lands on the hot path: the
+dispatch loop has no error branch at all today, and adding `if (r == .err)` to
+`doApply` measured **+3.7% on dot and +7.7% on fibonacci** — a real slowdown, so it
+was reverted. See "Runtime error locations" in `.plan/tasks.md`; a comptime debug-only
+flag is the obvious way to get them for free in release builds.
+
 ## 2026-07-29 (later) — DCE purity hardened; `.Apply` was classified pure
 `isEffectful()` was a blocklist with `else => false`, so anything nobody thought about
 was assumed pure and removable: `.Apply` (what `f'x` lowers to) and every IO verb

@@ -6,6 +6,34 @@ const V = @import("../noun/value.zig").V;
 
 /// A generic interface for evaluating ink expressions and formatting results.
 /// Shared by the CLI runner and the Jupyter kernel.
+/// A byte offset resolved to a 1-based line/column plus that source line.
+pub const SrcPos = struct {
+  line: u32, col: u32, text: []const u8,
+
+  pub fn of(src: []const u8, off: u32) SrcPos {
+    const o = @min(off, src.len);
+    var line: u32 = 1;
+    var bol: usize = 0;
+    for (src[0..o], 0..) |ch, i| if (ch == '\n') { line += 1; bol = i + 1; };
+    var eol = bol;
+    while (eol < src.len and src[eol] != '\n') eol += 1;
+    return .{ .line = line, .col = @intCast(o - bol + 1), .text = src[bol..eol] };
+  }
+};
+
+/// `!parse_error: <name> at L:C` followed by the offending line and a caret.
+/// Purely a reporting path — the position comes from the parser, so the VM is
+/// untouched and nothing is carried at runtime.
+fn writeParseError(w: *std.Io.Writer, err: anyerror, src: []const u8, off: u32) void {
+  const p = SrcPos.of(src, off);
+  w.print("!parse_error: {s} at {d}:{d}\n", .{ @errorName(err), p.line, p.col }) catch return;
+  if (p.text.len == 0) return;
+  w.print("  {s}\n  ", .{p.text}) catch return;
+  // Indent with the line's own leading whitespace so tabs line the caret up.
+  for (p.text[0..@min(p.col - 1, p.text.len)]) |ch| w.writeByte(if (ch == '\t') '\t' else ' ') catch return;
+  w.print("^\n", .{}) catch return;
+}
+
 pub const Repl = struct {
   vm: *VM,
   alloc: std.mem.Allocator,
@@ -44,7 +72,9 @@ pub const Repl = struct {
     }
 
     const node = self.vm.parser.?.parse(source) catch |err| {
-      const msg = try std.fmt.allocPrint(self.alloc, "!parse_error: {s}", .{@errorName(err)});
+      const p = SrcPos.of(source, self.vm.parser.?.err_pos);
+      const msg = try std.fmt.allocPrint(self.alloc, "!parse_error: {s} at {d}:{d}",
+        .{ @errorName(err), p.line, p.col });
       const results = try self.alloc.alloc(Result, 1);
       results[0] = .{ .source = try self.alloc.dupe(u8, source), .output = msg, .value = .blank };
       return EvalResult{ .results = results, .is_error = true, .vm_alloc = self.vm.alloc };
@@ -165,7 +195,7 @@ pub const Repl = struct {
     if (source.len == 0) return false;
   
     const node = self.vm.parser.?.parse(source) catch |err| {
-      writer.print("!parse_error: {s}\n", .{@errorName(err)}) catch {};
+      writeParseError(writer, err, source, self.vm.parser.?.err_pos);
       writer.flush() catch {};
       return true;
     };

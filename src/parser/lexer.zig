@@ -168,8 +168,15 @@ pub const Lexer = struct {
     }
 
     // Adverb or adverb_val for '
+    // Spacing does NOT participate: `f ' x` means the same as `f'x`. What decides is
+    // solely what is to the LEFT — after a noun or a verb this is the adverb (the
+    // parser then picks scan-vs-dyadic-verb from that operand), and only at phrase
+    // start is it the bare adverb VALUE. Letting a space flip it silently turned
+    // `sep \ str` into a scan and `f ' xs` into an error. NB `/` cannot join this
+    // rule: a spaced `/` is a COMMENT (see above), which is why it still tests
+    // had_space.
     if (c == '\'') {
-      if ((self.tag != .phrase) and !had_space) {
+      if (self.tag != .phrase) {
         self.adv();
         if (self.ch(0) == ':') self.adv();
         self.tag = .verb;
@@ -183,8 +190,10 @@ pub const Lexer = struct {
 
     // Backslash
     if (c == '\\') {
-      // Adverb \: or \ takes priority when immediately after a noun or verb
-      if ((self.tag != .phrase) and !had_space) {
+      // Adverb \: or \ takes priority after a noun or verb, spaced or not (see the
+      // note on `'`). Commands (`\d`, `\l`, …) are unaffected: they only ever start a
+      // phrase, and a newline/`;`/`:` resets tag to .phrase.
+      if (self.tag != .phrase) {
         self.adv();
         if (self.ch(0) == ':') self.adv();
         self.tag = .verb;

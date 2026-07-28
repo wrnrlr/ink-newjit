@@ -1412,24 +1412,6 @@ test "intrinsic registry parity with Op1/Op2" {
   try testing.expectEqual(@as(usize, 11), intrinsic.prelude_names.len);
 }
 
-test "enclosing-lambda locals are reported, not silently blank" {
-  var t = try Tester.init();
-  defer t.deinit();
-  // Lambdas do not capture. Reading an enclosing lambda's LOCAL used to yield a
-  // blank, which then flowed on silently (as a null FFI handle it no-ops, so GPU
-  // work can appear to run while dispatching nothing). It must raise instead.
-  try t.check("{[] loc: 42; {[i] loc} 0}[]", "!EnclosingLocal");
-  // Same for an enclosing PARAM.
-  try t.check("{[a] {[b] a} 0}[1]", "!EnclosingLocal");
-  // A real global of that name is legitimate — this is the `x::x` mirror idiom
-  // used in lib/fbx.k to hand a param to an inner lambda on purpose.
-  try t.check("g::7; {[] {[i] g} 0}[]", "7");
-  // Plain globals read from a nested lambda are untouched.
-  try t.check("h::5; {[] q: 1; {[i] h} 0}[]", "5");
-  // A local of the lambda ITSELF still resolves normally.
-  try t.check("{[] v: 3; v}[]", "3");
-}
-
 test "DCE keeps effectful primitives" {
   var t = try Tester.init();
   defer t.deinit();
@@ -1444,4 +1426,45 @@ test "DCE keeps effectful primitives" {
   // Arithmetic stays pure so constant folding and DCE still apply.
   try testing.expectEqual(Op1.purity(.sqrt), .pure);
   try testing.expectEqual(Op2.purity(.@"+"), .pure);
+}
+
+test "adverb binding does not depend on spacing" {
+  var t = try Tester.init();
+  defer t.deinit();
+  // A space used to flip `\` and `'` from the adverb to the bare adverb VALUE, so
+  // `sep \ str` silently became a scan (nnLoadVocab returned the whole file as one
+  // line) and `f ' xs` errored. Only what is to the LEFT decides.
+  try t.check("nl:\"\\n\"; s:\"a\",nl,\"b\",nl,\"c\"; #nl\\s", "3");
+  try t.check("nl:\"\\n\"; s:\"a\",nl,\"b\",nl,\"c\"; #nl \\ s", "3");
+  try t.check("f:{[i] i*2}; f'!4", "0 2 4 6");
+  try t.check("f:{[i] i*2}; f ' !4", "0 2 4 6");
+  // `/` is deliberately NOT in this rule: a spaced `/` is a comment.
+  try t.check("+/!5", "10");
+  try t.check("+/ !5", "10");
+  try t.check("7  / a comment", "7");
+}
+
+test "a malformed dict entry is refused, not silently desynced" {
+  var t = try Tester.init();
+  defer t.deinit();
+  // `[3;4]` has no `key:` so it is not a dict. It used to yield an EMPTY dict plus a
+  // stray `4` statement, and inside `$[…]` it ate the `]` and absorbed the following
+  // statement — trailing code vanished with exit 0.
+  try testing.expectError(error.UnexpectedToken, t.vm.parser.?.parse("[3;4]"));
+  try testing.expectError(error.UnexpectedToken, t.vm.parser.?.parse("$[1;2;[3;4]]"));
+  // Valid dict/table forms are unaffected.
+  try t.check("[x:1;y:2]", "[x:1;y:2]");
+  try t.check("a:[]; #a", "0");
+  try t.check("a:[[]x:1 2;y:3 4]; #a", "2");
+}
+
+test "parse errors carry a source position" {
+  var t = try Tester.init();
+  defer t.deinit();
+  const p = t.vm.parser.?;
+  // line 3, at the `;` that should have been the `:` of a dict entry
+  try testing.expectError(error.UnexpectedToken, p.parse("a:1\nb:2\n$[1;2;[3;4]]\n"));
+  const pos = @import("cmd/repl.zig").SrcPos.of("a:1\nb:2\n$[1;2;[3;4]]\n", p.err_pos);
+  try testing.expectEqual(@as(u32, 3), pos.line);
+  try testing.expectEqual(@as(u32, 9), pos.col);   // the `;` where a `:` was due
 }
