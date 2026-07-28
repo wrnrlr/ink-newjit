@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-07-29 (later) — DCE purity hardened; `.Apply` was classified pure
+`isEffectful()` was a blocklist with `else => false`, so anything nobody thought about
+was assumed pure and removable: `.Apply` (what `f'x` lowers to) and every IO verb
+under `Apply1`/`Apply2` counted as pure, and `inlineLambdas` hard-coded
+`is_pure = true` when folding an effectful `.Call` into an Apply. Now `isPure()` is an
+ALLOWLIST that fails safe on new opcodes, and `Op1.purity()`/`Op2.purity()` are
+exhaustive switches with no `else`, so adding a primitive is a compile error until it
+is classified. Benchmarks unchanged (dot 351 vs 353, avg 32 vs 35, deltas 526 vs 537,
+iota 668 vs 698).
+
+This is hardening, NOT a bug fix — I could not construct a case where the old pass
+loses an effect. Discarded statement values get a `Drop`, which was already effectful
+and anchors them.
+
+Two attempts at catching enclosing-local reads were tried and BACKED OUT; see
+"Diagnostics for silent blanks" in `.plan/tasks.md`:
+- A compile-time error had a 100% false-positive rate across lib/. GPU kernel and
+  shader bodies (`gpu.kernel`, `shader.*`) are ordinary lambdas to this compiler but
+  are INLINED by dye, where enclosing locals ARE in scope (`gemmK` in lib/nn.k, the
+  slug fragment shader); and lib/fbx.k deliberately mirrors a param into a same-named
+  global (`target::target`) so an inner lambda can see it.
+- A dedicated `GlobalCk` opcode that raised only when the global was actually blank
+  worked and cost nothing, but it is too narrow a mechanism to carry in the opcode
+  set — especially with `.blank` itself slated for removal.
+
 ## 2026-07-29 — ASR another 2.2× (12× total); 8–10× real time
 A 2.5 s clip now transcribes in ~315 ms (was ~680 ms yesterday, 3.8 s originally);
 14.7 s takes 1.39 s, i.e. **10.6× real time**. Token ids still match NeMo exactly.
@@ -28,10 +53,11 @@ Measured and rejected: memoising the predictor across blank steps. It looks free
 time with its duration head rather than emitting blanks, so essentially every step
 emits. Noted in the code so nobody re-derives it.
 
-Beware when profiling this stack: an ink micro-benchmark of the form
-`z: {[i] gpu.dispatch[…]}' !n` is DEAD-CODE ELIMINATED (z unused), and reports
-sub-microsecond "per-call" times for work that never ran. Every number here came
-from timing the real pipeline with kernels stubbed out group by group.
+Beware when profiling this stack: several micro-benchmarks reported sub-microsecond
+"per-call" times for work that never ran. (I first blamed dead-code elimination —
+wrong, see the 2026-07-29 entry. The real causes were building GPU resources outside
+`gpu.computeRun`, and nested lambdas reading enclosing locals.) Every number here
+came from timing the real pipeline with kernels stubbed out group by group.
 
 ## 2026-07-28 (later) — ASR is ~6× faster, and now runs faster than real time
 Transcription was 3.8 s for a 2.5 s clip. It is now 0.63 s, and a 14.7 s clip went

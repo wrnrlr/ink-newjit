@@ -14,6 +14,18 @@ pub const Adverb = enum(u8) {
   pub fn toString(self: Adverb) []const u8 { return @tagName(self); }
 };
 
+/// Whether applying a primitive can be observed outside the expression itself.
+/// `effectful` means the optimizer may NOT delete the application when its result
+/// is unused, nor reorder it against other effects. The classification lives here,
+/// next to the enums, and both switches below are EXHAUSTIVE ON PURPOSE (no `else`)
+/// — adding a primitive is a compile error until someone classifies it, so the
+/// analysis fails safe rather than silently assuming a new verb is pure.
+///
+/// Nondeterminism is NOT an effect for this purpose: dropping an unused roll (`n?m`)
+/// or clock read is unobservable. It would matter for CSE/hoisting, which would want
+/// a third class; nothing does that today.
+pub const Purity = enum { pure, effectful };
+
 /// Monadic primitives. Apply1 bytecode + monad dispatch table.
 pub const Op1 = enum(u8) {
   // symbol/glyph verbs
@@ -43,6 +55,22 @@ pub const Op1 = enum(u8) {
   pub fn toString(self: Op1) []const u8 { return @tagName(self); }
   pub inline fn code(op: Op1) usize { return @intFromEnum(op); }
   pub inline fn load(a: u8) usize { return @enumFromInt(a); }
+
+  /// See `Purity`. Exhaustive by design — do not add an `else` branch.
+  pub fn purity(self: Op1) Purity {
+    return switch (self) {
+      // world I/O + dynamic evaluation
+      .@"0:", .@"1:", .@"2:", .@"8:", .@"9:", .exec => .effectful,
+      // everything else is a value-to-value computation
+      .@"%", .@"!", .@"&", .@"+", .@"*", .@"|", .@"<", .@">", .@"=", .@"~",
+      .@",", .@"^", .@"#", .@"_", .@"$", .@"?", .@"@", .@"-", .@".", .@":",
+      .sqrt, .sqr, .exp, .log, .sin, .cos, .abs,
+      .first, .last, .count, .parse,
+      .depth, .epoch,
+      .@"+/", .@"*/", .@"|/", .@"&/",
+      .freq => .pure,
+    };
+  }
 };
 
 /// Dyadic primitives. Apply2 bytecode + dyad dispatch table.
@@ -71,6 +99,21 @@ pub const Op2 = enum(u8) {
   pub fn toString(self: Op2) []const u8 { return @tagName(self); }
   pub inline fn code(op: Op2) usize { return @intFromEnum(op); }
   pub inline fn isQuick(op: Op2) bool { return @intFromEnum(op) < QUICK_COUNT; }
+
+  /// See `Purity`. Exhaustive by design — do not add an `else` branch.
+  pub fn purity(self: Op2) Purity {
+    return switch (self) {
+      // world I/O + dynamic evaluation
+      .@"0:", .@"1:", .@"2:", .@"8:", .@"9:", .exec => .effectful,
+      // everything else is a value-to-value computation (`:` dyadic is Right)
+      .@"+", .@"-", .@"*", .@"%",
+      .@"=", .@"|", .@"&",
+      .@"<", .@">",
+      .@"~", .@"!",
+      .@",", .@"^", .@"#", .@"_", .@"$", .@"?", .@"@", .@".",
+      .in, .has, .mod, .div, .@":" => .pure,
+    };
+  }
 };
 
 /// Triadic primitives. Apply3 bytecode (amend3/drill3).

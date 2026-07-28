@@ -1411,3 +1411,37 @@ test "intrinsic registry parity with Op1/Op2" {
   try testing.expect(intrinsic.find("nope") == null);
   try testing.expectEqual(@as(usize, 11), intrinsic.prelude_names.len);
 }
+
+test "enclosing-lambda locals are reported, not silently blank" {
+  var t = try Tester.init();
+  defer t.deinit();
+  // Lambdas do not capture. Reading an enclosing lambda's LOCAL used to yield a
+  // blank, which then flowed on silently (as a null FFI handle it no-ops, so GPU
+  // work can appear to run while dispatching nothing). It must raise instead.
+  try t.check("{[] loc: 42; {[i] loc} 0}[]", "!EnclosingLocal");
+  // Same for an enclosing PARAM.
+  try t.check("{[a] {[b] a} 0}[1]", "!EnclosingLocal");
+  // A real global of that name is legitimate — this is the `x::x` mirror idiom
+  // used in lib/fbx.k to hand a param to an inner lambda on purpose.
+  try t.check("g::7; {[] {[i] g} 0}[]", "7");
+  // Plain globals read from a nested lambda are untouched.
+  try t.check("h::5; {[] q: 1; {[i] h} 0}[]", "5");
+  // A local of the lambda ITSELF still resolves normally.
+  try t.check("{[] v: 3; v}[]", "3");
+}
+
+test "DCE keeps effectful primitives" {
+  var t = try Tester.init();
+  defer t.deinit();
+  const Op1 = @import("noun/operator.zig").Op1;
+  const Op2 = @import("noun/operator.zig").Op2;
+  // The IO verbs and exec must never be classified pure, in either valence:
+  // an unused `1: "path"` is a file read that has to survive the optimizer.
+  for ([_]Op1{ .@"0:", .@"1:", .@"2:", .@"8:", .@"9:", .exec }) |o|
+    try testing.expectEqual(Op1.purity(o), .effectful);
+  for ([_]Op2{ .@"0:", .@"1:", .@"2:", .@"8:", .@"9:", .exec }) |o|
+    try testing.expectEqual(Op2.purity(o), .effectful);
+  // Arithmetic stays pure so constant folding and DCE still apply.
+  try testing.expectEqual(Op1.purity(.sqrt), .pure);
+  try testing.expectEqual(Op2.purity(.@"+"), .pure);
+}

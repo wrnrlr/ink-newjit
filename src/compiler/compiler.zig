@@ -1460,6 +1460,7 @@ const PatchInfo = struct {
   name: []const u8,
 };
 
+
 const Scope = struct {
   alloc: Alloc,
   parent: ?*Scope,
@@ -1940,7 +1941,11 @@ fn inlineLambdas(alloc: Alloc, scope_ir: *ir.IR, fn_tables: *const fntable.FnTab
     inst.op = new_op;
     inst.arg1 = op_byte;
     inst.inputs = new_inputs;
-    inst.is_pure = true;
+    // Recompute rather than asserting purity: this rewrites an effectful .Call into
+    // an Apply1/Apply2, and hard-coding `true` here laundered the effect away for any
+    // lambda whose body is a single IO verb (e.g. `{1: x}`), re-introducing the very
+    // bug isPure() exists to prevent.
+    inst.is_pure = inst.isPure();
     _ = i;
     changed = true;
   }
