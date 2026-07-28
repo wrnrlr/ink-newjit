@@ -65,6 +65,14 @@ test:
 	$(INK) test/ui.k
 	sh test/ipc.sh
 
+# Parakeet-TDT ASR pipeline vs a real NeMo oracle. Needs the exported weights
+# (data/parakeet-tdt-0.6b-v2/parakeet.safetensors, see doc/parakeet-export.py) and
+# the oracle dumps in test/data/asr (doc/parakeet-oracle.py), so it is not in `test`.
+asr-test:
+	zig build gpu
+	zig build safetensors
+	INK_SNAP=0 $(INK) test/asr.k
+
 build:
 	time zig build -Doptimize=ReleaseFast -Dversion=$(VERSION)
 

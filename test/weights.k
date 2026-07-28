@@ -31,8 +31,10 @@ subW: ( rv[C*9;1]; rv[C;2]; rv[C*9;3]; rv[C;4]; rv[C*C;5]; rv[C;6];
         rv[C*9;7]; rv[C;8]; rv[C*C;9]; rv[C;10]; rv[D*(C*F3);11]; rv[D;12] )
 V:5; EncD:8; EmbD:4; LH:6; J:10; DUR:0 1 2 3 4
 NOUT: (V+1) + #DUR
-decW: ( rv[(V+1)*EmbD;1]; rv[4*LH*EmbD;2]; rv[4*LH*LH;3]; rv[4*LH;4];
-        rv[J*EncD;5]; rv[J*LH;6]; rv[J;7]; rv[NOUT*J;8]; rv[NOUT;9] )
+decW: ( rv[(V+1)*EmbD;1];
+        rv[4*LH*EmbD;2]; rv[4*LH*LH;3]; rv[4*LH;4];      / LSTM layer 0 ([4H,EmbD])
+        rv[4*LH*LH;5];   rv[4*LH*LH;6]; rv[4*LH;7];      / LSTM layer 1 ([4H,H])
+        rv[J*EncD;8]; rv[J*LH;9]; rv[J;10]; rv[NOUT*J;11]; rv[NOUT;12] )
 
 demo:{[]
   / encoder: build model, load, round-trip + forward

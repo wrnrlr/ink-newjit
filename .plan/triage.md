@@ -336,3 +336,20 @@ location/packing interaction with the specific vec sizes (earth's 3+3+4+3+2) or 
 fragmentTexN. Workaround used: pack the flag into a spare lane of an existing varying (wSun v3→v4,
 bordersOn in .w). Worth pinning down the real rule in shader.vertexPull location assignment so
 overlays can add channels without hunting for spare lanes.
+
+## `test/llm.k` fails to parse (`!parse_error: UnexpectedToken`)
+`make test` runs `$(INK) test/llm.k` and it aborts immediately with
+`!parse_error: UnexpectedToken`; nothing in the file is exercised. Pre-existing —
+reproduces with an otherwise clean tree (confirmed by stashing unrelated changes),
+so it is not fallout from the nn/ASR work. `make test` does not stop on it because
+the recipe lines aren't `set -e`-guarded, so the failure is easy to miss.
+Unrelated to this task; found while running the suite for demo/asr.k.
+
+## A SPACED `\` is the scan adverb, never the split verb
+`sep \ str` silently means "scan", so `"\n" \ 1: path` returned the whole file as a
+ONE-element list instead of splitting it into lines. This is what made
+`nnLoadVocab` (lib/nn.k) return a 1-entry vocab, so every detokenized transcript
+came out empty. The glued forms `"\n"\s` and `NL\s` both split correctly; only the
+spaced form is wrong. It is a silent wrong-answer rather than an error, which makes
+it nasty — worth either rejecting `verb-adverb` where a dyad was clearly intended,
+or at least calling it out in AGENT.md next to the other adverb-glue gotchas.

@@ -151,13 +151,52 @@ linK: gpu.kernel[{[o;x;w;b;g;d]
   nn:`i$g[1]; kk:`i$g[2]
   i:d div nn; j:d mod nn
   set[o; d; (+/{[k] (x[(i*kk)+k]) * w[(j*kk)+k]}'!kk) + b[j]]}; 0; 5]
-linPipe::0; linParam::0
+
+/ 8×8-tiled Linear — gemm2dK's shared-memory scheme with B TRANSPOSED (W is [N,K])
+/ and the bias folded into the store.  linK gives every output its own private pass
+/ over a full row of X and a full row of W, so each weight is re-read M times and
+/ neighbouring threads (adjacent j) read K floats apart — no reuse AND uncoalesced.
+/ This fetches each X/W element once per 8×8 tile instead of once per output.
+/ 16×16 rather than gemm2dK's 8×8: a taller tile cuts how many times each weight is
+/ re-read, and weight traffic is what dominates here (X is only T×1024).
+/ ROW COUNT IS NOT REQUIRED TO BE ALIGNED. M is the number of encoder frames T', which
+/ is an arbitrary function of the utterance length — demanding M%16=0 would silently
+/ drop most real utterances back onto linK (a 10 s clip gives T'=126, and the fallback
+/ is ~5× slower). Instead the launch rounds the ROWS up to a whole tile and threads
+/ outside [0,M) neither load nor store. Only N and K must be multiples of 16, and in
+/ this model they always are (D=1024, 2D=2048, Dff=4096).
+/ `wg` is sticky and read when the kernel is DEFINED, so set it here and put it back.
+wg:: 256
+lin2dK: gpu.kernelWG[{[o;x;w;b;g;d]
+  m:`i$g[0]; n:`i$g[1]; kk:`i$g[2]
+  wgId:d div wgsz
+  lr:lid div 16; lc:lid mod 16
+  bpr:n div 16
+  brow:wgId div bpr; bcol:wgId mod bpr
+  row:(brow*16)+lr; col:(bcol*16)+lc
+  ok: row < m
+  nt:kk div 16
+  acc: +/{[t]
+    lset[0; (lr*16)+lc; $[ok; x[(row*kk)+(t*16)+lc]; 0.]]
+    lset[1; (lr*16)+lc; w[(col*kk)+(t*16)+lr]]
+    barrier[]
+    p: +/{[q] (lget[0; (lr*16)+q]) * lget[1; (q*16)+lc]}'!16
+    barrier[]
+    p}'!nt
+  $[ok; set[o; (row*n)+col; acc + b[col]]; 0]}; 0; 5; (256;256)]
+wg:: 64
+
+linPipe::0; linTile::0; linParam::0
+linPlainPipe: {[] $[linPipe=0; linPipe:: gpu.compileCompute[linK;5]; 0]; linPipe}
+linTilePipe:  {[] $[linTile=0; linTile:: gpu.compileCompute[lin2dK;5]; 0]; linTile}
 / Resident: bo (≥nnPad[M*N]) = bx[M,K] · bw[N,K]ᵀ + bb[N].
 LinearR: {[bo;bx;bw;bb;M;K;N]
-  $[linPipe=0;  linPipe::  gpu.compileCompute[linK;5]; 0]
   $[linParam=0; linParam:: gpu.buffer[4#0.]; 0]
   gpu.write[linParam; (0.+M),(0.+N),(0.+K),0.]
-  gpu.dispatch[linPipe; (bo;bx;bw;bb;linParam); M*N]
+  tiled: (0 = N mod 16) & (0 = K mod 16)
+  pipe: $[tiled; linTilePipe[]; linPlainPipe[]]
+  Mp: 16 * ((M + 15) div 16)                / rows rounded up to a whole tile
+  gpu.dispatch[pipe; (bo;bx;bw;bb;linParam); $[tiled; Mp*N; M*N]]
   bo}
 Linear: {[X;W;B;M;K;N]
   bx:gpu.buffer[X]; bw:gpu.buffer[W]; bb:gpu.buffer[B]; bo:gpu.buffer[(nnPad[M*N])#0.]
@@ -513,13 +552,21 @@ cbStepRB: {[bx;wb] bo: ConformerBlockRB[bx; wb; cbCfg]; gpu.free bx; bo}
 / EncoderR[X; Ws; cfg] — resident conformer stack. Uploads all weights ONCE, keeps the
 / activation resident across layers, reads back the final [T,D] and frees everything.
 / Bit-identical to Encoder (same kernels; only the host round-trips are removed).
-EncoderR: {[X; Ws; cfg]
+/ EncoderRW[X; WB; cfg] — encoder over weights that are ALREADY on the device
+/ (WB = nnHoldWs Ws). Uploading the 24 layers costs ~300 ms, which is a large slice of
+/ a short utterance's encode time, so a caller that transcribes repeatedly should hoist
+/ nnHoldWs out of the per-utterance path and call this.
+EncoderRW: {[X; WB; cfg]
   cbCfg:: cfg
-  WB: nnHoldWs Ws
   bx: gpu.buffer[X]
   bo: bx cbStepRB/ WB
   r: ((cfg 0)*(cfg 1)) # gpu.read bo
   gpu.free bo
+  r}
+/ One-shot: upload, run, free.
+EncoderR: {[X; Ws; cfg]
+  WB: nnHoldWs Ws
+  r: EncoderRW[X; WB; cfg]
   gpu.free' ,/ WB
   r}
 
@@ -531,6 +578,47 @@ nnPI:: 3.14159265358979
 
 / frames produced from n samples given window/hop ("valid" framing).
 nnFrames: {[n;win;hop] 1 + (n - win) div hop}
+
+/ ── NeMo AudioToMelSpectrogramPreprocessor compatibility ─────────────────────
+/ NeMo calls torch.stft(center=True, pad_mode="constant"), which ZERO-pads the signal
+/ by nfft÷2 and centres the win-length window inside the nfft-long frame (offset
+/ (nfft−win)÷2).  A pure time shift only rotates the DFT phase and we keep |X|², so
+/ instead of widening the STFT kernel to nfft we zero-pad by exactly
+/ (nfft÷2)−((nfft−win)÷2) and keep the cheap win-point transform.  Frame count then
+/ matches torch: floor((n + 2·(nfft÷2) − nfft) / hop) + 1 = n÷hop + 1.  NB NeMo's own
+/ get_seq_len is ONE LESS than that — see nnValidC.
+nnPreemphA:: 0.97                / NeMo FilterbankFeatures preemph default
+nnLogGuard:: 5.9604644775390625e-8   / log_zero_guard_value = 2⁻²⁴
+nnNormEps:: 0.00001              / normalize_batch CONSTANT, added to the STD
+
+/ nnFramesC = frames the STFT physically produces (torch.stft center=True).
+/ nnValidC  = NeMo get_seq_len, which is ONE LESS — the trailing frame is excluded
+/ from the normalization statistics and then zeroed by the pad mask.  Missing that
+/ shifts every per-bin mean/std and corrupts the whole spectrogram.
+nnFramesC: {[n;hop] 1 + n div hop}
+nnValidC:  {[n;hop] n div hop}
+nnPadAmt:  {[nfft;win] (nfft div 2) - (nfft - win) div 2}
+
+/ y[0]=x[0];  y[i]=x[i] − a·x[i−1]
+nnPreemph: {[sig;a] (1#sig), (1_sig) - a * -1_sig}
+/ NeMo calls torch.stft with pad_mode="constant", so this is ZERO padding — NOT
+/ the reflect padding torch defaults to.  Pads left by p and out to `tot` samples.
+nnZPad: {[sig;p;tot] (p#0.), sig, (tot - p + #sig)#0.}
+
+/ per-feature (per mel bin) normalization over frames — NeMo normalize_batch.
+/ NB torch .std() is UNBIASED (÷ nfr−1) and CONSTANT is added to the std, not the
+/ variance; getting either wrong shifts every encoder input.
+nnNmu::(); nnNsd::()
+nnDev:   {[r] r - nnNmu}
+nnScale: {[d] d % nnNsd}
+nnSqr:   {[d] d*d}
+/ stats come from the first nv frames only; frames [nv,nfr) are zeroed (pad_value).
+nnNorm: {[mel;nfr;nv;nm]
+  M:  nv # (nfr;nm)#mel
+  nnNmu:: (+/M) % nv
+  dev: nnDev' M
+  nnNsd:: nnNormEps + sqrt (+/ nnSqr' dev) % nv-1
+  ,/ (nnScale' dev), (nfr-nv) # ,nm#0.}
 
 / Hann window of length win.
 nnHann: {[win] 0.5 - 0.5 * cos (2. * nnPI * `f$!win) % (0. + win - 1)}
@@ -597,6 +685,16 @@ LogMel: {[sig; Cr; Ci; MelFb; cfg]
   bout:gpu.buffer[(nnPad[nfr*nm])#0.]
   LogEpsR[bout;bmel;eps;nfr*nm]
   (nfr*nm) # gpu.read[bout]}
+
+/ nnFeatures[sig; Cr; Ci; MelFb; cfg] — the whole NeMo preprocessor, cfg =
+/ (hop;win;nfft;nfreq;nmels).  sig is raw f32 audio in [-1,1); returns the
+/ per-feature-normalized log-mel [nframes*nmels], i.e. exactly what the encoder
+/ wants.  Frame count is nnFramesC[#sig;hop].
+nnFeatures: {[sig; Cr; Ci; MelFb; cfg]
+  hop:cfg 0; win:cfg 1; nfft:cfg 2; nf:cfg 3; nm:cfg 4
+  nfr: nnFramesC[#sig; hop]; nv: nnValidC[#sig; hop]
+  xp:  nnZPad[nnPreemph[sig; nnPreemphA]; nnPadAmt[nfft; win]; ((nfr-1)*hop)+win]
+  nnNorm[LogMel[xp; Cr; Ci; MelFb; (hop;win;nf;nm;nfr;nnLogGuard)]; nfr; nv; nm]}
 
 / ── Conv subsampling  (mel spectrogram → 8×-downsampled encoder input) ───────
 / 2-D conv, kernel 3, stride 2, pad 1.  Layout [C,T,F] channel-major flat.
@@ -702,12 +800,20 @@ ConvSubsample: {[MEL;W;cfg]
 nnSig:  {[v] 1. % 1. + exp 0. - v}
 nnTanh: {[v] e: exp 2.*v; (e-1.) % e+1.}
 nnMvd:  {[W;k;x;o] +/ x * W@(o*k)+!k}
-nnMv:   {[W;n;k;x] nnMvd[W;k;x;]' !n}        / matrix-vector  W[n,k]·x
+nnMv:   {[W;n;k;x] nnMvd[W;k;x;]' !n}        / matrix-vector  W[n,k]·x (flat W)
+/ Same product, but with W pre-split into a LIST OF ROWS ((n;k)#W, done once when the
+/ weights are loaded). `W@(o*k)+!k` rebuilds a k-long index vector and gathers for
+/ every output row; over the decoder's 2560×640 matrices that dominates. Measured 3.1×
+/ faster than nnMv at that shape, bit-identical output.
+nnMvX:: ()
+nnDot:  {[r] +/ nnMvX * r}
+nnMvR:  {[rows;x] nnMvX:: x; nnDot' rows}
 nnAmax: {[v] v ? |/v}                         / argmax = index of first max
 
-/ LSTM cell step: (x[E],h[H],c[H]) → (h'[H]; c'[H]).  Wih[4H,E], Whh[4H,H], b[4H].
-nnLstm: {[x;h;c;Wih;Whh;b;H]
-  pre: b + (nnMv[Wih;4*H;#x;x]) + nnMv[Whh;4*H;H;h]
+/ LSTM cell step: (x[E],h[H],c[H]) → (h'[H]; c'[H]).  Rih/Rhh are ROW LISTS of
+/ Wih[4H,E] / Whh[4H,H] (see nnMvR); b is flat [4H].
+nnLstm: {[x;h;c;Rih;Rhh;b;H]
+  pre: b + (nnMvR[Rih;x]) + nnMvR[Rhh;h]
   ig: nnSig pre@!H
   fg: nnSig pre@H+!H
   gg: nnTanh pre@(2*H)+!H
@@ -716,44 +822,63 @@ nnLstm: {[x;h;c;Wih;Whh;b;H]
   (og * nnTanh nc; nc)}
 
 / TDT joint: (enc_t[Fe], g[H]) → logits[nout].  JW=(Wf[J,Fe];Wg[J,H];bj[J];Wo[nout,J];bo[nout]).
-nnJoint: {[enc;g;JW;dims]
-  J:dims 0; nout:dims 1
-  jj: nnTanh (JW 2) + (nnMv[JW 0;J;#enc;enc]) + nnMv[JW 1;J;#g;g]
-  (JW 4) + nnMv[JW 3;nout;J;jj]}
+/ NeMo's joint_net is Sequential(ReLU, Dropout, Linear) — the activation is RELU,
+/ not tanh (jointnet.activation: relu in model_config.yaml).
+/ JW 0/1/3 are ROW LISTS (Wf, Wg, Wo); JW 2/4 stay flat bias vectors.
+nnRelu: {[v] 0. | v}
+nnJoint: {[enc;g;JW]
+  jj: nnRelu (JW 2) + (nnMvR[JW 0;enc]) + nnMvR[JW 1;g]
+  (JW 4) + nnMvR[JW 3;jj]}
 
-/ decode state = (t; u; h; c; prev; emitted).  Weights/config in globals (the while
-/ body is single-arg; blank token id = tdVocab, last of the vocab+1 token slots).
-tdEnc::(); tdEmb::(); tdWih::(); tdWhh::(); tdLb::(); tdJW::(); tdJd::()
+/ decode state = (t; u; h0; c0; h1; c1; prev; emitted).  Weights/config in globals
+/ (the while body is single-arg; blank token id = tdVocab, last of the vocab+1 token
+/ slots).  The predictor is a 2-LAYER LSTM (prednet.pred_rnn_layers: 2) — layer 0
+/ consumes the embedding, layer 1 consumes layer 0's hidden state, and the JOINT
+/ sees layer 1's output.
+/ prev=blank feeds embedding row `tdVocab`, which is the padding_idx row and is all
+/ zeros — exactly NeMo's _SOS "zero input" start state.
+tdEnc::(); tdEmb::(); tdJW::()
+tdWih0::(); tdWhh0::(); tdLb0::(); tdWih1::(); tdWhh1::(); tdLb1::()
 tdDur::(); tdVocab::0; tdT::0; tdH::0; tdEncD::0; tdEmbD::0; tdMax::0
 tdStep: {[st]
-  t:st 0; u:st 1; h:st 2; c:st 3; prev:st 4; em:st 5
-  x: tdEmb@(prev*tdEmbD)+!tdEmbD
-  hc: nnLstm[x;h;c;tdWih;tdWhh;tdLb;tdH]; nh:hc 0; nc:hc 1
+  t:st 0; u:st 1; h0:st 2; c0:st 3; h1:st 4; c1:st 5; prev:st 6; em:st 7
+  x:  tdEmb@(prev*tdEmbD)+!tdEmbD
+  l0: nnLstm[x;    h0; c0; tdWih0; tdWhh0; tdLb0; tdH]
+  l1: nnLstm[l0 0; h1; c1; tdWih1; tdWhh1; tdLb1; tdH]
   enc: tdEnc@(t*tdEncD)+!tdEncD
-  lg: nnJoint[enc; nh; tdJW; tdJd]
-  tok: nnAmax lg@!tdVocab+1
-  dur: tdDur nnAmax lg@(tdVocab+1)+!#tdDur
+  lg: nnJoint[enc; l1 0; tdJW]
+  tok:  nnAmax lg@!tdVocab+1
+  skip: tdDur nnAmax lg@(tdVocab+1)+!#tdDur
   blank: tok = tdVocab
   em2:   $[blank; em;   em,tok]           / host $ is lazy — no join on blank
   prev2: $[blank; prev; tok]
-  h2:    $[blank; h;    nh]               / predictor state advances only on emit
-  c2:    $[blank; c;    nc]
-  adv:   $[dur>0; dur; $[~((u+1)<tdMax); 1; 0]]   / dur=0 stall → force advance at tdMax (no >= in ink)
-  u2:    $[adv>0; 0; u+1]
-  (t+adv; u2; h2; c2; prev2; em2)}
+  n0: $[blank; h0; l0 0]; k0: $[blank; c0; l0 1]   / predictor state advances only on emit
+  n1: $[blank; h1; l1 0]; k1: $[blank; c1; l1 1]
+  / NeMo GreedyTDTInfer: time += skip every step; the inner loop repeats only while
+  / skip==0, and when it bails out at max_symbols time gets ONE extra frame.
+  un:   u+1
+  last: un = tdMax
+  t2:   $[last; (t+skip)+1; t+skip]
+  u2:   $[last | ~skip=0; 0; un]
+  (t2; u2; n0; k0; n1; k1; prev2; em2)}
 tdCond: {[st] (st 0) < tdT}
 
 / TdtGreedy[enc; W; cfg] → emitted token ids.
-/   enc[T,EncD] encoder output;  W = (Emb[V,EmbD]; Wih; Whh; Lb; Wf; Wg; bj; Wo; bo);
+/   enc[T,EncD] encoder output;
+/   W = (Emb[V+1,EmbD]; Wih0;Whh0;b0; Wih1;Whh1;b1; Wf; Wg; bj; Wo; bo);
 /   cfg = (T; EncD; EmbD; H; J; V; durList; maxSym).
 TdtGreedy: {[enc;W;cfg]
-  tdEnc::enc; tdEmb::W 0; tdWih::W 1; tdWhh::W 2; tdLb::W 3
-  tdJW:: (W 4; W 5; W 6; W 7; W 8)
   tdT::cfg 0; tdEncD::cfg 1; tdEmbD::cfg 2; tdH::cfg 3
   tdVocab::cfg 5; tdDur::cfg 6; tdMax::cfg 7
-  tdJd:: (cfg 4; (tdVocab+1) + #tdDur)
-  st: (0; 0; tdH#0.; tdH#0.; tdVocab; !0)      / prev = blank, empty emission
-  (tdCond tdStep/ st) 5}
+  J: cfg 4; nout: (tdVocab+1) + #tdDur
+  H4: 4*tdH
+  tdEnc::enc; tdEmb::W 0
+  / split every weight matrix into rows ONCE here, not once per decode step
+  tdWih0::(H4;tdEmbD)#W 1; tdWhh0::(H4;tdH)#W 2; tdLb0::W 3
+  tdWih1::(H4;tdH)   #W 4; tdWhh1::(H4;tdH)#W 5; tdLb1::W 6
+  tdJW:: ((J;tdEncD)#W 7; (J;tdH)#W 8; W 9; (nout;J)#W 10; W 11)
+  st: (0; 0; tdH#0.; tdH#0.; tdH#0.; tdH#0.; tdVocab; !0)   / prev = blank, empty emission
+  (tdCond tdStep/ st) 7}
 
 / ── Weight loading  (safetensors dict → the weight lists the nn fns expect) ───
 / `model` is the dict from safetensors.read: symbol name → (`dtype`shape`data).
@@ -780,8 +905,10 @@ nnLoadEncoder: {[model;nlayers] nnLoadBlock[model;]' !nlayers}
 nnSubSuf: ("c0.w";"c0.b";"dw1.w";"dw1.b";"pw1.w";"pw1.b";"dw2.w";"dw2.b";"pw2.w";"pw2.b";"proj.w";"proj.b")
 nnLoadSubsample: {[model] nnTen[model;]' "sub." ,/: nnSubSuf}
 
-/ decoder: 9 tensors in TdtGreedy's W order (LSTM predictor + joint).
-nnDecSuf: ("dec.emb";"dec.wih";"dec.whh";"dec.b";"joint.wf";"joint.wg";"joint.bj";"joint.wo";"joint.bo")
+/ decoder: 12 tensors in TdtGreedy's W order (2-layer LSTM predictor + joint).
+nnDecSuf: ("dec.emb";
+  "dec.wih0";"dec.whh0";"dec.b0"; "dec.wih1";"dec.whh1";"dec.b1";
+  "joint.wf";"joint.wg";"joint.bj";"joint.wo";"joint.bo")
 nnLoadDecoder: {[model] nnTen[model;]' nnDecSuf}
 
 / ── SentencePiece detokenize  (token ids → text) ─────────────────────────────
@@ -794,4 +921,6 @@ nnStripL: {[r] $[0=#r; r; $[" "=*r; 1_r; r]]}       / drop the leading word-spac
 nnCat:    {[vocab; ids] ,/ (nnPiece' vocab@ids)}    / precompute the each (`,/ f'x` mis-parses)
 nnDetok:  {[vocab; ids] $[0=#ids; ""; nnStripL nnCat[vocab;ids]]}
 / load a vocab file: one piece per line, in id order (from the offline export).
-nnLoadVocab: {[path] "\n" \ 1: path}
+/ NB the split verb must be GLUED (`"\n"\s`): a SPACED `\` parses as the scan adverb
+/ instead, which silently returns the whole file as a single line.
+nnLoadVocab: {[path] s: 1: path; "\n"\s}

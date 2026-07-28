@@ -15,12 +15,18 @@ ENC: (`f$ (!(T*EncD)) mod 5) - 2.
 
 / zero-weight model with a rigged output bias `bo` → logits == bo (constant), so the
 / token/duration argmax is exactly what we choose.
-zeroW: {[bo] ( (((V+1)*EmbD)#0.); ((4*H*EmbD)#0.); ((4*H*H)#0.); ((4*H)#0.);
+/ The predictor is a 2-LAYER LSTM: layer 0 consumes the [EmbD] embedding, layer 1
+/ consumes layer 0's [H] hidden state — so wih0 is [4H,EmbD] but wih1 is [4H,H].
+zeroW: {[bo] ( (((V+1)*EmbD)#0.);
+               ((4*H*EmbD)#0.); ((4*H*H)#0.); ((4*H)#0.);
+               ((4*H*H)#0.);    ((4*H*H)#0.); ((4*H)#0.);
                ((J*EncD)#0.); ((J*H)#0.); (J#0.); ((NOUT*J)#0.); bo )}
 / nonzero (tiny) weights but a huge bias peak → argmax still bias-determined.
 tiny: {[n;o] 0.01 * `f$ ((o+!n) mod 7) - 3}
-nzW:  {[bo] ( tiny[(V+1)*EmbD;1]; tiny[4*H*EmbD;2]; tiny[4*H*H;3]; tiny[4*H;4];
-              tiny[J*EncD;5]; tiny[J*H;6]; tiny[J;7]; tiny[NOUT*J;8]; bo )}
+nzW:  {[bo] ( tiny[(V+1)*EmbD;1];
+              tiny[4*H*EmbD;2]; tiny[4*H*H;3]; tiny[4*H;4];
+              tiny[4*H*H;5];    tiny[4*H*H;6]; tiny[4*H;7];
+              tiny[J*EncD;8]; tiny[J*H;9]; tiny[J;10]; tiny[NOUT*J;11]; bo )}
 
 demo:{[]
   `0 0:"tanh(1)="; `0 0:$nnTanh 1.; `0 0:"  sig(0)="; `0 0:$nnSig 0.; `0 0:"  (want ~0.7616, 0.5)\n"

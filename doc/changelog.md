@@ -1,5 +1,67 @@
 # Changelog
 
+## 2026-07-28 (later) — ASR is ~6× faster, and now runs faster than real time
+Transcription was 3.8 s for a 2.5 s clip. It is now 0.63 s, and a 14.7 s clip went
+from 14.7 s to 2.1 s — i.e. from roughly 1× real time to **~6.8×**. Output is still
+bit-identical to NeMo (`make asr-test` covers both an aligned and an unaligned T').
+Measured, not guessed — the encoder was 85% of the time and scaled at 124 ms/layer.
+- **`LinearR` used a naive one-thread-per-output kernel.** Every output re-read a
+  full row of X and of W, so each weight was fetched M times, and adjacent threads
+  read K floats apart (completely uncoalesced). Added `lin2dK`: gemm2dK's shared
+  memory tiling with B transposed (W is [N,K]) and the bias folded into the store.
+  Encoder 2663 → 583 ms.
+- **The tile must not require an aligned row count.** A first cut demanded M%16=0.
+  M is the encoder frame count T', an arbitrary function of utterance length, so
+  that silently dropped most real utterances back to the slow kernel — a 10 s clip
+  (T'=126) still took 10.6 s. The launch now rounds rows up to a whole tile and
+  threads outside [0,M) neither load nor store. 10 s clip: 10.6 s → 1.5 s.
+- **`nnMv` rebuilt an index vector per output row.** `W@(o*k)+!k` constructs a
+  k-long index and gathers, for every one of n rows. `nnMvR` takes W pre-split into
+  rows (done once in `TdtGreedy`'s setup, not once per decode step): 3.1× faster at
+  the decoder's 2560×640 shape, bit-identical. Decode 531 → 180 ms.
+- **`EncoderRW`** runs over weights already on the device. Uploading the 24 layers
+  is ~300 ms, which was most of a short utterance's encode time and was being paid
+  on every transcription; `demo/asr.k` now uploads once, on the first transcription
+  (there is no GPU context to upload into until `window.run` is live).
+
+Still on the table: the GEMM has no register blocking — each thread computes one
+output with two shared-memory reads per multiply-add, which is why it sits at
+~74 GFLOP/s against ~5 TFLOP/s of hardware. A 4×4 register micro-tile is the next
+big win. The host-side TDT decode is now the second bottleneck (~38% at 14.7 s).
+
+## 2026-07-28
+- **`demo/asr.k` actually transcribes now**, and the pipeline is pinned to NeMo
+  itself rather than to our reading of the paper. `doc/parakeet-oracle.py` runs the
+  real `.nemo` model over a wav and dumps every stage (mel, subsample, encoder,
+  token ids) into a safetensors; `test/asr.k` (`make asr-test`) recomputes each
+  stage in ink and diffs. End result on the 2.5 s test clip: mel/subsample/encoder
+  match to ~1e-5 relative, and the decoder emits the **exact same 19 token ids**,
+  detokenizing to `The quick brown fox jumps over the lazy dog.`
+  Four real bugs came out of that diff:
+  - **The predictor was 1-layer; the model is 2-layer** (`prednet.pred_rnn_layers: 2`).
+    The export already wrote `dec.wih0/whh0/b0` + `dec.wih1/whh1/b1`, which
+    `nnLoadDecoder` didn't even look for, so decoding produced nothing at all.
+    `TdtGreedy`'s weight list is now 12 tensors and its state carries `(h0,c0,h1,c1)`.
+  - **The joint activation was `tanh`; NeMo's is `relu`** (`jointnet.activation: relu`).
+  - **The featurizer skipped preemphasis and mis-framed the STFT.** NeMo applies
+    `preemph 0.97`, then `torch.stft(center=True, pad_mode="constant")` — note
+    *constant*, i.e. ZERO padding, not torch's default reflect. Since `|X|²` is
+    invariant to a time shift, we get this exactly by zero-padding `nfft÷2 −
+    (nfft−win)÷2` samples and keeping the cheap win-point transform. The log guard
+    is `2⁻²⁴`, not `1e-5`.
+  - **Per-feature normalization used the wrong frame count and the wrong std.**
+    NeMo's `get_seq_len` is one LESS than the number of STFT frames: the trailing
+    frame is excluded from the mean/std and then zeroed. The std is UNBIASED
+    (÷ n−1) and the `1e-5` is added to the std, not to the variance.
+  `nnFeatures` now wraps that whole preprocessor as one call.
+- **`nnLoadVocab` returned a 1-entry vocab** because `"\n" \ 1: path` used a SPACED
+  `\`, which parses as the scan adverb rather than split — a silent wrong answer.
+  Every transcript detokenized to the empty string. Glued (`"\n"\s`) is correct;
+  noted in AGENT.md and `.plan/triage.md`.
+- The demo auto-detects the weights (no more `LOADMODEL` flag), defers the ~4 s
+  transcription to the frame after it paints a "Transcribing..." state so the window
+  doesn't look hung, and reports too-short clips instead of silently doing nothing.
+
 ## 2026-07-26
 - **Syntax highlighting in `demo/edit.k`, driven by `parse` itself.** The editor is
   rebuilt on two new libraries and the Iosevka font.
