@@ -1,0 +1,59 @@
+{
+ "wav": "test/data/asr/ink.wav",
+ "samples": 47659,
+ "text": "Inc is an array programming language with a GPU compiler written in itself.",
+ "transcribe": "Inc is an array programming language with a GPU compiler written in itself.",
+ "ids": [
+  378,
+  832,
+  59,
+  101,
+  304,
+  828,
+  62,
+  159,
+  609,
+  91,
+  834,
+  19,
+  33,
+  447,
+  831,
+  338,
+  102,
+  3,
+  219,
+  863,
+  874,
+  453,
+  143,
+  12,
+  552,
+  301,
+  22,
+  36,
+  51,
+  524,
+  841
+ ],
+ "stages": {
+  "mel": [
+   298,
+   128
+  ],
+  "sub": [
+   38,
+   1024
+  ],
+  "enc": [
+   38,
+   1024
+  ],
+  "ids": [
+   31
+  ],
+  "sig": [
+   47659
+  ]
+ }
+}

@@ -1,0 +1,47 @@
+{
+ "wav": "test/data/asr/fox.wav",
+ "samples": 39946,
+ "text": "The quick brown fox jumps over the lazy dog.",
+ "transcribe": "The quick brown fox jumps over the lazy dog.",
+ "ids": [
+  155,
+  277,
+  373,
+  464,
+  344,
+  452,
+  850,
+  112,
+  192,
+  838,
+  826,
+  354,
+  5,
+  668,
+  864,
+  833,
+  98,
+  835,
+  841
+ ],
+ "stages": {
+  "mel": [
+   250,
+   128
+  ],
+  "sub": [
+   32,
+   1024
+  ],
+  "enc": [
+   32,
+   1024
+  ],
+  "ids": [
+   19
+  ],
+  "sig": [
+   39946
+  ]
+ }
+}
