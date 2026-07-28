@@ -71,8 +71,11 @@ $[haveFile[MNAME] & haveFile[VNAME]; loadModel[]; 0]
 / The encoder weights are uploaded ONCE and kept on the device: that upload is ~300 ms,
 / i.e. most of a short utterance's encode time, and there is no GPU context to upload
 / into until window.run is live — so it happens on the first transcription, not at load.
-ENCB:0; ENCBOK:0
-holdEnc:{[] ENCB:: nnHoldWs ENC; ENCBOK:: 1}
+/ The decoder weights are likewise transposed to column-major once, not per utterance.
+/ nnPrepDec ignores cfg[0] (the frame count), so a placeholder 0 is fine here.
+DCFG: (0; Dm; EMBD; PREDH; JOINTH; VOCABN; DUR; MAXSYM)
+ENCB:0; DECP:0; ENCBOK:0
+holdEnc:{[] ENCB:: nnHoldWs ENC; DECP:: nnPrepDec[DEC; DCFG]; ENCBOK:: 1}
 ensureEnc:{[] $[ENCBOK=0; holdEnc[]; 0]}
 runAsr:{[buf]
   ensureEnc[]
@@ -81,7 +84,7 @@ runAsr:{[buf]
   Tp:  nnSub2 nnSub2 nnSub2 nfr
   sub: ConvSubsample[mel; SUB; (nfr; NMELS; SUBC; Dm)]
   enc: EncoderRW[sub; ENCB; (Tp; Dm; Hh; Dff; KS; EPS)]  / weights + activations stay on-device across all NLAYERS blocks
-  ids: TdtGreedy[enc; DEC; (Tp; Dm; EMBD; PREDH; JOINTH; VOCABN; DUR; MAXSYM)]
+  ids: TdtGreedyP[enc; DECP; (Tp; Dm; EMBD; PREDH; JOINTH; VOCABN; DUR; MAXSYM)]
   nnDetok[VOCAB; ids]}
 setText:{[buf] t: runAsr buf; TEXT:: $[0=#t; "(nothing recognised)"; t]}
 transcribe:{[buf]

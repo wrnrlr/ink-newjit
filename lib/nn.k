@@ -119,21 +119,53 @@ lnStatK: gpu.kernel[{[mb;rb;x;g;i]
   mean: (+/{[k] x[(i*n)+k]}'!n) % nf
   var:  (+/{[k] sqr[(x[(i*n)+k]) - mean]}'!n) % nf
   set[mb; i; mean]; set[rb; i; 1. % sqrt[var + eps]]}; 0; 4]
+
+/ lnStatK gives each ROW one thread, so a [32,1024] LayerNorm launches 32 threads that
+/ each walk 2048 dependent global loads — the GPU sits idle and the dispatch costs
+/ ~0.38 ms of pure latency. Over 5 LayerNorms × 24 layers that was ~46 ms, 15% of the
+/ encoder. This gives each row a whole WORKGROUP: 256 threads take a strided (hence
+/ coalesced) slice each, then one thread folds the 256 partials in shared memory.
+/ Still the same two-pass mean-then-variance formulation, so it stays numerically close
+/ to lnStatK; only the summation ORDER changes.  Needs N % 256 = 0 — LayerNormR falls
+/ back to lnStatK otherwise.
+wg:: 256
+lnStat2K: gpu.kernelWG[{[mb;rb;x;g;d]
+  nf:g[0]; eps:g[1]; n:`i$nf
+  row: d div wgsz
+  base: row*n
+  per:  n div wgsz
+  s: +/{[t] x[base+(t*wgsz)+lid]}'!per
+  lset[0; lid; s]
+  barrier[]
+  $[lid=0; lset[1; 0; +/{[q] lget[0;q]}'!wgsz]; 0]
+  barrier[]
+  mean: (lget[1;0]) % nf
+  s2: +/{[t] sqr[(x[base+(t*wgsz)+lid]) - mean]}'!per
+  lset[0; lid; s2]
+  barrier[]
+  $[lid=0; lset[1; 1; +/{[q] lget[0;q]}'!wgsz]; 0]
+  barrier[]
+  $[lid=0; set[mb; row; mean]; 0]
+  $[lid=0; set[rb; row; 1. % sqrt[((lget[1;1]) % nf) + eps]]; 0]}; 0; 4; (256;2)]
+wg:: 64
 lnApplyK: gpu.kernel[{[o;x;mb;rb;gm;bt;g;d]
   n:`i$g[0]; i:d div n; j:d mod n
   nrm: ((x[d]) - mb[i]) * rb[i]
   set[o; d; (nrm * gm[j]) + bt[j]]}; 0; 7]
 
-lnSP::0; lnAP::0; lnParam::0
+lnSP::0; lnSP2::0; lnAP::0; lnParam::0
+lnStatPipe:  {[] $[lnSP=0;  lnSP::  gpu.compileCompute[lnStatK;4];  0]; lnSP}
+lnStat2Pipe: {[] $[lnSP2=0; lnSP2:: gpu.compileCompute[lnStat2K;4]; 0]; lnSP2}
 / Resident LayerNorm: writes bo (≥nnPad[M*N]); bm/br are per-row scratch (≥nnPad M).
 / cfg=(M;N;eps) — dims are packed because ink lambdas cap at 8 params.
 LayerNormR: {[bo;bx;bg;bb;bm;br;cfg]
   M:cfg 0; N:cfg 1; eps:cfg 2
-  $[lnSP=0;    lnSP::    gpu.compileCompute[lnStatK;4];  0]
   $[lnAP=0;    lnAP::    gpu.compileCompute[lnApplyK;7]; 0]
   $[lnParam=0; lnParam:: gpu.buffer[4#0.]; 0]
   gpu.write[lnParam; (0.+N),eps,0.,0.]
-  gpu.dispatch[lnSP; (bm;br;bx;lnParam); M]
+  wide: 0 = N mod 256
+  $[wide; gpu.dispatch[lnStat2Pipe[]; (bm;br;bx;lnParam); M*256]
+        ; gpu.dispatch[lnStatPipe[];  (bm;br;bx;lnParam); M]]
   gpu.dispatch[lnAP; (bo;bx;bm;br;bg;bb;lnParam); M*N]
   bo}
 / LayerNorm of X (M×N) with per-feature gamma G (N) and beta B (N) → host (M*N).
@@ -320,6 +352,20 @@ nnPosRow: {[idx]
   ,/ +(sin ang; cos ang)}
 nnPosEmb: {[T;D] nnPosT::T; nnPosD::D; ,/ nnPosRow' !(2*T)-1}
 
+/ The rel-pos table depends only on (T,D), so it is IDENTICAL for all 24 layers — but
+/ MhsaRelRB used to rebuild it host-side and re-upload it every layer, ~45 ms per
+/ encoder run (11% of the total). Cache the device buffer and rebuild only when the
+/ shape changes. Same for the constant zero bias the pos projection uses.
+nnPeT::0; nnPeD::0; nnPeB::0; nnPeZ::0
+nnPeMk: {[T;D]
+  $[nnPeB=0; 0; gpu.free nnPeB]
+  $[nnPeZ=0; 0; gpu.free nnPeZ]
+  nnPeB:: gpu.buffer[nnPosEmb[T;D]]
+  nnPeZ:: gpu.buffer[D#0.]
+  nnPeT::T; nnPeD::D}
+nnPosEmbB: {[T;D] $[(nnPeT=T)&(nnPeD=D); 0; nnPeMk[T;D]]; nnPeB}
+nnPosZeroB: {[T;D] $[(nnPeT=T)&(nnPeD=D); 0; nnPeMk[T;D]]; nnPeZ}
+
 / rel-pos scores: buffers s,q,k,u,v,P + params (T;D;dh;scale).  One thread per H·T·T.
 attnScoresRelK: gpu.kernel[{[s;q;kb;u;v;pe;g;e]
   T:`i$g[0]; D:`i$g[1]; dh:`i$g[2]; sc:g[3]
@@ -477,9 +523,9 @@ nnHoldWs: {[Ws] nnHold' Ws}                        / per-layer weight lists → 
 FfnBlockRB: {[bx; WB; cfg]
   M:cfg 0; D:cfg 1; Dff:cfg 2; eps:cfg 3
   bw1:WB 0; bb1:WB 1; bw2:WB 2; bb2:WB 3; bgm:WB 4; bbt:WB 5
-  h0:gpu.buffer[(nnPad[M*D])#0.]; bm:gpu.buffer[(nnPad M)#0.]; br:gpu.buffer[(nnPad M)#0.]
-  h1:gpu.buffer[(nnPad[M*Dff])#0.]; h2:gpu.buffer[(nnPad[M*Dff])#0.]; h3:gpu.buffer[(nnPad[M*D])#0.]
-  bo:gpu.buffer[(nnPad[M*D])#0.]
+  h0:gpu.bufferN[nnPad[M*D]]; bm:gpu.buffer[(nnPad M)#0.]; br:gpu.buffer[(nnPad M)#0.]
+  h1:gpu.bufferN[nnPad[M*Dff]]; h2:gpu.bufferN[nnPad[M*Dff]]; h3:gpu.bufferN[nnPad[M*D]]
+  bo:gpu.bufferN[nnPad[M*D]]
   LayerNormR[h0; bx; bgm; bbt; bm; br; (M;D;eps)]
   LinearR[h1; h0; bw1; bb1; M; D; Dff]
   SiluR[h2; h1; M*Dff]
@@ -494,19 +540,19 @@ MhsaRelRB: {[bx; WB; cfg]
   dh: D div H; scale: 1. % sqrt 0.+dh
   bwq:WB 0; bbq:WB 1; bwk:WB 2; bbk:WB 3; bwv:WB 4; bbv:WB 5; bwo:WB 6; bbo:WB 7
   bwp:WB 8; bu:WB 9; bv:WB 10
-  bq:gpu.buffer[(nnPad[T*D])#0.];  LinearR[bq;bx;bwq;bbq;T;D;D]
-  bk:gpu.buffer[(nnPad[T*D])#0.];  LinearR[bk;bx;bwk;bbk;T;D;D]
-  bvv:gpu.buffer[(nnPad[T*D])#0.]; LinearR[bvv;bx;bwv;bbv;T;D;D]
+  bq:gpu.bufferN[nnPad[T*D]];  LinearR[bq;bx;bwq;bbq;T;D;D]
+  bk:gpu.bufferN[nnPad[T*D]];  LinearR[bk;bx;bwk;bbk;T;D;D]
+  bvv:gpu.bufferN[nnPad[T*D]]; LinearR[bvv;bx;bwv;bbv;T;D;D]
   np: (2*T)-1
   bz:gpu.buffer[D#0.]
-  bpe0:gpu.buffer[nnPosEmb[T;D]]
-  bpe:gpu.buffer[(nnPad[np*D])#0.]; LinearR[bpe;bpe0;bwp;bz;np;D;D]
-  bs:gpu.buffer[(nnPad[H*T*T])#0.]; AttnScoresRelR[bs;bq;bk;bu;bv;bpe;(T;D;dh;scale)]
-  bsm:gpu.buffer[(nnPad[H*T*T])#0.]; bmx:gpu.buffer[(nnPad[H*T])#0.]; bsu:gpu.buffer[(nnPad[H*T])#0.]
+  bpe0: nnPosEmbB[T;D]                       / cached: identical for every layer
+  bpe:gpu.bufferN[nnPad[np*D]]; LinearR[bpe;bpe0;bwp;bz;np;D;D]
+  bs:gpu.bufferN[nnPad[H*T*T]]; AttnScoresRelR[bs;bq;bk;bu;bv;bpe;(T;D;dh;scale)]
+  bsm:gpu.bufferN[nnPad[H*T*T]]; bmx:gpu.bufferN[nnPad[H*T]]; bsu:gpu.bufferN[nnPad[H*T]]
   SoftmaxR[bsm;bs;bmx;bsu;H*T;T]
-  bc:gpu.buffer[(nnPad[T*D])#0.]; AttnCtxR[bc;bsm;bvv;T;D;dh]
-  bo:gpu.buffer[(nnPad[T*D])#0.]; LinearR[bo;bc;bwo;bbo;T;D;D]
-  gpu.free'(bq;bk;bvv;bz;bpe0;bpe;bs;bsm;bmx;bsu;bc)
+  bc:gpu.bufferN[nnPad[T*D]]; AttnCtxR[bc;bsm;bvv;T;D;dh]
+  bo:gpu.bufferN[nnPad[T*D]]; LinearR[bo;bc;bwo;bbo;T;D;D]
+  gpu.free'(bq;bk;bvv;bz;bpe;bs;bsm;bmx;bsu;bc)   / bpe0 is cached, not owned here
   bo}
 
 / Resident conv module (residual included). WB = 10 handles (lnG;lnB;Wpw1;Bpw1;Wdw;Bdw;caA;caB;Wpw2;Bpw2).
@@ -514,11 +560,11 @@ ConvModuleRB: {[bx; WB; cfg]
   T:cfg 0; D:cfg 1; ks:cfg 2; eps:cfg 3
   pad: (ks-1) div 2
   blnG:WB 0; blnB:WB 1; bwp1:WB 2; bbp1:WB 3; bwdw:WB 4; bbdw:WB 5; bcaA:WB 6; bcaB:WB 7; bwp2:WB 8; bbp2:WB 9
-  h0:gpu.buffer[(nnPad[T*D])#0.]; bm:gpu.buffer[(nnPad T)#0.]; br:gpu.buffer[(nnPad T)#0.]
-  h1:gpu.buffer[(nnPad[T*2*D])#0.]
-  h2:gpu.buffer[(nnPad[T*D])#0.]; h3:gpu.buffer[(nnPad[T*D])#0.]
-  h4:gpu.buffer[(nnPad[T*D])#0.]; h5:gpu.buffer[(nnPad[T*D])#0.]; h6:gpu.buffer[(nnPad[T*D])#0.]
-  bo:gpu.buffer[(nnPad[T*D])#0.]
+  h0:gpu.bufferN[nnPad[T*D]]; bm:gpu.buffer[(nnPad T)#0.]; br:gpu.buffer[(nnPad T)#0.]
+  h1:gpu.bufferN[nnPad[T*2*D]]
+  h2:gpu.bufferN[nnPad[T*D]]; h3:gpu.bufferN[nnPad[T*D]]
+  h4:gpu.bufferN[nnPad[T*D]]; h5:gpu.bufferN[nnPad[T*D]]; h6:gpu.bufferN[nnPad[T*D]]
+  bo:gpu.bufferN[nnPad[T*D]]
   LayerNormR[h0; bx; blnG; blnB; bm; br; (T;D;eps)]
   LinearR[h1; h0; bwp1; bbp1; T; D; 2*D]
   GluR[h2; h1; T; D]
@@ -536,13 +582,13 @@ ConformerBlockRB: {[bx; WB; cfg]
   fc: (T;D;Dff;eps)
   b1: FfnBlockRB[bx; (WB 2;WB 3;WB 4;WB 5;WB 0;WB 1); fc]
   / attn LayerNorm(x1) resident
-  bln:gpu.buffer[(nnPad[T*D])#0.]; am:gpu.buffer[(nnPad T)#0.]; ar:gpu.buffer[(nnPad T)#0.]
+  bln:gpu.bufferN[nnPad[T*D]]; am:gpu.buffer[(nnPad T)#0.]; ar:gpu.buffer[(nnPad T)#0.]
   LayerNormR[bln; b1; WB 6; WB 7; am; ar; (T;D;eps)]
   batt: MhsaRelRB[bln; WB@8+!11; (T;D;H)]
-  bx2:gpu.buffer[(nnPad[T*D])#0.]; AddScaledR[bx2; b1; batt; 1.; T*D]
+  bx2:gpu.bufferN[nnPad[T*D]]; AddScaledR[bx2; b1; batt; 1.; T*D]
   bx3: ConvModuleRB[bx2; WB@19+!10; (T;D;ks;eps)]
   bx4: FfnBlockRB[bx3; (WB 31;WB 32;WB 33;WB 34;WB 29;WB 30); fc]
-  bo:gpu.buffer[(nnPad[T*D])#0.]; bfm:gpu.buffer[(nnPad T)#0.]; bfr:gpu.buffer[(nnPad T)#0.]
+  bo:gpu.bufferN[nnPad[T*D]]; bfm:gpu.buffer[(nnPad T)#0.]; bfr:gpu.buffer[(nnPad T)#0.]
   LayerNormR[bo; bx4; WB 35; WB 36; bfm; bfr; (T;D;eps)]
   gpu.free'(b1;bln;am;ar;batt;bx2;bx3;bx4;bfm;bfr)
   bo}
@@ -808,12 +854,23 @@ nnMv:   {[W;n;k;x] nnMvd[W;k;x;]' !n}        / matrix-vector  W[n,k]·x (flat W)
 nnMvX:: ()
 nnDot:  {[r] +/ nnMvX * r}
 nnMvR:  {[rows;x] nnMvX:: x; nnDot' rows}
+
+/ Faster still: hold W COLUMN-wise and read the product as a linear combination of
+/ columns, Σ_k x[k]·W[:,k], instead of n separate length-k dot products. Same k order,
+/ so it is BIT-IDENTICAL to nnMvR — but it is n·(alloc + multiply + reduce) collapsed
+/ into k·(scalar×vector) plus one fold, i.e. far fewer interpreter round-trips and
+/ temporaries. Measured ~3.4× faster at the decoder's 2560×640 shape.
+nnMvT:  {[cols;x] +/ x * cols}
+/ nnCols[Wf;n;k] — flat row-major W[n,k] → list of k columns, each n long.
+nnColW:: (); nnColN::0; nnColK::0
+nnColOne: {[j] nnColW@(j + nnColK*!nnColN)}
+nnCols: {[Wf;n;k] nnColW::Wf; nnColN::n; nnColK::k; nnColOne' !k}
 nnAmax: {[v] v ? |/v}                         / argmax = index of first max
 
-/ LSTM cell step: (x[E],h[H],c[H]) → (h'[H]; c'[H]).  Rih/Rhh are ROW LISTS of
-/ Wih[4H,E] / Whh[4H,H] (see nnMvR); b is flat [4H].
-nnLstm: {[x;h;c;Rih;Rhh;b;H]
-  pre: b + (nnMvR[Rih;x]) + nnMvR[Rhh;h]
+/ LSTM cell step: (x[E],h[H],c[H]) → (h'[H]; c'[H]).  Cih/Chh are COLUMN LISTS of
+/ Wih[4H,E] / Whh[4H,H] (see nnCols/nnMvT); b is flat [4H].
+nnLstm: {[x;h;c;Cih;Chh;b;H]
+  pre: b + (nnMvT[Cih;x]) + nnMvT[Chh;h]
   ig: nnSig pre@!H
   fg: nnSig pre@H+!H
   gg: nnTanh pre@(2*H)+!H
@@ -824,11 +881,11 @@ nnLstm: {[x;h;c;Rih;Rhh;b;H]
 / TDT joint: (enc_t[Fe], g[H]) → logits[nout].  JW=(Wf[J,Fe];Wg[J,H];bj[J];Wo[nout,J];bo[nout]).
 / NeMo's joint_net is Sequential(ReLU, Dropout, Linear) — the activation is RELU,
 / not tanh (jointnet.activation: relu in model_config.yaml).
-/ JW 0/1/3 are ROW LISTS (Wf, Wg, Wo); JW 2/4 stay flat bias vectors.
+/ JW 0/1/3 are COLUMN LISTS (Wf, Wg, Wo); JW 2/4 stay flat bias vectors.
 nnRelu: {[v] 0. | v}
 nnJoint: {[enc;g;JW]
-  jj: nnRelu (JW 2) + (nnMvR[JW 0;enc]) + nnMvR[JW 1;g]
-  (JW 4) + nnMvR[JW 3;jj]}
+  jj: nnRelu (JW 2) + (nnMvT[JW 0;enc]) + nnMvT[JW 1;g]
+  (JW 4) + nnMvT[JW 3;jj]}
 
 / decode state = (t; u; h0; c0; h1; c1; prev; emitted).  Weights/config in globals
 / (the while body is single-arg; blank token id = tdVocab, last of the vocab+1 token
@@ -840,6 +897,10 @@ nnJoint: {[enc;g;JW]
 tdEnc::(); tdEmb::(); tdJW::()
 tdWih0::(); tdWhh0::(); tdLb0::(); tdWih1::(); tdWhh1::(); tdLb1::()
 tdDur::(); tdVocab::0; tdT::0; tdH::0; tdEncD::0; tdEmbD::0; tdMax::0
+/ NB memoising the predictor across BLANK steps (state unchanged ⇒ identical LSTM
+/ output) looks attractive but measured a 0% hit rate: TDT advances time with its
+/ duration head instead of emitting blanks, so essentially every step emits. Not worth
+/ the extra state — the win came from nnMvT instead.
 tdStep: {[st]
   t:st 0; u:st 1; h0:st 2; c0:st 3; h1:st 4; c1:st 5; prev:st 6; em:st 7
   x:  tdEmb@(prev*tdEmbD)+!tdEmbD
@@ -867,18 +928,31 @@ tdCond: {[st] (st 0) < tdT}
 /   enc[T,EncD] encoder output;
 /   W = (Emb[V+1,EmbD]; Wih0;Whh0;b0; Wih1;Whh1;b1; Wf; Wg; bj; Wo; bo);
 /   cfg = (T; EncD; EmbD; H; J; V; durList; maxSym).
-TdtGreedy: {[enc;W;cfg]
+/ nnPrepDec[W;cfg] — transpose the decoder weights into column lists ONCE. This is
+/ per-utterance work otherwise, and it is not cheap (the four 2560×640 LSTM matrices),
+/ so a caller that transcribes repeatedly should hoist it and use TdtGreedyP.
+nnPrepDec: {[W;cfg]
+  EmbD:cfg 2; H:cfg 3; J:cfg 4; V:cfg 5
+  nout: (V+1) + #cfg 6
+  H4: 4*H
+  (W 0;
+   nnCols[W 1;H4;EmbD]; nnCols[W 2;H4;H]; W 3;
+   nnCols[W 4;H4;H];    nnCols[W 5;H4;H]; W 6;
+   nnCols[W 7;J;cfg 1]; nnCols[W 8;J;H];  W 9; nnCols[W 10;nout;J]; W 11)}
+
+/ TdtGreedyP — decode with already-prepared (column-major) weights.
+TdtGreedyP: {[enc;P;cfg]
   tdT::cfg 0; tdEncD::cfg 1; tdEmbD::cfg 2; tdH::cfg 3
   tdVocab::cfg 5; tdDur::cfg 6; tdMax::cfg 7
-  J: cfg 4; nout: (tdVocab+1) + #tdDur
-  H4: 4*tdH
-  tdEnc::enc; tdEmb::W 0
-  / split every weight matrix into rows ONCE here, not once per decode step
-  tdWih0::(H4;tdEmbD)#W 1; tdWhh0::(H4;tdH)#W 2; tdLb0::W 3
-  tdWih1::(H4;tdH)   #W 4; tdWhh1::(H4;tdH)#W 5; tdLb1::W 6
-  tdJW:: ((J;tdEncD)#W 7; (J;tdH)#W 8; W 9; (nout;J)#W 10; W 11)
+  tdEnc::enc; tdEmb::P 0
+  tdWih0::P 1; tdWhh0::P 2; tdLb0::P 3
+  tdWih1::P 4; tdWhh1::P 5; tdLb1::P 6
+  tdJW:: (P 7; P 8; P 9; P 10; P 11)
   st: (0; 0; tdH#0.; tdH#0.; tdH#0.; tdH#0.; tdVocab; !0)   / prev = blank, empty emission
   (tdCond tdStep/ st) 7}
+
+/ One-shot: prepare the weights, then decode.
+TdtGreedy: {[enc;W;cfg] TdtGreedyP[enc; nnPrepDec[W;cfg]; cfg]}
 
 / ── Weight loading  (safetensors dict → the weight lists the nn fns expect) ───
 / `model` is the dict from safetensors.read: symbol name → (`dtype`shape`data).

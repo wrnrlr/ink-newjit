@@ -57,6 +57,10 @@ gpu.runShader2:   so 2: (`gpuCompute2;  3)   / (spirv_I; in1_F; in2_F) → outpu
 / gpu.buffer/gpu.read round-trip once; gpu.dispatch runs a cached pipeline with no
 / readback, so ping-pong is a plain k loop over gpu.dispatch (see test/relax.k).
 gpu.buffer:    so 2: (`gpuBufferNew;  1)   / F → bufHandle : alloc+upload a resident storage buffer
+/ gpu.bufferN[n] — alloc an n-float storage buffer with NO upload. CONTENTS UNDEFINED:
+/ only for scratch a kernel fully overwrites before anything reads it. Skips building
+/ and copying an n-float zero vector, which is most of the cost of gpu.buffer[n#0.].
+gpu.bufferN:   so 2: (`gpuBufferNewN; 1)   / i → bufHandle : alloc only, no upload
 gpu.write:  so 2: (`gpuBufferWrite;2)   / (bufHandle; F) → 0 : overwrite a resident buffer
 gpu.read:   so 2: (`gpuBufferRead; 1)   / bufHandle → F : read a resident buffer back to host
 gpu.readI:  so 2: (`gpuBufferReadI;1)   / bufHandle → I : read a resident buffer back as ints (atomic accumulators)

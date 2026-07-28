@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-07-29 — ASR another 2.2× (12× total); 8–10× real time
+A 2.5 s clip now transcribes in ~315 ms (was ~680 ms yesterday, 3.8 s originally);
+14.7 s takes 1.39 s, i.e. **10.6× real time**. Token ids still match NeMo exactly.
+Profiling first, so the work went where the time actually was — at T'=32 the encoder
+split roughly 73% GPU kernels / 15% host+allocation / 12% dispatch overhead, with the
+matmuls only ~33% of it. So the wins were *not* where I expected:
+- **The rel-pos embedding was rebuilt and re-uploaded every layer.** It depends only
+  on (T,D), so all 24 layers were computing the identical [2T−1,D] table host-side —
+  ~45 ms per encoder run, plus 24 uploads. Cached on the device (`nnPosEmbB`).
+- **LayerNorm gave each ROW one thread.** A [32,1024] norm launched 32 threads that
+  each walked 2048 dependent global loads: ~0.38 ms of pure latency per dispatch, and
+  there are 5 per layer. `lnStat2K` gives each row a whole workgroup (coalesced
+  strided slices + a shared-memory fold), same two-pass formulation. ~50 ms.
+- **`gpu.bufferN[n]`** (new, in gpu_vk.zig) allocates a storage buffer with NO upload.
+  The nn scratch buffers are fully overwritten by the kernel that fills them, so
+  `gpu.buffer[n#0.]` was building an n-float zero vector host-side and memcpy'ing it
+  in — and in the interpreter that host array is the expensive half. ~60 ms.
+- **`nnMvT`: hold decoder weights COLUMN-wise.** Reading a matrix-vector product as
+  Σ_k x[k]·W[:,k] instead of n separate dot products collapses n·(alloc+multiply+
+  reduce) into k·(scalar×vector) plus one fold. Same k order, so **bit-identical** —
+  3.4× at the decoder's 2560×640 shape. Decode 208 → 49 ms at 2.5 s (4.2×).
+  `nnPrepDec`/`TdtGreedyP` hoist the transpose out of the per-utterance path.
+
+Measured and rejected: memoising the predictor across blank steps. It looks free
+(state unchanged ⇒ identical LSTM output) but the hit rate is **0%** — TDT advances
+time with its duration head rather than emitting blanks, so essentially every step
+emits. Noted in the code so nobody re-derives it.
+
+Beware when profiling this stack: an ink micro-benchmark of the form
+`z: {[i] gpu.dispatch[…]}' !n` is DEAD-CODE ELIMINATED (z unused), and reports
+sub-microsecond "per-call" times for work that never ran. Every number here came
+from timing the real pipeline with kernels stubbed out group by group.
+
 ## 2026-07-28 (later) — ASR is ~6× faster, and now runs faster than real time
 Transcription was 3.8 s for a 2.5 s clip. It is now 0.63 s, and a 14.7 s clip went
 from 14.7 s to 2.1 s — i.e. from roughly 1× real time to **~6.8×**. Output is still

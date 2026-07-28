@@ -237,6 +237,22 @@ fn newBuffer(data_k: ?K, uniform: bool) ?K {
 export fn gpuBufferNew(data_k: ?K) callconv(.c) ?K { return newBuffer(data_k, false); }
 export fn gpuUniformNew(data_k: ?K) callconv(.c) ?K { return newBuffer(data_k, true); }
 
+// gpu.bufferN[n] — allocate an n-float storage buffer with NO upload. Scratch buffers
+// (nn activations) are fully overwritten by the kernel that produces them, so building
+// an n-float zero vector host-side and memcpy'ing it in is pure waste — and in the k
+// interpreter that host array is the expensive half. CONTENTS ARE UNDEFINED (the slot
+// may be recycled off g_bfree), so only use it where a kernel writes every element that
+// is later read.
+export fn gpuBufferNewN(n_k: ?K) callconv(.c) ?K {
+  const v = g_vk orelse return ki(0);
+  const n = ki_val(n_k);
+  if (n <= 0) return ki(0);
+  const b = v.createBuffer(@as(u64, @intCast(n)) * @sizeOf(f32), false) catch return ki(0);
+  if (g_bfree.pop()) |idx| { g_bufs.items[idx] = b; return ki(@intCast(idx + 1)); }
+  g_bufs.append(alloc, b) catch { v.destroyBuffer(b); return ki(0); };
+  return ki(@intCast(g_bufs.items.len));
+}
+
 // Uniform buffer of raw i32 words (exact i32 counts past the f32 2^24 cliff): the reduce/scan/compact kernels
 // carry only integer COUNTS in their uniform, so shipping the exact i32 bit pattern
 // (shader bitcasts f32-lane → i32) is exact to 2^31 instead of the f32 f2s 2^24 cliff.
@@ -910,6 +926,7 @@ fn inkInit(reg: *anyopaque) void {
   r.k_register("gpuCompute", @ptrCast(&gpuCompute), 2);
   r.k_register("gpuCompute2", @ptrCast(&gpuCompute2), 3);
   r.k_register("gpuBufferNew", @ptrCast(&gpuBufferNew), 1);
+  r.k_register("gpuBufferNewN", @ptrCast(&gpuBufferNewN), 1);
   r.k_register("gpuUniformNew", @ptrCast(&gpuUniformNew), 1);
   r.k_register("gpuUniformNewI", @ptrCast(&gpuUniformNewI), 1);
   r.k_register("gpuBufferWrite", @ptrCast(&gpuBufferWrite), 2);
