@@ -4,9 +4,6 @@
 
 ### Lexical Grammar
 
-Source is tokenized into literals, names, operators, adverbs, delimiters and
-comments. The literal grammar in EBNF:
-
 ```ebnf
 digit    = "0" | "1" | ... | "9" ;
 hex      = digit | "a" ... "f" | "A" ... "F" ;
@@ -17,7 +14,7 @@ mantissa = ( digit , { digit } , [ "." , { digit } ]
             | "." , digit , { digit } ) , [ exponent ] ;
 bit = ( "0" | "1" ) , "b" ;
 nat = ( digit , { digit } | "0" , ( "N" | "W" ) ) , "u" ;
-int   §= [ sign ] , ( "0" , ( "x" | "X" ) , hex , { hex }
+int   = [ sign ] , ( "0" , ( "x" | "X" ) , hex , { hex }
           | "0" , ( "N" | "W" )
           | digit , { digit } ) ;
 float = [ sign ] , ( "0" , ( "n" | "w" )
@@ -29,33 +26,9 @@ half   = [ sign ] , ( "0" , ( "n" | "w" ) | mantissa ) , "h" ;
 bits   = ( "0" | "1" ) , ( "0" | "1" ) , { "0" | "1" } , "b" ;
 string = '"' , { stringchar } , '"' ;
 symbol = "`" , ( { letter | digit | "." }| '"' , { ? any char except '"' ? } , '"' ) ;
-(* exception: a backtick directly followed by `<digit> ":"` is the blank symbol
-   `` ` `` plus the io verb `<digit>:`, not a digit-named symbol — so `` `0:"hi" ``
-   is (blank) 0: "hi", i.e. write to stdout. *)
 name   = letter , { letter | digit } ,
          { "." , letter , { letter | digit } } ;
 ```
-
-Four tokenizer behaviors the grammar above can't fully express:
-
-- **`sign`** attaches as a negative literal only when the `-` isn't glued to a
-  preceding noun: `abs -3` → negative `-3`, but `abs-3` → dyadic subtract
-  (`abs` minus `3`). Matches ngn/k, where `cos -3` works but `cos-3` errors.
-- **`stringchar`** follows the K doubling convention — an interior `"` is
-  content unless the next character is whitespace, a bracket, an operator glyph
-  or a digit, so `"""` is a 1-char string holding `"`. A `"` immediately
-  followed by a newline opens a multi-line string that runs to its closing `"`.
-- A **char** is a single-character like `"H"` is atom, not a string.
-- **`symbol`** joins only `letter | digit | "."` in its unquoted body; an
-  operator glyph ends it (`` `~ `` is the null symbol `` ` `` then Match `~`).
-  Quote the body to include glyphs: `` `"+" ``, `` `"<=" ``.
-- **`name`** extends across a `.` only when the dot is followed by a letter —
-  `a.b` is one name, but `a.1` and `a. b` keep `.` as the Apply/index operator.
-  `_` is never part of a name (it is always the Drop/Cut/Delete primitive).
-
-Comments: a `/` preceded by whitespace (or starting a line) runs to end of line.
-A line containing only `/` opens a block comment that runs until a line
-containing only `\`. Newlines and `;` are statement separators (`sep`).
 
 ### Syntactical Grammar
 Nouns can be combined into expressions using verbs and adverbs.
@@ -240,7 +213,7 @@ implemented (see the note at the end of this file / doc/design).
 - **Partial** - partialy applied operator/lambda, type `` `p ``
 - **Composition** - A composition is a sequence of variadics applied in succession, type `` `q ``
 
-### Blank `` ` ``
+### Blank
 Blanks are used for empty assignment and defining partials.
 
 ## Variables
@@ -254,59 +227,59 @@ and a variable declared inside a lambda is a local variable.
 Assignmet of globals and locals at the top level happens with the singe colon `:`,
 while assigment of globals in a lambda happen with a double colon `::`
 
-### General Verbs `@#`
+### General Verbs
 - `@x` **Type** - Type of x. `` @(1;2.3;`c;"Hi")  / `i`f`s`C ``
 - `#x` **Tally** - Count number of elements in x. `` #(1 2;3 4)  / 2 ``
 
-### Arithmetic Verbs `-+*%`
+### Arithmetic Verbs
 - `-x` **Minus** - Negative x. `` -(1;2.3)  / (-1;-2.3) ``
 - `x+y` **Add** - Sum of x and y
 - `x-y` **Sub** - Difference between x and y
 - `x*y` **Mul** - Product of x and y
 - `x%y` **Div** - Return x divided by y. `` (2%3;4.%2.)  / 0.6666667 2.0 ``  
 
-### Logical Verbs `~=|&`
+### Logical Verbs
 - `~x` **Not** - boolean negation `` ~0110b  / 1001b ``
 - `x~y` **Match** - identity check (same type and value)
 - `x=y` **Equal** - elementwise equality
 - `x|y` **Max/Or** - maximum value of x or y
 - `x&y` **Min/And** - minimum value of x and y
 
-### Grading Verbs `<>`
+### Grading Verbs
 - `<X` **Ascend** - indices that sort X ascending
 - `>X` **Descend** - indices that sort X descending
 
-### Index Verbs `div mod`
+### Index Verbs
 - `x mod y` **Modulo** - remainder of x÷y (integer)
 - `x div y` **Integer division** - floor(x÷y)
 - `!i` **Iota** - integers 0..i-1
 - `!I` **Odometer** - Cartesian product indices for an integer list
 
-### Random Verb `?`
+### Random Verb
 - `?X` **Distinct** - distinct elements in order
 - `?i` **Uniform** - i random floats in [0,1)
 - `i?x` **Roll/Deal** - i random selections from x
 
-### String Verbs `$`
+### String Verbs
 - `$x` **String** - string representation
 - `i$C` **Pad** - pad string to length |i|
 
-### Array Verbs `*|`
+### Array Verbs
 - `*x` **First** - first item in x
 - `|x` **Reverse** - elements in reverse order
 
-### List Verbs `,`
+### List Verbs
 - `,x` **Enlist** - wrap x in a list
 - `x,y` **Join** - join atoms/lists; merge dictionaries (right-side wins). `x,()` (empty list on the right) is identity and preserves x's type — a typed vector stays typed (`` `a`b,() `` → `` `S ``), an atom enlists to its typed 1-vector (`1,()` → `,1`). (The left form `(),x` still boxes into a general list `` `L ``.)
 
-### Mappping Verbs `+!#_`
+### Mappping Verbs
 - `+d` **Pivot** - table to dict-of-lists and vice versa. `` +[[]n:`b`c;i:2 3] `` → `` [n:`b`c;i:2 3] ``
 - `.d` **Value** - extract dictionary values
 - `x!y` **Key** - dictionary creation
 - `X#d` **TakeKeys** - filter dictionary d to keys X
 - `X_d` **DropKeys** - remove keys X from dictionary d
 
-### Structural Verbs `+#`
+### Structural Verbs
 - `+x` **Flip** - transpose. `` +(1 2 3;4 5 6) `` → `` (1 4;2 5;3 6) ``
 - `I#y` **Reshape** - reshape y to shape I, a `0N` means shape whats fits
 
@@ -320,14 +293,14 @@ while assigment of globals in a lambda happen with a double colon `::`
 - `.s` **GetSymbol** - retrieve global by symbol name
 - `s$y` **Cast** - cast y to type s. `` `I$"-12" `` → `-12`; `` `F$"-12.3" `` → `-12.3`
 
-### Bulk Verbs `` @[] .[] ?[] ``
+### Bulk Verbs
 - `@[x;y;f]` **Amend3** - `` @["ABC";1;_:] `` → `"AbC"`
 - `@[x;y;F;z]` **Amend4** - `` @["abc";1;:;"x"] `` → `"axc"`
 - `.[x;y;f]` **Drill3** - `` .[("AB";"CD");1 0;_:] `` → `("AB";"cD")`
 - `.[x;y;F;z]` **Drill4** - `` .[("ab";"cd");1 0;:;"x"] `` → `("ab";"xd")`
 - `?[C;I;C]` **Splice** - `` ?["abcd";1 3;"xyz"] -> "axyzd" `` TODO: does this work for non-char arrays as well
 
-### Monadic Operators `:%+-*!#@&|<>=?,^~$.`
+### Monadic Operators
 - `:x` **Identity** - return right-hand side
 - `%x` **Shape** - rectangular extent as an int vector (APL rho): `%5`→`!0` (atom, rank 0), `%1 2 3`→`,3`, `%(1 2;3 4;5 6)`→`3 2`. Ragged lists stop at the first non-uniform level (`%(1 2;3 4 5)`→`,2`). Inverse of reshape: `(%m)#,/m ~ m`. Placed arrays carry it as the descriptor's `s` field.
 - `&I` **Where** - convert counts to repeated indices
@@ -362,7 +335,7 @@ The IO system is organized around file descriptors (filename, port number, etc.)
 - `` 8: d `` **Fetch** — sync + read a placed array back to the host, reshaped to its `s`; a `tbl` descriptor reads every column and rebuilds the table
 - `` n 8: d `` **FetchN** — first n elements (trims the ×64 dispatch padding)
 
-## Adverbs `` ' / \ ': /: \: ``
+## Adverbs
 An adverb is one of the glyphs: `` ' / \ ': /: \: `` when it is used as a modifier 
 of how the verb on the right-hand side is applied to the verb on the left hand argument.
 The verb can be a operator, partial or lambda.
