@@ -63,11 +63,11 @@ ck["kernelInfer"; shader.kernelI[{[o;x;g;d] n:`i$g[0]; i:d div n; j:d mod n; set
 / workgroup shared memory (gpu.kernelWG): a Workgroup-storage array + barrier[] + lid.
 / The reverse case is a top-level barrier; the tiled GEMM stresses barriers + lset/lget
 / owned by nested +/ loops. kAlloc resets the shared globals, so later dumps are clean.
-ck["kernelWGrev"; gpu.kernelWG[{[o;x;d] lset[0; lid; x[d]]; barrier[]; set[o; d; lget[0; (wgsz-1)-lid]]}; 0; 2; ,64]]
+ck["kernelWGrev"; gpu.kernelWG[{[o;x;d] lset[0; lid; x[d]]; barrier[]; set[o; d; lget[0; (wgsz-1)-lid]]}; 0; 2; ,64; 0]]
 ck["kernelWGgemm"; gpu.kernelWG[{[c;a;b;g;d]
   n:`i$g[1]; kk:`i$g[2]; i:d div n; j:d mod n; nt:kk div wgsz
   acc: +/{[t] lset[0; lid; a[(i*kk)+(t*wgsz)+lid]]; barrier[]; p: +/{[m] (lget[0;m]) * b[(((t*wgsz)+m)*n)+j]}'!wgsz; barrier[]; p}'!nt
-  set[c; d; acc]}; 0; 4; ,64]]
+  set[c; d; acc]}; 0; 4; ,64; 0]]
 
 / kk2 §2.4-1: the canonical full syntax  +/{[k] e}'!K  (and |/… → rmax) must
 / lower to the SAME words as the intrinsic rsum/rmax spelling above — assert

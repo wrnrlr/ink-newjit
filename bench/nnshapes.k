@@ -53,10 +53,10 @@ nnbSetup: {[]
     nnbActx[]]
   / Hoisted variants: run the wrapper ONCE so its pipelines are compiled and its
   / params buffer is written, then the repeat loop dispatches those pipes directly.
-  $[KI=8;  SoftmaxR[BO;BX;BM;BS;M;NCOL]
-    KI=9;  LayerNormR[BO;BX;BG;BB2;BM;BS;(M;NCOL;0.00001)]
-    KI=10; AttnScoresR[BSC;BQ;BK;TT;DMODEL;DHEAD;0.125]
-    KI=11; AttnCtxR[BO;BAT;BV;TT;DMODEL;DHEAD]
+  $[KI=8;  softmax[BO;BX;BM;BS;M;NCOL]
+    KI=9;  layernorm[BO;BX;BG;BB2;BM;BS;(M;NCOL;0.00001)]
+    KI=10; attn.scores[BSC;BQ;BK;TT;DMODEL;DHEAD;0.125]
+    KI=11; attn.ctx[BO;BAT;BV;TT;DMODEL;DHEAD]
     0]}
 
 / GEMM: square M=N=K=S. Threads = S*S, each reducing over K=S.
@@ -64,7 +64,7 @@ nnbGemm: {[]
   M:: S; NN:: S; KK:: S
   BA:: gpu.buffer[(M*KK) # 0.01]
   BB:: gpu.buffer[(KK*NN) # 0.02]
-  BC:: gpu.buffer[(nnPad[M*NN]) # 0.]
+  BC:: gpu.buffer[(nn.pad[M*NN]) # 0.]
   GP:: gpu.buffer[4#0.]
   gpu.write[GP; (0.+M),(0.+NN),(0.+KK),0.]
   PIPE:: $[KI=0; gemmPlainPipe[]; gemmTilePipe[]]
@@ -73,23 +73,23 @@ nnbGemm: {[]
 / Elementwise silu/gelu over S elements.
 nnbEw: {[]
   NEL:: S
-  BX:: gpu.buffer[(nnPad S) # 0.5]
-  BO:: gpu.buffer[(nnPad S) # 0.]
+  BX:: gpu.buffer[(nn.pad S) # 0.5]
+  BO:: gpu.buffer[(nn.pad S) # 0.]
   0}
 
-/ Softmax / LayerNorm: M=S rows of NCOL columns.
+/ softmax.host / layernorm.host: M=S rows of NCOL columns.
 NCOL:: 256
 nnbSm: {[]
   M:: S
-  BX:: gpu.buffer[(nnPad[S*NCOL]) # 0.5]
-  BO:: gpu.buffer[(nnPad[S*NCOL]) # 0.]
-  BM:: gpu.buffer[(nnPad S) # 0.]
-  BS:: gpu.buffer[(nnPad S) # 0.]
+  BX:: gpu.buffer[(nn.pad[S*NCOL]) # 0.5]
+  BO:: gpu.buffer[(nn.pad[S*NCOL]) # 0.]
+  BM:: gpu.buffer[(nn.pad S) # 0.]
+  BS:: gpu.buffer[(nn.pad S) # 0.]
   0}
 nnbLn: {[]
   nnbSm[]
-  BG:: gpu.buffer[(nnPad NCOL) # 1.]
-  BB2:: gpu.buffer[(nnPad NCOL) # 0.]
+  BG:: gpu.buffer[(nn.pad NCOL) # 1.]
+  BB2:: gpu.buffer[(nn.pad NCOL) # 0.]
   0}
 
 / Attention: T=S tokens, D=256 model dim, dh=64 head dim (H=4 heads).
@@ -97,31 +97,31 @@ DMODEL:: 256
 DHEAD::  64
 nnbAsc: {[]
   TT:: S
-  BQ:: gpu.buffer[(nnPad[S*DMODEL]) # 0.01]
-  BK:: gpu.buffer[(nnPad[S*DMODEL]) # 0.02]
-  BSC:: gpu.buffer[(nnPad[(DMODEL div DHEAD)*S*S]) # 0.]
+  BQ:: gpu.buffer[(nn.pad[S*DMODEL]) # 0.01]
+  BK:: gpu.buffer[(nn.pad[S*DMODEL]) # 0.02]
+  BSC:: gpu.buffer[(nn.pad[(DMODEL div DHEAD)*S*S]) # 0.]
   0}
 nnbActx: {[]
   TT:: S
-  BAT:: gpu.buffer[(nnPad[(DMODEL div DHEAD)*S*S]) # 0.01]
-  BV::  gpu.buffer[(nnPad[S*DMODEL]) # 0.02]
-  BO::  gpu.buffer[(nnPad[S*DMODEL]) # 0.]
+  BAT:: gpu.buffer[(nn.pad[(DMODEL div DHEAD)*S*S]) # 0.01]
+  BV::  gpu.buffer[(nn.pad[S*DMODEL]) # 0.02]
+  BO::  gpu.buffer[(nn.pad[S*DMODEL]) # 0.]
   0}
 
 / ── one repetition of the op under test ──────────────────────────────────────
 nnbStep: {[i]
   $[KI<2;  gpu.dispatch[PIPE; (BC;BA;BB;GP); M*NN]
-    KI=2;  SiluR[BO;BX;NEL]
-    KI=3;  GeluR[BO;BX;NEL]
-    KI=4;  SoftmaxR[BO;BX;BM;BS;M;NCOL]
-    KI=5;  LayerNormR[BO;BX;BG;BB2;BM;BS;(M;NCOL;0.00001)]
-    KI=6;  AttnScoresR[BSC;BQ;BK;TT;DMODEL;DHEAD;0.125]
-    KI=7;  AttnCtxR[BO;BAT;BV;TT;DMODEL;DHEAD]
+    KI=2;  silu[BO;BX;NEL]
+    KI=3;  gelu[BO;BX;NEL]
+    KI=4;  softmax[BO;BX;BM;BS;M;NCOL]
+    KI=5;  layernorm[BO;BX;BG;BB2;BM;BS;(M;NCOL;0.00001)]
+    KI=6;  attn.scores[BSC;BQ;BK;TT;DMODEL;DHEAD;0.125]
+    KI=7;  attn.ctx[BO;BAT;BV;TT;DMODEL;DHEAD]
     KI=8;  nnbSmH[]
     KI=9;  nnbLnH[]
     KI=10; gpu.dispatch[asPipe; (BSC;BQ;BK;asParam); (DMODEL div DHEAD)*TT*TT]
     gpu.dispatch[acPipe; (BO;BAT;BV;acParam); TT*DMODEL]]}
-/ Same two dispatches SoftmaxR/LayerNormR issue, minus the params write + sync.
+/ Same two dispatches softmax/layernorm issue, minus the params write + sync.
 nnbSmH: {[]
   gpu.dispatch[smSP; (BM;BS;BX;smParam); M]
   gpu.dispatch[smAP; (BO;BX;BM;BS;smParam); M*NCOL]}

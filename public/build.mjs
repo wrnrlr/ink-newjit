@@ -40,12 +40,30 @@ function mdTitle(md, fallback) {
 
 // --- discover sources --------------------------------------------------------
 
+// YAML front matter is metadata for tooling, not prose — strip it before the
+// markdown renderer sees it.  (`ink tools/doc.k` emits it on every api page.)
+function stripFront(md) {
+  return md.startsWith("---\n") ? md.slice(4).replace(/^[\s\S]*?\n---\n/, "") : md;
+}
+
 const docs = readdirSync(p("doc"))
   .filter((f) => f.endsWith(".md"))
   .sort()
   .map((f) => {
     const name = f.replace(/\.md$/, "");
-    const md = readFileSync(p("doc", f), "utf8");
+    const md = stripFront(readFileSync(p("doc", f), "utf8"));
+    return { name, file: f, title: mdTitle(md, name), md };
+  });
+
+// Generated API reference: doc/api/<mod>.md, produced by `ink tools/doc.k`.
+// These are linked from doc/api.md, so they need pages of their own.
+const apiDir = p("doc", "api");
+const apiDocs = !existsSync(apiDir) ? [] : readdirSync(apiDir)
+  .filter((f) => f.endsWith(".md"))
+  .sort()
+  .map((f) => {
+    const name = f.replace(/\.md$/, "");
+    const md = stripFront(readFileSync(join(apiDir, f), "utf8"));
     return { name, file: f, title: mdTitle(md, name), md };
   });
 
@@ -191,6 +209,15 @@ for (const d of docs) {
   const { html, headings } = renderMarkdown(d.md);
   write(`doc/${d.name}.html`, page({
     title: d.title, active: `doc/${d.name}`, root: "../",
+    content: `<div class="doc-body">${html}</div>`,
+    toc: headings,
+  }));
+}
+
+for (const d of apiDocs) {
+  const { html, headings } = renderMarkdown(d.md);
+  write(`doc/api/${d.name}.html`, page({
+    title: d.title, active: "doc/api", root: "../../",
     content: `<div class="doc-body">${html}</div>`,
     toc: headings,
   }));

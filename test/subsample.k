@@ -1,13 +1,14 @@
 / test/subsample.k — GPU conv-subsampling (dw_striding 8×) validated vs CPU.
-/ Each conv kernel is checked individually, then the full ConvSubsample pipeline.
+/ Each conv kernel is checked individually, then the full subsample.host pipeline.
 / Run headless:  INK_SNAP=0 ink test/subsample.k
 
 2: "lib/dye.k"
 2: "lib/gpu.k"
 2: "lib/nn.k"
+2: "lib/asr.k"
 
 Ti:16; Fi:16; C:4; D:8
-T1:nnSub2 Ti; F1:nnSub2 Fi; T2:nnSub2 T1; F2:nnSub2 F1; T3:nnSub2 T2; F3:nnSub2 F2
+T1:nn.sub2 Ti; F1:nn.sub2 Fi; T2:nn.sub2 T1; F2:nn.sub2 F1; T3:nn.sub2 T2; F3:nn.sub2 F2
 rv:{[n;o] (`f$ ((o+!n) mod 13) - 6) % 6.}
 MEL: (`f$ (!(Ti*Fi)) mod 9) - 4.
 
@@ -44,7 +45,7 @@ cpuRelu:{[X] 0. | X}
 
 cpuSubsample:{[M;W;cfg]
   ti:cfg 0; fi:cfg 1; c:cfg 2; d:cfg 3
-  t1:nnSub2 ti;f1:nnSub2 fi;t2:nnSub2 t1;f2:nnSub2 f1;t3:nnSub2 t2;f3:nnSub2 f2
+  t1:nn.sub2 ti;f1:nn.sub2 fi;t2:nn.sub2 t1;f2:nn.sub2 f1;t3:nn.sub2 t2;f3:nn.sub2 f2
   h1: cpuRelu cpuConv2d[M; W 0; W 1; (c;t1;f1;ti;fi)]
   h2: cpuDwConv2d[h1; W 2; W 3; (c;t2;f2;t1;f1)]
   p2: cpuRelu cpuPwConv2d[h2; W 4; W 5; c; t2*f2]
@@ -54,14 +55,14 @@ cpuSubsample:{[M;W;cfg]
   cpuLin[hf; W 10; W 11; t3; c*f3; d]}
 
 / ── GPU wrappers for the individual convs ───────────────────────────────────
-gConv2d:  {[IN;Wm;Bs;cfg] n:(cfg 0)*(cfg 1)*(cfg 2); bo:gpu.buffer[(nnPad n)#0.]
-  Conv2dR[bo; gpu.buffer[IN]; gpu.buffer[Wm]; gpu.buffer[Bs]; cfg]; n#gpu.read[bo]}
-gDwConv2d:{[IN;Wm;Bs;cfg] n:(cfg 0)*(cfg 1)*(cfg 2); bo:gpu.buffer[(nnPad n)#0.]
-  DwConv2dR[bo; gpu.buffer[IN]; gpu.buffer[Wm]; gpu.buffer[Bs]; cfg]; n#gpu.read[bo]}
-gPwConv2d:{[IN;Wm;Bs;c;t;f] n:c*t*f; bo:gpu.buffer[(nnPad n)#0.]
-  PwConv2dR[bo; gpu.buffer[IN]; gpu.buffer[Wm]; gpu.buffer[Bs]; c; t; f]; n#gpu.read[bo]}
-gFlatten: {[IN;c;tp;fp] n:tp*c*fp; bo:gpu.buffer[(nnPad n)#0.]
-  FlattenR[bo; gpu.buffer[IN]; c; tp; fp]; n#gpu.read[bo]}
+gConv2d:  {[IN;Wm;Bs;cfg] n:(cfg 0)*(cfg 1)*(cfg 2); bo:gpu.buffer[(nn.pad n)#0.]
+  conv2d[bo; gpu.buffer[IN]; gpu.buffer[Wm]; gpu.buffer[Bs]; cfg]; n#gpu.read[bo]}
+gDwConv2d:{[IN;Wm;Bs;cfg] n:(cfg 0)*(cfg 1)*(cfg 2); bo:gpu.buffer[(nn.pad n)#0.]
+  dwconv2d[bo; gpu.buffer[IN]; gpu.buffer[Wm]; gpu.buffer[Bs]; cfg]; n#gpu.read[bo]}
+gPwConv2d:{[IN;Wm;Bs;c;t;f] n:c*t*f; bo:gpu.buffer[(nn.pad n)#0.]
+  pwconv2d[bo; gpu.buffer[IN]; gpu.buffer[Wm]; gpu.buffer[Bs]; c; t; f]; n#gpu.read[bo]}
+gFlatten: {[IN;c;tp;fp] n:tp*c*fp; bo:gpu.buffer[(nn.pad n)#0.]
+  flatten[bo; gpu.buffer[IN]; c; tp; fp]; n#gpu.read[bo]}
 
 / full subsample weight list (12 arrays)
 WSUB: ( rv[C*9;1];  rv[C;2]
@@ -83,7 +84,7 @@ demo:{[]
   `0 0:"flatten maxerr -> "; `0 0:$(|/abs gFlatten[IN2;C;T2;F2] - cpuFlatten[IN2;C;T2;F2]); `0 0:"\n"
   / full pipeline
   scfg:(Ti;Fi;C;D)
-  Rg: ConvSubsample[MEL; WSUB; scfg]
+  Rg: subsample.host[MEL; WSUB; scfg]
   Rc: cpuSubsample[MEL; WSUB; scfg]
   `0 0:"subsample out=[T3="; `0 0:$T3; `0 0:",D="; `0 0:$D; `0 0:"]  #gpu="; `0 0:$#Rg; `0 0:"  #cpu="; `0 0:$#Rc; `0 0:"\n"
   `0 0:"subsample maxerr -> "; `0 0:$(|/abs Rg-Rc); `0 0:"\n"

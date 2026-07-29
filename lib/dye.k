@@ -1333,17 +1333,22 @@ gpu.kernelI: gpu.kernel                                          / alias: the de
 / shared f32 arrays (shSizes = a list of element counts) that a whole workgroup reads and
 / writes cooperatively. Extra names/intrinsics visible in the body:
 /   lid            — this thread's index WITHIN its workgroup (0 .. wg-1), = gid mod wg
-/   wgsz           — the workgroup size (LocalSize.x; the sticky `wg`, default 64)
+/   wgsz           — the workgroup size (LocalSize.x; the `lsz` argument, default 64)
 /   lset[s;i;v]    — write v to shared array s (a literal 0-based index) at position i
 /   lget[s;i]      — read shared array s at position i
 /   barrier[]      — synchronise the workgroup (OpControlBarrier): all shared writes
 /                    before it are visible to all reads after it
-/ The host dispatches it like any kernel (ceil(n/wg) workgroups of wg threads); the
+/ The host dispatches it like any kernel (ceil(n/lsz) workgroups of lsz threads); the
 / algorithm must respect workgroup boundaries. Shared arrays are NOT bindings, so the
-/ host pipeline still takes nAcc+nBuf storage bindings (published as KKnb). Set `wg`
-/ before compiling to change the workgroup/tile size (shSizes then track it).
-compGpShared: {[fn; nAcc; nBuf; shSizes]
-  ids: kAlloc[nAcc; nBuf; 0; 1]
+/ host pipeline still takes nAcc+nBuf storage bindings (published as KKnb).
+/ `lsz` is this kernel's workgroup size (LocalSize.x). It is an ARGUMENT, not the
+/ sticky `wg`: a tiled kernel's tile size is a property OF THAT KERNEL, and reading it
+/ from a mutable global meant every 256-wide kernel had to bracket its own definition
+/ with `wg::256 … wg::64`, which silently compiled the wrong size if the restore was
+/ dropped or two such kernels were defined in the wrong order. lsz=0 inherits `wg`.
+compGpShared: {[fn; nAcc; nBuf; shSizes; lsz]
+  ids: kAlloc[nAcc; nBuf; 0; 1]      / resets AKlsz — set the override AFTER it
+  AKlsz:: lsz
   Xidx:: 1
   kAllocShared[shSizes]
   lam: lamOf fn; argNames: lamArgs lam
@@ -1365,7 +1370,8 @@ compGpShared: {[fn; nAcc; nBuf; shSizes]
   rp: xSeq[lamBody lam; e2; `f32]
   xLowerC[,rp 0]
   kAsm[]}
-gpu.kernelWG: {[fn; nAcc; nBuf; shSizes] compGpShared[fn; nAcc; nBuf; shSizes]}
+/ gpu.kernelWG[fn; nAcc; nBuf; shSizes; lsz] — lsz is the workgroup size (0 = sticky `wg`).
+gpu.kernelWG: {[fn; nAcc; nBuf; shSizes; lsz] compGpShared[fn; nAcc; nBuf; shSizes; lsz]}
 
 / ── shader.kernel[fn] — gpu.kernel with the binding table INFERRED ───────────
 / Roles come from the lambda itself (kk.md incr 3, bindings-from-free-vars):

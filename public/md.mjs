@@ -52,7 +52,10 @@ function inline(src) {
       const m = /^\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/.exec(src.slice(i));
       if (m) {
         const text = inline(m[1]);
-        const url = escapeHtml(m[2]);
+        // A relative link between two markdown sources points at the rendered
+        // page here (doc/api.md's `api/http.md` -> api/http.html).
+        const target = /^https?:/.test(m[2]) ? m[2] : m[2].replace(/\.md(?=$|#)/, ".html");
+        const url = escapeHtml(target);
         const ext = /^https?:/.test(m[2]) ? ' target="_blank" rel="noopener"' : "";
         out += `<a href="${url}"${ext}>${text}</a>`;
         i += m[0].length;

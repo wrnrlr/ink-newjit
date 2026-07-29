@@ -45,3 +45,5 @@ data/parakeet**/*
 
 # transient UI screenshot-test comparison outputs (goldens are the .png files)
 test/golden/*.out.png
+
+doc/api/*

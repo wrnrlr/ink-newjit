@@ -376,3 +376,29 @@ or at least calling it out in AGENT.md next to the other adverb-glue gotchas.
 same as `sep\str` and `f ' xs` the same as `f'xs`. `/` deliberately KEEPS its spacing
 rule, because ` / ` after a noun or verb is a comment; that asymmetry is now documented
 in AGENT.md rather than being a silent trap.
+
+## `&` on an empty general list errors, and `#` of an error is 1 (silent infinite loop)
+
+Found while writing `lib/doc.k` (the API-doc extractor); `ink tools/doc.k -check lib/agent.k`
+hung forever on a file with no comments in it.
+
+```
+e: {[x]x}'(0#0)   / each over an empty typed vector -> empty GENERAL list `L
+@e                / `L
+#e                / 0
+e=0               / ()      -- fine
+&e=0              / !type   -- Where on an empty `L` is a type error
+#&e=0             / 1       -- and `#` of an error value is 1, not an error
+```
+
+Three separate things, in increasing order of nastiness:
+
+1. `f'(0#0)` loses the element type: each over an empty typed vector yields an empty
+   general list rather than an empty typed vector. (`lib/doc.k` works around this by
+   guarding every "no comments in this file" path explicitly.)
+2. `&` on an empty `L` raises `!type` where it should give an empty index vector — an
+   empty list has no true elements, so Where is well defined.
+3. `#` of an error VALUE returns 1. That is what turned (2) into a hang instead of a
+   report: `$[#h; recurse; stop]` saw a truthy 1 and recursed forever. Errors behaving
+   like 1-element values is the general shape of the "silent wrong answer" failure mode
+   — worth deciding whether primitives should propagate `!` instead of measuring it.

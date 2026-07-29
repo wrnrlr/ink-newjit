@@ -6,6 +6,8 @@
 2: "lib/dye.k"
 2: "lib/gpu.k"
 2: "lib/nn.k"
+2: "lib/conformer.k"
+2: "lib/asr.k"
 
 D:8; H:2; Dff:16; ks:3; EPS:0.00001
 CFG: (4; D; H; Dff; ks; EPS)                / T=4
@@ -25,8 +27,8 @@ X0: (`f$ (!(4*D)) mod 9) - 4.
 / synthetic tensor as safetensors.read returns them (symbol-keyed dict of dicts)
 mkTensor:{[data] `dtype`shape`data ! (`f32; (,#data); data)}
 
-/ subsample + decoder weight sets (shapes match ConvSubsample / TdtGreedy)
-C:4; Ti:16; Fi:16; F3: nnSub2 nnSub2 nnSub2 Fi
+/ subsample + decoder weight sets (shapes match subsample.host / tdt.once)
+C:4; Ti:16; Fi:16; F3: nn.sub2 nn.sub2 nn.sub2 Fi
 subW: ( rv[C*9;1]; rv[C;2]; rv[C*9;3]; rv[C;4]; rv[C*C;5]; rv[C;6];
         rv[C*9;7]; rv[C;8]; rv[C*C;9]; rv[C;10]; rv[D*(C*F3);11]; rv[D;12] )
 V:5; EncD:8; EmbD:4; LH:6; J:10; DUR:0 1 2 3 4
@@ -39,21 +41,21 @@ decW: ( rv[(V+1)*EmbD;1];
 demo:{[]
   / encoder: build model, load, round-trip + forward
   Ws: (mkLayer[100]; mkLayer[400])
-  names: ,/ {[i] nnEncNm[i;]' nnBlkSuf}' !2
+  names: ,/ {[i] asr.encNm[i;]' asr.blkSuf}' !2
   model: (`s$' names) ! mkTensor' ,/Ws
-  loaded: nnLoadEncoder[model; 2]
+  loaded: asr.load.encoder[model; 2]
   `0 0:"encoder  round-trip exact -> "; `0 0:$(,/,/loaded) ~ ,/,/Ws; `0 0:"\n"
-  Rd: Encoder[X0; Ws; CFG]
-  Rl: Encoder[X0; loaded; CFG]
+  Rd: conformer.fold[X0; Ws; CFG]
+  Rl: conformer.fold[X0; loaded; CFG]
   `0 0:"encoder  forward(loaded)==forward(direct) -> "; `0 0:$Rl~Rd; `0 0:"  maxerr="; `0 0:$|/abs Rl-Rd; `0 0:"\n"
 
   / subsample round-trip
-  sm: (`s$' "sub." ,/: nnSubSuf) ! mkTensor' subW
-  `0 0:"subsample round-trip exact -> "; `0 0:$(,/ nnLoadSubsample[sm]) ~ ,/subW; `0 0:"\n"
+  sm: (`s$' "sub." ,/: asr.subSuf) ! mkTensor' subW
+  `0 0:"subsample round-trip exact -> "; `0 0:$(,/ asr.load.subsample[sm]) ~ ,/subW; `0 0:"\n"
 
   / decoder round-trip
-  dm: (`s$' nnDecSuf) ! mkTensor' decW
-  `0 0:"decoder  round-trip exact -> "; `0 0:$(,/ nnLoadDecoder[dm]) ~ ,/decW; `0 0:"\n"
+  dm: (`s$' asr.decSuf) ! mkTensor' decW
+  `0 0:"decoder  round-trip exact -> "; `0 0:$(,/ asr.load.decoder[dm]) ~ ,/decW; `0 0:"\n"
   0}
 gDone::0
 go::{[] gDone::1; demo[]}

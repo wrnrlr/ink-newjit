@@ -85,6 +85,18 @@ pub const ModuleLoader = struct {
       const trimmed = line[skip..];
       if (trimmed.len == 0 or trimmed[0] == '/') continue;
 
+      // `\e a b c` export directive: index these BARE (undotted) names to this
+      // file.  Bare defs are not indexed automatically — they are usually private
+      // helpers (`so`, `tmp`, …) and indexing them all would flood autoload — so a
+      // module that wants an unqualified public surface (`gemm`, `softmax`) lists
+      // those names explicitly here.  Runtime no-op (see runtime/command.zig).
+      if (trimmed[0] == '\\' and trimmed.len >= 2 and trimmed[1] == 'e' and
+          (trimmed.len == 2 or trimmed[2] == ' ' or trimmed[2] == '\t')) {
+        var it = std.mem.tokenizeAny(u8, trimmed[2..], " \t");
+        while (it.next()) |name| try self.addEntry(name, path);
+        continue;
+      }
+
       // `\d` namespace directive: `\d` (reset), `\d ns`, or `\d ns a b`.
       if (trimmed[0] == '\\' and trimmed.len >= 2 and trimmed[1] == 'd' and
           (trimmed.len == 2 or trimmed[2] == ' ' or trimmed[2] == '\t')) {

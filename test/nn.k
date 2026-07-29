@@ -1,9 +1,10 @@
-/ test/nn.k — validate the GPU nn primitives (Gemm/Softmax/LayerNorm) against
+/ test/nn.k — validate the GPU nn primitives (gemm/softmax/layernorm) against
 / CPU references.  Run headless:  INK_SNAP=0 ink test/nn.k
 
 2: "lib/dye.k"
 2: "lib/gpu.k"
 2: "lib/nn.k"
+2: "lib/conformer.k"
 
 / ── GEMM  3×4×2 ──────────────────────────────────────────────────────────────
 GM:3; GK:4; GN:2
@@ -133,31 +134,31 @@ cref:{[]
   CX + ,/H6}
 
 demo:{[]
-  Rg: Gemm[GA;GB;GM;GK;GN]
+  Rg: gemm.host[GA;GB;GM;GK;GN]
   `0 0:"GEMM      maxerr -> "; `0 0:$(|/abs Rg-gref[]); `0 0:"\n"
 
-  Rs: Softmax[SX;SM;SN]
+  Rs: softmax.host[SX;SM;SN]
   `0 0:"Softmax   maxerr -> "; `0 0:$(|/abs Rs-sref[]);  `0 0:"\n"
   `0 0:"  row0 sums (want 1) gpu/cpu -> "; `0 0:$((+/SN#Rs); +/SN#sref[]); `0 0:"\n"
 
-  Rl: LayerNorm[LX;LG;LB;LM;LN;LEPS]
+  Rl: layernorm.host[LX;LG;LB;LM;LN;LEPS]
   `0 0:"LayerNorm maxerr -> "; `0 0:$(|/abs Rl-lref[]);  `0 0:"\n"
 
-  Rp: Linear[PX;PW;PB;PM;PK;PN]
+  Rp: linear.host[PX;PW;PB;PM;PK;PN]
   `0 0:"Linear    maxerr -> "; `0 0:$(|/abs Rp-pref[]);  `0 0:"\n"
 
-  Rsi: Silu[AX;AN]
+  Rsi: silu.host[AX;AN]
   `0 0:"SiLU      maxerr -> "; `0 0:$(|/abs Rsi-siluC AX); `0 0:"\n"
-  Rge: Gelu[AX;AN]
+  Rge: gelu.host[AX;AN]
   `0 0:"GELU      maxerr -> "; `0 0:$(|/abs Rge-geluC AX); `0 0:"\n"
 
-  Rf: FfnBlock[FX;W1;FB1;W2;FB2;FGA;FBE;(FM;D;Dff;FEPS)]
+  Rf: ffn.host[FX;(W1;FB1;W2;FB2;FGA;FBE);(FM;D;Dff;FEPS;0.5)]
   `0 0:"FFN block maxerr -> "; `0 0:$(|/abs Rf-fref[]);  `0 0:"\n"
 
-  Rm: Mhsa[MX; (MWq;MBq;MWk;MBk;MWv;MBv;MWo;MBo); (MT;MD;MH)]
+  Rm: attn.abs.host[MX; (MWq;MBq;MWk;MBk;MWv;MBv;MWo;MBo); (MT;MD;MH)]
   `0 0:"MHSA      maxerr -> "; `0 0:$(|/abs Rm-mref[]);  `0 0:"\n"
 
-  Rc: ConvModule[CX; (ClnG;ClnB;CWpw1;CBpw1;CWdw;CBdw;CcaA;CcaB;CWpw2;CBpw2); (CT;CD;CKS;CEPS)]
+  Rc: conformer.conv.host[CX; (ClnG;ClnB;CWpw1;CBpw1;CWdw;CBdw;CcaA;CcaB;CWpw2;CBpw2); (CT;CD;CKS;CEPS)]
   `0 0:"ConvMod   maxerr -> "; `0 0:$(|/abs Rc-cref[]);  `0 0:"\n"
   0}
 gDone::0

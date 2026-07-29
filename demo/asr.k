@@ -1,6 +1,7 @@
 / demo/asr.k — record speech and transcribe it with Parakeet-TDT, all in ink.
 / Combines demo/replay.k (mic + waveform) with demo/edit.k (font text rendering)
-/ and the lib/nn.k ASR pipeline (LogMel → ConvSubsample → Encoder → TDT → detok).
+/ and the ink ASR pipeline (logmel → subsample → conformer.run → tdt → asr.detok),
+/ which lives in lib/nn.k + lib/conformer.k + lib/feat.k + lib/asr.k (see doc/design/nn.md).
 /
 / Build first:  zig build gpu && zig build audio && zig build font && zig build safetensors
 / Run:          ink demo/asr.k
@@ -21,6 +22,9 @@
 2: "lib/dye.k"
 2: "lib/canvas.k"
 2: "lib/nn.k"
+2: "lib/conformer.k"
+2: "lib/feat.k"
+2: "lib/asr.k"
 2: "lib/font.k"
 / audio.* autoloads lib/audio.k on first reference.
 
@@ -39,7 +43,7 @@ Dm:1024; NLAYERS:24; Hh:8; Dff:4096; KS:9; SUBC:256; EPS:0.00001
 / they are NeMo's own tables rather than a re-derivation.
 NFFT:512; WINL:400; HOP:160; NMELS:128
 NFREQ: (NFFT div 2) + 1
-/ decoder — pred_rnn_layers:2, so TdtGreedy runs a 2-layer LSTM predictor.
+/ decoder — pred_rnn_layers:2, so tdt.once runs a 2-layer LSTM predictor.
 VOCABN:1024; EMBD:640; PREDH:640; JOINTH:640; DUR:0 1 2 3 4; MAXSYM:10
 
 RATE: 16000                        / record at the model's rate (no host resample)
@@ -55,37 +59,37 @@ tailEq: {[e] k:#WANT; $[(#e)<k; 0; WANT ~ (0-k)#e]}
 haveFile:{[nm] WANT:: "/",nm; 0 < +/ tailEq' `dir MDIR}
 loadModel:{[]
   MODEL:: safetensors.read MODELPATH
-  ENC::   nnLoadEncoder[MODEL; NLAYERS]
-  SUB::   nnLoadSubsample MODEL
-  DEC::   nnLoadDecoder MODEL
-  VOCAB:: nnLoadVocab VOCABPATH
-  dft: nnDft[NFFT; WINL; (MODEL[`feat.window])`data]
+  ENC::   asr.load.encoder[MODEL; NLAYERS]
+  SUB::   asr.load.subsample MODEL
+  DEC::   asr.load.decoder MODEL
+  VOCAB:: asr.load.vocab VOCABPATH
+  dft: feat.dft[NFFT; WINL; (MODEL[`feat.window])`data]
   CRb:: dft 0; CIb:: dft 1
   MELFBb:: (MODEL[`feat.fb])`data
   HAVE:: 1}
 $[haveFile[MNAME] & haveFile[VNAME]; loadModel[]; 0]
 
 / ── ASR pipeline (one shot on the recorded buffer) ───────────────────────────
-/ nnFeatures is the whole NeMo preprocessor (preemphasis → zero-padded STFT power
+/ logmel is the whole NeMo preprocessor (preemphasis → zero-padded STFT power
 / → mel → log → per-feature normalize); test/asr.k pins it to the real thing.
 / The encoder weights are uploaded ONCE and kept on the device: that upload is ~300 ms,
 / i.e. most of a short utterance's encode time, and there is no GPU context to upload
 / into until window.run is live — so it happens on the first transcription, not at load.
 / The decoder weights are likewise transposed to column-major once, not per utterance.
-/ nnPrepDec ignores cfg[0] (the frame count), so a placeholder 0 is fine here.
+/ asr.prep ignores cfg[0] (the frame count), so a placeholder 0 is fine here.
 DCFG: (0; Dm; EMBD; PREDH; JOINTH; VOCABN; DUR; MAXSYM)
 ENCB:0; DECP:0; ENCBOK:0
-holdEnc:{[] ENCB:: nnHoldWs ENC; DECP:: nnPrepDec[DEC; DCFG]; ENCBOK:: 1}
+holdEnc:{[] ENCB:: nn.holdWs ENC; DECP:: asr.prep[DEC; DCFG]; ENCBOK:: 1}
 ensureEnc:{[] $[ENCBOK=0; holdEnc[]; 0]}
 runAsr:{[buf]
   ensureEnc[]
-  nfr: nnFramesC[#buf; HOP]
-  mel: nnFeatures[buf; CRb; CIb; MELFBb; (HOP;WINL;NFFT;NFREQ;NMELS)]
-  Tp:  nnSub2 nnSub2 nnSub2 nfr
-  sub: ConvSubsample[mel; SUB; (nfr; NMELS; SUBC; Dm)]
-  enc: EncoderRW[sub; ENCB; (Tp; Dm; Hh; Dff; KS; EPS)]  / weights + activations stay on-device across all NLAYERS blocks
-  ids: TdtGreedyP[enc; DECP; (Tp; Dm; EMBD; PREDH; JOINTH; VOCABN; DUR; MAXSYM)]
-  nnDetok[VOCAB; ids]}
+  nfr: feat.nemo.frames[#buf; HOP]
+  mel: logmel[buf; CRb; CIb; MELFBb; (HOP;WINL;NFFT;NFREQ;NMELS)]
+  Tp:  nn.sub2 nn.sub2 nn.sub2 nfr
+  sub: subsample.host[mel; SUB; (nfr; NMELS; SUBC; Dm)]
+  enc: conformer.run[sub; ENCB; (Tp; Dm; Hh; Dff; KS; EPS)]  / weights + activations stay on-device across all NLAYERS blocks
+  ids: tdt[enc; DECP; (Tp; Dm; EMBD; PREDH; JOINTH; VOCABN; DUR; MAXSYM)]
+  asr.detok[VOCAB; ids]}
 setText:{[buf] t: runAsr buf; TEXT:: $[0=#t; "(nothing recognised)"; t]}
 transcribe:{[buf]
   $[~HAVE; TEXT::HELP; (#buf)<MINSAMP; TEXT::"Too short - hold it a little longer."; setText buf]}

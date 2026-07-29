@@ -1,4 +1,4 @@
-/ test/relpos.k — relative-position self-attention (MhsaRel) validated vs CPU.
+/ test/relpos.k — relative-position self-attention (attn.rel.host) validated vs CPU.
 / Run headless:  INK_SNAP=0 ink test/relpos.k
 
 2: "lib/dye.k"
@@ -20,7 +20,7 @@ Xm: (T;D)#X
 QF: ,/ gLinR[Wq;Bq;D;D;]' Xm
 KF: ,/ gLinR[Wk;Bk;D;D;]' Xm
 VF: ,/ gLinR[Wv;Bv;D;D;]' Xm
-PE: nnPosEmb[T;D]                                 / [2T-1, D]
+PE: attn.pos[T;D]                                 / [2T-1, D]
 PF: ,/ gLinR[Wpos; D#0.; D; D;]' ((2*T)-1; D)#PE  / P = PE·Wposᵀ  [2T-1, D]
 
 / score term for (h,i,j) channel c
@@ -34,10 +34,10 @@ rCrow: {[i] rCel[i;]' !D}
 cref:  {[] ,/ gLinR[Wo;Bo;D;D;]' rCrow' !T}
 
 demo:{[]
-  Rg: MhsaRel[X; WLIST; (T;D;H)]
+  Rg: attn.rel.host[X; WLIST; (T;D;H)]
   Rc: cref[]
   `0 0:"#gpu="; `0 0:$#Rg; `0 0:"  #cpu="; `0 0:$#Rc; `0 0:"\n"
-  `0 0:"MhsaRel maxerr -> "; `0 0:$(|/abs Rg-Rc); `0 0:"\n"
+  `0 0:"RelAttn maxerr -> "; `0 0:$(|/abs Rg-Rc); `0 0:"\n"
   `0 0:"gpu[0..7] -> "; `0 0:$8#Rg; `0 0:"\n"
   `0 0:"cpu[0..7] -> "; `0 0:$8#Rc; `0 0:"\n"
   0}

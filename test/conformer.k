@@ -5,6 +5,7 @@
 2: "lib/dye.k"
 2: "lib/gpu.k"
 2: "lib/nn.k"
+2: "lib/conformer.k"
 
 T:4; D:8; H:2; Dff:16; ks:3; EPS:0.00001
 CFG: (T;D;H;Dff;ks;EPS)
@@ -61,7 +62,7 @@ cpuMhsa:{[X;Wl;t;d;h]
   GQF:: ,/ gLinR[Wl 0; Wl 1; d; d;]' Xm
   GKF:: ,/ gLinR[Wl 2; Wl 3; d; d;]' Xm
   GVF:: ,/ gLinR[Wl 4; Wl 5; d; d;]' Xm
-  GPF:: ,/ gLinR[Wl 8; d#0.; d; d;]' ((2*t)-1; d)#nnPosEmb[t;d]
+  GPF:: ,/ gLinR[Wl 8; d#0.; d; d;]' ((2*t)-1; d)#attn.pos[t;d]
   ,/ gLinR[Wl 6; Wl 7; d; d;]' grcRow' !t}
 
 / Conv module — globals hold flat GLU output + depthwise weights/dims
@@ -96,19 +97,19 @@ WL: mkLayer[100]
 Ws: (mkLayer[100]; mkLayer[400]; mkLayer[900])
 
 demo:{[]
-  Rg: ConformerBlock[X0; WL; CFG]
+  Rg: conformer.block.host[X0; WL; CFG]
   Rc: cpuBlock[X0; WL; CFG]
   `0 0:"1 block  #out="; `0 0:$#Rg; `0 0:"  maxerr -> "; `0 0:$(|/abs Rg-Rc); `0 0:"\n"
 
-  Eg: Encoder[X0; Ws; CFG]
+  Eg: conformer.fold[X0; Ws; CFG]
   Ec: cpuEnc[X0; Ws]
   `0 0:"3 layers #out="; `0 0:$#Eg; `0 0:"  maxerr -> "; `0 0:$(|/abs Eg-Ec); `0 0:"\n"
   `0 0:"encoder out[0..7] -> "; `0 0:$8#Eg; `0 0:"\n"
   `0 0:"all finite (|/|.|<1e9) -> "; `0 0:$(1e9 > |/abs Eg); `0 0:"\n"
 
   / Resident encoder (weights + activations stay on-device): must be BIT-IDENTICAL to
-  / the host Encoder (same kernels; only host round-trips removed) and match the CPU ref.
-  Er: EncoderR[X0; Ws; CFG]
+  / the host conformer.fold (same kernels; only host round-trips removed) and match the CPU ref.
+  Er: conformer[X0; Ws; CFG]
   `0 0:"resident vs host  bit-identical -> "; `0 0:$[Eg~Er; "PASS"; "FAIL"]; `0 0:"\n"
   `0 0:"resident vs CPU   maxerr -> "; `0 0:$(|/abs Er-Ec); `0 0:"\n"
   0}

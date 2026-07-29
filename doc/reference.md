@@ -426,6 +426,11 @@ step mod clamp mix smoothstep floor fract sign tanh length normalize`.
 ## Commands
 A command always starts at the beginning of a line with `\`.
 - `\d name` - Declare namespace
+- `\e a b c` - Export the **bare** (undotted) names `a b c` for autoload. Dotted names
+  (`ns.member`) are indexed automatically, along with their `ns` prefix; bare globals are
+  not, because most of them are private helpers and indexing them all would pull in half
+  the library on any common identifier. `\e` lets a module publish an unqualified API
+  (`gemm`, `linear`, …) without that. Runtime no-op — it is read by the module indexer.
 - `\l name` - Load `name` module from `$INK_HOME/lib/<name>.k`
 - `\l name.k` - Loads `name` module from `$PWD/<name>.k`
 - `\t:n expr` - Time elapsed in milliseconds after n runs (n is optional).

@@ -8,6 +8,11 @@
 / Lambdas do not capture parent locals — map with PROJECTION `f[ctx]'items`, not a
 / nested lambda; mutate globals with `::` in a helper (never a `[a::x;b::y]` block,
 / which is a dict literal). Raw byte IO uses the stdin/stdout handles in the runtime.
+/
+/ Symbol documentation comes from lib/doc.k — the same extractor `ink tools/doc.k`
+/ uses for doc/api/ — so a hover popup and the published reference never diverge.
+
+2:"lib/doc.k"
 
 \d lsp run
 
@@ -119,7 +124,8 @@ p2p:{[uri] $[("file://")~7#uri;7_uri;uri]}
 kfiles:{[root] f:`dir root; f@&{".k"~-2#x}'f}
 drecOf:{[t;src;uri;bi]
   vi:childF[t;bi;`v]; ai:childF[t;bi;`a]
-  (`name`uri`range`kind)!(qual[nsAt[src;(t`start)@vi];nameOf[t;vi]];uri;nrng[t;src;vi];$[`lambda=(t`kind)@ai;12;13])}
+  r:doc.at[doc.of[uri;src]; *lc[src;(t`start)@vi]]      / memoised per file
+  (`name`uri`range`kind`doc)!(qual[nsAt[src;(t`start)@vi];nameOf[t;vi]];uri;nrng[t;src;vi];$[`lambda=(t`kind)@ai;12;13];$[`m~@r; r`summary; ""])}
 fileDefs:{[path] src:1: path; t:parse src; drecOf[t;src;"file://",path]'topBinds t}
 buildIndex:{[root] kf:kfiles root; windex:: $[#kf;,/{fileDefs x}'kf;()]}
 winNames:{[d] {x`name}'windex}
@@ -220,13 +226,23 @@ hoverAdv:{[t;ni;id]
   mo:look[advk;advmono;nm]; dy:look[advk;advdyad;nm]
   md:$[isDyad[t;ni];sense[1b;mo;dy];isMono[t;ni];sense[0b;mo;dy];$[(0<#mo)&0<#dy;mo," · ",dy;mo,dy]]
   $[0=#md;reply[id;`null];hoverMd[id;md]]}
+/ In-file variable hover.  lib/doc.k owns the doc-comment convention (a comment
+/ block directly above a line-leading binding), so hover shows exactly what
+/ `ink tools/doc.k` publishes — signature, arity/type, and the prose.  Falls
+/ back to the bare "defined at line N" note for an undocumented binding.
 hvVar:{[t;src;di;nm;id]
-  ln:1+*lc[src;(t`start)@di]
+  l0:*lc[src;(t`start)@di]
+  r:doc.at[doc.of["";src]; l0]
+  $[`m~@r; hoverMd[id;doc.hoverMd r]; hvPlain[t;src;di;nm;id;l0]]}
+hvPlain:{[t;src;di;nm;id;l0]
   bi:(t`parent)@di; ai:childF[t;bi;`a]
   kw:$[`lambda=(t`kind)@ai;"function";"variable"]
-  hoverMd[id;"**",kw,"** `",nm,"` — defined at line ",$ln]}
-/ cross-file variable hover: report the file + line from the workspace index
-hvCrossMd:{[w] kw:$[12=w`kind;"function";"variable"]; st:(w`range)`start; ln:1+st`line; file:*|"/"\p2p(w`uri); "**",kw,"** `",(w`name),"` — defined in `",file,"` (line ",($ln),")"}
+  hoverMd[id;"**",kw,"** `",nm,"` — defined at line ",$1+l0]}
+/ cross-file variable hover: file + line from the workspace index, plus the
+/ indexed doc summary when that binding is documented
+hvCrossMd:{[w] kw:$[12=w`kind;"function";"variable"]; st:(w`range)`start; ln:1+st`line; file:*|"/"\p2p(w`uri)
+  hd:"**",kw,"** `",(w`name),"` — defined in `",file,"` (line ",($ln),")"
+  $[0=#(w`doc); hd; hd,"\n\n",w`doc]}
 hovCross:{[rel;nm;id] w:$[0<#rel;winFind rel;`]; w:$[`m~@w;w;winFind nm]; $[`m~@w;hoverMd[id;hvCrossMd w];reply[id;`null]]}
 hoverVar:{[t;src;ni;id]
   nm:nameOf[t;ni]; o:(t`start)@ni

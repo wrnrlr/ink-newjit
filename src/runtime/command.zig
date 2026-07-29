@@ -56,6 +56,10 @@ pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
   } else if (std.mem.eql(u8, verb, "d")) {
     std.debug.print("\\d {s}\n", .{args});
     return .blank;
+  } else if (std.mem.eql(u8, verb, "e")) {
+    // `\e a b c` — export bare names for autoload.  Consumed by the module
+    // indexer (cmd/modules.zig scanText) at scan time; no runtime effect.
+    return .blank;
   } else if (std.mem.eql(u8, verb, "t")) {
     if (args.len == 0) return .blank;
     const count = if (n == 0) 1 else n;

@@ -60,7 +60,7 @@ src/
 │   ├── dispatch.zig  # Type-based dispatch
 │   └── promote.zig   # Scalar/vector/list promotion
 ├── runtime/
-│   ├── vm.zig        # Stack VM: [2048]V stack, [64] call frames, [256] globals
+│   ├── vm.zig        # Stack VM: [2048]V stack, [64] call frames, [4096] globals
 │   ├── compiler.zig  # AST → IR → OpCode bytecode (DCE, constant folding)
 │   ├── tape.zig      # OpCode enum and Chunk (bytecode storage)
 │   └── ir.zig        # Intermediate representation
@@ -77,6 +77,23 @@ doc/               # changelog.md
 
 **Memory model:** reference counting with copy-on-write.
 
+## Documenting a k module
+
+`lib/*.k` is self-documenting: `lib/doc.k` extracts an API reference from the parse
+CST, `ink tools/doc.k` writes it to `doc/api/`, and `tools/lsp.k` serves the same text
+as editor hover. One convention drives all three — a top-level binding is **public**
+when it starts its own line (indentation is fine) *and* a `/` comment block sits
+directly above it, with no blank line between. Anything else — no comment, a blank
+line in between, a binding after other code on the same line, or a name a `\d ns a b`
+export list hides — is private and never listed. The file's leading comment block is
+the module header (write it as `lib/foo.k — one-line summary`); a `/ ── section ──`
+banner separates code rather than documenting the next binding.
+
+```bash
+make docs-api      # regenerate doc/api.md + doc/api/*.md
+make docs-check    # which modules still have no documented API
+```
+
 ## Language Gotchas
 
 - No `>=`/`<=` operators — `x<=y` parses as `x<(=y)`. Use `~(x>y)` and `~(x<y)`.
@@ -87,7 +104,7 @@ doc/               # changelog.md
 - Lambdas do **not** close over parent scope. Use `/:` patterns instead of nested closures.
 - Namespaces: `\d ns` opens namespace `ns` (all members public); `\d ns a b` makes only `a`,`b` public (rest private, reachable only within `ns`); bare `\d` resets to global. Resolution is compile-time — names mangle to `ns.member` global keys (zero runtime cost). A bare name inside `ns` resolves to `ns.name` if that member exists, else the global.
 - Only **four keyword verbs remain**: `in has mod div` (all genuinely dyadic). Everything else that used to be a keyword — the math functions (`sqrt sqr exp log sin cos abs`) and the monadic verbs (`first last count parse exec depth epoch`) — was removed from the grammar and rebound as **names in `lib/prelude.k`** (loaded at VM init). Consequences: (1) a bare op-glyph directly after one is **dyadic** unless it is a `-` glued to a numeric literal with a space before it: `abs -4` now applies `abs` to `-4` (a negative literal, like ngn/k), but `abs-4` is subtract and `parse $x` is still dyadic — write `parse[$x]` (and `abs[-x]` when the operand isn't a literal); (2) these names no longer need qualified LHS in a namespace (`parse: …` is fine now); (3) any monadic primitive is callable as a symbol (`` `first x ``, `` `parse x `` → its Op1 kernel via syms.zig). `first`/`last`/`count` are bound to the glyph verbs (`*`/`*|`/`#`); `parse`/`exec`/`depth`/`epoch` to their Op1 kernels. See `doc/design/dye.md`.
-- Module loading: `2:"lib/foo.k"` loads by path; `2:"foo"` / `\l foo` (extension-less) resolve to `lib/foo.k`. A public `ns.member` / dotted name auto-loads its file on first reference. Only namespaced/dotted public names are indexed for autoload — bare global names are file-private.
+- Module loading: `2:"lib/foo.k"` loads by path; `2:"foo"` / `\l foo` (extension-less) resolve to `lib/foo.k`. A public `ns.member` / dotted name auto-loads its file on first reference (both the full name and its `ns` prefix are indexed). Bare global names are file-private by default — a module publishes an unqualified API with the `\e a b c` export directive (runtime no-op, read by the module indexer). Unset globals read as `0` rather than erroring, so a mistyped or un-renamed name fails silently.
 
 ## Native Extensions (FFI)
 
@@ -97,7 +114,9 @@ Extensions are shared libraries loaded at runtime via `src/ffi.zig`. Available: 
 
 - `AGENT.md` — language tips, known gotchas, full operator reference
 - `doc/reference.md` — language specification (WIP, most up-to-date)
-- `doc/api.md` — library apis for graphics, data loading, audio and more
+- `doc/api.md` + `doc/api/*.md` — **generated** library API reference (`make docs-api`); edit the k source, not these
+- `doc/api-legacy.md` — the old hand-written library notes, being migrated into module headers
+- `doc/design/nn.md` — neural-net stack (lib/nn.k, conformer.k, feat.k, asr.k): naming rules, the params-buffer perf trap, negative results, roadmap
 - `doc/design/ui.md` — UI library design docs
 - `doc/design/kk2.md` — UI library design docs
 - `doc/design/canvas-slug.md` — canvas and slug library design docs

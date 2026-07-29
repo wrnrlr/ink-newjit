@@ -22,7 +22,7 @@ HOST := $(HOST_OS)-$(HOST_ARCH)
 # Jupyter kernel, and native FFI extensions are unavailable there.
 PLATFORMS := macos-arm64 macos-x64 linux-arm64 linux-x64 windows-arm64 windows-x64
 
-.PHONY: test ui-test ui-shot lint build release all static-all install data demo qa bench info clean docs docs-snap
+.PHONY: test ui-test ui-shot lint build release all static-all install data demo qa bench info clean docs docs-snap docs-api docs-check
 
 # Flag common ink parse gotchas (currently the `<=`/`>=` misparse) in the k libs + demos.
 lint:
@@ -44,6 +44,7 @@ ui-shot:
 test:
 	time zig build test
 	$(INK) lib/stats.k
+	$(INK) test/doc.k
 	$(INK) test/regex.k
 	$(INK) test/rope.k
 	$(INK) test/syntax.k
@@ -181,10 +182,19 @@ data:
 docs-snap: build
 	sh public/snap.sh
 
+# Regenerate the API reference (doc/api.md + doc/api/*.md) from lib/*.k.
+docs-api:
+	$(INK) tools/doc.k
+
+# Which modules still have no documented API (a comment block above each
+# line-leading public binding).  Exit status = number of such modules.
+docs-check:
+	-$(INK) tools/doc.k -check
+
 # Build the static documentation site into ./out (upload the folder to Cloudflare).
 # Runs docs-snap first so the demo gallery is populated; `bun public/build.mjs`
 # alone rebuilds the HTML from whatever screenshots already exist.
-docs: docs-snap
+docs: docs-snap docs-api
 	bun public/build.mjs
 	@echo "Docs built -> out/  (serve: bunx serve out  |  deploy: upload ./out)"
 
