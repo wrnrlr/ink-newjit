@@ -1,9 +1,19 @@
-/ lib/font.k — native sfnt font reader + outline/shape/metrics
 /
-/ font.read "path" → a LIST of face dicts (one per face; a TTC yields several,
-/ a single TTF/OTF yields a one-element list — uniform API across flavours).
-/ Each face dict is keyed by normalized table name → that table's value:
-/   head  maxp  hhea  hmtx  loca  post  name  OS2  cmap  cvt  fpgm  prep  gasp
+# font
+
+Reads sfnt (TTF/OTF/TTC) fonts: outlines, shaping, metrics.
+
+font.read "path" → a LIST of face dicts (one per face; a TTC yields several,
+a single TTF/OTF yields a one-element list — uniform API across flavours).
+Each face dict is keyed by normalized table name → that table's value:
+
+```k
+head  maxp  hhea  hmtx  loca  post  name  OS2  cmap  cvt  fpgm  prep  gasp
+```
+
+Pure k — loads on the first reference to any `font.*` name.
+\
+
 \d font read outline outlines quads shape scale metrics upm glyph nameID family subfamily fullName
   so:"./zig-out/lib/libfont.dylib"
   read:so 2:(`ReadFont; 1)            / "path" → L of face dicts

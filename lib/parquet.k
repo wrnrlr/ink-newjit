@@ -1,7 +1,11 @@
-/ lib/parquet.k — Parquet extension
 /
-/ Build first:  zig build parquet
-/ Use:          parquet.read "path.parquet"   (auto-loads on first use)
+# parquet
+
+Reads Parquet files into tables, across encodings, codecs and row groups.
+
+Build the extension first with `zig build parquet`; the module then loads on the
+first reference to any `parquet.*` name.
+\
 
 \d parquet read
 so: "./zig-out/lib/libparquet.dylib"

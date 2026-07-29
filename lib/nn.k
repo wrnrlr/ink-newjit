@@ -1,26 +1,34 @@
-/ lib/nn.k — GPU neural-net primitives on the resident-compute stack.
-/ Generic tensor ops and layers only: nothing here knows about audio or ASR.
-/   lib/conformer.k  conformer block + encoder stack
-/   lib/feat.k       audio → log-mel features
-/   lib/asr.k        conv subsampling, TDT decode, weight loading, detokenize
-/ Design notes, naming rules and the roadmap: doc/design/nn.md
 /
-/ Build first:  zig build gpu
-/ Run:          inside a window.run loop (compute needs a live device — see test/nn.k)
-/
-/ NAMING (doc/design/nn.md §2)
-/   gemm           public entry, RESIDENT: GPU buffer handles in, handle out
-/   gemm.host      host arrays in, host array out (one-shot / the bit-exact oracle)
-/   gemm.kern      the gpu.kernel value
-/   nn.*           shared plumbing;  nn.fn.*  host-side scalar/vector helpers
-/ Every mutable global lives under a dotted prefix — there are no bare globals.
-/
-/ All matrices are ROW-MAJOR flat f32 vectors.
-/
-/ gpu.dispatch rounds the grid up to a multiple of 64, and Metal CLAMPS an out-of-bounds
-/ store to the last valid index — so every OUTPUT buffer is padded to the launched
-/ thread count (`nn.pad`) so stray writes land in padding, never clobbering a live
-/ element.  OOB input reads clamp harmlessly (their outputs are discarded).
+# nn
+
+Neural-net primitives that keep their weights and activations on the GPU.
+
+Compute needs a live device, so these run inside a `window.run` loop — see
+test/nn.k.  All matrices are ROW-MAJOR flat f32 vectors.
+
+## Naming
+
+Every operator comes in three forms (doc/design/nn.md §2):
+
+```k
+gemm        / public entry, RESIDENT: buffer handles in, handle out
+gemm.host   / host arrays in, host array out (one-shot, and the bit-exact oracle)
+gemm.kern   / the gpu.kernel value
+```
+
+`nn.*` is shared plumbing and `nn.fn.*` the host-side scalar/vector helpers.
+Every mutable global lives under a dotted prefix — there are no bare globals.
+
+## The padding rule
+
+`gpu.dispatch` rounds the grid up to a multiple of 64, and Metal CLAMPS an
+out-of-bounds store to the last valid index.  So every OUTPUT buffer is padded to
+the launched thread count (`nn.pad`), and stray writes land in padding instead of
+clobbering a live element.  Out-of-bounds input reads clamp harmlessly — their
+outputs are discarded anyway.
+
+Pure k — loads on the first reference to any `nn.*` name.
+\
 
 \e gemm linear softmax layernorm silu gelu relu addscaled glu dwconv chanaffine
 \e conv2d dwconv2d pwconv2d flatten ffn lstm

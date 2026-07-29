@@ -1,18 +1,26 @@
-/ fbx.k — binary FBX reader (pure k)
 /
-/ ReadFbx "model.fbx" parses a binary Autodesk FBX file into a nested,
-/ array-language-friendly tree.  Each node is a dict
-/   [name:`NodeType; props:(p0;p1;..); nodes:(child0;child1;..)]
-/ where props is a general list of decoded property values and nodes is a
-/ general list of child node dicts.  The result of ReadFbx is the top-level
-/ list of nodes (the implicit root list of the FBX document).
-/
-/ Limitations (ink is 32-bit int / 32-bit float):
-/   - D / d (float64) properties are decoded to f32 precision.
-/   - L / l (int64) properties are decoded to f32 (exact only to 2^24);
-/     large 64-bit object UIDs therefore lose precision.
-/   - I / i (int32) and Y (int16) are exact.
-/ See doc/bug.md for the precision caveat and the parser quirks worked around.
+# fbx
+
+Reads binary FBX scene files, including their DEFLATE-compressed arrays.
+
+ReadFbx "model.fbx" parses a binary Autodesk FBX file into a nested,
+array-language-friendly tree.  Each node is a dict
+  [name:`NodeType; props:(p0;p1;..); nodes:(child0;child1;..)]
+where props is a general list of decoded property values and nodes is a
+general list of child node dicts.  The result of ReadFbx is the top-level
+list of nodes (the implicit root list of the FBX document).
+
+Limitations (ink is 32-bit int / 32-bit float):
+
+- D / d (float64) properties are decoded to f32 precision.
+- L / l (int64) properties are decoded to f32 (exact only to 2^24);
+  large 64-bit object UIDs therefore lose precision.
+- I / i (int32) and Y (int16) are exact.
+
+See doc/bug.md for the precision caveat and the parser quirks worked around.
+
+Pure k — loads on the first reference to any `fbx.*` name.
+\
 
 / Everything below lives in the `fbx` namespace: a bare `u16` here is `fbx.u16`
 / to the outside world, and the public entry points (fbx.read/all/get/uname/

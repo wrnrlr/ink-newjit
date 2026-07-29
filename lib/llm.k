@@ -1,26 +1,38 @@
-/ lib/llm.k — LLM chat + streaming for Anthropic and xAI (Grok).
 /
-/ Pure k over the http + json modules (no dylib of its own).  Streaming is
-/ folded in from the start: llm.ask prints tokens live as they arrive and
-/ returns the full assistant text.
-/
-/ Setup — keys come from the environment (`env[]):
-/   ANTHROPIC_API_KEY   for llm.anthropic
-/   XAI_API_KEY         for llm.grok
-/
-/ Quick tour:
-/   c: llm.grok "grok-4"                 / or llm.anthropic "claude-opus-4-8"
-/   llm.ask[c; "explain array languages in one line"]     / streams, returns text
-/   h: llm.turn[c; (); "hello"]          / multi-turn: returns updated history
-/   llm.say[c; h; "and now in french"]   / continue the conversation
-/
-/ Message shape is provider-neutral: a list of [role;content] dicts.  Both
-/ providers take role in `system`user`assistant.
-/
-/ Gotchas baked in: env/JSON keys are SYMBOLS and API field names have
-/ underscores, so they're quoted (`"max_tokens", `"XAI_API_KEY"); SSE deltas
-/ are scanned out of each data: line with a small JSON-string reader rather than
-/ json.parse (which columnarises object arrays).
+# llm
+
+Chat with Anthropic and xAI models, with live token streaming and tool use.
+
+Pure k over the http + json modules (no dylib of its own).  Streaming is
+folded in from the start: llm.ask prints tokens live as they arrive and
+returns the full assistant text.
+
+Setup — keys come from the environment (`env[]):
+
+```k
+ANTHROPIC_API_KEY   for llm.anthropic
+XAI_API_KEY         for llm.grok
+```
+
+Quick tour:
+
+```k
+c: llm.grok "grok-4"                 / or llm.anthropic "claude-opus-4-8"
+llm.ask[c; "explain array languages in one line"]     / streams, returns text
+h: llm.turn[c; (); "hello"]          / multi-turn: returns updated history
+llm.say[c; h; "and now in french"]   / continue the conversation
+```
+
+Message shape is provider-neutral: a list of [role;content] dicts.  Both
+providers take role in `system`user`assistant.
+
+Gotchas baked in: env/JSON keys are SYMBOLS and API field names have
+underscores, so they're quoted (`"max_tokens", `"XAI_API_KEY"); SSE deltas
+are scanned out of each data: line with a small JSON-string reader rather than
+json.parse (which columnarises object arrays).
+
+Pure k — loads on the first reference to any `llm.*` name.
+\
 
 \d llm
   bs: `c$92    / backslash

@@ -1,14 +1,21 @@
-/ lib/pga.k — Projective Geometric Algebra G(3,0,1)
 /
-/ Metric: e0²=0, e1²=e2²=e3²=1  (signature +++0, aka PGA or R3,0,1)
-/ 16 basis blades ordered by grade then lexicographic:
-/   i=0 : 1          (scalar)
-/   i=1..4 : e0 e1 e2 e3   (vectors)
-/   i=5..10: e01 e02 e03 e12 e13 e23  (bivectors)
-/   i=11..14: e012 e013 e023 e123     (trivectors)
-/   i=15: e0123      (pseudoscalar)
-/
-/ Load with: 2: "lib/pga.k"
+# pga
+
+Projective geometric algebra G(3,0,1): points, lines, planes and motors.
+
+Metric: e0²=0, e1²=e2²=e3²=1  (signature +++0, aka PGA or R3,0,1)
+16 basis blades ordered by grade then lexicographic:
+
+```k
+i=0 : 1          (scalar)
+i=1..4 : e0 e1 e2 e3   (vectors)
+i=5..10: e01 e02 e03 e12 e13 e23  (bivectors)
+i=11..14: e012 e013 e023 e123     (trivectors)
+i=15: e0123      (pseudoscalar)
+```
+
+Pure k — loads on the first reference to any `pga.*` name.
+\
 
 / ── Precomputed Cayley table (sign and blade index for all 16×16 products) ───────
 / Row i, column j at flat index i*16+j.

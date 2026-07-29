@@ -96,6 +96,20 @@ chk["detail is the rest";                 fld["f";`detail]; ,"second line"]
 load "// slashslash comments work\nf:{[p] p}\n"
 chk["// is a comment marker too";         fld["f";`summary]; "slashslash comments work"]
 
+/ ── block-comment headers ───────────────────────────────────────────────────
+BLK: "/\n# audio\n\nPlay a sound.\n\n    audio.play \"boop.wav\"\n\\\n\n/ doc\na:1\n"
+load BLK
+chk["block header: title from the # heading";  M`title;   "audio"]
+chk["block header: summary is the lead line";  M`summary; "Play a sound."]
+chk["block header: markdown kept verbatim";    M`head;    ("# audio";"";"Play a sound.";"";"    audio.play \"boop.wav\"")]
+chk["block header: body drops the heading";    M`body;    ("Play a sound.";"";"    audio.play \"boop.wav\"")]
+chk["block header: the binding after it is still public"; pubN 0; 1]
+chk["  ...with its own doc";                   fld["a";`doc]; ,"doc"]
+load "/\n# m\n\nlead\n\\\na:1\n"
+chk["a block running into a binding documents it"; #M`head; 0]
+load "/ one\n/ two\nf:{[p] p}\n"
+chk["a `/` run above a binding still works";   fld["f";`doc]; ("one";"two")]
+
 / ── degenerate inputs (each of these used to hang or miscount) ──────────────
 load ""
 chk["empty source";                       pubN 0; 0]

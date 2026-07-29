@@ -1,14 +1,23 @@
-/ lib/kk.k — the kk array-level GPU surface (doc/design/kk.md, kk2 §2/§6).
 /
-/ kk.compile[fn; placements] — idiomatic whole-array lambda → cached pipeline
-/ kk.loop / kk.converge      — iterate an amend sweep on-device (ping-pong)
-/ kk.reduce/sum/max/min/prod — whole-buffer reductions (subgroup fast path)
-/ kk.scan/sums/maxs/mins     — inclusive prefix scans
-/ kk.where                   — compaction (&mask)
-/
-/ The classifiers/emitters live in lib/dye.k (shader.*); the device runtime +
-/ placed-array descriptors (gpu.hold / 9: / 8:) live in lib/gpu.k.
-/ Load with:  2: "lib/kk.k"   (pulls in dye + gpu itself).
+# kk
+
+Compiles idiomatic whole-array k to GPU pipelines that run on resident buffers.
+
+```k
+kk.compile[fn; placements]   / whole-array lambda → cached pipeline
+kk.loop / kk.converge        / iterate an amend sweep on-device (ping-pong)
+kk.reduce/sum/max/min/prod   / whole-buffer reductions (subgroup fast path)
+kk.scan/sums/maxs/mins       / inclusive prefix scans
+kk.where                     / compaction (&mask)
+```
+
+The classifiers and emitters live in lib/dye.k (`shader.*`); the device runtime
+and the placed-array descriptors (`gpu.hold`, `9:`, `8:`) live in lib/gpu.k.
+See doc/design/kk.md for the design.
+
+Pure k — loads on the first reference to any `kk.*` name.
+\
+
 2: "lib/dye.k"
 2: "lib/gpu.k"
 

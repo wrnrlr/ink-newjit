@@ -1,28 +1,35 @@
-/ lib/audio.k — audio module (native miniaudio extension).
 /
-/ Build first:  zig build audio
-/ Load with:    2: "lib/audio.k"   (or reference any `audio.*` name to autoload)
-/
-/ Playback runs on miniaudio's own audio thread — the calls below are
-/ fire-and-forget, so you never block or spin a loop to make sound.  Recording
-/ is the one place you poll: call audio.rec.read[] from your game/UI loop (the
-/ same place you read window events) to drain freshly captured samples.
-/
-/ Quick tour:
-/   audio.play "boop.wav"                    / one-shot UI/SFX
-/   h: audio.load "gun.wav"                  / a controllable voice
-/   audio.start h                            / (re)trigger it
-/   audio.music "song.mp3"                   / streamed, looping background music
-/   audio.pos[h; 3 0 -2]                     / place it in 3D; move the listener
-/   audio.listener 0 0 0                     /   with audio.listener each frame
-/   audio.rec.start[]                        / start the mic
-/   s: audio.rec.read[]                      / drain samples (call in your loop)
-/   audio.save["take.wav"; audio.rec.channels[]; audio.rec.rate[]; s]
-/   clip: audio.decode "take.wav"            / load a file to a PCM dict
-/
-/ Layout: raw one-to-one FFI bindings live in the `audio.ffi` sub-namespace; the
-/ public `audio.*` names below are thin aliases (pass-throughs) or convenience
-/ wrappers over them.  `audio.ffi` is declared first so those aliases resolve.
+# audio
+
+Play, stream, record and decode audio, with 3D positioning.
+
+Playback runs on miniaudio's own audio thread — the calls below are
+fire-and-forget, so you never block or spin a loop to make sound.  Recording
+is the one place you poll: call audio.rec.read[] from your game/UI loop (the
+same place you read window events) to drain freshly captured samples.
+
+Quick tour:
+
+```k
+audio.play "boop.wav"                    / one-shot UI/SFX
+h: audio.load "gun.wav"                  / a controllable voice
+audio.start h                            / (re)trigger it
+audio.music "song.mp3"                   / streamed, looping background music
+audio.pos[h; 3 0 -2]                     / place it in 3D; move the listener
+audio.listener 0 0 0                     /   with audio.listener each frame
+audio.rec.start[]                        / start the mic
+s: audio.rec.read[]                      / drain samples (call in your loop)
+audio.save["take.wav"; audio.rec.channels[]; audio.rec.rate[]; s]
+clip: audio.decode "take.wav"            / load a file to a PCM dict
+```
+
+Layout: raw one-to-one FFI bindings live in the `audio.ffi` sub-namespace; the
+public `audio.*` names below are thin aliases (pass-throughs) or convenience
+wrappers over them.  `audio.ffi` is declared first so those aliases resolve.
+
+Build the extension first with `zig build audio`; the module then loads on the
+first reference to any `audio.*` name.
+\
 
 \d audio.ffi
   so: "./zig-out/lib/libaudio.dylib"

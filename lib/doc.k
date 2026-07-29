@@ -1,37 +1,57 @@
-/ lib/doc.k — extract API documentation from ink source.
 /
-/ One shared extractor behind `ink doc` (tools/doc.k), the language server's
-/ hover (tools/lsp.k) and the static site build.  Everything is read off the
-/ `parse` CST table, so the docs describe what the parser actually saw rather
-/ than what a regex guessed.
-/
-/ DOC VISIBILITY — a doc/lsp concept; the language itself is unaffected.
-/ A top-level binding is PUBLIC when BOTH hold:
-/   * it is the first thing on its line (indentation is fine; `a:1;b:2` is not),
-/   * a `/` comment block sits DIRECTLY above it (no blank line in between).
-/ Everything else is PRIVATE and is never listed.  A `\d ns a b` export list
-/ still wins: a member it hides stays private no matter how well commented.
-/
-/ Entry points:
-/   doc.file "lib/http.k"        → module dict (below)
-/   doc.scan[path; src]          → same, from source you already hold (the lsp path)
-/   doc.find[m; "http.get"]      → one def dict from a module dict, or `` ` ``
-/   doc.at[m; line]              → the def bound on `line` (0-based), or `` ` ``
-/
-/ Module dict:  `path`mod`title`head`defs
-/   head = the file's leading comment block (list of lines, "/" stripped)
-/   defs = list of def dicts, source order:
-/     `name    C  fully-qualified name ("http.get")
-/     `kind    s  `fn (lambda) · `verb (a bare/derived verb) · `val
-/     `type    s  i f b c s C I F B S L m M · `fn `verb · `expr when not a literal
-/     `arity   i  parameter count for `fn (implicit x/y/z counted), else -1
-/     `params  L  parameter names (list of C), () otherwise
-/     `count   i  element count of a literal vector/list/dict, else -1
-/     `line    i  0-based line of the binding
-/     `doc     L  the full comment block (list of C lines)
-/     `summary C  first doc line
-/     `detail  L  remaining doc lines
-/     `sig     C  "http.get[url]" for functions, the bare name otherwise
+# doc
+
+Extracts an API reference from ink source, off the parse CST.
+
+One shared extractor sits behind `ink doc` (tools/doc.k), the language server's
+hover (tools/lsp.k) and the static site build, so the published reference, the
+editor popup and the website can never drift apart.  Everything is read off the
+`parse` CST table rather than guessed at with a regex.
+
+## Doc visibility
+
+This is a doc/lsp concept — the language itself is unaffected.  A top-level
+binding is PUBLIC when both hold:
+
+- it starts its own line (indentation is fine; the `b` in `a:1;b:2` is not), and
+- a comment block sits directly above it, with no blank line in between.
+
+Everything else is private and is never listed.  A `\d ns a b` export list still
+wins: a member it hides stays private no matter how well commented.  An aligned
+trailing comment (`read: … / what it does`) documents the binding too.
+
+## Module headers
+
+A header is a block comment holding markdown — a lone `/` opens it, a lone `\`
+closes it, and its first heading names the module.  A run of `/` lines still
+works; the title is then the text after the em dash.
+
+## Entry points
+
+```k
+doc.file "lib/http.k"     / → module dict
+doc.scan[path; src]       / same, from source you already hold (the lsp path)
+doc.find[m; "http.get"]   / one def dict, or ` when absent
+doc.at[m; line]           / the def bound on `line` (0-based), or `
+```
+
+The module dict is `` `path`mod`title`summary`head`body`defs ``:
+
+| key | meaning |
+| --- | --- |
+| `head` | the leading comment, as lines (markers stripped, markdown kept) |
+| `body` | `head` without its `# title` heading |
+| `summary` | the body's lead line, for an index row or a tooltip |
+| `defs` | every top-level binding, in source order |
+
+Each def carries `name` (fully qualified), `kind` (`` `fn `verb `val ``), `type`
+(`` i f b c s C I F B S L m M ``, or `` `fn `verb `expr ``), `arity` (parameters
+of a function, implicit `x`/`y`/`z` counted, else -1), `params`, `count`
+(elements of a literal vector/list/dict, else -1), `line` (0-based), `public`,
+`doc` / `summary` / `detail`, and `sig`.
+
+Pure k — loads on the first reference to any `doc.*` name.
+\
 
 doc.BS:  `c$92
 doc.TAB: `c$9
@@ -48,7 +68,8 @@ doc.LO:   0#0     / codepoint offset of each line start
 doc.T:    ()      / the parse CST table
 doc.CI:   0#0     / row index of each comment, ascending by offset
 doc.CS:   0#0     /   its start offset
-doc.CL:   0#0     /   its line
+doc.CL:   0#0     /   its first line
+doc.CE:   0#0     /   its last line (block comments span many)
 doc.COWN: 0#0     /   1b when it is the first thing on its line
 doc.DL:   0#0     / line of each `\d` directive
 doc.DNS:  ()      /   the namespace it opens ("" = global)
@@ -72,11 +93,21 @@ doc.streq: {[a;b] $[(#a)=#b; doc.allEq[a;b]; 0b]}
 / anything projected over an each must take its fixed argument first.
 doc.hasNm: {[ns;nm] $[0=#ns; 0b; |/doc.streq[nm]'ns]}
 doc.blankStr:{[s] $[0=#s; 1b; &/(s=" ")|s=doc.TAB]}
+doc.nlines:{[s] +/s="\n"}         / how many lines a chunk of text spans, minus 1
 doc.lineAt:{[o] -1+#&~doc.LO>o}
-/ strip a comment's "/" or "//" marker and one following space.  The text always
-/ starts with "/" (it came from a comment node), so only the doubled form needs
-/ a test — and `2#"/"` cycles to "//", which folds the bare-"/" divider in too.
-doc.ctext:{[s] u:$[("//")~2#s; 2_s; 1_s]
+/ A comment node's text → its content LINES.
+/   `/ foo`   → ,"foo"           the marker and one following space go
+/   `//foo`   → ,"foo"
+/   `/\n…\n\` → the inner lines VERBATIM (a block comment holds markdown, so
+/                indentation, fences and blank lines all have to survive)
+/ The text always starts with "/" (it came from a comment node), so only the
+/ doubled form needs a test — and `2#"/"` cycles to "//", which folds the
+/ bare-"/" divider line in too.
+doc.ctext:{[s] $[doc.isBlock s; doc.blockBody s; ,doc.lineText s]}
+doc.isBlock:{[s] ("/\n")~2#s}
+doc.blockBody:{[s] ls:"\n"\s; doc.dropClose 1_ls}
+doc.dropClose:{[ls] $[0=#ls; ls; doc.streq[*|ls; ,doc.BS]; -1_ls; ls]}
+doc.lineText:{[s] u:$[("//")~2#s; 2_s; 1_s]
   $[(0<#u)&(*u)=" "; 1_u; u]}
 / is `line` the first thing on its line?  o is a codepoint offset.
 doc.ownLine:{[o] l:doc.lineAt o; doc.blankStr doc.cpTake[doc.LNS@l; o-doc.LO@l]}
@@ -145,12 +176,15 @@ doc.qual:{[ns;nm] $[(0<#ns)&~|/"."=nm; ns,".",nm; nm]}
 doc.exOk:{[ln;nm] ex:doc.exAt ln; $[0=#ex; 1b; doc.hasNm[ex;nm]]}
 
 / ── comment blocks ──────────────────────────────────────────────────────────
-/ row index of the own-line comment on `l`, or -1.  The empty-file guard is not
-/ decoration: with no comments at all `&(()=l)&()` yields a 1-element result and
-/ blkDown recurses forever (lib/agent.k hung on exactly this).
+/ A comment node is either a `/` line or a whole `/ … \` BLOCK spanning many
+/ lines, so lookups key off the line the comment ENDS on and walking upwards
+/ resumes from the line it STARTS on.  The empty-file guard is not decoration:
+/ with no comments at all `&(()=l)&()` yields a 1-element result and blkDown
+/ recurses forever (lib/agent.k hung on exactly this).
 doc.cmtAt:{[l] $[0=#doc.CI; -1; doc.cmtHit l]}
-doc.cmtHit:{[l] h:&(doc.CL=l)&doc.COWN; $[#h; doc.CI@*h; -1]}
+doc.cmtHit:{[l] h:&(doc.CE=l)&doc.COWN; $[#h; doc.CI@*h; -1]}
 doc.cval: {[i] (doc.T`value)@i}
+doc.cstart:{[i] doc.CL@doc.CI?i}                 / first line of comment row i
 / a section-divider comment (`/ ── hover ────`) separates code, it does not
 / document the next binding — treat it like a blank line and stop the block.
 / Both the pure rule (`/ ─────────`) and the banner (`/ ── hover ───────`) count:
@@ -159,18 +193,24 @@ doc.DIVC:"-=_*~+#. ",`c$226 148 128 149 129 130 131
 doc.allDiv:{[s] $[0=#s; 0b; &/s in doc.DIVC]}
 doc.nosp:  {[s] s@&~s=" "}
 doc.isDiv: {[s] u:doc.nosp s; $[3>#u; 0b; doc.allDiv u; 1b; doc.allDiv[2#u]&doc.allDiv[-2#u]]}
-/ contiguous own-line comment block ending at line l, walking upwards
+/ contiguous own-line comments ending at line l, walking upwards
 doc.blkUp:{[l;acc] i:$[l<doc.HEADN; -1; doc.cmtAt l]
-  $[i<0; acc; doc.blkStep[l; doc.ctext doc.cval i; acc]]}
-doc.blkStep:{[l;s;acc] $[doc.isDiv s; acc; doc.blkUp[l-1; (,s),acc]]}
+  $[i<0; acc; doc.blkStep[i; doc.ctext doc.cval i; acc]]}
+doc.blkStep:{[i;ls;acc] $[doc.isDiv doc.join[" ";ls]; acc; doc.blkUp[-1+doc.cstart i; ls,acc]]}
 doc.blockAbove:{[ln] doc.blkUp[ln-1; ()]}
-/ contiguous own-line comment block starting at line l, walking downwards
-doc.blkDown:{[l;acc] i:doc.cmtAt l
-  $[i<0; acc; doc.blkDown[l+1; acc,,doc.ctext doc.cval i]]}
+/ the own-line comment STARTING at line l, or -1
+doc.cmtFrom:{[l] $[0=#doc.CI; -1; doc.cmtFromHit l]}
+doc.cmtFromHit:{[l] h:&(doc.CL=l)&doc.COWN; $[#h; doc.CI@*h; -1]}
+doc.cend:{[i] doc.CE@doc.CI?i}                   / last line of comment row i
+/ contiguous own-line comments starting at line l, walking downwards.  One block
+/ comment covers the whole header on its own; a run of `/` lines takes several.
+doc.blkDown:{[l;acc] i:doc.cmtFrom l
+  $[i<0; acc; doc.blkDown[1+doc.cend i; acc,doc.ctext doc.cval i]]}
+doc.blkEnd: {[l] i:doc.cmtFrom l; $[i<0; l; doc.blkEnd[1+doc.cend i]]}
 / a trailing comment on the binding's own line (after the name), or ""
 doc.trailAt:{[ln;o] $[0=#doc.CI; ""; doc.trailHit[ln;o]]}
 doc.trailHit:{[ln;o] h:&(doc.CL=ln)&(~doc.COWN)&doc.CS>o
-  $[#h; doc.ctext doc.cval doc.CI@*h; ""]}
+  $[#h; doc.join[" ";doc.ctext doc.cval doc.CI@*h]; ""]}
 
 / ── one definition ──────────────────────────────────────────────────────────
 doc.sigOf:{[nm;kd;ps] $[~kd~`fn; nm; 0=#ps; nm,"[]"; nm,"[",doc.join[doc.SEMI;ps],"]"]}
@@ -197,13 +237,27 @@ doc.defAt:{[bi]
 
 / ── scan a whole file ───────────────────────────────────────────────────────
 doc.modOf:{[path] f:*|"/"\path; $[".k"~-2#f; -2_f; f]}
-/ first header line often reads "lib/http.k — HTTP client"; keep the prose half
-/ bracket the argument: a bare `*` after a name reads as dyadic multiply
-doc.titleOf:{[head] $[0=#head; ""; doc.afterDash[*head]]}
+doc.trimS:{[s] $[(0<#s)&(*s)=" "; doc.trimS 1_s; s]}
+doc.nonEmpty:{[ls] $[0=#ls; ls; ls@&0<#'ls]}   / `&` over an each-of-nothing errors
+
+/ Title of a header block.  The modern form is a markdown block comment whose
+/ first heading names the module (`# audio`); the legacy line-comment form reads
+/ `lib/http.k — HTTP client`, so fall back to the text after the em dash.
 doc.DASH:`c$226 128 148          / U+2014 EM DASH, as its three UTF-8 bytes
+doc.HASH:,"#"
+doc.titleOf:{[head] ls:doc.nonEmpty head
+  $[0=#ls; ""; doc.isH1[*ls]; doc.trimS 1_*ls; doc.afterDash[*ls]]}
+doc.isH1:{[s] doc.streq[1#s; doc.HASH] & ~doc.streq[2#s; "##"]}
 doc.afterDash:{[s] w:doc.DASH\s
   $[1<#w; doc.trimS doc.join[doc.DASH;1_w]; doc.trimS s]}
-doc.trimS:{[s] $[(0<#s)&(*s)=" "; doc.trimS 1_s; s]}
+/ Header prose WITHOUT its `# title` heading — the renderer supplies its own.
+doc.bodyOf:{[head] ls:doc.nonEmpty head
+  $[0=#ls; head; doc.isH1[*ls]; doc.afterH1 head; head]}
+doc.afterH1:{[head] h:&doc.isH1'head; doc.trimBlank (1+*h)_head}
+doc.trimBlank:{[ls] $[0=#ls; ls; 0<#*ls; ls; doc.trimBlank 1_ls]}
+/ one-line description for an index or a tooltip: the body's lead line (write the
+/ first line under the heading as one sentence), falling back to the title
+doc.leadOf:{[body;title] ls:doc.nonEmpty body; $[#ls; *ls; title]}
 
 doc.scan:{[path;src]
   doc.LNS::"\n"\src
@@ -213,6 +267,7 @@ doc.scan:{[path;src]
   doc.CI::ci
   doc.CS::(doc.T`start)@ci
   doc.CL::doc.lineAt'doc.CS
+  doc.CE::doc.CL+doc.nlines'(doc.T`value)@ci
   doc.COWN::doc.ownLine'doc.CS
   di:&doc.isDir'doc.LNS
   dw:doc.words'doc.LNS@di
@@ -222,13 +277,17 @@ doc.scan:{[path;src]
   b:doc.topBinds doc.T
   doc.BL::doc.lineAt'(doc.T`start)@doc.childF[doc.T]'[b;`v]
   doc.HEADN::0
-  hd:doc.blkDown[0;()]
-  / a comment block that runs straight into a binding documents THAT binding,
-  / it is not the file header
-  doc.HEADN::$[doc.hasLine[doc.BL;#hd]; 0; #hd]
+  hd:doc.blkDown[0;()]             / the comment run the file OPENS with
+  nx:doc.blkEnd 0                  / first line after it
+  / a comment that runs straight into a binding documents THAT binding, it is
+  / not the file header
+  doc.HEADN::$[doc.hasLine[doc.BL;nx]; 0; nx]
   hd:$[0<doc.HEADN; hd; ()]
   ds:doc.defAt'b
-  (`path`mod`title`head`defs)!(path; doc.modOf path; doc.titleOf hd; hd; ds)}
+  ti:doc.titleOf hd
+  bd:doc.bodyOf hd
+  (`path`mod`title`summary`head`body`defs)!(
+    path; doc.modOf path; ti; doc.leadOf[bd;ti]; hd; bd; ds)}
 doc.hasLine:{[bl;l] |/bl=l}
 
 doc.file:{[path] doc.scan[path; 1: path]}

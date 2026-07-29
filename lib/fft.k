@@ -1,23 +1,35 @@
-/ Fast Fourier Transform — Cooley-Tukey radix-2 DIT (decimation-in-time).
 /
-/ Complex vectors are represented as (re;im) — two float arrays of equal length.
-/ Complex 2D matrices are (re_mat;im_mat) — two lists of equal-length row vectors.
-/
-/ Public API:
-/   fft[x]        — DFT of complex vector x=(re;im); length must be power of 2
-/   ifft[x]       — inverse DFT; recovers x from fft output (within f32 error ~1e-7)
-/   rfft[xr;yr]   — FFT of two real signals at once ("two for one" trick)
-/   fft2[A]       — 2D DFT of complex matrix A=(re_mat;im_mat)
-/
-/ kyte→ink translation:
-/   kyte `1@theta`  (polar unit complex)   → ink `(cos theta;-sin theta)` via tau
-/   kyte `conj x`                           → ink `cconj[x]`
-/   kyte `imag[x;y]` (interleave)          → ink `(x;y)` directly (already split)
-/   kyte `1a270`    (-i)                    → ink multiply: (re;im)→(im;-re)
-/   kyte `n!k`      (k mod n)              → ink `k mod n`
-/   kyte `n%:2`     (integer divide by 2)  → ink `n div 2`
-/   CRITICAL: all `c@0` used in arithmetic need (c@0) parens — ink is right-to-left,
-/             so `x@0+y@0` parses as `x@(0+y@0)`, not `(x@0)+(y@0)`.
+# fft
+
+Fast Fourier transform — Cooley-Tukey radix-2, decimation in time.
+
+Complex vectors are represented as (re;im) — two float arrays of equal length.
+Complex 2D matrices are (re_mat;im_mat) — two lists of equal-length row vectors.
+
+Public API:
+
+```k
+fft[x]        — DFT of complex vector x=(re;im); length must be power of 2
+ifft[x]       — inverse DFT; recovers x from fft output (within f32 error ~1e-7)
+rfft[xr;yr]   — FFT of two real signals at once ("two for one" trick)
+fft2[A]       — 2D DFT of complex matrix A=(re_mat;im_mat)
+```
+
+kyte→ink translation:
+
+```k
+kyte `1@theta`  (polar unit complex)   → ink `(cos theta;-sin theta)` via tau
+kyte `conj x`                           → ink `cconj[x]`
+kyte `imag[x;y]` (interleave)          → ink `(x;y)` directly (already split)
+kyte `1a270`    (-i)                    → ink multiply: (re;im)→(im;-re)
+kyte `n!k`      (k mod n)              → ink `k mod n`
+kyte `n%:2`     (integer divide by 2)  → ink `n div 2`
+CRITICAL: all `c@0` used in arithmetic need (c@0) parens — ink is right-to-left,
+          so `x@0+y@0` parses as `x@(0+y@0)`, not `(x@0)+(y@0)`.
+```
+
+Pure k — loads on the first reference to any `fft.*` name.
+\
 
 tau:6.283185307179586   / 2π — hardcoded (acos/asin not available in ink)
 

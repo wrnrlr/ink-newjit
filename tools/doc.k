@@ -54,7 +54,7 @@ kdoc.front:{[m;ps] doc.lines(
   "module: ",kdoc.yq[m`mod]
   "file: ",kdoc.yq[m`path]
   "kind: api"
-  "summary: ",kdoc.yq[m`title]
+  "summary: ",kdoc.yq[m`summary]
   "symbols: ",($#ps)
   $[0=#ps; "api: []"; doc.lines[(,"api:"),kdoc.fmSym'ps]]
   "---")}
@@ -74,12 +74,17 @@ kdoc.indent:{[s] $[0=#s; ""; "  ",s]}
 kdoc.apiBlock:{[ps] $[0=#ps
   ; "_No documented API yet — add a comment block above each public binding._"
   ; doc.lines[("## API";""),kdoc.bullet'ps]]}
+/ The header block comment is already markdown, so it goes through verbatim; only
+/ its `# title` heading is re-emitted here (as the module name) so every page is
+/ headed the same way.  A legacy `lib/x.k — prose` header keeps its prose as a
+/ lead line instead.
 kdoc.body:{[m;ps] doc.lines(
   "# ",(m`mod)
-  $[0=#(m`title); ""; "\n",(m`title)]
-  $[1<#(m`head); "\n",doc.lines[1_(m`head)]; ""]
+  $[kdoc.hasLead m; "\n",(m`title); ""]
+  $[0=#(m`body); ""; "\n",doc.lines[m`body]]
   ""
   kdoc.apiBlock[ps])}
+kdoc.hasLead:{[m] (0<#(m`title)) & ~doc.streq[m`title; m`mod]}
 
 kdoc.render:{[m] ps:doc.pub m; kdoc.front[m;ps],"\n",kdoc.body[m;ps],"\n"}
 
@@ -92,7 +97,7 @@ kdoc.isTop:{[dir;f] doc.streq[f; dir,"/",*|"/"\f]}
 kdoc.kfiles:{[dir] f:`dir dir; ff:f@&kdoc.isK'f; tf:ff@&kdoc.isTop[dir]'ff; tf@<doc.modOf'tf}
 
 / ── index page ──────────────────────────────────────────────────────────────
-kdoc.idxRow:{[m] "| [",(m`mod),"](api/",(m`mod),".md) | ",($#doc.pub m)," | ",(m`title)," |"}
+kdoc.idxRow:{[m] "| [",(m`mod),"](api/",(m`mod),".md) | ",($#doc.pub m)," | ",(m`summary)," |"}
 kdoc.index:{[ms] doc.lines[(
   "---"
   "title: 'API reference'"
@@ -111,7 +116,7 @@ kdoc.index:{[ms] doc.lines[(
   "| --- | --- | --- |"),kdoc.idxRow'ms]}
 
 / ── reporting ───────────────────────────────────────────────────────────────
-kdoc.report:{[m] `0:(kdoc.pad[16;m`mod])," ",(kdoc.pad[4;$#doc.pub m])," /",(kdoc.pad[5;$#(m`defs)])," ",$[0=#(m`head);"(no header)";m`title],"\n"}
+kdoc.report:{[m] `0:(kdoc.pad[16;m`mod])," ",(kdoc.pad[4;$#doc.pub m])," /",(kdoc.pad[5;$#(m`defs)])," ",$[0=#(m`head);"(no header)";m`summary],"\n"}
 
 / ── drivers ─────────────────────────────────────────────────────────────────
 kdoc.write:{[m] p:kdoc.OUT,"/",(m`mod),".md"; p 1: kdoc.render m; p}

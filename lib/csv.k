@@ -1,7 +1,11 @@
-/ lib/csv.k — CSV extension
 /
-/ Build first:  zig build csv
-/ Use:          csv.read "path.csv"   (auto-loads this file on first use)
+# csv
+
+Reads a CSV file into a dict of typed column arrays.
+
+Build the extension first with `zig build csv`; the module then loads on the
+first reference to any `csv.*` name.
+\
 
 \d csv read
 so: "./zig-out/lib/libcsv.dylib"

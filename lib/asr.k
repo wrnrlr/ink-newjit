@@ -1,9 +1,12 @@
-/ lib/asr.k — the ASR-specific layer: conv subsampling, TDT greedy decode,
-/ Parakeet weight loading and SentencePiece detokenize.
-/ Generic pieces live in lib/nn.k / lib/conformer.k / lib/feat.k.
-/ Design notes: doc/design/nn.md
 /
-/ Full pipeline:  audio → logmel → subsample → conformer → tdt → asr.detok → text
+# asr
+
+Speech recognition on top of lib/nn.k: conv subsampling, encoder, TDT greedy decode.
+
+Full pipeline:  audio → logmel → subsample → conformer → tdt → asr.detok → text
+
+Pure k — loads on the first reference to any `asr.*` name.
+\
 
 \e subsample tdt
 

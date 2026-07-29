@@ -1,25 +1,40 @@
-/ regex.k — Pure-k regex engine (Thompson NFA / Pike VM)
 /
-/ Public API:
-/   regex.compile[pat]         compile regex pattern string to NFA program
-/   regex.test[prog;str]       1b if full match
-/   regex.find[prog;str]       (start;len) of first match, or !0
-/   regex.all[prog;str]        list of (start;len) for all non-overlapping matches
-/   regex.sub[prog;str;rep]    replace first match
-/   regex.suball[prog;str;rep] replace all matches
-/
-/ The pipeline is split into private sub-namespaces:
-/   regex.token    pattern string → token stream
-/   regex.postfix  token stream → postfix (concat insertion + shunting yard)
-/   regex.nfa      postfix → NFA program (Thompson construction)
-/   regex.vm       run an NFA program against a string (Pike VM)
-/
-/ Supported syntax:
-/   . * + ? | ( ) [ ] [^] [a-z] \d \w \s \D \W \S ^ $
-/
-/ NFA opcodes: 0=CHAR 1=ANY 2=CLASS 3=SPLIT 4=JUMP 5=MATCH 6=SOL 7=EOL
-/ All instructions use explicit next-PC in arg2 (no fall-through).
-/ Program dict: [ops;a1;a2;cls;start]
+# regex
+
+A regex engine in pure k — Thompson NFA construction, Pike VM matching.
+
+Public API:
+
+```k
+regex.compile[pat]         compile regex pattern string to NFA program
+regex.test[prog;str]       1b if full match
+regex.find[prog;str]       (start;len) of first match, or !0
+regex.all[prog;str]        list of (start;len) for all non-overlapping matches
+regex.sub[prog;str;rep]    replace first match
+regex.suball[prog;str;rep] replace all matches
+```
+
+The pipeline is split into private sub-namespaces:
+
+```k
+regex.token    pattern string → token stream
+regex.postfix  token stream → postfix (concat insertion + shunting yard)
+regex.nfa      postfix → NFA program (Thompson construction)
+regex.vm       run an NFA program against a string (Pike VM)
+```
+
+Supported syntax:
+
+```k
+. * + ? | ( ) [ ] [^] [a-z] \d \w \s \D \W \S ^ $
+```
+
+NFA opcodes: 0=CHAR 1=ANY 2=CLASS 3=SPLIT 4=JUMP 5=MATCH 6=SOL 7=EOL
+All instructions use explicit next-PC in arg2 (no fall-through).
+Program dict: [ops;a1;a2;cls;start]
+
+Pure k — loads on the first reference to any `regex.*` name.
+\
 
 / ── public API ────────────────────────────────────────────────────────────────
 \d regex compile test find all sub suball

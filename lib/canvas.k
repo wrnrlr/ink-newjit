@@ -1,46 +1,46 @@
-/ lib/canvas.k — a Canvas/Gio-style 2D recorder over an ops table (Phase 0).
 /
-/ Build first:  zig build gpu
-/ Load with:    2: "lib/canvas.k"
-/
-/ WHAT THIS IS
-/ ------------
-/ An immediate-mode drawing API (moveTo/lineTo/quadTo/cubicTo/fill/stroke) that
-/ RECORDS into a retained, columnar "ops table" instead of drawing eagerly. Every
-/ path reduces to quadratic Béziers (lines = degenerate quads, cubics split to two
-/ quads), which is exactly what the Slug analytic rasterizer consumes.
-/
-/ Each draw carries its own 2×3 affine transform (the CTM at fill/stroke time) —
-/ points are stored in LOCAL space and the transform rides alongside. cnv.render bins
-/ every draw's curves + paint into ONE resident scene buffer and issues one bbox-quad
-/ pull draw each (recursively — draws inside '/ / adverbs are eliminated, so a dynamic
-/ draw count needs recursion).
-/
-/ THE OPS TABLE (cnv.scene[])
-/ ---------------------------
-/   draws  — one row per fill/stroke: kind(0 fill,1 stroke) pidx width rule
-/            cstart ccount constart concount  (CSR indices, in segments/contours)
-/   curves — flat F, 6 per quadratic segment [x0 y0 cx cy x1 y1] (local space)
-/   conlen — flat I, quadratic-segment count per contour
-/   xf     — flat F, 6 per draw (the 2×3 affine [a b c d e f])
-/   paints — list of 44-float fragment-uniform blocks (gpu.solid / gradients)
-/ Draw i owns curves[cstart..cstart+ccount] and contours conlen[constart..+concount].
-/
-/ USAGE (globals-as-state, like the ECS `wld` or edit.k's RowGids)
-/ ----------------------------------------------------------------
-/   run:{[props]
-/     cnv.new[]
-/     cnv.save[]; cnv.translate[100.;100.]; cnv.rotate[props`time]
-/     cnv.moveTo[0.;-40.]; cnv.lineTo[40.;40.]; cnv.lineTo[-40.;40.]; cnv.close[]
-/     cnv.fill cnv.rgba[0.9;0.3;0.2;1.]
-/     cnv.restore[]
-/     cnv.render[props`width; props`height] }   / w,h = framebuffer size (for Slug text)
-/   window.run[run; 640. 480.]
-/
-/ EVERYTHING — solid/gradient fills, clips, strokes, and text — renders through the ONE
-/ analytic Slug SCENE-BUFFER backend (lib/slug.k): resolution-independent, antialiased,
-/ one resident curve buffer per frame, the paint (gradient/solid + scissor clip) evaluated
-/ per pixel in the fragment. No tessellation. Strokes become fill outlines (miter joins).
+# canvas
+
+A retained 2D drawing surface: record shapes into an ops table, then replay them.
+
+## What this is
+An immediate-mode drawing API (moveTo/lineTo/quadTo/cubicTo/fill/stroke) that
+RECORDS into a retained, columnar "ops table" instead of drawing eagerly. Every
+path reduces to quadratic Béziers (lines = degenerate quads, cubics split to two
+quads), which is exactly what the Slug analytic rasterizer consumes.
+
+Each draw carries its own 2×3 affine transform (the CTM at fill/stroke time) —
+points are stored in LOCAL space and the transform rides alongside. cnv.render bins
+every draw's curves + paint into ONE resident scene buffer and issues one bbox-quad
+pull draw each (recursively — draws inside '/ / adverbs are eliminated, so a dynamic
+draw count needs recursion).
+
+## THE OPS TABLE (cnv.scene[])
+  draws  — one row per fill/stroke: kind(0 fill,1 stroke) pidx width rule
+           cstart ccount constart concount  (CSR indices, in segments/contours)
+  curves — flat F, 6 per quadratic segment [x0 y0 cx cy x1 y1] (local space)
+  conlen — flat I, quadratic-segment count per contour
+  xf     — flat F, 6 per draw (the 2×3 affine [a b c d e f])
+  paints — list of 44-float fragment-uniform blocks (gpu.solid / gradients)
+Draw i owns curves[cstart..cstart+ccount] and contours conlen[constart..+concount].
+
+## USAGE (globals-as-state, like the ECS `wld` or edit.k's RowGids)
+  run:{[props]
+    cnv.new[]
+    cnv.save[]; cnv.translate[100.;100.]; cnv.rotate[props`time]
+    cnv.moveTo[0.;-40.]; cnv.lineTo[40.;40.]; cnv.lineTo[-40.;40.]; cnv.close[]
+    cnv.fill cnv.rgba[0.9;0.3;0.2;1.]
+    cnv.restore[]
+    cnv.render[props`width; props`height] }   / w,h = framebuffer size (for Slug text)
+  window.run[run; 640. 480.]
+
+EVERYTHING — solid/gradient fills, clips, strokes, and text — renders through the ONE
+analytic Slug SCENE-BUFFER backend (lib/slug.k): resolution-independent, antialiased,
+one resident curve buffer per frame, the paint (gradient/solid + scissor clip) evaluated
+per pixel in the fragment. No tessellation. Strokes become fill outlines (miter joins).
+
+Pure k — loads on the first reference to any `canvas.*` name.
+\
 
 2: "lib/gpu.k"
 2: "lib/slug.k"

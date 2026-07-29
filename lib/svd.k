@@ -1,32 +1,40 @@
-/ SVD — Singular Value Decomposition via the Jacobi-Hestenes algorithm.
 /
-/ WHAT IS SVD?
-/ Every matrix A can be written as A = U * diag(s) * V':
-/   U  — orthogonal matrix: pure rotation/reflection (columns = left singular vectors)
-/   s  — non-negative scalars: singular values (how much each direction is scaled)
-/   V  — orthogonal matrix: pure rotation/reflection (columns = right singular vectors)
-/ Think of A as "rotate to V-frame, scale by s, rotate to U-frame".
-/ The singular values measure how much the matrix stretches space along each principal axis.
-/
-/ HOW DOES JACOBI RELATE TO walk.k?
-/ walk.k — Jacobi RELAXATION: updates each cell to the average of its neighbours,
-/   repeatedly, until the energy function stabilises (fixed-point iteration / linear solve).
-/ svd     — Jacobi ROTATIONS: applies 2×2 Givens rotations to pairs of columns
-/   repeatedly, until all cross-products vanish (orthogonalisation).
-/ Both share the pattern: local two-element update iterated until convergence.
-/ A Givens rotation is exactly the 2×2 "Jacobian step" you know from Newton's method —
-/ finding the angle that zeros one off-diagonal entry of A'A.
-/
-/ FORMAT: A = list of column vectors, e.g. A:(col0;col1;col2).
-/ Real matrices only — kyte's original handles complex via conj/imag; ink does not.
-/ RETURNS: (U; s; V) sorted by decreasing singular value.
-/
-/ kyte→ink differences:
-/   kyte `%x` (monadic sqrt)          → ink `sqrt x`
-/   kyte `f.list` (multi-arg apply)   → ink `f[a;b;c]` (brackets required)
-/   kyte `[stmt;stmt;val]` in $[;;]   → factored into helper svdRot (ink blocks unsupported)
-/   kyte complex conj/imag            → dropped; real matrices only
-/   kyte lambdas close over outer scope → ink lambdas DO NOT; all helpers are global
+# svd
+
+Singular value decomposition by the Jacobi-Hestenes algorithm.
+
+`A` is a list of COLUMN vectors, e.g. `A:(col0;col1;col2)`, and the result is
+`(U; s; V)` sorted by decreasing singular value.  Real matrices only.
+
+## What SVD is
+
+Every matrix factors as `A = U · diag(s) · V'`, where `U` and `V` are orthogonal
+(pure rotation/reflection; their columns are the left and right singular vectors)
+and `s` is the non-negative vector of singular values.  Read it as "rotate to the
+V-frame, scale by s, rotate to the U-frame" — the singular values measure how much
+the matrix stretches space along each principal axis.
+
+## How Jacobi here relates to walk.k
+
+walk.k does Jacobi RELAXATION: set each cell to the average of its neighbours,
+repeatedly, until the energy stabilises.  This does Jacobi ROTATIONS: apply 2×2
+Givens rotations to pairs of columns, repeatedly, until every cross-product
+vanishes.  Both are the same shape — a local two-element update iterated to
+convergence — and a Givens rotation is exactly the 2×2 Jacobian step from
+Newton's method, finding the angle that zeros one off-diagonal entry of `A'A`.
+
+## Translating from kyte
+
+```k
+kyte `%x` (monadic sqrt)            / → ink `sqrt x`
+kyte `f.list` (multi-arg apply)     / → ink `f[a;b;c]`, brackets required
+kyte `[stmt;stmt;val]` inside $[;;] / → a helper (svdRot); ink has no blocks there
+kyte complex conj/imag              / → dropped; real matrices only
+kyte lambdas closing over scope     / → ink lambdas DO NOT; every helper is global
+```
+
+Pure k — loads on the first reference to any `svd.*` name.
+\
 
 / ── global helpers (ink lambdas don't close over parent scope) ───────────────
 

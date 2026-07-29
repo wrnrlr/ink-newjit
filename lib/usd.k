@@ -1,32 +1,45 @@
-/ usd.k — binary USDC (Pixar "crate") reader (pure k)
 /
-/ ReadUsdc "model.usdc" parses a binary USD crate file into an array-language
-/ friendly table.  Each row is one Sdf "spec" (a prim, attribute, relationship,
-/ …) with columns:
-/   path   `s  the spec's scene path, e.g. `/Cube`/Cube.points
-/   spec   `s  the spec type, e.g. `Prim`Attribute`PseudoRoot
-/   fields `m  a dict of field-name -> decoded value (specifier, typeName,
-/              default value, custom metadata, …)
-/ The result is a `M` table; filter / index it with ordinary verbs.
-/
-/ Crate layout (handled): bootstrap header -> table-of-contents -> the six
-/ structural sections TOKENS STRINGS FIELDS FIELDSETS PATHS SPECS.  TOKENS and
-/ value-rep buffers are LZ4-compressed; FIELDS/FIELDSETS/PATHS/SPECS index
-/ arrays use USD's 2-bit "integer compression"; integral arrays additionally
-/ LZ4 their integer-compressed payload.  Supported file versions: >= 0.4.0
-/ (compressed structural sections), which covers all current writers.
-/
-/ Limitations (ink is 32-bit int / 32-bit float):
-/   - D (float64) and L (int64) decode to f32 precision (large UIDs lose bits).
-/   - 64-bit file offsets/counts are read from their low 32 bits (fine for any
-/     file under 2 GiB).
-/   - Inline scalars/vectors, uncompressed arrays, integer-compressed integral
-/     arrays, and token/path vectors are fully decoded.  Dictionaries, list-ops,
-/     time-samples and compressed float arrays are returned tagged but not
-/     expanded: (`usdc.ref;type;payload) / (`usdc.arr;type;count).
-/
-/ ink note: lambdas do NOT capture enclosing locals, so per-element callbacks
-/ are global helpers (usd.*at) reading shared globals, or fixed-arg projections.
+# usd
+
+Reads binary USDC (Pixar 'crate') scene files in pure k.
+
+ReadUsdc "model.usdc" parses a binary USD crate file into an array-language
+friendly table.  Each row is one Sdf "spec" (a prim, attribute, relationship,
+…) with columns:
+
+```k
+path   `s  the spec's scene path, e.g. `/Cube`/Cube.points
+spec   `s  the spec type, e.g. `Prim`Attribute`PseudoRoot
+fields `m  a dict of field-name -> decoded value (specifier, typeName,
+           default value, custom metadata, …)
+```
+
+The result is a `M` table; filter / index it with ordinary verbs.
+
+Crate layout (handled): bootstrap header -> table-of-contents -> the six
+structural sections TOKENS STRINGS FIELDS FIELDSETS PATHS SPECS.  TOKENS and
+value-rep buffers are LZ4-compressed; FIELDS/FIELDSETS/PATHS/SPECS index
+arrays use USD's 2-bit "integer compression"; integral arrays additionally
+LZ4 their integer-compressed payload.  Supported file versions: >= 0.4.0
+(compressed structural sections), which covers all current writers.
+
+Limitations (ink is 32-bit int / 32-bit float):
+
+```k
+- D (float64) and L (int64) decode to f32 precision (large UIDs lose bits).
+- 64-bit file offsets/counts are read from their low 32 bits (fine for any
+  file under 2 GiB).
+- Inline scalars/vectors, uncompressed arrays, integer-compressed integral
+  arrays, and token/path vectors are fully decoded.  Dictionaries, list-ops,
+  time-samples and compressed float arrays are returned tagged but not
+  expanded: (`usdc.ref;type;payload) / (`usdc.arr;type;count).
+```
+
+ink note: lambdas do NOT capture enclosing locals, so per-element callbacks
+are global helpers (usd.*at) reading shared globals, or fixed-arg projections.
+
+Pure k — loads on the first reference to any `usd.*` name.
+\
 
 / --- powers of two -----------------------------------------------------------
 usd.pi:{$[x=0;1;*/x#2]}                          / integer 2^x  (x>=0)

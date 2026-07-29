@@ -81,12 +81,32 @@ doc/               # changelog.md
 
 `lib/*.k` is self-documenting: `lib/doc.k` extracts an API reference from the parse
 CST, `ink tools/doc.k` writes it to `doc/api/`, and `tools/lsp.k` serves the same text
-as editor hover. One convention drives all three — a top-level binding is **public**
-when it starts its own line (indentation is fine) *and* a `/` comment block sits
-directly above it, with no blank line between. Anything else — no comment, a blank
-line in between, a binding after other code on the same line, or a name a `\d ns a b`
-export list hides — is private and never listed. The file's leading comment block is
-the module header (write it as `lib/foo.k — one-line summary`); a `/ ── section ──`
+as editor hover.
+
+**Module header** — a **block comment holding markdown**: a line that is exactly `/`
+opens it, a line that is exactly `\` closes it (both alone in column 0). The first
+heading names the module, the line under it is a one-sentence summary that has to read
+on its own (it becomes the index row), and the last line says how to load it.
+
+```k
+/
+# audio
+
+Play, stream, record and decode audio, with 3D positioning.
+
+```k
+audio.play "boop.wav"
+```
+
+Build the extension first with `zig build audio`; …
+\
+```
+
+**Per-binding docs** stay `/` line comments. A top-level binding is **public** when it
+starts its own line (indentation is fine) *and* a comment block sits directly above it
+with no blank line between; an aligned trailing comment counts too. Anything else — no
+comment, a blank line in between, a binding after other code on the same line, or a
+name a `\d ns a b` export list hides — is private and never listed. A `/ ── section ──`
 banner separates code rather than documenting the next binding.
 
 ```bash

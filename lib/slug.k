@@ -1,56 +1,54 @@
-/ lib/slug.k — GPU analytic vector coverage (Slug-style), Phase 1 + band acceleration.
 /
-/ Build first:  zig build gpu
-/ Load with:    2: "lib/slug.k"
-/
-/ WHAT THIS IS
-/ ------------
-/ Resolution-independent glyph/shape rendering with NO tessellation: a shape's RAW
-/ quadratic Béziers (font.quads) are packed into a float DATA TEXTURE, and a fragment
-/ shader computes per-pixel coverage analytically — for each pixel it loops the curves,
-/ finds the horizontal-ray crossings, and accumulates signed (nonzero-winding) coverage
-/ with 1px antialiasing. Same family as Eric Lengyel's Slug (patent released) and
-/ Loop-Blinn / Dobbie GPU font rendering. The shader handles TRUE quadratics (curves
-/ stay smooth at any zoom) with a robust line fallback for a≈0 segments.
-/
-/ BAND ACCELERATION
-/ -----------------
-/ The glyph's y-range [0,1] is split into slugNB horizontal BANDS. A curve is stored
-/ in every band its (true, extremum-aware) y-extent overlaps, and each band holds at
-/ most slugMPB curves. A pixel picks its band from py and loops only slugMPB slots —
-/ so the per-pixel cost is fixed and small regardless of total glyph complexity
-/ (instead of looping every curve). Data texture is 2-D: one ROW per band.
-/
-/ Enabled by: fragment-shader bounded loops (dye rsum in the fragment path) and a
-/ NEAREST-sampled R32G32B32A32_SFLOAT data texture (gpu.textureF) for exact per-texel
-/ reads via sample[] at texel centres (no texelFetch needed).
-/
-/ DATA LAYOUT
-/ -----------
-/ A (slugTW × slugNB) texture, slugTW = 2*slugMPB. Row b = band b; within a row, curve
-/ j occupies texels 2j = (x0,y0,cx,cy) and 2j+1 = (x2,y2,0,0). Empty slots padded far
-/ away (5.0) so they never cross a pixel.
-/
-/ TWO CONSUMPTION PATHS
-/ ---------------------
-/ (1) DATA-TEXTURE path (glyph/upload/pipe/draw/quad + VTX/FRAG): one curve texture per
-/     shape, drawn white in clip space. Used by the standalone demo/slug.k.
-/ (2) SCENE-BUFFER path (sceneBegin/addFill/sceneFlush/fillDraw + VTXF/FRAGF): ALL of a
-/     frame's fills — solid shapes AND text glyphs — bin their curves into ONE resident
-/     StorageBuffer (gpu.write once/frame); each fill draws a clip-space bbox quad whose
-/     fragment reads its curves back by offset. This is what lib/canvas.k uses for both
-/     fills and text: no per-shape textures, handles unlimited repeats, dynamic geometry.
-/     (The older coloured per-glyph texture path was removed as redundant — one backend.)
-/
-/ STATUS / LIMITS
-/ ---------------
-/ slugNB/MPB/TW/AA are baked shader constants (slugTW must = 2*slugMPB). The SCENE-BUFFER
-/ path (FRAGF/FRAGFI) has NO per-band cap: bandDataC stores every overlapping curve and the
-/ fragment loops the real per-band count (rsum[bcnt]), so dense bands render correctly. Only
-/ the fixed TEXTURE path (FRAG) still caps at slugMPB (its texture width is fixed). AA is a
-/ baked uv width (dFdx would make it zoom-exact). Vertical AA on long horizontal edges is
-/ limited (winding gives horizontal AA); fine for real outlines. The scene buffer is
-/ compacted (bandDataC), so a fill costs only its real curve count (SCCAP caps total/frame).
+# slug
+
+Analytic vector coverage on the GPU: resolution-independent curves and text.
+
+## What this is
+Resolution-independent glyph/shape rendering with NO tessellation: a shape's RAW
+quadratic Béziers (font.quads) are packed into a float DATA TEXTURE, and a fragment
+shader computes per-pixel coverage analytically — for each pixel it loops the curves,
+finds the horizontal-ray crossings, and accumulates signed (nonzero-winding) coverage
+with 1px antialiasing. Same family as Eric Lengyel's Slug (patent released) and
+Loop-Blinn / Dobbie GPU font rendering. The shader handles TRUE quadratics (curves
+stay smooth at any zoom) with a robust line fallback for a≈0 segments.
+
+## Band acceleration
+The glyph's y-range [0,1] is split into slugNB horizontal BANDS. A curve is stored
+in every band its (true, extremum-aware) y-extent overlaps, and each band holds at
+most slugMPB curves. A pixel picks its band from py and loops only slugMPB slots —
+so the per-pixel cost is fixed and small regardless of total glyph complexity
+(instead of looping every curve). Data texture is 2-D: one ROW per band.
+
+Enabled by: fragment-shader bounded loops (dye rsum in the fragment path) and a
+NEAREST-sampled R32G32B32A32_SFLOAT data texture (gpu.textureF) for exact per-texel
+reads via sample[] at texel centres (no texelFetch needed).
+
+## Data layout
+A (slugTW × slugNB) texture, slugTW = 2*slugMPB. Row b = band b; within a row, curve
+j occupies texels 2j = (x0,y0,cx,cy) and 2j+1 = (x2,y2,0,0). Empty slots padded far
+away (5.0) so they never cross a pixel.
+
+## Two consumption paths
+(1) DATA-TEXTURE path (glyph/upload/pipe/draw/quad + VTX/FRAG): one curve texture per
+    shape, drawn white in clip space. Used by the standalone demo/slug.k.
+(2) SCENE-BUFFER path (sceneBegin/addFill/sceneFlush/fillDraw + VTXF/FRAGF): ALL of a
+    frame's fills — solid shapes AND text glyphs — bin their curves into ONE resident
+    StorageBuffer (gpu.write once/frame); each fill draws a clip-space bbox quad whose
+    fragment reads its curves back by offset. This is what lib/canvas.k uses for both
+    fills and text: no per-shape textures, handles unlimited repeats, dynamic geometry.
+    (The older coloured per-glyph texture path was removed as redundant — one backend.)
+
+## Status / limits
+slugNB/MPB/TW/AA are baked shader constants (slugTW must = 2*slugMPB). The SCENE-BUFFER
+path (FRAGF/FRAGFI) has NO per-band cap: bandDataC stores every overlapping curve and the
+fragment loops the real per-band count (rsum[bcnt]), so dense bands render correctly. Only
+the fixed TEXTURE path (FRAG) still caps at slugMPB (its texture width is fixed). AA is a
+baked uv width (dFdx would make it zoom-exact). Vertical AA on long horizontal edges is
+limited (winding gives horizontal AA); fine for real outlines. The scene buffer is
+compacted (bandDataC), so a fill costs only its real curve count (SCCAP caps total/frame).
+
+Pure k — loads on the first reference to any `slug.*` name.
+\
 
 2: "lib/gpu.k"
 

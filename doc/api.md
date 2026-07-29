@@ -13,51 +13,51 @@ block directly above it; everything else is private.
 
 | Module | API | Summary |
 | --- | --- | --- |
-| [agent](api/agent.md) | 0 |  |
-| [asr](api/asr.md) | 16 | the ASR-specific layer: conv subsampling, TDT greedy decode, |
-| [audio](api/audio.md) | 39 | audio module (native miniaudio extension). |
-| [bits](api/bits.md) | 12 | the `bits` CPU backend (kk.md §3.2, kk2 §4). |
-| [camera](api/camera.md) | 4 | orbit camera for the isometric demos. |
-| [canvas](api/canvas.md) | 13 | a Canvas/Gio-style 2D recorder over an ops table (Phase 0). |
-| [color](api/color.md) | 7 |  |
-| [compress](api/compress.md) | 8 | DEFLATE compression module (native Zig std.compress.flate). |
-| [conformer](api/conformer.md) | 7 | Conformer convolution module, block and encoder stack. |
-| [crypto](api/crypto.md) | 31 | crypto module (native Zig std.crypto extension). |
-| [csv](api/csv.md) | 1 | CSV extension |
-| [doc](api/doc.md) | 33 | extract API documentation from ink source. |
-| [dye](api/dye.md) | 167 | the dye compiler: ink shader front-end + optimizer + SPIR-V codegen. |
-| [fbx](api/fbx.md) | 28 | binary FBX reader (pure k) |
-| [feat](api/feat.md) | 15 | audio samples → log-mel features. |
-| [fft](api/fft.md) | 12 | Cooley-Tukey radix-2 DIT (decimation-in-time). |
-| [fmt](api/fmt.md) | 5 | number → string formatting helpers (the `fmt` namespace). |
-| [font](api/font.md) | 9 | native sfnt font reader + outline/shape/metrics |
-| [fts](api/fts.md) | 0 | FTS |
-| [geometry](api/geometry.md) | 17 | the uniform polyhedra from Coxeter groups (Wythoff) |
-| [gltf](api/gltf.md) | 15 | glTF 2.0 / GLB reader (pure k, on top of the JSON extension) |
-| [gpu](api/gpu.md) | 40 | load GPU extension |
-| [http](api/http.md) | 5 | HTTP client module (native Zig std.http.Client). |
-| [image](api/image.md) | 15 | format-agnostic image front end (native libimage extension). |
-| [json](api/json.md) | 2 | JSON extension |
-| [kk](api/kk.md) | 29 | the kk array-level GPU surface (doc/design/kk.md, kk2 §2/§6). |
-| [layout](api/layout.md) | 0 | DEPRECATED. Merged into lib/ui.k (2026-07-22): the layout engine + widgets now |
-| [lin](api/lin.md) | 7 | PLU decomposition and linear system solver. |
-| [llm](api/llm.md) | 22 | LLM chat + streaming for Anthropic and xAI (Grok). |
-| [math](api/math.md) | 6 |  |
-| [nn](api/nn.md) | 57 | GPU neural-net primitives on the resident-compute stack. |
-| [parquet](api/parquet.md) | 1 | Parquet extension |
-| [pbr](api/pbr.md) | 2 | physically based renderer (Cook-Torrance) for the ink std lib |
-| [pga](api/pga.md) | 16 | Projective Geometric Algebra G(3,0,1) |
-| [prelude](api/prelude.md) | 0 | CPU builtins, loaded into every VM at init (see VM.create). |
-| [recs](api/recs.md) | 11 | a relational ECS. An archetype is a TABLE [[]id:…;cols…]; an entity is a |
-| [regex](api/regex.md) | 0 | Pure-k regex engine (Thompson NFA / Pike VM) |
-| [rope](api/rope.md) | 21 | a SumTree rope: a B-tree over text chunks, keyed by summaries. |
-| [safetensors](api/safetensors.md) | 1 | Safetensors extension |
-| [slug](api/slug.md) | 15 | GPU analytic vector coverage (Slug-style), Phase 1 + band acceleration. |
-| [spirv](api/spirv.md) | 98 | SPIR-V instruction stencils (the copy-and-patch "stencil library"). |
-| [stats](api/stats.md) | 7 | Statistical functions translated from kyte dialect to ink dialect. |
-| [svd](api/svd.md) | 12 | Singular Value Decomposition via the Jacobi-Hestenes algorithm. |
-| [syntax](api/syntax.md) | 12 | configurable syntax highlighting. |
-| [ui](api/ui.md) | 40 | a tables-as-ECS immediate-mode UI toolkit (widgets + flexbox + input, one `ui` |
-| [uitest](api/uitest.md) | 36 | a deterministic, replayable test harness for lib/ui.k apps (one `t` namespace). |
-| [usd](api/usd.md) | 22 | binary USDC (Pixar "crate") reader (pure k) |
-| [zip](api/zip.md) | 4 | ZIP archive module (native Zig std.zip + std.compress.flate). |
+| [agent](api/agent.md) | 0 | A sketch of an agent loop: run a task until it reports done. |
+| [asr](api/asr.md) | 16 | Speech recognition on top of lib/nn.k: conv subsampling, encoder, TDT greedy decode. |
+| [audio](api/audio.md) | 39 | Play, stream, record and decode audio, with 3D positioning. |
+| [bits](api/bits.md) | 12 | Runs a dye compute kernel on the CPU by interpreting its neutral IR. |
+| [camera](api/camera.md) | 4 | An orbit camera: folds one frame of input into a camera-state dict. |
+| [canvas](api/canvas.md) | 13 | A retained 2D drawing surface: record shapes into an ops table, then replay them. |
+| [color](api/color.md) | 7 | Colour conversion and the full Tailwind palette as OKLCh constants. |
+| [compress](api/compress.md) | 8 | DEFLATE, gzip and zlib compression, plus crc32/adler32 checksums. |
+| [conformer](api/conformer.md) | 7 | Conformer blocks — convolution module, block and encoder stack. |
+| [crypto](api/crypto.md) | 31 | Hashes, MACs, key derivation, authenticated encryption and signatures. |
+| [csv](api/csv.md) | 1 | Reads a CSV file into a dict of typed column arrays. |
+| [doc](api/doc.md) | 40 | Extracts an API reference from ink source, off the parse CST. |
+| [dye](api/dye.md) | 167 | Compiles ink lambdas to SPIR-V shaders — the GPU language layer. |
+| [fbx](api/fbx.md) | 28 | Reads binary FBX scene files, including their DEFLATE-compressed arrays. |
+| [feat](api/feat.md) | 15 | Turns raw audio samples into log-mel spectrogram features. |
+| [fft](api/fft.md) | 12 | Fast Fourier transform — Cooley-Tukey radix-2, decimation in time. |
+| [fmt](api/fmt.md) | 5 | Formats numbers as fixed-width strings that do not jitter frame to frame. |
+| [font](api/font.md) | 9 | Reads sfnt (TTF/OTF/TTC) fonts: outlines, shaping, metrics. |
+| [fts](api/fts.md) | 0 | Full-text search: an inverted index over tokenised documents. |
+| [geometry](api/geometry.md) | 17 | Generates the uniform polyhedra from Coxeter groups by Wythoff construction. |
+| [gltf](api/gltf.md) | 15 | Reads glTF 2.0 and GLB scene files, with accessor and mesh helpers. |
+| [gpu](api/gpu.md) | 40 | Opens a window, drives the frame loop, and owns every GPU resource. |
+| [http](api/http.md) | 5 | An HTTP client for web and JSON APIs, with TLS, redirects and decompression. |
+| [image](api/image.md) | 15 | Reads, writes and scales images, dispatching on the file's magic bytes. |
+| [json](api/json.md) | 2 | Parses and generates JSON, columnarising object arrays into tables. |
+| [kk](api/kk.md) | 29 | Compiles idiomatic whole-array k to GPU pipelines that run on resident buffers. |
+| [layout](api/layout.md) | 0 | DEPRECATED — merged into lib/ui.k; use `ui.row` / `ui.col` / `ui.button` instead. |
+| [lin](api/lin.md) | 7 | Solves linear systems by PLU decomposition. |
+| [llm](api/llm.md) | 22 | Chat with Anthropic and xAI models, with live token streaming and tool use. |
+| [math](api/math.md) | 6 | Small numeric helpers: combinatorics, sequences and bit-pattern generators. |
+| [nn](api/nn.md) | 57 | Neural-net primitives that keep their weights and activations on the GPU. |
+| [parquet](api/parquet.md) | 1 | Reads Parquet files into tables, across encodings, codecs and row groups. |
+| [pbr](api/pbr.md) | 2 | A physically based (Cook-Torrance) shader pair for lit 3D meshes. |
+| [pga](api/pga.md) | 16 | Projective geometric algebra G(3,0,1): points, lines, planes and motors. |
+| [prelude](api/prelude.md) | 0 | The CPU builtins every VM gets at startup — math names and monadic verbs. |
+| [recs](api/recs.md) | 11 | A relational ECS: an archetype is a table, an entity is a row. |
+| [regex](api/regex.md) | 0 | A regex engine in pure k — Thompson NFA construction, Pike VM matching. |
+| [rope](api/rope.md) | 21 | A SumTree rope: a B-tree over text chunks, indexed by summaries. |
+| [safetensors](api/safetensors.md) | 1 | Reads safetensors weight files into a dict of named tensors. |
+| [slug](api/slug.md) | 15 | Analytic vector coverage on the GPU: resolution-independent curves and text. |
+| [spirv](api/spirv.md) | 98 | The SPIR-V instruction stencils dye patches to emit shader words. |
+| [stats](api/stats.md) | 7 | Descriptive statistics: moments, correlation, regression and distributions. |
+| [svd](api/svd.md) | 12 | Singular value decomposition by the Jacobi-Hestenes algorithm. |
+| [syntax](api/syntax.md) | 12 | Syntax highlighting over the parse CST, with swappable themes and languages. |
+| [ui](api/ui.md) | 40 | An immediate-mode UI toolkit where a widget is a row and a frame is three passes. |
+| [uitest](api/uitest.md) | 36 | A deterministic, replayable harness that drives a real UI app headlessly. |
+| [usd](api/usd.md) | 22 | Reads binary USDC (Pixar 'crate') scene files in pure k. |
+| [zip](api/zip.md) | 4 | Reads and writes ZIP archives (store and deflate). |

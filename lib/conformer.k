@@ -1,14 +1,19 @@
-/ lib/conformer.k — Conformer convolution module, block and encoder stack.
-/ Built on the generic layers in lib/nn.k.  Design notes: doc/design/nn.md
 /
-/ block(x) = ½FFN → (x + MHSA(LayerNorm x)) → ConvModule → ½FFN → LayerNorm
-/ (ffn and conformer.conv already self-contain their LayerNorm + residual; MHSA is
-/  bare, so the block wraps it with a LayerNorm and a residual add.)
-/
-/ Resident forms are primary: buffer handle in, buffer handle out, weights held on
-/ device.  `.host` forms upload/read back and exist for one-shot use and as the
-/ bit-exactness oracle — host round-trips are lossless f32 copies, so
-/ `conformer` and `conformer.fold` must agree to the bit.
+# conformer
+
+Conformer blocks — convolution module, block and encoder stack.
+
+block(x) = ½FFN → (x + MHSA(LayerNorm x)) → ConvModule → ½FFN → LayerNorm
+(ffn and conformer.conv already self-contain their LayerNorm + residual; MHSA is
+ bare, so the block wraps it with a LayerNorm and a residual add.)
+
+Resident forms are primary: buffer handle in, buffer handle out, weights held on
+device.  `.host` forms upload/read back and exist for one-shot use and as the
+bit-exactness oracle — host round-trips are lossless f32 copies, so
+`conformer` and `conformer.fold` must agree to the bit.
+
+Pure k — loads on the first reference to any `conformer.*` name.
+\
 
 \e conformer
 

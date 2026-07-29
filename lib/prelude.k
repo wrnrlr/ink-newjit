@@ -1,4 +1,8 @@
-/ lib/prelude.k — CPU builtins, loaded into every VM at init (see VM.create).
+/
+# prelude
+
+The CPU builtins every VM gets at startup — math names and monadic verbs.
+\
 
 sqrt:{`sqrt x};sqr:{`sqr x};cbrt:{`cbrt x};
 exp:{`exp x};log:{`log x};abs:{`abs x};

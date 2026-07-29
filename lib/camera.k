@@ -1,31 +1,41 @@
-/ lib/camera.k — orbit camera for the isometric demos.
 /
-/ One frame of input (the `props` dict gpuRun passes the loop) folds into a
-/ small camera-state dict; read the result to drive a vertex shader or a
-/ CPU-side transform.  This factors the pan/zoom/rotate input handling that
-/ pbr.k and sword.k used to each carry verbatim.
-/
-/ Controls (matching the demos):
-/   WASD           — pan        (camX/camZ)
-/   Scroll         — zoom       (clamped 0.3 .. 5)
-/   Right-drag X   — yaw   (Y-axis rotation, cos/sin in rotCa/rotSa)
-/   Right-drag Y   — tilt  (X-axis rotation, cos/sin in xCa/xSa)
-/
-/ Input comes from the props`events TABLE (see lib/gpu.k). gpuRun no longer
-/ reports held keys/buttons, so the camera state tracks them itself: WASD keys
-/ (GLFW codes 87/65/83/68) and the right mouse button (button 1) are held/released
-/ by `key`/`mouse` down-events; scroll sums the frame's `scroll` amt.
-/
-/ Rotation is tracked as cos/sin pairs updated by a small-angle rotation each
-/ drag delta (no trig per frame): for delta angle d, (c;s) ← (c·cosd − s·sind;
-/ s·cosd + c·sind) with cosd ≈ 1 − d²/2, sind ≈ d.
-/
-/ Usage:
-/   cam:: CamNew[]                       / or CamAt[...] for a preset view
-/   ... inside the loop ...
-/   cam:: CamUpdate[cam; props]
-/   ca: cam`rotCa; sa: cam`rotSa; xca: cam`xCa; xsa: cam`xSa
-/   zoom: cam`zoom; camX: cam`camX; camZ: cam`camZ
+# camera
+
+An orbit camera: folds one frame of input into a camera-state dict.
+
+One frame of input (the `props` dict gpuRun passes the loop) folds into a
+small camera-state dict; read the result to drive a vertex shader or a
+CPU-side transform.  This factors the pan/zoom/rotate input handling that
+pbr.k and sword.k used to each carry verbatim.
+
+Controls (matching the demos):
+
+```k
+WASD           — pan        (camX/camZ)
+Scroll         — zoom       (clamped 0.3 .. 5)
+Right-drag X   — yaw   (Y-axis rotation, cos/sin in rotCa/rotSa)
+Right-drag Y   — tilt  (X-axis rotation, cos/sin in xCa/xSa)
+```
+
+Input comes from the props`events TABLE (see lib/gpu.k). gpuRun no longer
+reports held keys/buttons, so the camera state tracks them itself: WASD keys
+(GLFW codes 87/65/83/68) and the right mouse button (button 1) are held/released
+by `key`/`mouse` down-events; scroll sums the frame's `scroll` amt.
+
+Rotation is tracked as cos/sin pairs updated by a small-angle rotation each
+drag delta (no trig per frame): for delta angle d, (c;s) ← (c·cosd − s·sind;
+s·cosd + c·sind) with cosd ≈ 1 − d²/2, sind ≈ d.
+
+```k
+cam:: CamNew[]                       / or CamAt[...] for a preset view
+... inside the loop ...
+cam:: CamUpdate[cam; props]
+ca: cam`rotCa; sa: cam`rotSa; xca: cam`xCa; xsa: cam`xSa
+zoom: cam`zoom; camX: cam`camX; camZ: cam`camZ
+```
+
+Pure k — loads on the first reference to any `camera.*` name.
+\
 
 / CamAt[rotCa;rotSa;xCa;xSa] — camera at a given yaw/tilt (cos/sin pairs),
 / no pan, zoom 1. hW/hA/hS/hD/hR track held WASD + right-button across frames.

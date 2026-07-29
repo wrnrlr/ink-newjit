@@ -1,25 +1,31 @@
-/ lib/pbr.k — physically based renderer (Cook-Torrance) for the ink std lib
 /
-/ One vertex shader + one fragment shader render any mesh whose vertices carry
-/ their own material, so ground / box / cloth / loaded models are all the same
-/ pipeline fed different per-vertex data rather than near-identical shaders.
-/
-/ Vertex layout (stride 11):  x y z  nx ny nz  r g b rough  lit
-/   pos(3)   world position
-/   nor(3)   surface normal
-/   mat(4)   material = rgb + roughness
-/   lit(1)   sun factor 0..1  (1 = full sun, 0 = shadowed: ambient + sky-fill only)
-/
-/ Depends on lib/spirv.k (shader.fragment/shader.vertexPull) and lib/gpu.k
-/ (mesh.compilePull). Load them first, then:  2: "lib/pbr.k"
-/
-/ Compile once:  h: mesh.compilePull[pbrVtx; PbrFragment]
-/ Draw a frame:  vb: gpu.buffer verts;  mesh.drawPull[h; ,vb; (#verts) div 11]
-/                (verts = flat stride-11 float vector)
-/
-/ A material+lit tail is five floats (rgb rough lit); build one with PbrMat:
-/   grass: PbrMat[0.13; 0.42; 0.07; 0.90; 1.]   / lit grass
-/   shadow:PbrMat[0.13; 0.42; 0.07; 0.90; 0.]   / same colour, sun blocked
+# pbr
+
+A physically based (Cook-Torrance) shader pair for lit 3D meshes.
+
+One vertex shader and one fragment shader render any mesh whose vertices carry
+their own material, so ground, box, cloth and loaded models are all the same
+pipeline fed different per-vertex data — rather than near-identical shaders.
+
+Vertices are a flat stride-11 float vector: world position (3), normal (3),
+material as rgb + roughness (4), and a sun factor (1) where 1 is full sun and 0
+is shadowed (ambient and sky-fill only).  `PbrMat` builds the five-float
+material+lit tail:
+
+```k
+grass:  PbrMat[0.13; 0.42; 0.07; 0.90; 1.]   / lit grass
+shadow: PbrMat[0.13; 0.42; 0.07; 0.90; 0.]   / same colour, sun blocked
+
+h:  mesh.compilePull[pbrVtx; PbrFragment]    / compile once
+vb: gpu.buffer verts                         / then, per frame
+mesh.drawPull[h; ,vb; (#verts) div 11]
+```
+
+Needs lib/spirv.k (`shader.fragment` / `shader.vertexPull`) and lib/gpu.k
+(`mesh.compilePull`).
+
+Pure k — loads on the first reference to any `pbr.*` name.
+\
 
 / ── PBR fragment shader (Cook-Torrance) ──────────────────────────────────────
 / Material arrives per-vertex as wMat = (r; g; b; roughness) and wLit = sun

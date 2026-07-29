@@ -1,12 +1,26 @@
-/ Statistical functions translated from kyte dialect to ink dialect.
-/ Key dialect differences handled:
-/   kyte `x^y`   (power)  → not available in ink; z95 stubbed
-/   kyte `^^x`   (sort)   → ink `x@<x` (grade-up applied)
-/   kyte `n^^x`  (windows)→ ink `n':x` (sliding window adverb)
-/   kyte `while[cond;body]`→ ink `n f/` (N-do adverb)
-/   kyte `(-n)#x`(pad-left)→ ink `(n#0.),(-n)_x` (explicit float-zero pad)
-/   kyte `_x`   (floor)   → ink has no floor builtin; use `x div 1` for int truncation
-/   ink `%` is always float division; use `div` for integer division
+/
+# stats
+
+Descriptive statistics: moments, correlation, regression and distributions.
+
+Means, variance and standard deviation, covariance and correlation, linear
+regression, and the normal / t distributions — all whole-array, no loops.
+
+## Translating from kyte
+
+```k
+kyte `x^y`   (power)     / not available in ink; z95 is stubbed
+kyte `^^x`   (sort)      / → ink `x@<x` (grade-up applied)
+kyte `n^^x`  (windows)   / → ink `n':x` (sliding-window adverb)
+kyte `while[cond;body]`  / → ink `n f/` (N-do adverb)
+kyte `(-n)#x`(pad-left)  / → ink `(n#0.),(-n)_x` (explicit float-zero pad)
+kyte `_x`    (floor)     / ink has no floor builtin; `x div 1` truncates
+```
+
+`%` is always float division in ink; use `div` for the integer form.
+
+Pure k — loads on the first reference to any `stats.*` name.
+\
 
 / Mean of a numeric list.
 / Ex: avg 1 2 3 4 5  ->  3.0

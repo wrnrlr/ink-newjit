@@ -1,10 +1,11 @@
-/ lib/safetensors.k — Safetensors extension
 /
-/ Build first:  zig build safetensors
-/ Use:          safetensors.read "model.safetensors"   (auto-loads on first use)
-/                 → dict: name → [dtype:`f32; shape:2 3; data:<F|I vector>]
-/               plus an optional `__metadata__` key → dict of string→string
-/               (reach it with  t@`s$"__metadata__"  — `_` is Drop in ink source).
+# safetensors
+
+Reads safetensors weight files into a dict of named tensors.
+
+Build the extension first with `zig build safetensors`; the module then loads on the
+first reference to any `safetensors.*` name.
+\
 
 \d safetensors read
 so: "./zig-out/lib/libsafetensors.dylib"

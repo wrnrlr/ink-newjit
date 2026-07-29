@@ -1,14 +1,23 @@
-/ PLU decomposition and linear system solver.
 /
-/ factor[A]     — factor square matrix A into (LU;P)
-/ solve[LUP;b]  — solve Ax=b given factor output and right-hand side b
-/
-/ WHAT IS PLU FACTORIZATION?
-/ Every square matrix A = P·L·U where:
-/   P — permutation matrix (partial pivoting for numerical stability)
-/   L — lower triangular, 1s on diagonal (implicit; multipliers stored below)
-/   U — upper triangular (Gaussian elimination result; on and above diagonal)
-/ P is a permutation vector: P[i] = original row index now at row i.
+# lin
+
+Solves linear systems by PLU decomposition.
+
+```k
+lin.factor[A]      / square matrix A → (LU;P)
+lin.solve[LUP;b]   / solve Ax=b from that factorisation and a right-hand side
+```
+
+## What PLU factorisation is
+
+Every square matrix is `A = P·L·U`, where `P` is a permutation (partial pivoting,
+for numerical stability), `L` is lower triangular with an implicit unit diagonal
+(the multipliers are stored below it), and `U` is upper triangular — the result of
+Gaussian elimination, on and above the diagonal.  `P` is kept as a permutation
+VECTOR: `P[i]` is the original index of the row now sitting at row `i`.
+
+Pure k — loads on the first reference to any `lin.*` name.
+\
 
 / Divide element at column `col` of row `k1[j]` by `piv`. State: (A;col;piv;k1;j).
 luDivRow:{[st]

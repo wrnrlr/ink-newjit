@@ -1,30 +1,38 @@
-/ lib/rope.k — a SumTree rope: a B-tree over text chunks, keyed by summaries.
 /
-/ Same shape as Zed's SumTree. Text is cut into small chunks (`rope.CH` codepoints);
-/ the chunks are the LEAVES of a B-tree of arity `rope.B`. Every node carries a
-/ SUMMARY of its whole subtree — here the monoid is (codepoints; newlines), which is
-/ all a text editor needs. Because the summary is additive, a query "where is offset
-/ 9312?" or "where does row 400 start?" descends the tree in O(log n) by comparing the
-/ running summary against the target, instead of scanning the document.
-/
-/   rope.new cps      build from a codepoint vector      rope.text r     whole document
-/   rope.len r        codepoints        rope.rows r      line count
-/   rope.sub[r;a;n]   codepoints [a;a+n)                 rope.lineAt[r;row]
-/   rope.pt[r;off]    → (row;col)       rope.lineStart[r;row] → offset
-/   rope.ins[r;off;cps]  rope.del[r;a;n]  rope.splice[r;a;n;cps]
-/
-/ Codepoints, not bytes: offsets here are exactly the offsets the built-in `parse`
-/ reports, so a CST range indexes straight into the buffer (see lib/syntax.k).
-/
-/ EDIT COST. A leaf-local edit that keeps the chunk within bounds writes one chunk and
-/ then walks the parent chain adding the summary DELTA — O(log n), the fast path every
-/ keystroke takes. An edit that would over/underflow a leaf (roughly one in `rope.CH`)
-/ re-chunks and rebuilds bottom-up from the leaf list: O(#leaves), all vectorised, and
-/ it re-uses the untouched chunk vectors by reference rather than copying text.
-/
-/ A rope is a plain LIST, not a dict: replacing a general-list value inside a dict
-/ mis-amends (it drills into the value), so column storage rides on list slots, which
-/ amend cleanly at any depth and any length.
+# rope
+
+A SumTree rope: a B-tree over text chunks, indexed by summaries.
+
+Same shape as Zed's SumTree. Text is cut into small chunks (`rope.CH` codepoints);
+the chunks are the LEAVES of a B-tree of arity `rope.B`. Every node carries a
+SUMMARY of its whole subtree — here the monoid is (codepoints; newlines), which is
+all a text editor needs. Because the summary is additive, a query "where is offset
+9312?" or "where does row 400 start?" descends the tree in O(log n) by comparing the
+running summary against the target, instead of scanning the document.
+
+```k
+rope.new cps      build from a codepoint vector      rope.text r     whole document
+rope.len r        codepoints        rope.rows r      line count
+rope.sub[r;a;n]   codepoints [a;a+n)                 rope.lineAt[r;row]
+rope.pt[r;off]    → (row;col)       rope.lineStart[r;row] → offset
+rope.ins[r;off;cps]  rope.del[r;a;n]  rope.splice[r;a;n;cps]
+```
+
+Codepoints, not bytes: offsets here are exactly the offsets the built-in `parse`
+reports, so a CST range indexes straight into the buffer (see lib/syntax.k).
+
+EDIT COST. A leaf-local edit that keeps the chunk within bounds writes one chunk and
+then walks the parent chain adding the summary DELTA — O(log n), the fast path every
+keystroke takes. An edit that would over/underflow a leaf (roughly one in `rope.CH`)
+re-chunks and rebuilds bottom-up from the leaf list: O(#leaves), all vectorised, and
+it re-uses the untouched chunk vectors by reference rather than copying text.
+
+A rope is a plain LIST, not a dict: replacing a general-list value inside a dict
+mis-amends (it drills into the value), so column storage rides on list slots, which
+amend cleanly at any depth and any length.
+
+Pure k — loads on the first reference to any `rope.*` name.
+\
 
 rope.CH:   64        / target chunk size, codepoints
 rope.MAXC: 128       / a leaf splits once it grows past this

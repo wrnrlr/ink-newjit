@@ -1,7 +1,22 @@
-/ lib/gpu.k — load GPU extension
 /
-/ Build first:  zig build gpu
-/ Load with:    2: "lib/gpu.k"
+# gpu
+
+Opens a window, drives the frame loop, and owns every GPU resource.
+
+`window.run[loop; cfg]` opens a window and calls `loop[props]` once per frame,
+where `props` carries the frame size, the mouse position, the elapsed time and
+an `events` TABLE of everything that happened since the last frame (`kind` is
+one of `` `text`key`mouse`scroll ``).  `gpu.computeRun[fn]` is the headless
+equivalent: it builds a device, calls `fn` once and tears it down.
+
+Everything the GPU holds is created here — buffers (`gpu.buffer`, `gpu.write`,
+`gpu.read`), textures (`texture.upload`), pipelines (`gpu.pipeline`,
+`gpu.compileCompute`) and draws.  Shaders themselves are compiled by lib/dye.k
+and the array-level surface lives in lib/kk.k.
+
+Build the extension first with `zig build gpu`; the module then loads on the
+first reference to any `gpu.*` name.
+\
 
 so: "./zig-out/lib/libgpu.dylib"
 / window.run calls loop_fn(props) each frame. props is a dict:

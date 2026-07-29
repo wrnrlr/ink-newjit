@@ -1,36 +1,34 @@
-/ gltf.k — glTF 2.0 / GLB reader (pure k, on top of the JSON extension)
 /
-/ Build first:  zig build json
-/ Use:          gltf.read "model.gltf"  /  gltf.readGlb "model.glb"
-/ (auto-loads this file; json.parse pulls in the JSON extension transitively)
-/
-/ gltf.read    "model.gltf"  parses a textual glTF asset (a JSON scene description
-/ plus binary buffers referenced by URI / base64 data: URI), and
-/ gltf.readGlb "model.glb"   parses the binary GLB container (12-byte header + a
-/ JSON chunk + an optional BIN chunk).  Both return the same wrapper dict
-/   [json: <parsed glTF document>; bin: <list of resolved buffers>]
-/ where `json` is the glTF JSON exactly as the extension decodes it (top-level
-/ arrays such as nodes / meshes / accessors become tables when uniform or
-/ general lists of dicts otherwise) and `bin` is a general list with one entry
-/ per glTF buffer, each an int byte-vector (0..255) ready for accessor decoding.
-/
-/ The geometry helpers turn the index-and-buffer indirection of glTF into plain
-/ arrays / dicts / tables:
-/   gltf.accessor[g;i]        -> a decoded accessor: an I/F vector for SCALAR,
-/                                or a count*ncomp matrix for VEC*/MAT*.
-/   gltf.prim[g;mesh;prim]    -> one mesh primitive as a dict of decoded vertex
-/                                attributes (POSITION/NORMAL/TEXCOORD_0/...) plus
-/                                `indices and `mode.
-/   gltf.mesh[g;mesh]         -> the list of decoded primitives of a mesh.
-/   gltf.nodes[g]             -> the node array; gltf.trs[node] composes a node's
-/                                local 4x4 (column-major) from its matrix or TRS.
-/
-/ Limitations (ink is 32-bit int / 32-bit float):
-/   - 5125 UNSIGNED_INT components decode through f32-exact range; index buffers
-/     (their only legal use) are always well within it.
-/   - Sparse accessors are decoded as their dense base only (the sparse override
-/     is reported via gltf.f but not applied).
-/   - Image pixel data (PNG/JPEG) is returned as raw bytes, not decoded.
+# gltf
+
+Reads glTF 2.0 and GLB scene files, with accessor and mesh helpers.
+
+`gltf.read "model.gltf"` parses a textual asset (a JSON scene description plus
+binary buffers referenced by URI or base64 data URI); `gltf.readGlb "model.glb"`
+parses the binary container (12-byte header, JSON chunk, optional BIN chunk).
+Both return `[json: <the parsed document>; bin: <resolved buffers>]`, where the
+buffers are int byte-vectors ready for accessor decoding.
+
+The geometry helpers turn glTF's index-and-buffer indirection into plain arrays:
+
+```k
+gltf.accessor[g;i]       / an I/F vector for SCALAR, a count*ncomp matrix for VEC*/MAT*
+gltf.prim[g;mesh;prim]   / one primitive as a dict of decoded vertex attributes
+gltf.mesh[g;mesh]        / every primitive of a mesh
+gltf.nodes[g]            / the node array; gltf.trs composes a node's local 4x4
+```
+
+Limitations (ink is 32-bit int / 32-bit float):
+
+- 5125 UNSIGNED_INT components decode through f32-exact range; index buffers
+  (their only legal use) are always well within it.
+- Sparse accessors decode as their dense base only (the override is reported
+  by `gltf.f` but not applied).
+- Image pixel data (PNG/JPEG) comes back as raw bytes — feed it to `image.read`.
+
+Pure k on top of the JSON extension — loads on the first reference to any
+`gltf.*` name.
+\
 
 / --- powers of two (float) ---------------------------------------------------
 gltf.pf:{$[x=0;1.0;x<0;1.0%*/(0-x)#2.0;*/x#2.0]}

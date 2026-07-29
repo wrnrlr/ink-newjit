@@ -1,23 +1,31 @@
-/ lib/syntax.k — configurable syntax highlighting.
 /
-/ A highlighter is a function `codepoints → role index per codepoint`. Roles are
-/ names ( `num `str `dyad `assign … ), and a THEME maps every role to an rgba. Both
-/ halves are swappable: register another language with `syn.reg[name; fn]`, or hand
-/ `syn.setTheme` a different role→colour dict. Nothing here knows about the GPU — a
-/ caller turns `syn.rgba` into whatever paint its renderer wants (see demo/edit.k).
-/
-/   syn.hl[`ink; cps]   → role index per codepoint
-/   syn.runs rls        → (starts; lens; roles) — the runs to draw
-/   syn.rgba role       → (r;g;b;a)             syn.rgbaAt idx
-/   syn.setTheme t      t = syn.ROLES!rgba-list (syn.themeDark / syn.themeLight)
-/
-/ The ink highlighter is driven by the built-in `parse`, which returns the CST as a
-/ column dict — one row per node, pre-order, with CODEPOINT ranges. That is the whole
-/ trick: paint each node's range with its role and let children overwrite their
-/ parents, so whatever a container node still owns afterwards is exactly its own
-/ punctuation — the `[`;`]` of a call, the `:` of an assignment, the `/` of a fold.
-/ `parse` is error tolerant (it returns the partial tree for half-typed source), so
-/ this runs happily on every keystroke.
+# syntax
+
+Syntax highlighting over the parse CST, with swappable themes and languages.
+
+A highlighter is a function `codepoints → role index per codepoint`. Roles are
+names ( `num `str `dyad `assign … ), and a THEME maps every role to an rgba. Both
+halves are swappable: register another language with `syn.reg[name; fn]`, or hand
+`syn.setTheme` a different role→colour dict. Nothing here knows about the GPU — a
+caller turns `syn.rgba` into whatever paint its renderer wants (see demo/edit.k).
+
+```k
+syn.hl[`ink; cps]   → role index per codepoint
+syn.runs rls        → (starts; lens; roles) — the runs to draw
+syn.rgba role       → (r;g;b;a)             syn.rgbaAt idx
+syn.setTheme t      t = syn.ROLES!rgba-list (syn.themeDark / syn.themeLight)
+```
+
+The ink highlighter is driven by the built-in `parse`, which returns the CST as a
+column dict — one row per node, pre-order, with CODEPOINT ranges. That is the whole
+trick: paint each node's range with its role and let children overwrite their
+parents, so whatever a container node still owns afterwards is exactly its own
+punctuation — the `[`;`]` of a call, the `:` of an assignment, the `/` of a fold.
+`parse` is error tolerant (it returns the partial tree for half-typed source), so
+this runs happily on every keystroke.
+
+Pure k — loads on the first reference to any `syntax.*` name.
+\
 
 2: "lib/color.k"
 

@@ -1,18 +1,26 @@
-/ lib/dye.k — the dye compiler: ink shader front-end + optimizer + SPIR-V codegen.
 /
-/ dye is to ink what q is to k: a language layer that compiles ink lambdas to GPU
-/ shaders. It owns the CST walk (via `parse`), the shader type system, the module
-/ state (id counter + word buffers), module assembly, and the public entry points
-/ (shader.fragment / shader.vertex / shader.compute / shader.stencil / gpu.kernel / …).
-/ It emits SPIR-V words through the pure instruction stencils in lib/spirv.k.
-/
-/ Tiramisu 4-layer model (doc/papers/baghdadi_2019_tiramisu.md):
-/   Layer 1 (Abstract Algorithm)  : ink lambda AST via `parse`
-/   Layer 2 (Computation Mgmt)    : type-annotate, schedule (trivial for shaders)
-/   Layer 3 (Data Mgmt)           : assign SPIR-V IDs, emit typed sections
-/   Layer 4 (Communication Mgmt)  : assemble SPIR-V binary in spec order
-/
-/ Load with:  2: "lib/dye.k"   (pulls in the encoder itself).
+# dye
+
+Compiles ink lambdas to SPIR-V shaders — the GPU language layer.
+
+dye is to ink what q is to k: a language layer that compiles ink lambdas to GPU
+shaders. It owns the CST walk (via `parse`), the shader type system, the module
+state (id counter + word buffers), module assembly, and the public entry points
+(shader.fragment / shader.vertex / shader.compute / shader.stencil / gpu.kernel / …).
+It emits SPIR-V words through the pure instruction stencils in lib/spirv.k.
+
+Tiramisu 4-layer model (doc/papers/baghdadi_2019_tiramisu.md):
+
+```k
+Layer 1 (Abstract Algorithm)  : ink lambda AST via `parse`
+Layer 2 (Computation Mgmt)    : type-annotate, schedule (trivial for shaders)
+Layer 3 (Data Mgmt)           : assign SPIR-V IDs, emit typed sections
+Layer 4 (Communication Mgmt)  : assemble SPIR-V binary in spec order
+```
+
+Pure k — loads on the first reference to any `dye.*` name.
+\
+
 2: "lib/spirv.k"
 
 / ── Layer 1+2: public shader compiler ───────────────────────────────────────

@@ -1,11 +1,19 @@
-/ lib/json.k — JSON extension
 /
-/ Build first:  zig build json
-/ Use:          json.read "path.json"   (auto-loads on first use)
-/               json.parse "{...}"      (parse a string)
-/
-/ NB: `parse` is a reserved verb, so the member is written with its explicit
-/ qualified name `json.parse:` (which lexes as one identifier, not the verb).
+# json
+
+Parses and generates JSON, columnarising object arrays into tables.
+
+`json.parse` turns a JSON string into k values: an array of uniform objects
+becomes a TABLE, other arrays become general lists, and objects become dicts.
+Use `json.list` when you want array-of-object data to stay a list of dicts
+instead.  `json.gen` goes the other way, and `json.read` parses a file.
+
+NB: `parse` is a reserved verb, so the member is written with its explicit
+qualified name `json.parse:` — which lexes as one identifier, not the verb.
+
+Build the extension first with `zig build json`; the module then loads on the
+first reference to any `json.*` name.
+\
 
 \d json read gen parse list
 so: "./zig-out/lib/libjson.dylib"

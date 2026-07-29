@@ -1,16 +1,21 @@
-/ lib/recs.k — a relational ECS. An archetype is a TABLE [[]id:…;cols…]; an entity is a
-/ row keyed by `id. Now that tables support amend, left/outer join and row append, almost
-/ every ECS operation IS a native table operator — so this module is tiny. It just mints
-/ entity ids and names the common patterns:
 /
-/   spawn    Spawn[a;vals]     a,(`id!Id[]),vals    append a row (fresh id)
-/   despawn  Despawn[a;e]      a@&~(a`id)=e          remove an entity
-/   system   @[a;`c;:;expr]    (native amend)        whole-column update — no per-entity loop
-/   pipeline Tick[a;systems]   a{y x}/systems        run system(s) left to right
-/   query    Where[a;mask]     a@&mask               sub-table of matching rows
-/   lookup   Get[a;e]          a@&(a`id)=e           an entity's row
-/   sparse   a,k               (native left join)    attach a keyed component, 0-filled
-/   merge    k1,k2             (native outer join)   combine two keyed tables
+# recs
+
+A relational ECS: an archetype is a table, an entity is a row.
+
+```k
+spawn    Spawn[a;vals]     a,(`id!Id[]),vals    append a row (fresh id)
+despawn  Despawn[a;e]      a@&~(a`id)=e          remove an entity
+system   @[a;`c;:;expr]    (native amend)        whole-column update — no per-entity loop
+pipeline Tick[a;systems]   a{y x}/systems        run system(s) left to right
+query    Where[a;mask]     a@&mask               sub-table of matching rows
+lookup   Get[a;e]          a@&(a`id)=e           an entity's row
+sparse   a,k               (native left join)    attach a keyed component, 0-filled
+merge    k1,k2             (native outer join)   combine two keyed tables
+```
+
+Pure k — loads on the first reference to any `recs.*` name.
+\
 
 Nxt:: 0
 Id: {[] i:Nxt; Nxt::Nxt+1; i}                  / fresh monotonic entity id

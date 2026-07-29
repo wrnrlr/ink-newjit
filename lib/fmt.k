@@ -1,12 +1,17 @@
-/ lib/fmt.k — number → string formatting helpers (the `fmt` namespace).
-/ Load with:  2: "lib/fmt.k"
 /
-/ Fully-qualified namespace (no `\d` block): every member is `fmt.name` and every internal
-/ reference is written out, so nothing depends on `\d` name-mangling.
-/
-/ The point of `fmt.dec` is a FIXED number of decimal places, so a live value doesn't change
-/ string width frame-to-frame (which makes on-screen text jitter). `$x` on a float gives a
-/ variable-width result; `fmt.dec[2; x]` is always "N.NN".
+# fmt
+
+Formats numbers as fixed-width strings that do not jitter frame to frame.
+
+Fully-qualified namespace (no `\d` block): every member is `fmt.name` and every internal
+reference is written out, so nothing depends on `\d` name-mangling.
+
+The point of `fmt.dec` is a FIXED number of decimal places, so a live value doesn't change
+string width frame-to-frame (which makes on-screen text jitter). `$x` on a float gives a
+variable-width result; `fmt.dec[2; x]` is always "N.NN".
+
+Pure k — loads on the first reference to any `fmt.*` name.
+\
 
 fmt.pw:{[n] $[n=0; 1; */n#10]}                   / 10^n  (guard n=0: */() is a unit, not 1)
 fmt.padz:{[v;n] t:$v; ((0|n-#t)#"0"),t}          / left-pad the digits of v to width n with '0'

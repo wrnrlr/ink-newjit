@@ -1,26 +1,32 @@
-/ lib/crypto.k — crypto module (native Zig std.crypto extension).
 /
-/ Build first:  zig build crypto
-/ Load with:    2:"lib/crypto.k"   (or reference any `crypto.*` name to autoload)
-/
-/ Everything is bytes: keys, nonces, messages, digests and ciphertexts are all
-/ C (byte) vectors, so the primitives compose.  Build higher-level protocols by
-/ chaining them — e.g. authenticated encryption with a derived key:
-/
-/   k: crypto.random 32                        / secret key
-/   n: crypto.random 24                         / XChaCha nonce
-/   c: crypto.encrypt[k; n; "attack at dawn"]   / ciphertext || tag
-/   crypto.decrypt[k; n; c]                      / → "attack at dawn"
-/
-/   crypto.hex crypto.sha256 "abc"              / hex digest text
-/   crypto.hmac[k; "msg"]                        / HMAC-SHA256 tag
-/   kp: crypto.keypair crypto.random 32          / Ed25519 pub(32)||secret(64)
-/   s:  crypto.sign[64_kp; "msg"]                / sign with the secret half
-/   crypto.verify[32#kp; s; "msg"]               / → 1b
-/
-/ NB: a single-character string is a char ATOM, not a C vector — enlist it
-/ (`,"x"`) when a 1-byte key/message is needed.  Decrypt/unhex/unb64 return an
-/ error value `' on failure (bad tag / malformed input), so guard with `@`.
+# crypto
+
+Hashes, MACs, key derivation, authenticated encryption and signatures.
+
+Everything is bytes: keys, nonces, messages, digests and ciphertexts are all
+C (byte) vectors, so the primitives compose.  Build higher-level protocols by
+chaining them — e.g. authenticated encryption with a derived key:
+
+```k
+k: crypto.random 32                        / secret key
+n: crypto.random 24                         / XChaCha nonce
+c: crypto.encrypt[k; n; "attack at dawn"]   / ciphertext || tag
+crypto.decrypt[k; n; c]                      / → "attack at dawn"
+
+crypto.hex crypto.sha256 "abc"              / hex digest text
+crypto.hmac[k; "msg"]                        / HMAC-SHA256 tag
+kp: crypto.keypair crypto.random 32          / Ed25519 pub(32)||secret(64)
+s:  crypto.sign[64_kp; "msg"]                / sign with the secret half
+crypto.verify[32#kp; s; "msg"]               / → 1b
+```
+
+NB: a single-character string is a char ATOM, not a C vector — enlist it
+(`,"x"`) when a 1-byte key/message is needed.  Decrypt/unhex/unb64 return an
+error value `' on failure (bad tag / malformed input), so guard with `@`.
+
+Build the extension first with `zig build crypto`; the module then loads on the
+first reference to any `crypto.*` name.
+\
 
 \d crypto
   so: "./zig-out/lib/libcrypto.dylib"

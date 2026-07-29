@@ -1,3 +1,26 @@
+/
+# color
+
+Colour conversion and the full Tailwind palette as OKLCh constants.
+
+`oklch (l;c;h;a)` resolves an OKLCh tuple to gamma-sRGB `(r;g;b;a)`, each in
+`0..1` — the form `ui.k` and `canvas.k` want.  The named palette constants
+(`Red500`, `Amber300`, …) are stored in that OKLCh form, so interpolating
+between two of them stays perceptually even.
+
+```k
+ui.fill[box; oklch Red500]
+```
+
+Verified bit-exact against the Tailwind hex values on the neutral ramp
+(neutral-500 = #737373, -800 = #262626, -50 = #fafafa, -950 = #0a0a0a).
+
+The older HSL/percentage converters below are disabled — see the note in the
+source; `oklch` is the live path.
+
+Pure k — loads on the first reference to any `color.*` name.
+\
+
 // [[https://en.wikipedia.org/wiki/HSL_and_HSV]]
 chroma:{[s;l]s*(1-{x|-x}1-2*l)}
 c2:{[h;c](_h1;c*1-{x|-x}1-%[;A](2*A)!(h1:%[h;60])*A:1000)}

@@ -1,13 +1,17 @@
-/ lib/feat.k — audio samples → log-mel features.
-/ STFT power via one kernel (framing folded in), mel projection = a Linear, then log.
-/ Design notes: doc/design/nn.md
 /
-/ The Hann window / DFT basis / mel filterbank are precomputed host-side here; in a
-/ real pipeline you would ship the mel matrix from the offline export (librosa/NeMo).
-/
-/ Everything under feat.nemo.* exists to match NeMo's
-/ AudioToMelSpectrogramPreprocessor bit-for-bit.  Those constants and off-by-ones are
-/ where the silent corruption bugs lived — see doc/design/nn.md §5.
+# feat
+
+Turns raw audio samples into log-mel spectrogram features.
+
+The Hann window / DFT basis / mel filterbank are precomputed host-side here; in a
+real pipeline you would ship the mel matrix from the offline export (librosa/NeMo).
+
+Everything under feat.nemo.* exists to match NeMo's
+AudioToMelSpectrogramPreprocessor bit-for-bit.  Those constants and off-by-ones are
+where the silent corruption bugs lived — see doc/design/nn.md §5.
+
+Pure k — loads on the first reference to any `feat.*` name.
+\
 
 \e logmel
 

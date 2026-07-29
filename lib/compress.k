@@ -1,15 +1,22 @@
-/ lib/compress.k — DEFLATE compression module (native Zig std.compress.flate).
 /
-/ Build first:  zig build compress
-/ Load with:    2:"lib/compress.k"   (or reference any `compress.*` name)
-/
-/ Bytes in, bytes out.  Round-trip:
-/   c: compress.deflate "the quick brown fox"
-/   compress.inflate c                 / → "the quick brown fox"
-/   compress.gzip x / compress.gunzip  / gzip container (RFC 1952)
-/   compress.zlib x / compress.unzlib  / zlib container (RFC 1950)
-/
-/ Decompressors return an error value `' on corrupt input, so guard with `@`.
+# compress
+
+DEFLATE, gzip and zlib compression, plus crc32/adler32 checksums.
+
+Bytes in, bytes out.  Round-trip:
+
+```k
+c: compress.deflate "the quick brown fox"
+compress.inflate c                 / → "the quick brown fox"
+compress.gzip x / compress.gunzip  / gzip container (RFC 1952)
+compress.zlib x / compress.unzlib  / zlib container (RFC 1950)
+```
+
+Decompressors return an error value `' on corrupt input, so guard with `@`.
+
+Build the extension first with `zig build compress`; the module then loads on the
+first reference to any `compress.*` name.
+\
 
 \d compress
   so: "./zig-out/lib/libcompress.dylib"

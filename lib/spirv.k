@@ -1,13 +1,19 @@
-/ lib/spirv.k — SPIR-V instruction stencils (the copy-and-patch "stencil library").
 /
-/ PURE, STATELESS layer: reserved type ids, type-id lookup tables, and one op*
-/ function per SPIR-V instruction. Each op* returns the exact 32-bit words for one
-/ instruction with the result-id / operand-id "holes" left for the caller to patch
-/ (copy-and-patch, doc/papers/copy-and-patch.md). The dye compiler (lib/dye.k) holds
-/ the id counter + word buffers and stitches these stencils into a module.
-/
-/ Split out of the old monolithic lib/spirv.k so the front-end/optimizer (dye) can
-/ later target the ink VM too. See doc/design/dye.md.
+# spirv
+
+The SPIR-V instruction stencils dye patches to emit shader words.
+
+PURE, STATELESS layer: reserved type ids, type-id lookup tables, and one op*
+function per SPIR-V instruction. Each op* returns the exact 32-bit words for one
+instruction with the result-id / operand-id "holes" left for the caller to patch
+(copy-and-patch, doc/papers/copy-and-patch.md). The dye compiler (lib/dye.k) holds
+the id counter + word buffers and stitches these stencils into a module.
+
+Split out of the old monolithic lib/spirv.k so the front-end/optimizer (dye) can
+later target the ink VM too. See doc/design/dye.md.
+
+Pure k — loads on the first reference to any `spirv.*` name.
+\
 
 / ── Reserved SPIR-V IDs (1–19 fixed in every module) ────────────────────────
 Tvoid:   1  / OpTypeVoid

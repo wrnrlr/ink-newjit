@@ -1,3 +1,13 @@
+/
+# fts
+
+Full-text search: an inverted index over tokenised documents.
+
+**Work in progress** — the segment layout below is sketched, not implemented.
+
+Pure k — loads on the first reference to any `fts.*` name.
+\
+
 / FTS
 
 InvertedIndexTable: `term`id`pos

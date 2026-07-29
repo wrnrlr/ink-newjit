@@ -1,18 +1,29 @@
-/ lib/zip.k — ZIP archive module (native Zig std.zip + std.compress.flate).
 /
-/ Build first:  zig build zip
-/ Load with:    2:"lib/zip.k"   (or reference any `zip.*` name)
-/
-/ Read:
-/   zip.list "a.zip"          / table [name;size;csize;method;crc] of entries
-/   zip.read "a.zip"          / dict name → decompressed bytes
-/   zip.entry["a.zip"; "f"]   / decompressed bytes of one entry (error if absent)
-/ Write:
-/   zip.write["out.zip"; ("a.txt";"b.txt"); ("hello";"world")]   / → 1b
-/
-/ Supports store (0) and deflate (8), non-encrypted, non-zip64 archives; other
-/ cases return an error `'.  Method column: 0=store, 8=deflate.  `crc`/`size` are
-/ i32 (crc is bit-reinterpreted, so large values read back negative).
+# zip
+
+Reads and writes ZIP archives (store and deflate).
+
+Read:
+
+```k
+zip.list "a.zip"          / table [name;size;csize;method;crc] of entries
+zip.read "a.zip"          / dict name → decompressed bytes
+zip.entry["a.zip"; "f"]   / decompressed bytes of one entry (error if absent)
+```
+
+Write:
+
+```k
+zip.write["out.zip"; ("a.txt";"b.txt"); ("hello";"world")]   / → 1b
+```
+
+Supports store (0) and deflate (8), non-encrypted, non-zip64 archives; other
+cases return an error `'.  Method column: 0=store, 8=deflate.  `crc`/`size` are
+i32 (crc is bit-reinterpreted, so large values read back negative).
+
+Build the extension first with `zig build zip`; the module then loads on the
+first reference to any `zip.*` name.
+\
 
 \d zip
   so: "./zig-out/lib/libzip.dylib"

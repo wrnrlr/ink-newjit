@@ -1,17 +1,23 @@
-/ lib/bits.k — the `bits` CPU backend (kk.md §3.2, kk2 §4).
 /
-/ dye lowers a kernel lambda to a target-neutral typed SSA IR (xOp/xTy/xArg/xVal
-/ in lib/dye.k) and then to SPIR-V. `bits` is a SECOND back-end for that SAME IR:
-/ a pure-k interpreter that runs the kernel on the CPU, node-for-node, over ink
-/ vectors. So ONE kernel lambda yields both the GPU program (gpu.kernel) and a
-/ CPU reference (bits.run) — a permanent cross-backend oracle (test/kkbits.k;
-/ test/nn.k's hand-written references are generated from this).
-/
-/ v1 scope: the elementwise/select/gather/reduce subset the nn kernels use —
-/ const cons extract arith math neg lnot select f2s i2f, buffer gather (bufidx)
-/ and store (setb), and the in-kernel reductions rsum/rmax plus the bounded
-/ loops ndo/whileL. Scatter (sadd/igetb/isetb, the XPBD path) is not needed by
-/ the nn references and errors loudly if hit — correctness first.
+# bits
+
+Runs a dye compute kernel on the CPU by interpreting its neutral IR.
+
+dye lowers a kernel lambda to a target-neutral typed SSA IR (xOp/xTy/xArg/xVal
+in lib/dye.k) and then to SPIR-V. `bits` is a SECOND back-end for that SAME IR:
+a pure-k interpreter that runs the kernel on the CPU, node-for-node, over ink
+vectors. So ONE kernel lambda yields both the GPU program (gpu.kernel) and a
+CPU reference (bits.run) — a permanent cross-backend oracle (test/kkbits.k;
+test/nn.k's hand-written references are generated from this).
+
+v1 scope: the elementwise/select/gather/reduce subset the nn kernels use —
+const cons extract arith math neg lnot select f2s i2f, buffer gather (bufidx)
+and store (setb), and the in-kernel reductions rsum/rmax plus the bounded
+loops ndo/whileL. Scatter (sadd/igetb/isetb, the XPBD path) is not needed by
+the nn references and errors loudly if hit — correctness first.
+
+Pure k — loads on the first reference to any `bits.*` name.
+\
 
 2: "lib/dye.k"
 

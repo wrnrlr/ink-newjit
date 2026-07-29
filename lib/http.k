@@ -1,22 +1,30 @@
-/ lib/http.k — HTTP client module (native Zig std.http.Client).
 /
-/ Build first:  zig build http
-/ Load with:    2:"lib/http.k"   (or reference any `http.*` name)
-/
-/ For talking to web/JSON APIs.  https (TLS), redirects and gzip/deflate/zstd
-/ response decompression are handled for you.  Every call returns a dict:
-/   r`status    / i    HTTP status code (200, 404, …)
-/   r`headers   / dict lowercased response header → value
-/   r`body      / C    response body (decompressed)
-/ or an error `' if the request could not be completed (DNS/TLS/connection).
-/
-/   r: http.get "https://api.github.com/repos/ziglang/zig"
-/   r`status                                   / 200
-/   json.parse r`body                          / decode the JSON
-/   http.post["https://httpbin.org/post"; "{\"a\":1}"]
-/   http.request["PUT"; url; ("authorization";tok); payload]
-/
-/ Headers are flat name/value pairs: ("accept";"application/json";"x-key";k).
+# http
+
+An HTTP client for web and JSON APIs, with TLS, redirects and decompression.
+
+https, redirect following and gzip/deflate/zstd response decompression are all
+handled for you.  Every call returns a dict — `status` (i), `headers` (a dict of
+lowercased name → value) and `body` (C, decompressed) — or an error `` ' `` if the
+request never completed at all (DNS, TLS, connection).
+
+```k
+r: http.get "https://api.github.com/repos/ziglang/zig"
+r`status                                   / 200
+json.parse r`body                          / decode the JSON
+http.post["https://httpbin.org/post"; "{\"a\":1}"]
+http.request["PUT"; url; ("authorization";tok); payload]
+```
+
+Request headers are flat name/value pairs:
+`("accept";"application/json";"x-key";k)`.
+
+For Server-Sent Events and token streams, `http.stream` hands you each response
+line as it arrives instead of buffering a body.
+
+Build the extension first with `zig build http`; the module then loads on the
+first reference to any `http.*` name.
+\
 
 \d http
   so: "./zig-out/lib/libhttp.dylib"

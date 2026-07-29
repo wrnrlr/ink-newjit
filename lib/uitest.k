@@ -1,23 +1,37 @@
-/ lib/uitest.k — a deterministic, replayable test harness for lib/ui.k apps (one `t` namespace).
-/ Load AFTER lib/ui.k:  2: "lib/ui.k"  then  2: "lib/uitest.k".
 /
-/ WHY THIS WORKS. A ui.k frame is a pure function of (model, props): input is a TABLE (props`events)
-/ and time/cursor ride in props, so a test is a SCRIPTED EVENT STREAM replayed frame by frame — no
-/ live window, no GPU. The harness builds the SAME `kind code mods down x y amt` event table the
-/ native window feeds `ui.frame`, drives ui.run + ui.frame (the real input + layout path), then lets
-/ you assert on model state, framework state (ui.get/isFocus/getv), or geometry (the widget table W).
-/ Only ui.draw touches the GPU, and a headless test never calls it (see t.shot for pixels).
-/
-/ SHAPE OF A TEST.
-/   t.app[{[] view[]}; {[a] act a}]   / register a view THUNK (0-arg → node tree) + action handler
-/   t.click[x;y]                      / drive a frame: a mouse down+up at (x,y) in LOGICAL px
-/   t.type["=A0+B1"]                  / drive a frame: one `text event per codepoint
-/   t.key[259]                        / drive a frame: a `key press (259=backspace, 263/262=←/→ …)
-/   t.eq["selected"; sheet.selCell; `A0]         / assert model state
-/   t.eq["6 cells"; #t.W[]`x; 6]                 / assert geometry / hit-test
-/   t.report[]                        / print "N passed / M failed", list failures, set exit status
-/ Coords are LOGICAL units at dpr=1 (the default) so they match the flexbox layout 1:1. Every action
-/ helper drives exactly ONE frame; accumulate several events into one frame with t.emit + t.flush.
+# uitest
+
+A deterministic, replayable harness that drives a real UI app headlessly.
+
+## Why it works
+
+A ui.k frame is a pure function of (model, props): input arrives as a TABLE
+(`props`events`) and time and cursor ride in `props`.  So a test is just a
+SCRIPTED EVENT STREAM replayed frame by frame — no live window, no GPU.  The
+harness builds the same `kind code mods down x y amt` event table the native
+window feeds `ui.frame`, drives the real `ui.run` + `ui.frame` path, and then lets
+you assert on model state, framework state (`ui.get` / `isFocus` / `getv`) or
+geometry (the widget table `W`).  Only `ui.draw` touches the GPU, and a headless
+test never calls it — see `t.shot` when you do want pixels.
+
+## The shape of a test
+
+```k
+t.app[{[] view[]}; {[a] act a}]   / a view THUNK (0-arg → node tree) + an action handler
+t.click[x;y]                      / one frame: a mouse down+up at (x,y), LOGICAL px
+t.type["=A0+B1"]                  / one frame: a `text event per codepoint
+t.key[259]                        / one frame: a `key press (259 backspace, 263/262 ←/→)
+t.eq["selected"; sheet.selCell; `A0]   / assert model state
+t.eq["6 cells"; #t.W[]`x; 6]           / assert geometry / hit-test
+t.report[]                        / "N passed / M failed", list failures, set exit status
+```
+
+Coordinates are logical units at `dpr=1` (the default), so they match the flexbox
+layout 1:1.  Every action helper drives exactly ONE frame; to put several events
+in a single frame, accumulate with `t.emit` and then `t.flush`.
+
+Pure k — loads on the first reference to any `uitest.*` name.
+\
 
 t.EVK:`kind`code`mods`down`x`y`amt
 t.VIEW:{[] ui.label[""]}                          / current view thunk (0-arg → node tree)

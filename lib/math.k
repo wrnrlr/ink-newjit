@@ -1,3 +1,14 @@
+/
+# math
+
+Small numeric helpers: combinatorics, sequences and bit-pattern generators.
+
+Fibonacci, factorial, combinations and Catalan numbers, plus the Gray-code /
+powerset / run-length family of bit-pattern generators.
+
+Pure k, no dependencies — loads on the first reference to any `math.*` name.
+\
+
 Pitagoras: sqrt +/sqr
 Fib: {x{x,+/ -2#x}/0 1}          / Iterative: generates x Fibonacci numbers
 FibN: {*(x-1){x,+/ -2#x}/0 1}    / Returns specifically the Nth Fib number

@@ -1,18 +1,34 @@
-/ lib/ui.k — a tables-as-ECS immediate-mode UI toolkit (widgets + flexbox + input, one `ui`
-/ namespace). Build GPU lib first: zig build gpu.  Load with: 2: "lib/ui.k".
 /
-/ MODEL. You describe the UI as a TREE of NODES (a node is a dict). `ui.run` solves the tree into
-/ a flat WIDGET TABLE — a column dict W with columns  id x y w h bg txt fg sz act  (an ECS
-/ archetype). A frame is three vectorised passes over W:
-/   view   model            -> node tree     (pure; components are functions returning nodes)
-/   frame  (W; props`events) -> app actions    (hit-test = ONE whole-array point-in-rect)
-/   draw   W                 -> canvas ops      (per row → a fill/text; canvas re-batches)
-/ Interaction state (text buffers, focus, caret, open menu) is framework-owned, keyed by widget
-/ id (the imgui "storage" trick) so it survives the per-frame rebuild.
-/
-/ OVERLAYS. A popup (dropdown menu) is emitted as extra rows AFTER the main tree and rendered in a
-/ SECOND cnv.render pass — the canvas draws all fills then all text per render, so a later render's
-/ fills correctly occlude the base pass's text. Max 2 render passes per frame (see doc/design/ui.md).
+# ui
+
+An immediate-mode UI toolkit where a widget is a row and a frame is three passes.
+
+## The model
+
+You describe the UI as a TREE of nodes (a node is a dict).  `ui.run` solves that
+tree into a flat WIDGET TABLE — a column dict `W` with columns
+`id x y w h bg txt fg sz act`, i.e. an ECS archetype.  A frame is then three
+vectorised passes over `W`:
+
+```k
+view  model               / → a node tree (pure; a component is a function returning nodes)
+frame (W; props`events)   / → app actions (hit-testing is ONE whole-array point-in-rect)
+draw  W                   / → canvas ops (per row, a fill or some text; canvas re-batches)
+```
+
+Interaction state — text buffers, focus, caret, the open menu — is framework-owned
+and keyed by widget id (the imgui "storage" trick), so it survives the per-frame
+rebuild.
+
+## Overlays
+
+A popup such as a dropdown is emitted as extra rows AFTER the main tree and drawn
+in a SECOND `cnv.render` pass: the canvas draws all fills and then all text per
+render, so a later pass's fills correctly occlude the base pass's text.  Two
+render passes per frame is the maximum — see doc/design/ui.md.
+
+Pure k — loads on the first reference to any `ui.*` name.
+\
 
 2: "lib/canvas.k"
 2: "lib/color.k"

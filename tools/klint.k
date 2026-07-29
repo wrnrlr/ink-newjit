@@ -43,13 +43,31 @@ klint.leLine:{[path;ln;line]
   ix: &hits
   $[#ix; klint.warn[path;ln;"LE ";"`",(,line[*ix]),"=` — k has no <=/>=; use ~(a>b) / ~(a<b)"]; 0]}
 
-klint.PATH:""; klint.LINES:()
+/ ── block comments ──────────────────────────────────────────────────────────
+/ A line consisting of exactly `/` opens a block comment that runs to a line
+/ consisting of exactly `\`. Module headers are written that way and hold prose,
+/ so `>=` inside one is English, not code — mask those lines out entirely.
+klint.BS:`c$92
+/ LINES keep their trailing newline, so trim that (and any padding) before the test
+klint.only:{[line;ch] t:klint.trimR line; (1=#t)&(*t)=ch}
+klint.trimR:{[s] $[(0<#s)&((*|s)=" ")|(*|s)="\n"; klint.trimR -1_s; s]}
+klint.bstep:{[st;i] l:klint.LINES i
+  $[st=1; $[klint.only[l;klint.BS]; 0; 1]
+   ; klint.only[l;"/"]; 1
+   ; 0]}
+/ 1b for every line that sits inside (or delimits) a block comment
+klint.blockMask:{[n] r:{klint.bmark[x;y]}/[(0;0#0); !n]; 0<r 1}
+klint.bmark:{[acc;i] st:klint.bstep[acc 0; i]; (st; (acc 1),st|acc 0)}
+
+klint.PATH:""; klint.LINES:(); klint.BLK:0#0
 klint.checkFile:{[path]
   src: 1: path
   klint.LINES:: (0,1+&src="\n") _ src                   / global: the each-lambda can't close over a local
   klint.PATH:: path
-  {klint.checkLE[klint.PATH; x+1; klint.LINES x]}'!#klint.LINES
+  klint.BLK:: klint.blockMask[#klint.LINES]        / bracket it: a bare `#` after a name is Take
+  {klint.checkLine[x]}'!#klint.LINES
   0}
+klint.checkLine:{[i] $[klint.BLK i; 0; klint.checkLE[klint.PATH; i+1; klint.LINES i]]}
 
 klint.run:{[paths]
   klint.NF::0

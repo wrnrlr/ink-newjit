@@ -1,18 +1,28 @@
-/ lib/image.k — format-agnostic image front end (native libimage extension).
 /
-/ image.read dispatches on the file's magic bytes to the matching per-format
-/ module (png/jpeg/bmp/gif/tga/hdr/pic/tiff), each of which auto-loads on first
-/ use — so a program that only reads PNGs never pulls in the JPEG decoder.
-/ (tiff is baseline only: 8-bit chunky RGB/gray, uncompressed or Deflate.)
-/
-/   image.read  "path"          → image dict `width`height`comp`data
-/   image.write ["path"; img]   → 1b   (chooses the encoder from the extension)
-/   image.scale [img; nw; nh]   → image dict resampled to nw×nh (bilinear)
-/   image.sniff "path"          → `png `jpeg `bmp `gif `tga `hdr `pic `tiff | `unknown
-/
-/ An image dict is `width`height`comp`data ! (w; h; channels; DATA) where DATA is
-/ a row-major, top-left-first, channel-interleaved vector of length w*h*comp — an
-/ I vector for 8/16-bit sources or an F vector for HDR.
+# image
+
+Reads, writes and scales images, dispatching on the file's magic bytes.
+
+`image.read` sniffs the file and hands off to the matching per-format module
+(png/jpeg/bmp/gif/tga/hdr/pic/tiff), each of which loads on first use — so a
+program that only reads PNGs never pulls in the JPEG decoder.  (tiff is baseline
+only: 8-bit chunky RGB/gray, uncompressed or Deflate.)
+
+```k
+image.read  "path"          / → image dict `width`height`comp`data
+image.write ["path"; img]   / → 1b   (encoder chosen from the extension)
+image.scale [img; nw; nh]   / → resampled to nw×nh (bilinear)
+image.sniff "path"          / → `png `jpeg `bmp `gif `tga `hdr `pic `tiff | `unknown
+```
+
+An image dict is `` `width`height`comp`data ``, where the data is a row-major,
+top-left-first, channel-interleaved vector of length `w*h*comp` — an I vector
+for 8/16-bit sources, an F vector for HDR.
+
+Build the extension first with `zig build image`; the module then loads on the
+first reference to any `image.*` name.
+\
+
 \d image read write scale sniff
   so:     "./zig-out/lib/libimage.dylib"
   sniff:  so 2:(`ImgSniff; 1)
