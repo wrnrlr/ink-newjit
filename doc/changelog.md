@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-07-30 (later) — calls: over-application errors, `f . args` applies, 16 parameters
+
+- **Over-application is a `!rank` error instead of a silent truncation.** `{x+y}[1;2;3]`
+  returned `3` and `{[a;b]a}[1][2;3]` quietly dropped the `3`; a mis-typed call produced
+  a plausible wrong answer rather than failing. Both the interpreted call path
+  (`call.zig applyCallable`/`applyPartial`) and the tail-call fast path check it now —
+  the latter simply declines the fast path and lets the generic one report. A niladic
+  still takes the one discarded argument that calls it (`{5}1` → `5`, the k way), so the
+  ceiling is `max(arity,1)`; a gap counts as a slot, so `{x+y}[1;;3]` errors too.
+- **`x . y` applies a function to a list of arguments**, matching ngn/k: `{x+y} . 1 2`,
+  `{x+y} . (1;2)`, `.[{x+y};1 2]` → `3`; an atom is a single argument (`{x+y} . 1` →
+  `{x+y}[1;]`) and `f . ()` applies nothing. This is the one way to call with an
+  argument count that is only known at runtime. `ApplyN` — the deep-index half of `.`,
+  documented since forever — turned out to be **dead code**: the struct was never listed
+  in `verbs.zig`'s dispatch declarations, so *every* dyadic `.` was `!type`, including
+  `(1 2 3;4 5) . 1 0`. Wired up, and both halves are generated over the type table now.
+- **Lambdas take up to 16 parameters, and a 17th is rejected at the definition.** The
+  cap is one constant, `operator.zig MAX_ARGS`, that everything sizes off: `Fn.arity`
+  (u5), `Partial.args` + its `ArgMask` fill word, the MakePartial gap mask in the
+  bytecode (now u16 — all four operand decoders updated), and the compiler's call-site
+  check. Previously the parser accepted any number of parameters and the 9th blew past
+  `Partial`'s 8-slot array — a debug panic, an out-of-bounds read in ReleaseFast.
+- Measured before changing it (`bench/call.k`, `bench/sweep.sh`, ReleaseFast, min-of-5,
+  ms/1M calls). 8 → 16 is free; 32 is not, because `Partial` doubles again:
+
+  | MAX_ARGS | monad | dyad | triad | heptad | partial | nested | fib | powerset |
+  |---|---|---|---|---|---|---|---|---|
+  | 8  | 49 | 56 | 93 | 177 | 36 | 82 | 136 | 332 |
+  | 16 | 51 | 58 | 94 | 178 | 38 | 80 | 136 | 329 |
+  | 32 | 50 | 58 | 94 | 178 | **50** | **91** | 135 | 328 |
+
+  The argument buffers are `undefined` rather than `.{.blank} ** N` — nothing reads past
+  `argc`, so their size is pure stack arithmetic and costs nothing. Handing the callee
+  the VM stack slice instead of a buffer (no copy at all) was tried and is *slower* —
+  54 vs 49 ms/1M on the monad line, because the callee pushes into that same array and
+  every argument access becomes aliasing to the optimizer.
+
 ## 2026-07-30 — parse errors have a location; two parser bugs fixed
 - **Parse errors now report `line:col` with the offending line and a caret.** The
   parser records the byte offset of the token it stopped on (`Parser.err_pos`, set by

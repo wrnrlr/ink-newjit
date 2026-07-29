@@ -428,7 +428,13 @@ Two things are wrong here:
 Found while implementing `<`/`>` on dicts and tables; the symptom there was that every
 test script using `t:` for a table hung before printing anything.
 
-## A lambda with 9+ parameters is accepted, then panics on partial application
+## FIXED — A lambda with 9+ parameters is accepted, then panics on partial application
+
+Fixed 2026-07-29. The cap is now one constant (`operator.zig MAX_ARGS`, = 16) that
+`Fn.arity`, `Partial`, the call buffers, the MakePartial bytecode mask and the compiler
+all size off; a 17th parameter is rejected at the definition with `TooManyParams`, and
+over-application raises `!rank`. Benchmarks for the 8/16/32 choice are in the changelog
+(2026-07-30 "later"). Original report:
 
 The parser/compiler accept any number of lambda parameters, but the call machinery is
 hard-capped at 8 in three independent places: `Fn.arity` is a `u4` (max 15),

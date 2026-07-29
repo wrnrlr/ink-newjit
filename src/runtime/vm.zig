@@ -497,7 +497,10 @@ pub const VM = struct {
 
   fn doTailCall(vm: *VM) !void {
     const argc = vm.readByte();
-    var buf: [8]V = .{.blank} ** 8;
+    // `undefined`, not `.{.blank} ** N`: every one of the argc slots is written
+    // by the pop loop below and nothing reads past argc, so the buffer costs a
+    // stack-pointer adjustment and MAX_ARGS can grow for free.
+    var buf: [opmod.MAX_ARGS]V = undefined;
     const incoming = buf[0..argc];
     for (0..argc) |i| incoming[argc - 1 - i] = vm.pop();
     const func_val = vm.pop();
@@ -507,9 +510,11 @@ pub const VM = struct {
       const ref = func_val.o;
       const kind = ref.kind;
       // Tail-call lambda: reuse current frame instead of pushing a new one.
-      if (kind == .callable and opmod.isLambdaIdx(ref.idx)) {
-        const lambda_idx = opmod.lambdaIdxOf(ref.idx);
-        const entry = vm.fn_tables.lambdaAt(lambda_idx);
+      // Over-application falls through to the generic path, which raises !rank.
+      const lambda_idx = if (kind == .callable and opmod.isLambdaIdx(ref.idx))
+        opmod.lambdaIdxOf(ref.idx) else null;
+      if (lambda_idx != null and argc <= @max(vm.fn_tables.lambdaAt(lambda_idx.?).arity, 1)) {
+        const entry = vm.fn_tables.lambdaAt(lambda_idx.?);
         const frame = vm.currentFrame();
         const res_slot = frame.result_slot;
 
@@ -522,7 +527,7 @@ pub const VM = struct {
         const locals_to_push = if (total_slots > argc) total_slots - argc else 0;
         for (0..locals_to_push) |_| try vm.push(.blank);
 
-        frame.lambda_idx = lambda_idx;
+        frame.lambda_idx = lambda_idx.?;
         frame.ip = 0;
         frame.base = vm.stack_len - argc - locals_to_push;
         vm.current_chunk = entry.chunk;
@@ -567,8 +572,13 @@ pub const VM = struct {
   }
 
   fn doCallWithMode(vm: *VM, mode: call.CallMode) !void {
+    // Marshalled through a local buffer rather than handed the (already
+    // contiguous, already ordered) argument slice of the value stack: passing
+    // the stack slice was measurably SLOWER — 54 vs 49 ms/1M on bench/call.k's
+    // monad line — because the callee can push into that same array, so the
+    // optimizer has to treat every argument access as aliasing.
     const argc = vm.readByte();
-    var buf: [8]V = .{.blank} ** 8;
+    var buf: [opmod.MAX_ARGS]V = undefined; // see doTailCall: argc slots, all written below
     const incoming = buf[0..argc];
     for (0..argc) |i| incoming[argc - 1 - i] = vm.pop();
     const func_val = vm.pop();
@@ -631,19 +641,22 @@ pub const VM = struct {
   
   fn doMakePartial(vm: *VM) !void {
     const argc = vm.readByte();
-    const mask = vm.readByte();
+    const mask = vm.read16(); // ArgMask-wide: one bit per MAX_ARGS slot
     const args_start = vm.stack_len - argc;
     const stack_args = vm.stack[args_start..vm.stack_len];
     const func_val = vm.stack[args_start - 1];
 
-    // Extract base func and existing args from func (possibly already a partial)
+    // Extract base func and existing args from func (possibly already a partial).
+    // `existing` aliases the source partial's slots rather than copying them —
+    // only the filled ones are read, and each is ref()'d into `merged` below.
+    const no_args: [opmod.MAX_ARGS]V = .{.blank} ** opmod.MAX_ARGS;
     var base_ref: opmod.Fn = undefined;
-    var existing: [8]V = .{.blank} ** 8;
-    var existing_fill: u8 = 0;
+    var existing: *const [opmod.MAX_ARGS]V = &no_args;
+    var existing_fill: opmod.ArgMask = 0;
     if (func_val == .p) {
       const p = func_val.asPartial();
       base_ref = p.ref;
-      existing = p.args;
+      existing = &p.args;
       existing_fill = p.fill;
     } else if (func_val == .o) {
       base_ref = func_val.o;
@@ -654,28 +667,34 @@ pub const VM = struct {
     }
 
     const arity = base_ref.getRealArity();
-    var merged: [8]V = .{.blank} ** 8;
-    var fill: u8 = 0;
+    var merged: [opmod.MAX_ARGS]V = .{.blank} ** opmod.MAX_ARGS;
+    var fill: opmod.ArgMask = 0;
     for (0..arity) |i| {
-      if (existing_fill & (@as(u8, 1) << @intCast(i)) != 0) {
+      if (existing_fill & (@as(opmod.ArgMask, 1) << @intCast(i)) != 0) {
         merged[i] = existing[i].ref();
-        fill |= @as(u8, 1) << @intCast(i);
+        fill |= @as(opmod.ArgMask, 1) << @intCast(i);
       }
     }
     var arg_idx: usize = 0;
     for (0..arity) |i| {
-      if (fill & (@as(u8, 1) << @intCast(i)) == 0) {
+      if (fill & (@as(opmod.ArgMask, 1) << @intCast(i)) == 0) {
         const should_fill = if (existing_fill != 0) true else ((mask >> @intCast(i)) & 1) != 0;
         if (should_fill and arg_idx < argc) {
           merged[i] = stack_args[arg_idx].ref();
-          fill |= @as(u8, 1) << @intCast(i);
+          fill |= @as(opmod.ArgMask, 1) << @intCast(i);
           arg_idx += 1;
         }
       }
     }
 
     const p = try vm.partials.create(vm.alloc);
-    p.* = .{ .pool = &vm.partials, .rc = 1, .fill = fill, .arity = arity, ._pad = 0, .ref = base_ref, .args = merged };
+    p.pool = &vm.partials;
+    p.rc = 1;
+    p.fill = fill;
+    p.arity = arity;
+    p._pad = 0;
+    p.ref = base_ref;
+    for (0..arity) |i| p.args[i] = merged[i]; // slots ≥ arity are never read
 
     for (vm.stack[args_start - 1 .. vm.stack_len]) |*v| v.deinit(vm.alloc);
     vm.stack_len = args_start - 1;

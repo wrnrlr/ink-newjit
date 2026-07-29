@@ -200,11 +200,24 @@ pub const op2ToOp1: [Op2.COUNT]?Op1 = blk: {
 //                  can't be expressed as a global function idx.
 //   .train         arity = number of ops; ops packed into idx + extra
 
-pub const FnKind = enum(u4) { callable, derived, derived_data, train };
+/// Maximum number of arguments a lambda, call site or projection can carry.
+/// Every hop of the call path sizes a fixed buffer or a fill bitmask off this,
+/// so memory per call stays constant and nothing on the hot path allocates:
+///   - the Call/TailCall/Apply argument buffers (stack, `undefined`, no init)
+///   - `Partial.args` + its `ArgMask` fill word (one pooled object per partial)
+///   - `Fn.arity` (u5) and the MakePartial gap mask in the bytecode (u16)
+/// Raising it costs one `ArgMask` bit and `@sizeOf(V)` bytes per partial; the
+/// call buffers are stack-pointer arithmetic and cost nothing (see bench/call.k).
+pub const MAX_ARGS = 16;
+
+/// Bitmask covering MAX_ARGS slots — `Partial.fill` and the MakePartial operand.
+pub const ArgMask = std.meta.Int(.unsigned, MAX_ARGS);
+
+pub const FnKind = enum(u3) { callable, derived, derived_data, train };
 
 pub const Fn = packed struct(u64) {
   kind:  FnKind,
-  arity: u4,    // cached; for builtins also derivable from arityOfIdx(idx)
+  arity: u5,    // cached; for builtins also derivable from arityOfIdx(idx)
   idx:   u24,
   extra: u32,
 

@@ -203,7 +203,7 @@ pub const TerseFormatter = struct {
         try w.writeAll("[");
         for (0..p.arity) |i| {
           if (i > 0) try w.writeAll(";");
-          if (p.fill & (@as(u8, 1) << @intCast(i)) != 0)
+          if (p.fill & (@as(@import("./operator.zig").ArgMask, 1) << @intCast(i)) != 0)
             try self.formatValue(p.args[i], w);
         }
         try w.writeAll("]");

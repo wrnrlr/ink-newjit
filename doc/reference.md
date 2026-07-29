@@ -322,13 +322,20 @@ while assigment of globals in a lambda happen with a double colon `::`
 - `X^y` **Without** - remove occurrences of X from y
 - `x?y` **Find** - first index of y in x (`#x` / length if not found, for index-with-fallback)
 - `x@y` **Apply** - index into x at y; apply function x to y
-- `x.y` **ApplyN** - deep indexing or multi-argument application
+- `x.y` **ApplyN** - deep indexing (`(1 2 3;4 5) . 1 0` → `4`), or applying a function to
+  a list of arguments: `` {x+y} . 1 2 `` → `3`, `` {x+y+z} . (1;2;3) `` → `6`. The items
+  of y become the arguments, so the argument count may be computed at runtime; an atom is
+  a single argument and `f . ()` applies nothing. A function takes at most 16 arguments,
+  and passing more than its arity is a `!rank` error.
 
 ### IO Verbs
 The IO system is organized around file descriptors (filename, port number, etc.).
-- `` <c `` **OpenFile** - return file handle for file (relative or absolute path)
-- `` <s `` **OpenSocket** - return file handle for connection to `"host:port"` or `":port"`
-- `` >n `` **CloseHandle**
+- `` >s `` **OpenFile** - return file handle for file (a symbol path, relative or absolute)
+- `` >C `` **OpenSocket** - connect to `"host:port"`, return a connection handle
+- `` >i `` **Listen** - listen on port `i` and block until the first client connects;
+  a **negative** port listens without blocking and serves through the event loop
+  (same as the `\p` command). See [IPC](#ipc).
+- `` <i `` **CloseHandle**
 - `` 0:x `` **ReadLine** - read lines from stdin
 - `` x 0:y `` **Write line** - write text. `` `0 0:"Hi" ``
 - `` 1:x `` **ReadBytes** 

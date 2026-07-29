@@ -9,6 +9,8 @@ const Op2 = opmod.Op2;
 const Op3 = opmod.Op3;
 const Op4 = opmod.Op4;
 const Adverb = opmod.Adverb;
+const MAX_ARGS = opmod.MAX_ARGS;
+const ArgMask = opmod.ArgMask;
 const Partial = @import("../noun/partial.zig").Partial;
 const VM = @import("vm.zig").VM;
 const dispatch = @import("../primitive/dispatch.zig");
@@ -88,6 +90,10 @@ pub const Call = struct {
 
     if (opmod.isLambdaIdx(idx)) {
       const arity = ref.arity;
+      // Over-application is a rank error, never a silent truncation. A niladic
+      // takes one discarded argument (`{5}1` — the k way to call one), so the
+      // ceiling is max(arity,1); `{x+y}[1;;3]` counts the gap and errors too.
+      if (args.len > @max(arity, 1)) return V{ .err = .rank };
       if (has_gaps or (filled < arity and (is_bracket or filled > 0)))
         return makePartialFromArgs(vm, ref, args);
       return vm.callLambdaAndRun(ref, args);
@@ -154,17 +160,20 @@ pub const Call = struct {
 
   fn applyPartial(self: *Call, p: *Partial, args: []const V, is_bracket: bool) V {
     const arity = p.arity;
-    var merged: [8]V = .{.blank} ** 8;
-    var fill: u8 = p.fill;
+    // More arguments than the projection has empty slots is a rank error —
+    // the same rule as calling the underlying function directly.
+    if (args.len > p.remaining()) return V{ .err = .rank };
+    var merged: [MAX_ARGS]V = .{.blank} ** MAX_ARGS;
+    var fill: ArgMask = p.fill;
     for (0..arity) |i| {
-      if (p.fill & (@as(u8, 1) << @intCast(i)) != 0)
+      if (p.fill & (@as(ArgMask, 1) << @intCast(i)) != 0)
         merged[i] = p.args[i];
     }
     var inc: usize = 0;
     for (0..arity) |i| {
-      if (fill & (@as(u8, 1) << @intCast(i)) == 0 and inc < args.len) {
+      if (fill & (@as(ArgMask, 1) << @intCast(i)) == 0 and inc < args.len) {
         merged[i] = args[inc];
-        fill |= @as(u8, 1) << @intCast(i);
+        fill |= @as(ArgMask, 1) << @intCast(i);
         inc += 1;
       }
     }
@@ -218,31 +227,40 @@ pub fn applyDerivedBuiltin(vm: *VM, ref: Fn, args: []const V) V {
   return derived_mod.derived(vm, base, ref.getAdverb(), args, Call.wrapper);
 }
 
-fn allocPartial(vm: *VM, ref: Fn, arity: u8, pa: [8]V, fill: u8) V {
+/// Only the first `arity` slots are copied: slots above it can never be read
+/// (their `fill` bit is 0, and `fill` is what deinit/format/apply walk), so the
+/// per-partial cost tracks the function's arity rather than MAX_ARGS.
+fn allocPartial(vm: *VM, ref: Fn, arity: u8, pa: *const [MAX_ARGS]V, fill: ArgMask) V {
   const p = vm.partials.create(vm.alloc) catch return V{ .err = .memory };
-  p.* = .{ .pool = &vm.partials, .rc = 1, .fill = fill, .arity = arity, ._pad = 0, .ref = ref, .args = pa };
+  p.pool = &vm.partials;
+  p.rc = 1;
+  p.fill = fill;
+  p.arity = arity;
+  p._pad = 0;
+  p.ref = ref;
+  for (0..arity) |i| p.args[i] = pa[i];
   return .{ .p = p };
 }
 
 pub fn makePartialFromArgs(vm: *VM, ref: Fn, args: []const V) V {
   const arity = ref.getRealArity();
-  var pa: [8]V = .{.blank} ** 8;
-  var fill: u8 = 0;
+  var pa: [MAX_ARGS]V = .{.blank} ** MAX_ARGS;
+  var fill: ArgMask = 0;
   for (args, 0..) |a, i| {
     if (i >= arity) break;
-    if (a != .blank) { pa[i] = a.ref(); fill |= @as(u8, 1) << @intCast(i); }
+    if (a != .blank) { pa[i] = a.ref(); fill |= @as(ArgMask, 1) << @intCast(i); }
   }
-  return allocPartial(vm, ref, arity, pa, fill);
+  return allocPartial(vm, ref, arity, &pa, fill);
 }
 
-fn makePartialFromMerged(vm: *VM, ref: Fn, arity: u8, merged: *const [8]V, fill: u8) V {
-  var pa: [8]V = .{.blank} ** 8;
-  var new_fill: u8 = 0;
+fn makePartialFromMerged(vm: *VM, ref: Fn, arity: u8, merged: *const [MAX_ARGS]V, fill: ArgMask) V {
+  var pa: [MAX_ARGS]V = .{.blank} ** MAX_ARGS;
+  var new_fill: ArgMask = 0;
   for (0..arity) |i| {
-    if (fill & (@as(u8, 1) << @intCast(i)) != 0) {
+    if (fill & (@as(ArgMask, 1) << @intCast(i)) != 0) {
       pa[i] = merged[i].ref();
-      new_fill |= @as(u8, 1) << @intCast(i);
+      new_fill |= @as(ArgMask, 1) << @intCast(i);
     }
   }
-  return allocPartial(vm, ref, arity, pa, new_fill);
+  return allocPartial(vm, ref, arity, &pa, new_fill);
 }

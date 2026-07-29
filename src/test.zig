@@ -402,6 +402,55 @@ test "partial amend" {
   // Partial amend saved, then completed.
   try t.check("c:(@[\"aBc\";1;]); c(_:)", "\"abc\"");
 }
+test "over-application is a rank error" {
+  var t = try Tester.init(); defer t.deinit();
+  // Extra arguments used to be dropped silently, which made a mis-typed call
+  // return a plausible wrong answer instead of failing.
+  try t.check("{x+y}[1;2;3]", "!rank");
+  try t.check("{x}[1;2]", "!rank");
+  try t.check("{[a;b;c]a}[1;2;3;4]", "!rank");
+  try t.check("{x+y}[1;;3]", "!rank");        // a gap still counts as a slot
+  try t.check("f:{[a;b]a}; f[1][2;3]", "!rank"); // and again through a projection
+  try t.check("+[1;2;3]", "!rank");
+  // A niladic still takes the one discarded argument that calls it, k-style.
+  try t.check("{5}1", "5");
+  try t.check("{5}[]", "5");
+  try t.check("{5}[1;2]", "!rank");
+  // Under-application is unaffected: that is a projection, not an error.
+  try t.check("{[a;b;c]a+b+c}[1;2][3]", "6");
+}
+test "apply a list of arguments with ." {
+  var t = try Tester.init(); defer t.deinit();
+  // f . args — the items of the right operand become the arguments, so the
+  // argument count can be computed at runtime.
+  try t.check("{x+y} . 1 2", "3");
+  try t.check("{x+y} . (1;2)", "3");
+  try t.check("{x+y+z} . 1 2 3", "6");
+  try t.check(".[{x+y};1 2]", "3");
+  try t.check("{x} . ,1", "1");
+  try t.check("{x+y} . 1", "{x+y}[1;]");      // an atom is a single argument
+  try t.check("{x+y} . ()", "{x+y}");         // no arguments applies nothing
+  try t.check("{x+y} . 1 2 3", "!rank");
+  try t.check("f:{[a;b;c]a+b+c}; f . 1 2 3", "6");
+  // The same verb still deep-indexes containers, one `@` per path item.
+  try t.check("(1 2 3;4 5) . 1 0", "4");
+  try t.check("((1 2;3 4);(5 6;7 8)) . 1 0 1", "6");
+  try t.check("(`a`b!(1 2;3 4)) . (`a;1)", "2");
+  try t.check("(1 2 3) . ()", "1 2 3");
+}
+test "lambda parameter cap" {
+  var t = try Tester.init(); defer t.deinit();
+  // MAX_ARGS parameters is the documented ceiling and it must WORK, not just
+  // compile: a 9-param lambda used to be accepted and then overflow the
+  // projection's 8-slot argument array once partially applied.
+  const p16 = "{[a;b;c;d;e;g;h;i;j;k;l;n;o;p;q;r]a+r}";
+  try t.check(p16 ++ "[1;2;3;4;5;6;7;8;9;10;11;12;13;14;15;16]", "17");
+  try t.check("f:" ++ p16 ++ "; ((((((((((((((((f 1)2)3)4)5)6)7)8)9)10)11)12)13)14)15)16", "17");
+  // One more parameter than that is rejected where the mistake is, at the
+  // definition — not at some later call site.
+  try testing.expectError(error.TooManyParams,
+    t.vm.eval("{[a;b;c;d;e;g;h;i;j;k;l;n;o;p;q;r;s]a}"));
+}
 test "dyadic verb" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("+", "+");

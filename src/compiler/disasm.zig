@@ -191,8 +191,8 @@ fn printChunk(chunk: *Chunk, symbols: *const Pool, names: []const ?[]const u8, o
       },
       .MakePartial => {
         const argc = code[ip]; ip += 1;
-        const mask = code[ip]; ip += 1;
-        try out.print("MakePartial {d}  mask=0b{b:08}\n", .{ argc, mask });
+        const mask = @as(u16, code[ip]) | (@as(u16, code[ip + 1]) << 8); ip += 2;
+        try out.print("MakePartial {d}  mask=0b{b:016}\n", .{ argc, mask });
       },
       .Derive => {
         const adv: Adverb = @enumFromInt(code[ip]); ip += 1;

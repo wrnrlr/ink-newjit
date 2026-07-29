@@ -1047,6 +1047,11 @@ pub const Compiler = struct {
   }
 
   fn compileLambda(self: *Compiler, l: ast.Lambda) anyerror!ir.ValueId {
+    // Reject an oversized parameter list at the DEFINITION. The call path sizes
+    // its buffers and its fill mask off MAX_ARGS, so a wider lambda used to
+    // compile fine and then fail (or overflow) only once someone projected it.
+    if (l.a) |params| if (params.len > opmod.MAX_ARGS) return error.TooManyParams;
+
     const chunk_ptr = try self.alloc.create(Chunk);
     chunk_ptr.* = try Chunk.init(self.alloc);
     var chunk_owned = true;
@@ -1189,12 +1194,12 @@ pub const Compiler = struct {
   }
 
   fn emitOpWithArg(self: *Compiler, op: OpCode, arg: u32, inputs: []const ir.ValueId) !ir.ValueId {
-    // Call/Apply/TailCall marshal their arguments through a fixed 8-slot buffer
-    // in the VM (doCallWithMode/doTailCall). Reject over-long arg lists here so
-    // a 9+ argument call site fails to compile instead of overflowing that
-    // buffer at runtime. Matches the 8-parameter lambda cap.
+    // Call/Apply/TailCall marshal their arguments through a fixed MAX_ARGS-slot
+    // buffer in the VM (doCallWithMode/doTailCall). Reject over-long arg lists
+    // here so an oversized call site fails to compile instead of overflowing
+    // that buffer at runtime. Matches the MAX_ARGS-parameter lambda cap.
     switch (op) {
-      .Call, .TailCall, .Apply => if (arg > 8) return error.TooManyArgs,
+      .Call, .TailCall, .Apply => if (arg > opmod.MAX_ARGS) return error.TooManyArgs,
       else => {},
     }
     return try self.scope.ir.emitWithArg(op, arg, inputs);
@@ -1375,7 +1380,8 @@ pub const Compiler = struct {
         return 0;
       },
       .Jump, .JumpFalse, .JumpTrue => return 3,
-      .MakePartial, .ReduceZip, .FusedMap => return 3,
+      .MakePartial => return 4, // opcode + argc byte + u16 gap mask (MAX_ARGS bits)
+      .ReduceZip, .FusedMap => return 3,
       else => return 1,
     }
   }
@@ -1439,7 +1445,11 @@ pub const Compiler = struct {
         const jump_size: i32 = @as(i32, @intCast(target_offset)) - @as(i32, @intCast(current_offset + 3));
         try chunk.write16(@as(u16, @bitCast(@as(i16, @intCast(jump_size)))));
       },
-      .MakePartial, .ReduceZip => {
+      .MakePartial => {
+        try chunk.write(@as(u8, @intCast(inst.arg1)));
+        try chunk.write16(@as(u16, @intCast(inst.arg2))); // gap mask, one bit per MAX_ARGS slot
+      },
+      .ReduceZip => {
         try chunk.write(@as(u8, @intCast(inst.arg1)));
         try chunk.write(@as(u8, @intCast(inst.arg2)));
       },
