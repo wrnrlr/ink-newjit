@@ -7,14 +7,22 @@
 /// `` `poll[] `` runs a single non-blocking pass, which is what a GPU frame loop
 /// wants (the C export `terse_poll()` is the same thing for extensions).
 ///
-/// Handlers are plain globals — ink has no `.z` namespace, since `.` is a verb:
+/// Handlers live in the `z` namespace — q's `.z`, minus the leading dot, which
+/// ink cannot spell because `.` is a verb.  They are ordinary globals whose
+/// names the compiler mangles to `z.member`, so either spelling defines them:
+/// `z.pg:{…}` directly, or `pg:{…}` inside a `\d z` block.
 ///
-///   pg:{[m] "echo: ", m}     message handler; a non-blank result is replied
-///   pg:{[h;m] …}             dyadic form also receives the calling handle
-///   ps:{[m] …}               same, but never replies (the async side)
-///   po:{[h] …}               a peer connected
-///   pc:{[h] …}               a peer went away
-///   ts:{[] …}                timer tick, every `` `timer[ms] `` milliseconds
+///   z.pg:{[m] "echo: ", m}   message handler; a non-blank result is replied
+///   z.pg:{[h;m] …}           dyadic form also receives the calling handle
+///   z.ps:{[m] …}             same, but never replies (the async side)
+///   z.po:{[h] …}             a peer connected
+///   z.pc:{[h] …}             a peer went away
+///   z.ts:{[] …}              timer tick, every `` `timer[ms] `` milliseconds
+///
+/// Only the callbacks are namespaced. The services a script calls INTO
+/// (`` `on ``, `` `timer ``, `` `poll ``, …) stay backtick symbols: they are
+/// already outside the global namespace, and the split keeps "I call the
+/// runtime" visibly distinct from "the runtime calls me".
 ///
 /// A handler attached to one handle with `` `on[h;f] `` takes priority over the
 /// globals, which is how a process talks to several peers with different
@@ -36,7 +44,7 @@ const Handler = struct { f: V, reply: Reply };
 
 /// Non-blocking single pass over all open connections: fire the timer if due,
 /// accept new clients on listening sockets, read and dispatch on connected ones.
-/// `handler` overrides the global `pg`/`ps` fallbacks when non-blank.
+/// `handler` overrides the `z.pg`/`z.ps` fallbacks when non-blank.
 /// IPC relies on posix poll(2), which Windows' std lacks — there it is a no-op.
 pub fn pollOnce(vm: *VM, handler: V) void {
   if (builtin.os.tag != .windows) pollOncePosix(vm, handler);
@@ -106,14 +114,14 @@ fn acceptClient(vm: *VM, listen_id: u32) void {
   if (cb.tag() != .blank) {
     vm.conns.setCallback(new_id, cb.ref()) catch {};
   }
-  callHook(vm, "po", new_id);
+  callHook(vm, "z.po", new_id);
 }
 
 /// Drop a connection, giving `pc` a chance to see the handle first.  The hook
 /// runs BEFORE the handle is invalidated so it can still read `` `peer[h] ``,
 /// and the handle is removed afterwards even if the hook errors.
 fn dropConn(vm: *VM, conn_id: u32) void {
-  callHook(vm, "pc", conn_id);
+  callHook(vm, "z.pc", conn_id);
   vm.conns.remove(conn_id);
 }
 
@@ -154,10 +162,10 @@ fn resolveHandler(vm: *VM, conn_id: u32, explicit: V) Handler {
   // Per-handle handler (`on[h;f]`) takes priority over the globals.
   const cb = vm.conns.getCallback(conn_id);
   if (cb.tag() != .blank) return .{ .f = cb, .reply = .on_value };
-  if (globalFn(vm, "pg")) |g| return .{ .f = g, .reply = .on_value };
-  // `ps` is the async side: it is called for its effect and never answers,
+  if (globalFn(vm, "z.pg")) |g| return .{ .f = g, .reply = .on_value };
+  // `z.ps` is the async side: it is called for its effect and never answers,
   // even when it happens to return a value.
-  if (globalFn(vm, "ps")) |g| return .{ .f = g, .reply = .never };
+  if (globalFn(vm, "z.ps")) |g| return .{ .f = g, .reply = .never };
   return .{ .f = .blank, .reply = .never };
 }
 
@@ -184,7 +192,7 @@ fn fireTimer(vm: *VM) void {
   const now = syms.microsNow();
   if (now < vm.timer_next) return;
   vm.timer_next = now + @as(i64, vm.timer_ms) * 1000;
-  const f = globalFn(vm, "ts") orelse return;
+  const f = globalFn(vm, "z.ts") orelse return;
   const prev_vm = ffi.getCurrentVm();
   ffi.setCurrentVm(vm);
   defer ffi.restoreVm(prev_vm);

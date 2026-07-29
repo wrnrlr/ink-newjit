@@ -406,10 +406,11 @@ step mod clamp mix smoothstep floor fract sign tanh length normalize`.
 
 ## IPC
 
-Processes talk over TCP. **Verbs move data; backtick-symbols configure the
-runtime; bare globals are the hooks.** There is no `.z` namespace — `.` is a
-verb, so a handler that needs to know who called takes an extra argument
-instead.
+Processes talk over TCP. **Verbs move data; backtick-symbols call into the
+runtime; the `z` namespace is where the runtime calls back.** `z` is q's `.z`
+minus the leading dot, which ink cannot spell because `.` is a verb — and for
+the same reason a handler that needs to know who called takes an extra argument
+rather than reading a `.z.w`.
 
 ### Connections
 
@@ -447,23 +448,29 @@ handle instead; they do no framing and no serialization.
 
 ### Handlers
 
-A handler is a plain global. Its **arity** picks the calling convention:
+Handlers live in the `z` namespace. Its **arity** picks the calling convention:
 
 ```k
-pg:{[m] "echo: ", m}    / message only; a non-blank result is sent back
-pg:{[h;m] …}            / also given the handle it arrived on
-ps:{[m] …}              / same, but never replies (the async side)
-po:{[h] …}              / a peer connected
-pc:{[h] …}              / a peer went away
-ts:{[] …}               / timer tick, see `timer below
+z.pg:{[m] "echo: ", m}  / message only; a non-blank result is sent back
+z.pg:{[h;m] …}          / also given the handle it arrived on
+z.ps:{[m] …}            / same, but never replies (the async side)
+z.po:{[h] …}            / a peer connected
+z.pc:{[h] …}            / a peer went away
+z.ts:{[] …}             / timer tick, see `timer below
 ```
+
+They are ordinary globals whose names the compiler mangles to `z.member`, so
+either spelling defines them — `z.pg:{…}` directly, or `pg:{…}` inside a
+`\d z` block. Only the *callbacks* are namespaced: the services a script calls
+into (`` `on ``, `` `timer ``, `` `poll ``, …) stay backtick symbols, which are
+already outside the global namespace.
 
 The dyadic form is what `.z.w` is for in q. Because the handler is *given* the
 handle, it can park it and answer later — from a different dispatch entirely —
 which is how a gateway forwards a query and routes the answer back to the
 client that asked. Returning blank sends nothing.
 
-`` `on[h;f] `` attaches `f` to one handle and takes priority over `pg`/`ps`, so
+`` `on[h;f] `` attaches `f` to one handle and takes priority over `z.pg`/`z.ps`, so
 one process can speak different protocols to different peers. A handler
 attached to a listening handle is inherited by the clients it accepts.
 
@@ -498,7 +505,7 @@ back:{[m]                     / backend answered (sq;payload)
   uh 2: (`res; m 1) }
 `on[bh; back]
 
-pg:{[h;m]                     / client asked: remember h, forward, reply LATER
+z.pg:{[h;m]                   / client asked: remember h, forward, reply LATER
   seq:: seq+1
   sqs:: sqs,seq
   uhs:: uhs,h
@@ -516,7 +523,7 @@ Runnable versions of all three tiers are in `test/ipcback.k`,
 - `` `prng[] `` **Random number**
 - `` `t[] `` **Clock** - microseconds on a monotonic clock; for elapsed time, not wall time
 - `` `sleep[ms] `` **Sleep** - block for `ms` milliseconds (fractional is fine; ≤0 is a no-op)
-- `` `timer[ms] `` **Timer** - call the global `ts` every `ms` ms while the event
+- `` `timer[ms] `` **Timer** - call the global `z.ts` every `ms` ms while the event
   loop runs. `` `timer[0] `` stops it, `` `timer[] `` reads it back.
 - `` `on[h;f] `` **Attach handler** - `` `on[h;] `` detaches, `` `on[h] `` reads it back
 - `` `conns[] `` **Open handles** - ascending int vector

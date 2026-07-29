@@ -9,7 +9,7 @@
 /   < h             close handle h
 /
 / There is no negative-handle form: whether a send is answered is decided by the
-/ REMOTE side (a `pg` handler replies, a `ps` handler does not), not by the
+/ REMOTE side (a `z.pg` handler replies, a `z.ps` handler does not), not by the
 / sender. See doc/reference.md "IPC".
 /
 / Start the server first:  ink test/server.k

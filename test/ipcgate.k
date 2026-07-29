@@ -1,6 +1,6 @@
 / test/ipcgate.k — gateway for the IPC test: async in both directions.
 /
-/ This is the shape that needs a caller's identity.  `pg` is DYADIC, so it is
+/ This is the shape that needs a caller's identity.  `z.pg` is DYADIC, so it is
 / handed the handle the message came in on; it parks that handle, forwards the
 / query to the backend, and returns blank — no reply yet.  When the backend
 / answers (on a different handle, dispatched by `on`) the parked handle is what
@@ -26,13 +26,13 @@ back:{[m]
 `on[bh; back]
 
 / a client asked something: park the handle, forward, answer later
-pg:{[h;m]
+z.pg:{[h;m]
   seq:: seq+1
   sqs:: sqs,seq
   uhs:: uhs,h
   bh 2: (seq; m) }
 
-po:{[h] `0 0: "gate: peer ",($h)," in"}
-pc:{[h] `0 0: "gate: peer ",($h)," out"}
+z.po:{[h] `0 0: "gate: peer ",($h)," in"}
+z.pc:{[h] `0 0: "gate: peer ",($h)," out"}
 
 \p 5210

@@ -187,7 +187,7 @@ fn setHandler(vm: *VM, args: []const V) V {
   return .blank;
 }
 
-/// `` `timer[ms] `` — call the global `ts` every `ms` milliseconds while the
+/// `` `timer[ms] `` — call the global `z.ts` every `ms` milliseconds while the
 /// event loop runs.  `` `timer[0] `` stops it, `` `timer[] `` reads the interval.
 fn timerCtl(vm: *VM, args: []const V) V {
   const has_arg = args.len == 1 and args[0] != .blank;

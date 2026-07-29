@@ -7,19 +7,27 @@ message, so a process could answer *only* whoever it was mid-dispatch for — it
 could not park a handle and reply later, which is the one thing a gateway or a
 load balancer is built on. Closed that, and the surrounding gaps.
 
-- **Handlers are arity-dispatched: `pg:{[h;m] …}` is given the handle the message
-  arrived on.** This is what `.z.w` is for in q; ink has no `.z` namespace because
-  `.` is a verb, so the caller's identity is simply a second argument. A handler
-  can now stash the handle and answer out of band, from a different dispatch —
-  `test/ipcgate.k` forwards a query to a backend and routes the answer back to
-  the client that asked. The monadic form `pg:{[m] …}` is unchanged.
-- **`ps` now means what its name says.** `pg` replies with a non-blank result;
-  `ps` is the async side and never replies, even when it returns a value.
-- **New hooks, all plain globals:** `po:{[h] …}` a peer connected, `pc:{[h] …}` a
-  peer went away (q's `.z.pc` — previously a connection was dropped silently, so
-  the failure handling that all three `doc/architecture/*.q` files hang off had
-  no equivalent), `ts:{[] …}` timer tick.
-- **`` `timer[ms] `` drives `ts` from the event loop**; `` `timer[0] `` stops it,
+- **Handlers are arity-dispatched: `z.pg:{[h;m] …}` is given the handle the
+  message arrived on.** This is what `.z.w` is for in q; ink cannot spell `.z`
+  because `.` is a verb, so the caller's identity is simply a second argument. A
+  handler can now stash the handle and answer out of band, from a different
+  dispatch — `test/ipcgate.k` forwards a query to a backend and routes the answer
+  back to the client that asked. The monadic form `z.pg:{[m] …}` is unchanged.
+- **The hooks live in a `z` namespace** — q's `.z` minus the dot. They were bare
+  globals, which squatted five short names in every program; `ts` in particular
+  is a name anyone with timestamps would reach for. They are ordinary globals
+  that the compiler mangles to `z.member`, so `z.pg:{…}` and a `pg:{…}` inside a
+  `\d z` block are the same definition. Only the *callbacks* moved: the services
+  a script calls into (`` `on ``, `` `timer ``, `` `poll ``, …) stay backtick
+  symbols, which are already outside the global namespace — and the split keeps
+  "I call the runtime" visibly distinct from "the runtime calls me".
+- **`z.ps` now means what its name says.** `z.pg` replies with a non-blank
+  result; `z.ps` is the async side and never replies, even when it returns one.
+- **New hooks:** `z.po:{[h] …}` a peer connected, `z.pc:{[h] …}` a peer went away
+  (q's `.z.pc` — previously a connection was dropped silently, so the failure
+  handling that all three `doc/architecture/*.q` files hang off had no
+  equivalent), `z.ts:{[] …}` timer tick.
+- **`` `timer[ms] `` drives `z.ts` from the event loop**; `` `timer[0] `` stops it,
   `` `timer[] `` reads it. `\t` was and stays a *benchmark* (time n runs of an
   expression), which is why the timer is a symbol and not a command. The
   reconnect-with-backoff loop in `service.q`/`gateway.q` is now expressible.
