@@ -1234,6 +1234,48 @@ test "grade ascending list" {
   try t.check("<(\"b\";\"a\";\"c\")", "1 0 2");
 }
 
+// `=d` groups a dict by its VALUES: each distinct value → the list of keys
+// carrying it. Same verb as `=X`, with keys standing in for a vector's indices.
+test "group dict" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("=`a`b`c`d!1 0 1 0", "0 1!(`b`d;`a`c)");
+  try t.check("=\"quicksort\"!\"quicksort\"<\"k\"", "01b!(\"quksort\";\"ic\")");
+  // All-distinct values still give one-element key lists, and `==` inverts.
+  try t.check("==\"missisippi\"", "(1 4 6 9;,0;7 8;2 3 5)!(,\"i\";,\"m\";,\"p\";,\"s\")");
+  try t.check("=`a!3", ",3!,,`a"); //  scalar-key dict: one entry, one key list
+  try t.check("=()!()", "()"); //      empty groups to an empty list, like `=()`
+  try t.check("=`a`b!(1 2;1 2)", ",1 2!,`a`b"); // list values compare by value
+}
+
+// x@d maps the index through the dict's VALUES, keys unchanged.
+test "pick through dict" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("1 2 3 4@`x`y!(0 2;1)", "[x:1 3;y:2]");
+  try t.check("1 2 3 4 `x`y!(0 2;1)", "[x:1 3;y:2]"); // juxtaposition, same thing
+  try t.check("\"quicksort\"@=\"quicksort\"<\"k\"", "01b!(\"quksort\";\"ic\")");
+  try t.check("`a`b`c@`x`y!(2;0 1)", "[x:`c;y:`a`b]");
+  try t.check("1 2 3@`x!,7", "!length");
+}
+
+test "reverse dict" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("|`a`b`c!1 2 3", "[c:3;b:2;a:1]");
+  try t.check("|=\"missisippi\"", "\"spmi\"!(2 3 5;7 8;,0;1 4 6 9)");
+  try t.check("|()!()", "[]");
+  try t.check("|`a!3", "[a:3]"); //                single entry — identity
+  try t.check("|[[k:`c`a`b]v:3 1 2]", "[[k:`b`a`c]v:2 1 3]"); // keyed table: rows
+}
+
+// The three together are what the classic k quicksort needs: partition by a
+// random pivot with `=` over a dict, flip the groups with `|`, recurse, join.
+test "quicksort one-liner" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("f:{$[2>#?x;x;,/f'|=x!x<*1?x]}; f\"quicksort\"", "\"cikoqrstu\"");
+  try t.check("f:{$[2>#?x;x;,/f'|=x!x<*1?x]}; f 5 3 9 1 3 7 0", "0 1 3 3 5 7 9");
+  // The `x@=mask` spelling of the same partition.
+  try t.check("g:{$[2>#?x;x;,/g'|x@=x<*1?x]}; g\"mississippi\"", "\"iiiimppssss\"");
+}
+
 // A dict grades to the dict itself with its entries reordered by value — its
 // "indices" are its keys, so a permutation would drop the values that ordered
 // it. A table grades like any other array, to row indices (see below).

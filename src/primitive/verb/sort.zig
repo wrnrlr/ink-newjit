@@ -166,9 +166,9 @@ fn sortDict(vm: *VM, x: V, desc: bool) V {
   const g = gradeAny(vm, vals, desc);
   if (g.tag() == .err) return g;
   defer g.deinit(vm.alloc);
-  const nk = permute(vm, keys, g);
+  const nk = pick.permute(vm, keys, g);
   if (nk.tag() == .err) return nk;
-  const nv = permute(vm, vals, g);
+  const nv = pick.permute(vm, vals, g);
   if (nv.tag() == .err) { nk.deinit(vm.alloc); return nv; }
   const d = Dict.init(vm.alloc, nk, nv) catch {
     nk.deinit(vm.alloc); nv.deinit(vm.alloc);
@@ -181,11 +181,6 @@ fn sortDict(vm: *VM, x: V, desc: bool) V {
 fn gradeAny(vm: *VM, v: V, desc: bool) V {
   if (v.tag() == .M) return gradeTable(vm, v, desc);
   return sortIndices(vm.alloc, v, desc);
-}
-
-fn permute(vm: *VM, v: V, g: V) V {
-  if (v.tag() == .M) return pick.pickTableRowVecFn(vm, v, g);
-  return pick.pickVecFn(vm, v, g);
 }
 
 // Row grade for a table: rows compare lexicographically over the columns, left

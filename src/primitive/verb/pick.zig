@@ -63,7 +63,39 @@ pub const Pick = struct {
 
   _S_s: VM.Dyad = pickSymAtomFn,
   _S_S: VM.Dyad = pickSymVecFn,
+
+  // x@d → the dict's values indexed into x, keys carried along unchanged
+  _B_m: VM.Dyad = pickDictMapFn,
+  _I_m: VM.Dyad = pickDictMapFn,
+  _F_m: VM.Dyad = pickDictMapFn,
+  _N_m: VM.Dyad = pickDictMapFn,
+  _D_m: VM.Dyad = pickDictMapFn,
+  _H_m: VM.Dyad = pickDictMapFn,
+  _S_m: VM.Dyad = pickDictMapFn,
+  _C_m: VM.Dyad = pickDictMapFn,
+  _L_m: VM.Dyad = pickDictMapFn,
 };
+
+// x@d — index-at maps through the dict's VALUES and leaves the keys alone, so
+// `(x@d)[k]` is `x@d[k]`. The same rule as `x@(y0;y1;…)`, with the keys carried
+// along instead of a list shape: `"quicksort"@=b` turns the mask's index groups
+// into the character groups they select.
+fn pickDictMapFn(vm: *VM, x: V, y: V) V {
+  const mapped = pickElement(vm.alloc, x, y.m.bv());
+  if (mapped.tag() == .err) return mapped;
+  const d = Dict.init(vm.alloc, y.m.av().ref(), mapped) catch {
+    mapped.deinit(vm.alloc);
+    return V{ .err = .memory };
+  };
+  return V{ .m = d };
+}
+
+/// Reorder any array-ish value by an index vector: a table gathers rows,
+/// everything else gathers elements. Shared by the grade and reverse verbs.
+pub fn permute(vm: *VM, x: V, g: V) V {
+  if (x.tag() == .M) return pickTableRowVecFn(vm, x, g);
+  return pickVecFn(vm, x, g);
+}
 
 
 fn pickTypedVec(comptime xk: K, alloc: Alloc, x: V, indices: []const i32) V {

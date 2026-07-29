@@ -5,6 +5,8 @@ const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const Dict = @import("../../noun/dict.zig").Dict;
 const VM = @import("../../runtime/vm.zig").VM;
+const pick = @import("pick.zig");
+const promote = @import("../promote.zig").promote;
 
 pub const Group = struct {
   pub const op = .@"=";
@@ -14,6 +16,7 @@ pub const Group = struct {
   _F: VM.Monad = groupFloatsFn,
   _C: VM.Monad = groupByteFn,
   _L: VM.Monad = groupValuesFn,
+  _m: VM.Monad = groupDictFn,
 };
 
 fn genGroupHash(comptime k: K) VM.Monad {
@@ -27,6 +30,75 @@ fn genGroupHash(comptime k: K) VM.Monad {
 fn groupByteFn(vm: *VM, x: V) V { return groupByte(vm.alloc, x.C.slice()); }
 fn groupFloatsFn(vm: *VM, x: V) V { return groupFloats(vm.alloc, x.F.slice()); }
 fn groupValuesFn(vm: *VM, x: V) V { return groupValues(vm.alloc, x.L.slice()); }
+
+// =d — group a dict by its VALUES: every distinct value maps to the LIST of keys
+// carrying it. The same verb as `=X`, with a dict's keys standing in where a
+// vector's indices would be (`=X` reports indices precisely because a vector's
+// keys ARE its indices). Runs the positional group over the value half, then
+// maps each index list back through the keys.
+fn groupDictFn(vm: *VM, x: V) V {
+  const keys = x.m.av();
+  const vals = x.m.bv();
+  // A scalar-key dict is a single entry stored unwrapped: its lone value groups
+  // to a one-element list holding its lone key.
+  if (keys.isAtom()) return groupSingleton(vm, keys, vals);
+  const g = groupPositions(vm, vals);
+  // An empty group is an empty list, not a dict (same as `=()`) — hand it back.
+  if (g.tag() != .m) return g;
+  defer g.deinit(vm.alloc);
+  const idx = g.m.bv();
+  const out = N(V).init(vm.alloc, idx.len()) catch return V{ .err = .memory };
+  @memset(out.slice(), .blank);
+  for (out.slice(), 0..) |*slot, i| {
+    const iv = idx.at(i);
+    defer iv.deinit(vm.alloc);
+    const picked = pick.pickVecFn(vm, keys, iv);
+    if (picked.tag() == .err) {
+      (V{ .L = out }).deinit(vm.alloc);
+      return picked;
+    }
+    slot.* = picked;
+  }
+  const d = Dict.init(vm.alloc, g.m.av().ref(), .{ .L = out }) catch {
+    (V{ .L = out }).deinit(vm.alloc);
+    return V{ .err = .memory };
+  };
+  return V{ .m = d };
+}
+
+// The positional group of a dict's value half — the same kernels `=X` uses.
+fn groupPositions(vm: *VM, v: V) V {
+  return switch (v) {
+    .B => |n| groupHash(bool, vm.alloc, n.slice()),
+    .I => |n| groupHash(i32,  vm.alloc, n.slice()),
+    .S => |n| groupHash(u32,  vm.alloc, n.slice()),
+    .F => |n| groupFloats(vm.alloc, n.slice()),
+    .C => |n| groupByte(vm.alloc, n.slice()),
+    .L => |n| groupValues(vm.alloc, n.slice()),
+    else => V{ .err = .@"type" },
+  };
+}
+
+fn groupSingleton(vm: *VM, key: V, val: V) V {
+  const kl = N(V).init(vm.alloc, 1) catch return V{ .err = .memory };
+  kl.slice()[0] = key.ref();
+  const vl = N(V).init(vm.alloc, 1) catch {
+    (V{ .L = kl }).deinit(vm.alloc);
+    return V{ .err = .memory };
+  };
+  vl.slice()[0] = val.ref();
+  const group = N(V).init(vm.alloc, 1) catch {
+    (V{ .L = kl }).deinit(vm.alloc);
+    (V{ .L = vl }).deinit(vm.alloc);
+    return V{ .err = .memory };
+  };
+  group.slice()[0] = promote(vm.alloc, kl);
+  const d = Dict.init(vm.alloc, promote(vm.alloc, vl), .{ .L = group }) catch {
+    (V{ .L = group }).deinit(vm.alloc);
+    return V{ .err = .memory };
+  };
+  return V{ .m = d };
+}
 
 // Build a key V from a permuted slice of raw keys (perm[i] = source index for sorted position i)
 fn keyVec(comptime T: type, alloc: Alloc, keys: []const T, perm: []const usize) !V {

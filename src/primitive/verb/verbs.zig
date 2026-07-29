@@ -287,6 +287,7 @@ const Monads = struct {
   pub const @"!d" = Keys;
   pub const @"&x" = @import("where.zig").Where;
   pub const @"|x" = @import("reverse.zig").Reverse;
+  pub const @"|m" = @import("reverse.zig").ReverseDict;
   pub const @"⍋x" = sort.Ascend;
   pub const @"⍒x" = sort.Descend;
   pub const @"<s" = Open;    // file open by symbol (overrides degenerate sort._s)

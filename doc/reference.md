@@ -279,6 +279,9 @@ while assigment of globals in a lambda happen with a double colon `::`
 - `>m` **Decend** - Sort dict by decending values
 - `<t` **Ascend** - Indices that sort table t's rows ascending, comparing the columns left to right, so `t@<t` sorts. `` <[[]a:3 1 2;b:`x`y`z] `` → `1 2 0`
 - `>t` **Decend** - Indices that sort table t's rows decending. A keyed table is an `m`, so it follows the dict rule instead: reordered by its value rows, with the key rows following along.
+- `=d` **Group** - group d by its values: each distinct value → the list of keys carrying it. `` =`a`b`c`d!1 0 1 0 `` → `` 0 1!(`b`d;`a`c) ``. Same verb as `=X`, with a dict's keys standing in where a vector's indices would be, so `==X` inverts a group.
+- `|d` **Reverse** - reverse the entry order, keys and values together. `` |`a`b`c!1 2 3 `` → `` [c:3;b:2;a:1] ``. A keyed table reverses its rows.
+- `x@d` **Apply** - index x through d's values, keys unchanged: `(x@d)[k]` is `x@d[k]`. `` 1 2 3 4@`x`y!(0 2;1) `` → `` [x:1 3;y:2] ``
 - `x!y` **Key** - dictionary creation
 - `X#d` **TakeKeys** - filter dictionary d to keys X
 - `X_d` **DropKeys** - remove keys X from dictionary d
