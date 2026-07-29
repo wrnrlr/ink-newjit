@@ -2,14 +2,17 @@
 /
 / usage:  ink test/client.k
 /
-/ Convention:
+/ Convention (the TEXT protocol — see test/ipccli.k for the binary one):
 /   > "host:port"   connect to server → handle h  (positive integer)
-/   h 0: msg        synchronous write (send, no wait for reply)
-/   -h 0: msg       asynchronous write (fire-and-forget, same as sync for now)
+/   h 0: msg        write one newline-terminated message
 /   0: h            read one newline-terminated message (blocks until data arrives)
 /   < h             close handle h
 /
-/ Start the server first:  ink test/ipc_server.k
+/ There is no negative-handle form: whether a send is answered is decided by the
+/ REMOTE side (a `pg` handler replies, a `ps` handler does not), not by the
+/ sender. See doc/reference.md "IPC".
+/
+/ Start the server first:  ink test/server.k
 
 h: > "127.0.0.1:5001"         / connect to server
 

@@ -47,17 +47,17 @@ pub const Unmarshal = struct {
 
 fn marshal_s_C(vm: *VM, x: V, y: V) V {
   const s = vm.getSymbol(x.s);
-  if (std.mem.eql(u8, s, "bin")) return binary.serialize(vm.alloc, &vm.symbols, y) catch return V{ .err = .memory };
+  if (std.mem.eql(u8, s, "bin")) return binary.serialize(vm.alloc, &vm.symbols, y, vm) catch return V{ .err = .memory };
   return .{ .err = .domain };
 }
 fn marshal_s_B(vm: *VM, x: V, y: V) V {
   const s = vm.getSymbol(x.s);
-  if (std.mem.eql(u8, s, "") or std.mem.eql(u8, s, "bin")) return binary.serialize(vm.alloc, &vm.symbols, y) catch return V{ .err = .memory };
+  if (std.mem.eql(u8, s, "") or std.mem.eql(u8, s, "bin")) return binary.serialize(vm.alloc, &vm.symbols, y, vm) catch return V{ .err = .memory };
   return .{ .err = .domain };
 }
 fn marshal_bin_only(vm: *VM, x: V, y: V) V {
   const s = vm.getSymbol(x.s);
-  if (std.mem.eql(u8, s, "bin")) return binary.serialize(vm.alloc, &vm.symbols, y) catch return V{ .err = .memory };
+  if (std.mem.eql(u8, s, "bin")) return binary.serialize(vm.alloc, &vm.symbols, y, vm) catch return V{ .err = .memory };
   return .{ .err = .domain };
 }
 
@@ -92,6 +92,6 @@ fn unmarshal_s_i(vm: *VM, x: V, y: V) V {
 
 fn unmarshalDispatch(vm: *VM, s: []const u8, data: []const u8) V {
   const eql = std.mem.eql;
-  if (eql(u8, s, "bin")) return binary.deserialize(vm.alloc, &vm.symbols, data) catch return V{ .err = .memory };
+  if (eql(u8, s, "bin")) return binary.deserialize(vm.alloc, &vm.symbols, data, vm) catch return V{ .err = .memory };
   return .{ .err = .domain };
 }

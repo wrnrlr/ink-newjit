@@ -344,6 +344,8 @@ The IO system is organized around file descriptors (filename, port number, etc.)
 - `` `stdout 1: y `` / `` `stderr 1: y `` write raw bytes with **no** trailing newline and flush.
 - Writing to a path that doesn't exist **creates** the file (`` "new.txt" 1: bytes ``); the same holds for `` x 0: y ``. (Reads still require the file to exist.)
 - `` 2: y `` **LoadCode** - used for importing other files
+- `` 2: h `` **Receive** - on a connection handle, block for one binary message
+- `` h 2: y `` **Send** - on a connection handle, send `y` as one binary message
 - `` 9: x `` **Place** — upload x to the GPU; returns a placed-array descriptor dict `[gpu:handle;t;n;s]`.
 - `` d 9: x `` **PlaceInto** — overwrite placement `d`'s buffer in place (no realloc); returns `d`
 - `` 8: d `` **Fetch** — sync + read a placed array back to the host, reshaped to its `s`; a `tbl` descriptor reads every column and rebuilds the table
@@ -402,11 +404,125 @@ literal with a leading space is a negative literal, so `abs -4` applies `abs` to
 step mod clamp mix smoothstep floor fract sign tanh length normalize`.
 
 
+## IPC
+
+Processes talk over TCP. **Verbs move data; backtick-symbols configure the
+runtime; bare globals are the hooks.** There is no `.z` namespace — `.` is a
+verb, so a handler that needs to know who called takes an extra argument
+instead.
+
+### Connections
+
+```k
+h: > "127.0.0.1:5010"   / connect; a dead address returns an error VALUE
+h: > 5010               / listen, blocking until the first client connects
+h: > -5010              / listen without blocking, serve via the event loop
+< h                     / close
+```
+
+`\p 5010` is the same as `> -5010` and is the usual way to open a service.
+Handles are integers (≥ 32768, so they never collide with file handles). A
+failed connect is an ordinary error value, which is what a reconnect loop
+tests each tick:
+
+```k
+iserr:{`"!"~@x}
+c: > "127.0.0.1:5010"
+$[iserr c; retry[]; connected c]
+```
+
+### Messages
+
+`h 2: v` sends `v` as one length-prefixed binary message; `2: h` blocks for
+one. Every value class travels: atoms, vectors, general lists, dicts, tables
+and keyed tables go structurally; **lambdas, projections, derived verbs and
+trains travel as their source text and are re-compiled by the receiver**, so a
+function arrives callable. Only foreign objects (`x`, e.g. GPU handles) are
+rejected. A function's text is compiled — not run — on arrival, but any global
+it names resolves in the *receiver's* scope, so treat an inbound function the
+way you would treat inbound code.
+
+For a byte- or line-oriented protocol (HTTP, LSP) use `0:` and `1:` on the same
+handle instead; they do no framing and no serialization.
+
+### Handlers
+
+A handler is a plain global. Its **arity** picks the calling convention:
+
+```k
+pg:{[m] "echo: ", m}    / message only; a non-blank result is sent back
+pg:{[h;m] …}            / also given the handle it arrived on
+ps:{[m] …}              / same, but never replies (the async side)
+po:{[h] …}              / a peer connected
+pc:{[h] …}              / a peer went away
+ts:{[] …}               / timer tick, see `timer below
+```
+
+The dyadic form is what `.z.w` is for in q. Because the handler is *given* the
+handle, it can park it and answer later — from a different dispatch entirely —
+which is how a gateway forwards a query and routes the answer back to the
+client that asked. Returning blank sends nothing.
+
+`` `on[h;f] `` attaches `f` to one handle and takes priority over `pg`/`ps`, so
+one process can speak different protocols to different peers. A handler
+attached to a listening handle is inherited by the clients it accepts.
+
+### Event loop
+
+The loop polls every connection, fires the timer, accepts new clients, and
+dispatches one message per ready handle per pass. A script enters it
+automatically when it finishes with work outstanding: a listening port, a
+timer, or a handler attached to an outbound connection — that last case is what
+lets a *client* process sit waiting for replies without listening on a port it
+does not need. `` `serve[] `` enters it explicitly; `` `poll[] `` runs a single
+non-blocking pass, which is what a render loop wants.
+
+It is single-threaded: a handler that blocks (on `2: h`, say, to forward a
+query synchronously) stalls every other connection until it returns. Prefer
+`` `on `` plus a dyadic handler when that matters.
+
+### Worked shape
+
+```k
+/ gateway: park the caller, forward, answer out of band
+sqs: !0                       / outstanding sequence numbers
+uhs: !0                       / the client handle each belongs to
+seq: 0
+bh: > "127.0.0.1:5211"        / long-lived connection to the backend
+
+back:{[m]                     / backend answered (sq;payload)
+  i: *&sqs=m 0
+  uh: uhs i
+  sqs:: sqs _ i
+  uhs:: uhs _ i
+  uh 2: (`res; m 1) }
+`on[bh; back]
+
+pg:{[h;m]                     / client asked: remember h, forward, reply LATER
+  seq:: seq+1
+  sqs:: sqs,seq
+  uhs:: uhs,h
+  bh 2: (seq; m) }
+\p 5210
+```
+
+Runnable versions of all three tiers are in `test/ipcback.k`,
+`test/ipcgate.k` and `test/ipccli.k`.
+
 ## Special Symbols
 - `` `argv[] `` **Arguments** - list of cmd-line args (also in global `x`)
 - `` `env[] `` **Environment variables** - dict of env variables
 - `` `dir p `` **Directory walk** - recursively list file paths under directory `p` (a char vector), skipping hidden/build dirs; returns a list of path strings. Apply by **juxtaposition** (`` `dir p ``), not `@`.
 - `` `prng[] `` **Random number**
+- `` `t[] `` **Clock** - microseconds on a monotonic clock; for elapsed time, not wall time
+- `` `sleep[ms] `` **Sleep** - block for `ms` milliseconds (fractional is fine; ≤0 is a no-op)
+- `` `timer[ms] `` **Timer** - call the global `ts` every `ms` ms while the event
+  loop runs. `` `timer[0] `` stops it, `` `timer[] `` reads it back.
+- `` `on[h;f] `` **Attach handler** - `` `on[h;] `` detaches, `` `on[h] `` reads it back
+- `` `conns[] `` **Open handles** - ascending int vector
+- `` `peer[h] `` **Peer address** - `"ip:port"` of the far end, `""` while only listening
+- `` `poll[] `` **Pump** - one non-blocking pass of the event loop
+- `` `serve[] `` **Serve** - run the event loop forever
 - Inverse trig `` `asin@x ``, `` `acos@x ``, `` `atan@x `` (element-wise over F vectors), `` `atan2@(y;x) `` (broadcasts scalar⊕vector) — no verb glyph, added for equirectangular UV mapping (see `demo/earth.k`)
 - Exit `` `exit@i ``
 
@@ -420,7 +536,10 @@ A command always starts at the beginning of a line with `\`.
   (`gemm`, `linear`, …) without that. Runtime no-op — it is read by the module indexer.
 - `\l name` - Load `name` module from `$INK_HOME/lib/<name>.k`
 - `\l name.k` - Loads `name` module from `$PWD/<name>.k`
-- `\t:n expr` - Time elapsed in milliseconds after n runs (n is optional).
+- `\p port` - Listen on `port` and serve through the event loop when the script
+  finishes. Same as `> -port` but discards the handle. See [IPC](#ipc).
+- `\t:n expr` - Time elapsed in milliseconds after n runs (n is optional). This
+  is a benchmark, **not** a repeating timer — for that use `` `timer[ms] ``.
 
 ## Native Extension
 Ink supports writing native extensions based on a FFI.

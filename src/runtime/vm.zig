@@ -58,6 +58,10 @@ pub const VM = struct {
   current_chunk: *Chunk,
   fs: Fs, conns: Conns,
   listen_handle: ?u32 = null,
+  // `` `timer[ms] `` tick for the global `ts` handler; 0 = off.  `timer_next`
+  // is the next due time on the same microsecond clock `` `t `` reads.
+  timer_ms: u32 = 0,
+  timer_next: i64 = 0,
   fn_tables: FnTables,
   ext: ExtRegistry,
   out: ?*std.Io.Writer = null,

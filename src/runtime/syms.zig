@@ -8,12 +8,14 @@ const VM = @import("vm.zig").VM;
 const exec_mod = @import("../primitive/verb/exec.zig");
 const Op1 = @import("../noun/operator.zig").Op1;
 const dispatch1 = @import("../primitive/dispatch.zig").dispatch1;
+const serve = @import("serve.zig");
+const Conns = @import("registry.zig").Conns;
 
 // Microsecond clock.  std.time has no timestamp fns and posix clock_gettime
 // doesn't compile for Windows, so branch at comptime per platform.
 extern "kernel32" fn GetSystemTimeAsFileTime(*std.os.windows.FILETIME) callconv(.winapi) void;
 
-fn microsNow() i64 {
+pub fn microsNow() i64 {
   if (builtin.os.tag == .windows) {
     var ft: std.os.windows.FILETIME = undefined;
     GetSystemTimeAsFileTime(&ft);
@@ -54,6 +56,16 @@ pub fn apply(vm: *VM, sym_idx: u32, args: []const V) !V {
     if (args.len == 2 and args[0] != .blank) return forkExec(vm, args[0], args[1]);
     return V{ .err = .rank };
   }
+  // ── IPC / event loop ──────────────────────────────────────────────────────
+  // Verbs move data (`> < 2:`); these symbols configure the runtime around it.
+  // See doc/reference.md "IPC".
+  if (eql(u8, name, "sleep")) return sleepMs(args);
+  if (eql(u8, name, "poll"))  { serve.pollOnce(vm, .blank); return .blank; }
+  if (eql(u8, name, "serve")) { serve.runLoop(vm); return .blank; }
+  if (eql(u8, name, "conns")) return listConns(vm);
+  if (eql(u8, name, "peer"))  return peerName(vm, args);
+  if (eql(u8, name, "on"))    return setHandler(vm, args);
+  if (eql(u8, name, "timer")) return timerCtl(vm, args);
   // Any monadic primitive is callable as a symbol: `` `sin x ``, `` `first x ``,
   // `` `parse x `` route to the SAME Op1 kernel the (now-removed) keyword verb used
   // (type-preserving — `` `sqr `` on ints stays int, unlike the f32-widening mapUnary
@@ -74,6 +86,123 @@ pub fn apply(vm: *VM, sym_idx: u32, args: []const V) !V {
   // cube root: f32-widening (cbrt of an int isn't an int), signed like std.math.cbrt.
   if (eql(u8, name, "cbrt")) return mapUnary(vm, args, fCbrt);
   return V{ .err = .@"type" };
+}
+
+// ── IPC helpers ─────────────────────────────────────────────────────────────
+
+/// `` `sleep[ms] `` — block for `ms` milliseconds.  Fractional values are fine
+/// (`` `sleep[0.5] ``); a negative or null delay is a no-op rather than an error,
+/// so a computed backoff that goes negative just doesn't sleep.
+fn sleepMs(args: []const V) V {
+  if (args.len != 1 or args[0] == .blank) return V{ .err = .rank };
+  const ms: f64 = switch (args[0]) {
+    .i => |x| if (x == V.@"0N") return .blank else @floatFromInt(x),
+    .n => |x| @floatFromInt(x),
+    .b => |x| if (x) 1.0 else 0.0,
+    .f => |x| if (std.math.isNan(x)) return .blank else @floatCast(x),
+    .d => |x| if (std.math.isNan(x)) return .blank else x,
+    .h => |x| if (std.math.isNan(x)) return .blank else @floatCast(x),
+    else => return V{ .err = .@"type" },
+  };
+  if (ms <= 0) return .blank;
+  const ns_total = ms * std.time.ns_per_ms;
+  // Cap at ~1 year so a runaway computation can't wedge the process forever.
+  const capped = @min(ns_total, @as(f64, 365 * 24 * 3600) * std.time.ns_per_s);
+  const secs: i64 = @intFromFloat(@divFloor(capped, std.time.ns_per_s));
+  const nsec: i64 = @intFromFloat(@mod(capped, std.time.ns_per_s));
+  sleepFor(secs, nsec);
+  return .blank;
+}
+
+fn sleepFor(secs: i64, nsec: i64) void {
+  if (builtin.os.tag == .windows) {
+    const ms: u32 = @intCast(@min(@as(i64, std.math.maxInt(u32)), secs * 1000 + @divTrunc(nsec, std.time.ns_per_ms)));
+    std.os.windows.kernel32.Sleep(ms);
+  } else {
+    // nanosleep returns early on a signal; loop on the remaining time so a
+    // stray SIGCHLD (from `` `x ``) doesn't shorten the sleep.
+    var req: std.posix.timespec = .{ .sec = secs, .nsec = nsec };
+    var rem: std.posix.timespec = undefined;
+    while (std.c.nanosleep(&req, &rem) == -1) {
+      if (std.posix.errno(@as(c_int, -1)) != .INTR) break;
+      req = rem;
+    }
+  }
+}
+
+/// `` `conns[] `` — the open connection handles, ascending.  A listening handle
+/// is included; that is what `` `peer `` distinguishes.
+fn listConns(vm: *VM) V {
+  const n = vm.conns.map.count();
+  const vec = N(i32).init(vm.alloc, @intCast(n)) catch return V{ .err = .memory };
+  var i: usize = 0;
+  var it = vm.conns.map.keyIterator();
+  while (it.next()) |k| : (i += 1) vec.slice()[i] = @intCast(k.*);
+  std.mem.sort(i32, vec.slice(), {}, std.sort.asc(i32));
+  return .{ .I = vec };
+}
+
+/// `` `peer[h] `` — "ip:port" of the remote end of `h`, or "" for a handle that
+/// is still only listening.  Handy for logging and for a registry keyed by
+/// address; a protocol should still send its own address, since a peer's
+/// source port is not the port it listens on.
+fn peerName(vm: *VM, args: []const V) V {
+  if (args.len != 1 or args[0].tag() != .i) return V{ .err = .@"type" };
+  const id: u32 = @intCast(args[0].i);
+  const conn = vm.conns.get(id) orelse return V{ .err = .io };
+  const stream = conn.stream orelse return V.Chars(vm.alloc, "") catch V{ .err = .memory };
+  if (builtin.os.tag == .windows) return V.Chars(vm.alloc, "") catch V{ .err = .memory };
+  var addr: std.posix.sockaddr.storage = undefined;
+  var len: std.posix.socklen_t = @sizeOf(@TypeOf(addr));
+  std.posix.getpeername(stream.socket.handle, @ptrCast(&addr), &len) catch
+    return V.Chars(vm.alloc, "") catch V{ .err = .memory };
+  var buf: [64]u8 = undefined;
+  const text = switch (addr.family) {
+    std.posix.AF.INET => blk: {
+      const a: *const std.posix.sockaddr.in = @ptrCast(@alignCast(&addr));
+      const o: [4]u8 = @bitCast(a.addr);
+      break :blk std.fmt.bufPrint(&buf, "{d}.{d}.{d}.{d}:{d}", .{
+        o[0], o[1], o[2], o[3], std.mem.bigToNative(u16, a.port),
+      }) catch return V{ .err = .io };
+    },
+    else => "",
+  };
+  return V.Chars(vm.alloc, text) catch V{ .err = .memory };
+}
+
+/// `` `on[h;f] `` — attach handler `f` to handle `h`; `` `on[h;] `` detaches.
+/// `` `on[h] `` reads the handler back.  This is deliberately NOT `h 2: f`:
+/// `2:` means "send" for every type, functions included.
+fn setHandler(vm: *VM, args: []const V) V {
+  if (args.len == 0 or args[0].tag() != .i) return V{ .err = .@"type" };
+  const id: u32 = @intCast(args[0].i);
+  if (!Conns.isConn(id) or vm.conns.get(id) == null) return V{ .err = .io };
+  if (args.len == 1 or args[1] == .blank) {
+    if (args.len == 1) return vm.conns.getCallback(id).ref();
+    vm.conns.clearCallback(id);
+    return .blank;
+  }
+  if (args.len != 2) return V{ .err = .rank };
+  vm.conns.setCallback(id, args[1].ref()) catch return V{ .err = .memory };
+  return .blank;
+}
+
+/// `` `timer[ms] `` — call the global `ts` every `ms` milliseconds while the
+/// event loop runs.  `` `timer[0] `` stops it, `` `timer[] `` reads the interval.
+fn timerCtl(vm: *VM, args: []const V) V {
+  const has_arg = args.len == 1 and args[0] != .blank;
+  if (!has_arg) return .{ .i = @intCast(vm.timer_ms) };
+  const ms: i64 = switch (args[0]) {
+    .i => |x| if (x == V.@"0N") 0 else x,
+    .n => |x| @intCast(x),
+    .b => |x| if (x) 1 else 0,
+    .f => |x| if (std.math.isNan(x)) 0 else @intFromFloat(x),
+    else => return V{ .err = .@"type" },
+  };
+  if (ms < 0) return V{ .err = .domain };
+  vm.timer_ms = @intCast(@min(ms, std.math.maxInt(u32)));
+  vm.timer_next = microsNow() + @as(i64, vm.timer_ms) * 1000;
+  return .blank;
 }
 
 fn fAsin(x: f32) f32 { return std.math.asin(x); }

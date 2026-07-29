@@ -210,8 +210,11 @@ fn evalSource(allocator: std.mem.Allocator, vm: *VM, loader: *modules.ModuleLoad
     std.process.exit(1);
   };
 
-  // If the script set \p port, enter the event loop and serve forever.
-  if (vm.listen_handle != null) {
+  // Serve forever if the script left work for the loop: a listening port
+  // (`\p` / `> -port`), a timer, or a handler on an outbound connection. That
+  // last case is what lets a pure client — one that never listens — sit in the
+  // loop waiting for replies instead of blocking on `2: h`.
+  if (serve.hasWork(vm)) {
     ffi.setCurrentVm(vm);
     serve.runLoop(vm);
   }

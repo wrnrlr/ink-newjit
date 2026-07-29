@@ -1,5 +1,31 @@
 # Issues
 
+## 27. A global named `t` hangs the process at COMPILE time
+
+```k
+t: 5
+`0 0: "END"
+```
+
+hangs forever. Not a runtime hang — **nothing at all executes**, not even a print
+placed *before* the assignment (`` `0 0: "before"; t: 5 `` prints nothing), so the
+unit never finishes compiling. `ink parse` on the same file is clean, so the
+parser is fine; it is the compiler or IR lowering.
+
+- The value is irrelevant: `t: 5`, `t: 1 2 3`, `` t: `a`b!1 2 ``, `t: [[]a:1 2]`
+  all hang. So does `t[0]: 5`.
+- **`t` is the only single letter affected** — a loop over `a`…`z` assigning
+  `1 2 3` hangs on `t` and nothing else. `tt`, `ts`, `t0`, `tb` are all fine.
+- Not the module autoloader: it still hangs with `INK_HOME` pointed at a
+  nonexistent directory, and there is no `lib/t.k`.
+- Predates the IPC work — reproduced against a build of `cf7bf04` with the
+  working tree stashed.
+
+Found while writing `test/ipccli.k`, which named a table `t`; renamed to `tb` to
+get around it. Nasty because the failure is total and silent: a script with a
+`t` global produces no output and no error, so it reads as a hang somewhere else
+entirely.
+
 ## 24. FIXED — VM stack limits, and a nested-call unwind that corrupted `current_chunk`
 
 Originally filed as "kk elementwise chains are silently wrong at 28 ops". The emitter

@@ -1,5 +1,65 @@
 # Changelog
 
+## 2026-07-31 — IPC: caller identity, timers, functions on the wire
+
+The transport worked; the process model didn't. A handler was handed only the
+message, so a process could answer *only* whoever it was mid-dispatch for — it
+could not park a handle and reply later, which is the one thing a gateway or a
+load balancer is built on. Closed that, and the surrounding gaps.
+
+- **Handlers are arity-dispatched: `pg:{[h;m] …}` is given the handle the message
+  arrived on.** This is what `.z.w` is for in q; ink has no `.z` namespace because
+  `.` is a verb, so the caller's identity is simply a second argument. A handler
+  can now stash the handle and answer out of band, from a different dispatch —
+  `test/ipcgate.k` forwards a query to a backend and routes the answer back to
+  the client that asked. The monadic form `pg:{[m] …}` is unchanged.
+- **`ps` now means what its name says.** `pg` replies with a non-blank result;
+  `ps` is the async side and never replies, even when it returns a value.
+- **New hooks, all plain globals:** `po:{[h] …}` a peer connected, `pc:{[h] …}` a
+  peer went away (q's `.z.pc` — previously a connection was dropped silently, so
+  the failure handling that all three `doc/architecture/*.q` files hang off had
+  no equivalent), `ts:{[] …}` timer tick.
+- **`` `timer[ms] `` drives `ts` from the event loop**; `` `timer[0] `` stops it,
+  `` `timer[] `` reads it. `\t` was and stays a *benchmark* (time n runs of an
+  expression), which is why the timer is a symbol and not a command. The
+  reconnect-with-backoff loop in `service.q`/`gateway.q` is now expressible.
+- **Functions travel.** A lambda, projection, derived verb or train serializes as
+  its source text and is re-compiled by the receiver, arriving callable —
+  `f: rt[{[a;b] a*b}]` then `f[6;7]` → `42` across a socket. Only foreign objects
+  (`x`, e.g. GPU handles) are still rejected. The text is compiled, not run, on
+  arrival, but any global it names resolves in the *receiver's* scope.
+- **Atoms travel.** `h 2: 42` and `` h 2: `sym `` were `!type`: the `2:` dispatch
+  table had rows for the vector types but none for the scalars, so the codec —
+  which handled atoms all along — was never reached. The reply direction always
+  worked, which is what made it hard to spot. Tier-2 `d`/`h` floats and their
+  vectors are on the wire now too.
+- **Attaching a handler moved to `` `on[h;f] ``** (`` `on[h;] `` detaches,
+  `` `on[h] `` reads it back). It used to be `h 2: f`, which is exactly the
+  spelling needed to *send* a function. `2:` means "send" for every type now,
+  with no row that quietly means something else.
+- **New: `` `sleep[ms] ``** (fractional ok, ≤0 a no-op, restarts on EINTR),
+  **`` `conns[] ``** open handles, **`` `peer[h] ``** the far end's `"ip:port"`,
+  **`` `poll[] ``** one non-blocking pass of the loop, **`` `serve[] ``** run it
+  forever.
+- **A client can run the event loop.** It used to start only if the script had
+  opened a listening port, so a process that just made outbound connections had
+  to block on `2: h`. It now starts if there is a port, a timer, *or* a handler
+  attached to any connection.
+- **No more silent starvation past 64 connections.** The poll set was a fixed
+  64-entry buffer with `if (n >= MAX_CONNS) break`, and `HashMap` iteration order
+  is not stable — so past 64 handles a *different* arbitrary subset went unpolled
+  each pass. It is sized to the live connection count now, and `POLLHUP`/`POLLERR`
+  are handled rather than only `POLLIN`.
+- **Docs.** `doc/reference.md` had the socket verbs backwards — `<c` OpenFile,
+  `<s` OpenSocket, `>n` CloseHandle — since forever; it is `>` to open and `<` to
+  close. Added an IPC section covering the whole model, and `\p`, which was
+  undocumented. `test/client.k` claimed `-h 0: msg` was an async write "same as
+  sync for now"; negative handles were never implemented and the sync/async
+  choice belongs to the receiving side, so the comment is gone.
+- `test/ipc.sh` now runs a three-tier binary suite (`ipcback` → `ipcgate` →
+  `ipccli`, 18 assertions) alongside the existing text-protocol pair.
+- On-wire format version 0x04 → 0x05.
+
 ## 2026-07-30 (later) — calls: over-application errors, `f . args` applies, 16 parameters
 
 - **Over-application is a `!rank` error instead of a silent truncation.** `{x+y}[1;2;3]`

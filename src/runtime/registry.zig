@@ -160,5 +160,19 @@ pub const Conns = struct {
     return self.callbacks.get(id) orelse .blank;
   }
 
+  pub fn clearCallback(self: *Conns, id: u32) void {
+    if (self.callbacks.fetchRemove(id)) |entry| {
+      var old = entry.value;
+      old.deinit(self.alloc);
+    }
+  }
+
+  /// True when any handle has a handler attached — the runner uses this to
+  /// decide whether a script that only made outbound connections should still
+  /// enter the event loop when it finishes.
+  pub fn hasCallbacks(self: *const Conns) bool {
+    return self.callbacks.count() > 0;
+  }
+
   pub fn isConn(id: u32) bool { return id >= BASE; }
 };

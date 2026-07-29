@@ -298,16 +298,6 @@ fn writeDataByIdValue(vm: *VM, x: V, y: V) V {
   return writeDataFallback(vm, x, y);
 }
 
-/// `handle 2: lambda` — attach a per-handle IPC callback.
-fn writeDataByIdCallback(vm: *VM, x: V, y: V) V {
-  const id: u32 = @intCast(x.i);
-  if (Conns.isConn(id)) {
-    vm.conns.setCallback(id, y.ref()) catch return V{ .err = .memory };
-    return .blank;
-  }
-  return writeDataFallback(vm, x, y);
-}
-
 pub const WriteData = struct {
   pub const op = .@"2:";
   _s_I: VM.Dyad = writeDataBySymbol,
@@ -326,16 +316,31 @@ pub const WriteData = struct {
   _C_L: VM.Dyad = writeDataByChars,
   _C_m: VM.Dyad = writeDataByChars,
   _C_M: VM.Dyad = writeDataByChars,
+  // `handle 2: value` sends ANY value the binary codec accepts — atoms and
+  // functions included.  Attaching a per-handle handler is `` `on[h;f] ``
+  // (syms.zig), not a lambda through this verb: `2:` means "send" for every
+  // type, with no row that quietly means something else.
+  _i_b: VM.Dyad = writeDataByIdValue,
+  _i_i: VM.Dyad = writeDataByIdValue,
+  _i_f: VM.Dyad = writeDataByIdValue,
+  _i_n: VM.Dyad = writeDataByIdValue,
+  _i_s: VM.Dyad = writeDataByIdValue,
+  _i_c: VM.Dyad = writeDataByIdValue,
+  _i_d: VM.Dyad = writeDataByIdValue,
+  _i_h: VM.Dyad = writeDataByIdValue,
   _i_I: VM.Dyad = writeDataByIdValue,
   _i_F: VM.Dyad = writeDataByIdValue,
   _i_S: VM.Dyad = writeDataByIdValue,
   _i_C: VM.Dyad = writeDataByIdValue,
   _i_B: VM.Dyad = writeDataByIdValue,
+  _i_N: VM.Dyad = writeDataByIdValue,
+  _i_D: VM.Dyad = writeDataByIdValue,
+  _i_H: VM.Dyad = writeDataByIdValue,
   _i_L: VM.Dyad = writeDataByIdValue,
   _i_m: VM.Dyad = writeDataByIdValue,
   _i_M: VM.Dyad = writeDataByIdValue,
-  _i_o: VM.Dyad = writeDataByIdCallback,
-  _i_p: VM.Dyad = writeDataByIdCallback,
+  _i_o: VM.Dyad = writeDataByIdValue,
+  _i_p: VM.Dyad = writeDataByIdValue,
 };
 
 pub fn writeDataFallback(vm: *VM, x: V, y: V) V {
@@ -444,6 +449,10 @@ fn parseHostPort(s: []const u8) ?struct { host: []const u8, port: u16 } {
 // Socket read / write helpers (used by the 0: and 1: handlers above)
 // ---------------------------------------------------------------------------
 
+/// Largest binary IPC frame accepted, as a sanity bound on the peer's length
+/// prefix. Well above any real message; raise it if a real one ever gets close.
+const MAX_MSG: u32 = 256 * 1024 * 1024;
+
 /// Receive one binary IPC message (4-byte LE length prefix + binary payload).
 /// Used by `2: handle` and the event loop in serve.zig.
 pub fn readConnBinary(vm: *VM, id: u32) V {
@@ -458,6 +467,10 @@ pub fn readConnBinary(vm: *VM, id: u32) V {
     total += n;
   }
   const payload_len = std.mem.readInt(u32, &len_buf, .little);
+  // The length prefix comes from the peer, so a garbled or hostile frame would
+  // otherwise ask for an arbitrary allocation up to 4 GiB before a single byte
+  // of it has arrived. Refuse the frame instead; the caller drops the conn.
+  if (payload_len > MAX_MSG) return V{ .err = .domain };
   const payload = vm.alloc.alloc(u8, payload_len) catch return V{ .err = .memory };
   defer vm.alloc.free(payload);
   total = 0;
@@ -466,13 +479,13 @@ pub fn readConnBinary(vm: *VM, id: u32) V {
     if (n == 0) return V{ .err = .io };
     total += n;
   }
-  return binary.deserialize(vm.alloc, &vm.symbols, payload) catch V{ .err = .domain };
+  return binary.deserialize(vm.alloc, &vm.symbols, payload, vm) catch V{ .err = .domain };
 }
 
 /// Send a binary IPC message (4-byte LE length prefix + binary payload).
 /// Used by `handle 2: value` and the event loop in serve.zig.
 pub fn writeConnBinary(vm: *VM, id: u32, y: V) V {
-  const ser = binary.serialize(vm.alloc, &vm.symbols, y) catch return V{ .err = .io };
+  const ser = binary.serialize(vm.alloc, &vm.symbols, y, vm) catch return V{ .err = .io };
   defer ser.deinit(vm.alloc);
   const data = ser.C.slice();
   const conn = vm.conns.get(id) orelse return V{ .err = .io };
