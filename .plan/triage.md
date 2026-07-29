@@ -427,3 +427,79 @@ Two things are wrong here:
 
 Found while implementing `<`/`>` on dicts and tables; the symptom there was that every
 test script using `t:` for a table hung before printing anything.
+
+## A lambda with 9+ parameters is accepted, then panics on partial application
+
+The parser/compiler accept any number of lambda parameters, but the call machinery is
+hard-capped at 8 in three independent places: `Fn.arity` is a `u4` (max 15),
+`Partial.args` is a `[8]V` with a `u8` `fill` bitmask, and `doCallWithMode` marshals
+through a fixed `[8]V` buffer (the compiler rejects a >8-arg *call site* with
+`error.TooManyArgs`, which is the only cap that reports).
+
+So a 9-param lambda can only ever be reached by projection, and that path is unsound:
+
+```
+f:{[a;b;c;d;e;g;h;i;j]a+j}
+((((((((f 1)2)3)4)5)6)7)8)9
+/ debug:       panic: integer does not fit in destination type
+/                     call.zig:160  @as(u8,1) << @intCast(i)   with i=8
+/ ReleaseFast: silently returns the 8-filled partial; merged[8] on a [8]V is OOB
+```
+
+`applyPartial` and `makePartialFromMerged` both loop `0..arity` over `[8]V` locals, so
+arity 9..15 reads/writes past the end. Fix: reject >8 parameters at lambda *definition*
+in the compiler (clear error at the point of the mistake), and assert the invariant in
+`makePartialFromArgs`.
+
+Related, and also silent: over-application drops the extra arguments instead of raising
+`!rank` — `{[a;b]a+b}[1;2;3]` → `3`, `{x+y}[1;;3]` → `{x+y}[1;]`.
+
+## `=` key order is sorted for I/S/B/C but first-occurrence for F/L
+
+`=x` sorts its keys for ints, symbols, bools and chars (the k7/k9-2021 contract),
+but the float and general-list kernels return groups in first-occurrence order:
+
+```
+="mississippi"        "imps"!(1 4 7 10;,0;8 9;2 3 5 6)   / sorted
+=2 1 2 2 1 1          1 2!(1 4 5;0 2 3)                  / sorted
+=1.5 0.5 1.5 0.5      1.5 0.5!(0 2;1 3)                  / NOT sorted
+=(2 2;1 1;2 2)        (2 2;1 1)!(0 2;,1)                 / NOT sorted
+```
+
+The sorted-key guarantee is what makes the classic `,/f'|=x!x<*1?x` quicksort
+work (it is exactly why k9 2021 can run it and ngn/k cannot), so code that relies
+on it silently gets a different answer as soon as the grouped values are floats or
+lists. Either sort F/L too, or document that `=` only orders the scalar-key types.
+`freq.zig` mirrors the same split deliberately, so both change together.
+
+## `=` on a general list is O(n · distinct) — FIXED 2026-07-29
+
+`groupValues` (and `freqValues`) linear-scanned the accumulated distinct keys with
+`.eq` for every element, so an all-distinct list was quadratic:
+
+```
+L:,'!10000    #=L    0.16s
+L:,'!20000    #=L    0.55s     / 2x the data, 3.4x the time
+```
+
+**FIXED:** `keying.Distinct` hands out group ids through a content hash of the
+value (`keying.hashV`, ±0.0-normalized so it agrees with `V.eq`), with hash
+buckets chained so exactness still comes from `.eq`. Now linear — `,'!10000` and
+`,'!40000` both group in 0.01s, and the 1M-element `=L` bench line went 2561ms →
+14ms at 100k distinct.
+
+## Each over a dict drops the keys — FIXED 2026-07-29
+
+`f'd` applied f to the dict's values and returned a plain list, so the canonical
+group workflow lost its labels at the last step:
+
+```
+score@=player       [alice:1 8;bob:4 5;carol:2 7]   / good
+|/'score@=player    8 5 7                           / ngn/k: `alice`bob`carol!8 5 7
+```
+
+**FIXED:** `each` now branches on the mapping types — a dict maps over its values
+and comes back keyed the same way, and a table maps over its ROWS. The table half
+also fixes an out-of-bounds read: `#t` counts rows but `t.at(i)` reads the i'th
+COLUMN, so `{x}'` over a table with more rows than columns indexed past the end of
+the column list.

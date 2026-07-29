@@ -6,6 +6,7 @@ const N = @import("../../noun/array.zig").N;
 const Dict = @import("../../noun/dict.zig").Dict;
 const VM = @import("../../runtime/vm.zig").VM;
 const pick = @import("pick.zig");
+const keying = @import("keying.zig");
 const promote = @import("../promote.zig").promote;
 
 pub const Group = struct {
@@ -22,9 +23,72 @@ pub const Group = struct {
 fn genGroupHash(comptime k: K) VM.Monad {
   return struct {
     fn f(vm: *VM, x: V) V {
-      return groupHash(K.backing(k), vm.alloc, @field(x, @tagName(k)).slice());
+      const T = K.backing(k);
+      const data = @field(x, @tagName(k)).slice();
+      // Small value range → address buckets directly: no hashing, and ascending
+      // buckets already give the ascending key order group promises.
+      if (keying.denseRange(T, data)) |r| return groupDense(T, vm.alloc, data, r);
+      return groupHash(T, vm.alloc, data);
     }
   }.f;
+}
+
+// Direct-bucket group: count, lay out one index array per non-empty bucket, fill.
+// Two passes over the data, none of them hashing.
+fn groupDense(comptime T: type, alloc: Alloc, data: []const T, r: keying.Dense) V {
+  const counts = alloc.alloc(u32, r.span) catch return V{ .err = .memory };
+  defer alloc.free(counts);
+  @memset(counts, 0);
+  for (data) |v| counts[keying.bucketOf(v, r.min)] += 1;
+
+  var n_groups: usize = 0;
+  for (counts) |c| { if (c != 0) n_groups += 1; }
+
+  const gid = alloc.alloc(u32, r.span) catch return V{ .err = .memory };
+  defer alloc.free(gid);
+  const result = N(V).init(alloc, n_groups) catch return V{ .err = .memory };
+  @memset(result.slice(), .blank);
+  const key_n = N(T).init(alloc, n_groups) catch {
+    result.deinit(alloc);
+    return V{ .err = .memory };
+  };
+  var g: u32 = 0;
+  for (counts, 0..) |c, b| {
+    if (c == 0) continue;
+    gid[b] = g;
+    key_n.slice()[g] = keying.fromBucket(T, b, r.min);
+    result.slice()[g] = .{ .I = N(i32).init(alloc, c) catch {
+      (V{ .L = result }).deinit(alloc);
+      key_n.deinit(alloc);
+      return V{ .err = .memory };
+    } };
+    g += 1;
+  }
+
+  @memset(counts, 0); // reused as the per-bucket write cursor
+  for (data, 0..) |v, i| {
+    const b = keying.bucketOf(v, r.min);
+    result.slice()[gid[b]].I.slice()[counts[b]] = @intCast(i);
+    counts[b] += 1;
+  }
+
+  const keys = keyOf(T, key_n);
+  const d = Dict.init(alloc, keys, .{ .L = result }) catch {
+    keys.deinit(alloc);
+    result.deinit(alloc);
+    return V{ .err = .memory };
+  };
+  return V{ .m = d };
+}
+
+// Backing type → key vector class, matching keyVec's mapping.
+fn keyOf(comptime T: type, n: @import("../../noun/array.zig").N(T)) V {
+  return switch (T) {
+    i32 => .{ .I = n },
+    u32 => .{ .S = n },
+    bool => .{ .B = n },
+    else => @compileError("keyOf: unsupported key type"),
+  };
 }
 
 fn groupByteFn(vm: *VM, x: V) V { return groupByte(vm.alloc, x.C.slice()); }
@@ -121,23 +185,42 @@ fn keyVec(comptime T: type, alloc: Alloc, keys: []const T, perm: []const usize) 
   unreachable;
 }
 
-// O(n log n) typed group: sorts unique keys, returns key!indices dict
+// Wide-range typed group: ONE hash lookup per element (the id is remembered in
+// `ids`), then a sort over the distinct keys only. The earlier version hashed
+// every element three times — once to build the key set and twice more to look
+// its group up again — which dominated everything else at high cardinality.
 fn groupHash(comptime T: type, alloc: Alloc, data: []const T) V {
   if (data.len == 0) return V.Values(alloc, &.{}) catch return V{ .err = .memory };
 
-  var map: std.AutoArrayHashMapUnmanaged(T, void) = .{};
+  var map: std.AutoHashMapUnmanaged(T, u32) = .empty;
   defer map.deinit(alloc);
-  map.ensureTotalCapacity(alloc, data.len) catch return V{ .err = .memory };
+  map.ensureTotalCapacity(alloc, @intCast(data.len)) catch return V{ .err = .memory };
 
-  for (data) |val| map.put(alloc, val, {}) catch return V{ .err = .memory };
-  const n_groups = map.count();
-  const raw_keys = map.keys();
+  const ids = alloc.alloc(u32, data.len) catch return V{ .err = .memory };
+  defer alloc.free(ids);
+  var keys: std.ArrayListUnmanaged(T) = .empty;
+  defer keys.deinit(alloc);
+  var counts: std.ArrayListUnmanaged(u32) = .empty;
+  defer counts.deinit(alloc);
 
-  // Build a sort permutation over unique keys
-  const sort_perm = alloc.alloc(usize, n_groups) catch return V{ .err = .memory };
-  defer alloc.free(sort_perm);
-  for (sort_perm, 0..) |*p, i| p.* = i;
-  std.mem.sort(usize, sort_perm, raw_keys, struct {
+  for (data, ids) |val, *slot| {
+    const gop = map.getOrPutAssumeCapacity(val);
+    if (!gop.found_existing) {
+      gop.value_ptr.* = @intCast(keys.items.len);
+      keys.append(alloc, val) catch return V{ .err = .memory };
+      counts.append(alloc, 0) catch return V{ .err = .memory };
+    }
+    const g = gop.value_ptr.*;
+    slot.* = g;
+    counts.items[g] += 1;
+  }
+
+  const n_groups = keys.items.len;
+  // perm[sorted position] = group id, rank[group id] = sorted position
+  const perm = alloc.alloc(usize, n_groups) catch return V{ .err = .memory };
+  defer alloc.free(perm);
+  for (perm, 0..) |*p, i| p.* = i;
+  std.mem.sort(usize, perm, keys.items, struct {
     fn lt(ks: []const T, a: usize, b: usize) bool {
       return if (comptime T == bool)
         (@intFromBool(ks[a]) < @intFromBool(ks[b]))
@@ -145,32 +228,32 @@ fn groupHash(comptime T: type, alloc: Alloc, data: []const T) V {
         (ks[a] < ks[b]);
     }
   }.lt);
-
-  // inv_perm[unsorted_idx] = sorted_idx
-  var inv_perm = alloc.alloc(usize, n_groups) catch return V{ .err = .memory };
-  defer alloc.free(inv_perm);
-  for (sort_perm, 0..) |orig, sorted| inv_perm[orig] = sorted;
-
-  var counts = alloc.alloc(usize, n_groups) catch return V{ .err = .memory };
-  defer alloc.free(counts);
-  @memset(counts, 0);
-  for (data) |val| counts[inv_perm[map.getIndex(val).?]] += 1;
+  const rank = alloc.alloc(u32, n_groups) catch return V{ .err = .memory };
+  defer alloc.free(rank);
+  for (perm, 0..) |g, s| rank[g] = @intCast(s);
 
   const result = N(V).init(alloc, n_groups) catch return V{ .err = .memory };
-  for (result.slice()) |*s| s.* = .blank;
-  for (result.slice(), counts) |*slot, cnt| {
-    slot.* = .{ .I = N(i32).init(alloc, cnt) catch return V{ .err = .memory } };
-  }
-
-  @memset(counts, 0);
-  for (data, 0..) |val, i| {
-    const g = inv_perm[map.getIndex(val).?];
-    result.slice()[g].I.slice()[counts[g]] = @intCast(i);
-    counts[g] += 1;
-  }
-
-  const kv = keyVec(T, alloc, raw_keys, sort_perm) catch {
+  @memset(result.slice(), .blank);
+  const cursor = alloc.alloc(u32, n_groups) catch {
     result.deinit(alloc);
+    return V{ .err = .memory };
+  };
+  defer alloc.free(cursor);
+  @memset(cursor, 0);
+  for (perm, 0..) |g, s| {
+    result.slice()[s] = .{ .I = N(i32).init(alloc, counts.items[g]) catch {
+      (V{ .L = result }).deinit(alloc);
+      return V{ .err = .memory };
+    } };
+  }
+  for (ids, 0..) |g, i| {
+    const s = rank[g];
+    result.slice()[s].I.slice()[cursor[s]] = @intCast(i);
+    cursor[s] += 1;
+  }
+
+  const kv = keyVec(T, alloc, keys.items, perm) catch {
+    (V{ .L = result }).deinit(alloc);
     return V{ .err = .memory };
   };
   const d = Dict.init(alloc, kv, .{ .L = result }) catch {
@@ -234,34 +317,53 @@ fn groupFloats(alloc: Alloc, data: []const f32) V {
   defer alloc.free(bits);
   for (data, bits) |f, *b| b.* = @bitCast(f);
 
-  var map: std.AutoArrayHashMapUnmanaged(u32, void) = .{};
+  // One lookup per element; groups stay in first-occurrence order (no sort).
+  var map: std.AutoHashMapUnmanaged(u32, u32) = .empty;
   defer map.deinit(alloc);
-  map.ensureTotalCapacity(alloc, data.len) catch return V{ .err = .memory };
-  for (bits) |b| map.put(alloc, b, {}) catch return V{ .err = .memory };
-  const n_groups = map.count();
+  map.ensureTotalCapacity(alloc, @intCast(data.len)) catch return V{ .err = .memory };
+  const ids = alloc.alloc(u32, data.len) catch return V{ .err = .memory };
+  defer alloc.free(ids);
+  var uniq: std.ArrayListUnmanaged(u32) = .empty;
+  defer uniq.deinit(alloc);
+  var counts_l: std.ArrayListUnmanaged(u32) = .empty;
+  defer counts_l.deinit(alloc);
 
-  var counts = alloc.alloc(usize, n_groups) catch return V{ .err = .memory };
-  defer alloc.free(counts);
-  @memset(counts, 0);
-  for (bits) |b| counts[map.getIndex(b).?] += 1;
+  for (bits, ids) |b, *slot| {
+    const gop = map.getOrPutAssumeCapacity(b);
+    if (!gop.found_existing) {
+      gop.value_ptr.* = @intCast(uniq.items.len);
+      uniq.append(alloc, b) catch return V{ .err = .memory };
+      counts_l.append(alloc, 0) catch return V{ .err = .memory };
+    }
+    slot.* = gop.value_ptr.*;
+    counts_l.items[gop.value_ptr.*] += 1;
+  }
+  const n_groups = uniq.items.len;
 
   const result = N(V).init(alloc, n_groups) catch return V{ .err = .memory };
-  for (result.slice()) |*s| s.* = .blank;
-  for (result.slice(), counts) |*slot, cnt| {
-    slot.* = .{ .I = N(i32).init(alloc, cnt) catch return V{ .err = .memory } };
+  @memset(result.slice(), .blank);
+  for (result.slice(), counts_l.items) |*slot, cnt| {
+    slot.* = .{ .I = N(i32).init(alloc, cnt) catch {
+      (V{ .L = result }).deinit(alloc);
+      return V{ .err = .memory };
+    } };
   }
-  @memset(counts, 0);
-  for (bits, 0..) |b, i| {
-    const g = map.getIndex(b).?;
-    result.slice()[g].I.slice()[counts[g]] = @intCast(i);
-    counts[g] += 1;
+  const cursor = alloc.alloc(u32, n_groups) catch {
+    (V{ .L = result }).deinit(alloc);
+    return V{ .err = .memory };
+  };
+  defer alloc.free(cursor);
+  @memset(cursor, 0);
+  for (ids, 0..) |g, i| {
+    result.slice()[g].I.slice()[cursor[g]] = @intCast(i);
+    cursor[g] += 1;
   }
 
   const key_n = N(f32).init(alloc, n_groups) catch {
     result.deinit(alloc);
     return V{ .err = .memory };
   };
-  for (map.keys(), key_n.slice()) |b, *f| f.* = @bitCast(b);
+  for (uniq.items, key_n.slice()) |b, *f| f.* = @bitCast(b);
 
   const d = Dict.init(alloc, .{ .F = key_n }, .{ .L = result }) catch {
     key_n.deinit(alloc);
@@ -271,48 +373,48 @@ fn groupFloats(alloc: Alloc, data: []const f32) V {
   return V{ .m = d };
 }
 
-// O(n²) fallback for heterogeneous lists (V has no cheap hash)
+// General lists: content-hash each element to its group (keying.Distinct), then
+// the same count/lay-out/fill shape as the dense path. Keys stay in
+// first-occurrence order. Was an eq-scan over every distinct key seen so far,
+// i.e. O(n · distinct).
 fn groupValues(alloc: Alloc, data: []const V) V {
   if (data.len == 0) return V.Values(alloc, &.{}) catch return V{ .err = .memory };
 
-  var groups: std.ArrayList(std.ArrayList(i32)) = .empty;
-  defer { for (groups.items) |*g| g.deinit(alloc); groups.deinit(alloc); }
-  var keys: std.ArrayList(V) = .empty;
-  defer { for (keys.items) |k| k.deinit(alloc); keys.deinit(alloc); }
+  var dis = keying.Distinct.init(alloc);
+  defer dis.deinit();
+  const ids = alloc.alloc(u32, data.len) catch return V{ .err = .memory };
+  defer alloc.free(ids);
+  for (data, ids) |val, *slot| slot.* = dis.id(val) catch return V{ .err = .memory };
 
-  for (data, 0..) |val, i| {
-    var found = false;
-    for (keys.items, 0..) |key, j| {
-      if (val.eq(key)) {
-        groups.items[j].append(alloc, @intCast(i)) catch return V{ .err = .memory };
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      keys.append(alloc, val.ref()) catch return V{ .err = .memory };
-      var g: std.ArrayList(i32) = .empty;
-      g.append(alloc, @intCast(i)) catch return V{ .err = .memory };
-      groups.append(alloc, g) catch return V{ .err = .memory };
-    }
+  const n_groups = dis.count();
+  const counts = alloc.alloc(u32, n_groups) catch return V{ .err = .memory };
+  defer alloc.free(counts);
+  @memset(counts, 0);
+  for (ids) |g| counts[g] += 1;
+
+  const result = N(V).init(alloc, n_groups) catch return V{ .err = .memory };
+  @memset(result.slice(), .blank);
+  for (result.slice(), counts) |*slot, c| {
+    slot.* = .{ .I = N(i32).init(alloc, c) catch {
+      (V{ .L = result }).deinit(alloc);
+      return V{ .err = .memory };
+    } };
+  }
+  @memset(counts, 0); // reused as the per-group write cursor
+  for (ids, 0..) |g, i| {
+    result.slice()[g].I.slice()[counts[g]] = @intCast(i);
+    counts[g] += 1;
   }
 
-  const result = N(V).init(alloc, groups.items.len) catch return V{ .err = .memory };
-  for (groups.items, 0..) |g, i| {
-    const arr = N(i32).init(alloc, g.items.len) catch return V{ .err = .memory };
-    @memcpy(arr.slice(), g.items);
-    result.slice()[i] = .{ .I = arr };
-  }
-
-  const key_n = N(V).init(alloc, keys.items.len) catch {
-    result.deinit(alloc);
+  const key_n = N(V).init(alloc, n_groups) catch {
+    (V{ .L = result }).deinit(alloc);
     return V{ .err = .memory };
   };
-  for (keys.items, key_n.slice()) |k, *dst| dst.* = k.ref();
+  for (key_n.slice(), 0..) |*dst, g| dst.* = dis.key(g).ref();
 
   const d = Dict.init(alloc, .{ .L = key_n }, .{ .L = result }) catch {
-    key_n.deinit(alloc);
-    result.deinit(alloc);
+    (V{ .L = key_n }).deinit(alloc);
+    (V{ .L = result }).deinit(alloc);
     return V{ .err = .memory };
   };
   return V{ .m = d };

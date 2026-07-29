@@ -1247,6 +1247,53 @@ test "group dict" {
   try t.check("=`a`b!(1 2;1 2)", ",1 2!,`a`b"); // list values compare by value
 }
 
+// Each keeps the shape of the mapping types: a dict stays keyed, a table maps
+// over its rows (which is what `#t` counts — indexing it as columns ran off the
+// end of the column list).
+test "each over dict and table" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("{x}'`a`b!(1 2;3 4)", "[a:1 2;b:3 4]");
+  try t.check("(+/)'`a`b!(1 2;3 4)", "[a:3;b:7]");
+  try t.check("p:`x`y`x`y;s:1 4 8 5;(|/)'s@=p", "[x:8;y:5]");
+  try t.check("p:`x`y`x`y;s:1 4 8 5;(+/)'s@=p", "[x:9;y:9]");
+  try t.check("{x}'`a!1 2 3", "[a:1 2 3]"); // scalar-key dict: one call, whole value
+  try t.check("{x}'()!()", "[]");
+  try t.check("{x}'[[]a:1 2 3;b:4 5 6]", "([a:1;b:4];[a:2;b:5];[a:3;b:6])");
+  try t.check("#'[[]a:1 2 3;b:4 5 6]", "2 2 2"); // 3 rows of 2 fields
+}
+
+// `#'=` compiles to the freq verb, so every type group accepts must have a freq
+// kernel too — including a dict, or the peephole turns a working expression into
+// a type error.
+test "freq peephole matches group" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("#'=`a`b`c`d!1 0 1 0", "2 2");
+  try t.check("#'=\"mississippi\"", "4 1 2 4");
+  try t.check("#'=1 1 2 3 3 3", "2 1 3");
+  try t.check("#'=`a!3", ",1");
+  try t.check("#'=(2 2;1 1;2 2)", "2 1");
+  try t.check("#'=1.5 0.5 1.5", "2 1");
+  // Dense-bucket path and hash path must agree with each other and with group.
+  try t.check("#'=-3 5 -3 5 0", "2 1 2");
+  try t.check("#'=1000000 0 1000000", "1 2");
+}
+
+// The dense-bucket kernels (small value range) and the hash kernels (wide range)
+// have to produce identical group/grade/distinct results.
+test "dense and sparse key paths agree" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("=-3 5 -3 5 0", "-3 0 5!(0 2;,4;1 3)");
+  try t.check("=1000000 0 1000000", "0 1000000!(,1;0 2)");
+  try t.check("=101b", "01b!(,1;0 2)");
+  try t.check("<3 1 2 1 3", "1 3 2 0 4"); //     stable: equal keys keep order
+  try t.check(">3 1 2 1 3", "0 4 2 1 3"); //     stable in reverse too
+  try t.check("<-5 10 -5 0", "0 2 3 1");
+  try t.check("<1000000 0 1000000 5", "1 3 0 2");
+  try t.check("?3 1 3 2 1", "3 1 2"); //         distinct keeps first-occurrence
+  try t.check("?-5 10 -5 0 10", "-5 10 0");
+  try t.check("?1000000 0 1000000 5", "1000000 0 5");
+}
+
 // x@d maps the index through the dict's VALUES, keys unchanged.
 test "pick through dict" {
   var t = try Tester.init(); defer t.deinit();

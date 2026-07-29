@@ -4,6 +4,7 @@ const K = @import("../../noun/class.zig").K;
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
+const keying = @import("keying.zig");
 
 // freq x — frequency of each distinct value, as a plain count vector.
 //
@@ -20,14 +21,66 @@ pub const Freq = struct {
   _F: VM.Monad = freqFloatsFn,
   _C: VM.Monad = freqByteFn,
   _L: VM.Monad = freqValuesFn,
+  _m: VM.Monad = freqDictFn,
 };
 
 fn genFreqHash(comptime k: K) VM.Monad {
   return struct {
     fn f(vm: *VM, x: V) V {
-      return freqHash(K.backing(k), vm.alloc, @field(x, @tagName(k)).slice());
+      const T = K.backing(k);
+      const data = @field(x, @tagName(k)).slice();
+      // Small value range → a plain histogram: one pass, no hashing, and the
+      // buckets are already in the ascending key order group reports.
+      if (keying.denseRange(T, data)) |r| return freqDense(T, vm.alloc, data, r);
+      return freqHash(T, vm.alloc, data);
     }
   }.f;
+}
+
+fn freqDense(comptime T: type, alloc: Alloc, data: []const T, r: keying.Dense) V {
+  const counts = alloc.alloc(u32, r.span) catch return V{ .err = .memory };
+  defer alloc.free(counts);
+  @memset(counts, 0);
+  for (data) |v| counts[keying.bucketOf(v, r.min)] += 1;
+
+  var n_groups: usize = 0;
+  for (counts) |c| { if (c != 0) n_groups += 1; }
+  const res = N(i32).init(alloc, n_groups) catch return V{ .err = .memory };
+  var g: usize = 0;
+  for (counts) |c| {
+    if (c == 0) continue;
+    res.slice()[g] = @intCast(c);
+    g += 1;
+  }
+  return .{ .I = res };
+}
+
+// `#'=d` over a dict: the group sizes are the frequencies of the dict's VALUES,
+// so freq just runs on the value half. (Without this slot the `#'=` peephole
+// would turn a working `#'=d` into a type error.)
+fn freqDictFn(vm: *VM, x: V) V {
+  const keys = x.m.av();
+  const vals = x.m.bv();
+  // Scalar-key dict: one entry, so one group of size 1.
+  if (keys.isAtom()) {
+    const res = N(i32).init(vm.alloc, 1) catch return V{ .err = .memory };
+    res.slice()[0] = 1;
+    return .{ .I = res };
+  }
+  return switch (vals) {
+    .B => |n| genFreqOf(bool, vm.alloc, n.slice()),
+    .I => |n| genFreqOf(i32, vm.alloc, n.slice()),
+    .S => |n| genFreqOf(u32, vm.alloc, n.slice()),
+    .F => |n| freqFloats(vm.alloc, n.slice()),
+    .C => |n| freqByte(vm.alloc, n.slice()),
+    .L => |n| freqValues(vm.alloc, n.slice()),
+    else => V{ .err = .@"type" },
+  };
+}
+
+fn genFreqOf(comptime T: type, alloc: Alloc, data: []const T) V {
+  if (keying.denseRange(T, data)) |r| return freqDense(T, alloc, data, r);
+  return freqHash(T, alloc, data);
 }
 
 fn freqByteFn(vm: *VM, x: V) V { return freqByte(vm.alloc, x.C.slice()); }
@@ -40,21 +93,34 @@ fn intsFrom(alloc: Alloc, counts: []const usize) V {
   return .{ .I = arr };
 }
 
-// I/S/B: counts in ascending-key order (mirrors group.zig groupHash).
+// I/S/B: counts in ascending-key order (mirrors group.zig groupHash) — one hash
+// lookup per element, then a sort over the distinct keys alone.
 fn freqHash(comptime T: type, alloc: Alloc, data: []const T) V {
   if (data.len == 0) return intsFrom(alloc, &.{});
 
-  var map: std.AutoArrayHashMapUnmanaged(T, void) = .{};
+  var map: std.AutoHashMapUnmanaged(T, u32) = .empty;
   defer map.deinit(alloc);
-  map.ensureTotalCapacity(alloc, data.len) catch return V{ .err = .memory };
-  for (data) |val| map.put(alloc, val, {}) catch return V{ .err = .memory };
-  const n_groups = map.count();
-  const raw_keys = map.keys();
+  map.ensureTotalCapacity(alloc, @intCast(data.len)) catch return V{ .err = .memory };
+  var keys: std.ArrayListUnmanaged(T) = .empty;
+  defer keys.deinit(alloc);
+  var counts: std.ArrayListUnmanaged(usize) = .empty;
+  defer counts.deinit(alloc);
 
-  const sort_perm = alloc.alloc(usize, n_groups) catch return V{ .err = .memory };
-  defer alloc.free(sort_perm);
-  for (sort_perm, 0..) |*p, i| p.* = i;
-  std.mem.sort(usize, sort_perm, raw_keys, struct {
+  for (data) |val| {
+    const gop = map.getOrPutAssumeCapacity(val);
+    if (!gop.found_existing) {
+      gop.value_ptr.* = @intCast(keys.items.len);
+      keys.append(alloc, val) catch return V{ .err = .memory };
+      counts.append(alloc, 0) catch return V{ .err = .memory };
+    }
+    counts.items[gop.value_ptr.*] += 1;
+  }
+
+  const n_groups = keys.items.len;
+  const perm = alloc.alloc(usize, n_groups) catch return V{ .err = .memory };
+  defer alloc.free(perm);
+  for (perm, 0..) |*p, i| p.* = i;
+  std.mem.sort(usize, perm, keys.items, struct {
     fn lt(ks: []const T, a: usize, b: usize) bool {
       return if (comptime T == bool)
         (@intFromBool(ks[a]) < @intFromBool(ks[b]))
@@ -63,17 +129,9 @@ fn freqHash(comptime T: type, alloc: Alloc, data: []const T) V {
     }
   }.lt);
 
-  // inv_perm[unsorted_idx] = sorted_idx
-  const inv_perm = alloc.alloc(usize, n_groups) catch return V{ .err = .memory };
-  defer alloc.free(inv_perm);
-  for (sort_perm, 0..) |orig, sorted| inv_perm[orig] = sorted;
-
-  const counts = alloc.alloc(usize, n_groups) catch return V{ .err = .memory };
-  defer alloc.free(counts);
-  @memset(counts, 0);
-  for (data) |val| counts[inv_perm[map.getIndex(val).?]] += 1;
-
-  return intsFrom(alloc, counts);
+  const res = N(i32).init(alloc, n_groups) catch return V{ .err = .memory };
+  for (perm, res.slice()) |g, *d| d.* = @intCast(counts.items[g]);
+  return .{ .I = res };
 }
 
 // C: counts for present bytes in ascending order (mirrors groupByte).
@@ -105,38 +163,36 @@ fn freqFloats(alloc: Alloc, data: []const f32) V {
   defer alloc.free(bits);
   for (data, bits) |f, *b| b.* = @bitCast(f);
 
-  var map: std.AutoArrayHashMapUnmanaged(u32, void) = .{};
+  var map: std.AutoHashMapUnmanaged(u32, u32) = .empty;
   defer map.deinit(alloc);
-  map.ensureTotalCapacity(alloc, data.len) catch return V{ .err = .memory };
-  for (bits) |b| map.put(alloc, b, {}) catch return V{ .err = .memory };
-  const n_groups = map.count();
+  map.ensureTotalCapacity(alloc, @intCast(data.len)) catch return V{ .err = .memory };
+  var counts: std.ArrayListUnmanaged(usize) = .empty;
+  defer counts.deinit(alloc);
 
-  const counts = alloc.alloc(usize, n_groups) catch return V{ .err = .memory };
-  defer alloc.free(counts);
-  @memset(counts, 0);
-  for (bits) |b| counts[map.getIndex(b).?] += 1;
-
-  return intsFrom(alloc, counts);
+  for (bits) |b| {
+    const gop = map.getOrPutAssumeCapacity(b);
+    if (!gop.found_existing) {
+      gop.value_ptr.* = @intCast(counts.items.len);
+      counts.append(alloc, 0) catch return V{ .err = .memory };
+    }
+    counts.items[gop.value_ptr.*] += 1;
+  }
+  return intsFrom(alloc, counts.items);
 }
 
-// L: counts in first-occurrence order (mirrors groupValues — O(n²) eq scan).
+// L: counts in first-occurrence order (mirrors groupValues — content-hashed).
 fn freqValues(alloc: Alloc, data: []const V) V {
   if (data.len == 0) return intsFrom(alloc, &.{});
 
-  var keys: std.ArrayList(V) = .empty;
-  defer { for (keys.items) |k| k.deinit(alloc); keys.deinit(alloc); }
+  var dis = keying.Distinct.init(alloc);
+  defer dis.deinit();
   var counts: std.ArrayList(usize) = .empty;
   defer counts.deinit(alloc);
 
   for (data) |val| {
-    var found = false;
-    for (keys.items, 0..) |key, j| {
-      if (val.eq(key)) { counts.items[j] += 1; found = true; break; }
-    }
-    if (!found) {
-      keys.append(alloc, val.ref()) catch return V{ .err = .memory };
-      counts.append(alloc, 1) catch return V{ .err = .memory };
-    }
+    const g = dis.id(val) catch return V{ .err = .memory };
+    if (g == counts.items.len) counts.append(alloc, 1) catch return V{ .err = .memory }
+    else counts.items[g] += 1;
   }
   return intsFrom(alloc, counts.items);
 }

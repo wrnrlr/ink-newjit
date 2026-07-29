@@ -75,3 +75,11 @@ echo "ngn/k powerset"
 echo "ink powerset"
 ./zig-out/bin/ink bench/powerset.k 10
 ./zig-out/bin/ink bench/powerset.k 15
+
+echo "ink group family (ms/20 reps of 1M: +/d  =d  #'=d  <d  ?d  =L)"
+echo "  100 distinct (dense-bucket path)"
+./zig-out/bin/ink bench/group.k 1000000 100
+echo "  100k distinct (dense-bucket path)"
+./zig-out/bin/ink bench/group.k 1000000 100000
+echo "  10M distinct (hash path)"
+./zig-out/bin/ink bench/group.k 1000000 10000000

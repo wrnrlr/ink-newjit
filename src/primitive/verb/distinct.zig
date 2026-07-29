@@ -2,6 +2,7 @@ const std = @import("std");
 const promote = @import("../promote.zig").promote;
 const VM = @import("../../runtime/vm.zig").VM;
 const so = @import("setops.zig");
+const keying = @import("keying.zig");
 const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const Alloc = std.mem.Allocator;
@@ -30,6 +31,7 @@ fn distinctN(vm: *VM, x: V) V {
     @memcpy(res.slice(), buf[0..n]);
     return .{ .N = res };
   }
+  if (keying.denseRange(u32, data)) |r| return distinctDense(u32, .N, vm.alloc, data, r);
   var map = so.buildOrderedSet(u32, vm.alloc, data) catch return V{ .err = .memory };
   defer map.deinit(vm.alloc);
   const res = N(u32).init(vm.alloc, map.count()) catch return V{ .err = .memory };
@@ -79,11 +81,36 @@ fn distinctI(vm: *VM, x: V) V {
     @memcpy(res.slice(), buf[0..n]);
     return .{ .I = res };
   }
+  if (keying.denseRange(i32, data)) |r| return distinctDense(i32, .I, vm.alloc, data, r);
   var map = so.buildOrderedSet(i32, vm.alloc, data) catch return V{ .err = .memory };
   defer map.deinit(vm.alloc);
   const res = N(i32).init(vm.alloc, map.count()) catch return V{ .err = .memory };
   @memcpy(res.slice(), map.keys());
   return .{ .I = res };
+}
+
+// Seen-flag dedup over a directly addressed value range — the same trick the char
+// path uses with its fixed 256 buckets, widened to any small range. Two passes,
+// no hashing, and first-occurrence order falls out of the second pass.
+fn distinctDense(comptime T: type, comptime k: @import("../../noun/class.zig").K, alloc: Alloc, data: []const T, r: keying.Dense) V {
+  const seen = alloc.alloc(bool, r.span) catch return V{ .err = .memory };
+  defer alloc.free(seen);
+  @memset(seen, false);
+  var n: usize = 0;
+  for (data) |v| {
+    const b = keying.bucketOf(v, r.min);
+    if (!seen[b]) { seen[b] = true; n += 1; }
+  }
+  const res = N(T).init(alloc, n) catch return V{ .err = .memory };
+  var i: usize = 0;
+  for (data) |v| {
+    const b = keying.bucketOf(v, r.min);
+    if (!seen[b]) continue; // already emitted
+    seen[b] = false;
+    res.slice()[i] = v;
+    i += 1;
+  }
+  return @unionInit(V, @tagName(k), res);
 }
 
 // Symbol — same as Integer but u32
@@ -99,6 +126,7 @@ fn distinctS(vm: *VM, x: V) V {
     @memcpy(res.slice(), buf[0..n]);
     return .{ .S = res };
   }
+  if (keying.denseRange(u32, data)) |r| return distinctDense(u32, .S, vm.alloc, data, r);
   var map = so.buildOrderedSet(u32, vm.alloc, data) catch return V{ .err = .memory };
   defer map.deinit(vm.alloc);
   const res = N(u32).init(vm.alloc, map.count()) catch return V{ .err = .memory };

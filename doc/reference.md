@@ -346,7 +346,7 @@ The IO system is organized around file descriptors (filename, port number, etc.)
 An adverb is one of the glyphs: `` ' / \ ': /: \: `` when it is used as a modifier 
 of how the verb on the right-hand side is applied to the verb on the left hand argument.
 The verb can be a operator, partial or lambda.
-- `f'` **Each** - apply f to each item. `` #'("abc";3 4 5 6) `` → `3 4`
+- `f'` **Each** - apply f to each item. `` #'("abc";3 4 5 6) `` → `3 4`. A dict maps over its values and stays keyed (`` (+/)'`a`b!(1 2;3 4) `` → `` [a:3;b:7] ``, so `` (|/)'score@=player `` reports a max per player); a table maps over its rows.
 - `x F'` **Zip** - elementwise dyad. `` 2 3#'"ab" `` → `("aa";"bbb")`
 - `F/` **Fold** - left fold. `+/1 2 3` → `6`
 - `F\` **Scan** - running fold. `+\1 2 3` → `1 3 6`
