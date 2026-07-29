@@ -1234,6 +1234,41 @@ test "grade ascending list" {
   try t.check("<(\"b\";\"a\";\"c\")", "1 0 2");
 }
 
+// A dict grades to the dict itself with its entries reordered by value — its
+// "indices" are its keys, so a permutation would drop the values that ordered
+// it. A table grades like any other array, to row indices (see below).
+test "ascend/descend dict" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("<=\"mississippi\"", "\"misp\"!(,0;1 4 7 10;2 3 5 6;8 9)");
+  try t.check(">=\"mississippi\"", "\"psim\"!(8 9;2 3 5 6;1 4 7 10;,0)");
+  try t.check("<`a`b`c!3 1 2", "[b:1;c:2;a:3]");
+  try t.check(">`a`b`c!3 1 2", "[a:3;c:2;b:1]");
+  try t.check("<`a`b!(2 3;1 5)", "[b:1 5;a:2 3]");
+  try t.check("<`a`b`c!\"cab\"", "[b:\"a\";c:\"b\";a:\"c\"]");
+  try t.check("<()!()", "[]");
+  // A scalar-key dict stores its lone value unwrapped — sorting is identity.
+  try t.check("<(,`a)!,3", "[a:,3]");
+}
+
+// A table grades to the row indices that order it, so `t@<t` sorts it. Rows
+// compare column by column, left to right.
+test "ascend/descend table" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("<[[]a:3 1 2;b:`x`y`z]", "1 2 0");
+  try t.check(">[[]a:3 1 2;b:`x`y`z]", "0 2 1");
+  try t.check("tb:[[]a:3 1 2;b:`x`y`z]; tb@<tb", "[[]a:1 2 3;b:`y`z`x]");
+  try t.check("tb:[[]a:3 1 2;b:`x`y`z]; tb@>tb", "[[]a:3 2 1;b:`x`z`y]");
+  try t.check("<[[]a:3 1 2]", "1 2 0");
+  // Ties on the first column break on the next one; equal rows keep their order.
+  try t.check("<[[]a:1 1 2;b:`z`y`x]", "1 0 2");
+  try t.check(">[[]a:1 1 2;b:`z`y`x]", "2 0 1");
+  try t.check("<[[]a:!0;b:!0]", "!0");
+  // A keyed table is an `m`, so it follows the dict rule: reordered by its value
+  // rows, with the key rows following along.
+  try t.check("<[[k:`c`a`b]v:3 1 2]", "[[k:`a`b`c]v:1 2 3]");
+  try t.check(">[[k:`c`a`b]v:3 1 2]", "[[k:`c`b`a]v:3 2 1]");
+}
+
 // Shape (monadic %; the dyad stays divide). Ragged lists stop at the first
 // non-uniform level; atoms are rank 0 (empty shape).
 test "shape (monadic %)" {

@@ -402,3 +402,28 @@ Three separate things, in increasing order of nastiness:
    report: `$[#h; recurse; stop]` saw a truthy 1 and recursed forever. Errors behaving
    like 1-element values is the general shape of the "silent wrong answer" failure mode
    — worth deciding whether primitives should propagate `!` instead of measuring it.
+
+## Assigning the bare global `t` hangs the interpreter (autoload of lib/uitest.k)
+
+`t:1` — nothing else in the script — never returns:
+
+```
+echo 't:1' | ink      # hangs forever
+echo 'q:1' | ink      # fine
+```
+
+`lib/uitest.k` defines `t.EVK: …`, `t.VW: …` and friends at top level, so the module
+indexer (`src/cmd/modules.zig` scanText) registers the dotted name AND its namespace
+prefix — i.e. bare `t` → `lib/uitest.k`. Any mention of `t` then autoloads the headless
+UI-test harness, which does not come back.
+
+Two things are wrong here:
+
+1. A *definition* (`t:1`) should never trigger an autoload — only a read of an unset
+   name should. The write is what the user meant, and it can't need the module.
+2. Indexing a one-letter namespace prefix like `t` poisons one of the most common
+   variable names in the language for every script. Either uitest.k should use a longer
+   stem (`uit.`), or single-character prefixes should be excluded from the index.
+
+Found while implementing `<`/`>` on dicts and tables; the symptom there was that every
+test script using `t:` for a table hung before printing anything.

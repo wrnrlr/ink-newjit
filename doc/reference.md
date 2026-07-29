@@ -246,8 +246,8 @@ while assigment of globals in a lambda happen with a double colon `::`
 - `x&y` **Min/And** - minimum value of x and y
 
 ### Grading Verbs
-- `<X` **Ascend** - indices that sort X ascending
-- `>X` **Descend** - indices that sort X descending
+- `<X` **GradeUp** - indices that sort array or table in ascending order
+- `>X` **GradeDown** - indices that sort array or table in descending order
 
 ### Index Verbs
 - `x mod y` **Modulo** - remainder of x÷y (integer)
@@ -275,6 +275,10 @@ while assigment of globals in a lambda happen with a double colon `::`
 ### Mappping Verbs
 - `+d` **Pivot** - table to dict-of-lists and vice versa. `` +[[]n:`b`c;i:2 3] `` → `` [n:`b`c;i:2 3] ``
 - `.d` **Value** - extract dictionary values
+- `<m` **Ascend** - Sort dict by ascending values. `` <`a`b`c!3 1 2 `` → `` [b:1;c:2;a:3] ``
+- `>m` **Decend** - Sort dict by decending values
+- `<t` **Ascend** - Indices that sort table t's rows ascending, comparing the columns left to right, so `t@<t` sorts. `` <[[]a:3 1 2;b:`x`y`z] `` → `1 2 0`
+- `>t` **Decend** - Indices that sort table t's rows decending. A keyed table is an `m`, so it follows the dict rule instead: reordered by its value rows, with the key rows following along.
 - `x!y` **Key** - dictionary creation
 - `X#d` **TakeKeys** - filter dictionary d to keys X
 - `X_d` **DropKeys** - remove keys X from dictionary d

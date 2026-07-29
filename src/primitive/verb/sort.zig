@@ -4,19 +4,34 @@ const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const K = @import("../../noun/class.zig").K;
 const VM = @import("../../runtime/vm.zig").VM;
+const Dict = @import("../../noun/dict.zig").Dict;
+const pick = @import("pick.zig");
 const h = @import("helper.zig");
 const Alloc = std.mem.Allocator;
 
-fn asc(vm: *VM, x: V) V { return sortIndices(vm.alloc, x, false); }
-fn dsc(vm: *VM, x: V) V { return sortIndices(vm.alloc, x, true); }
+// `<M`/`>M` grade a table like any other array — the row indices that order it,
+// so `t@<t` sorts. `<m`/`>m` on a dict instead hand back the dict itself with its
+// entries reordered by value (`<="mississippi"` → the group dict with its
+// shortest run first): a dict's "indices" are its keys, and returning those would
+// lose the values that did the ordering.
+fn asc(vm: *VM, x: V) V { return grade(vm, x, false); }
+fn dsc(vm: *VM, x: V) V { return grade(vm, x, true); }
+
+fn grade(vm: *VM, x: V, desc: bool) V {
+  return switch (x) {
+    .m => sortDict(vm, x, desc),
+    .M => gradeTable(vm, x, desc),
+    else => sortIndices(vm.alloc, x, desc),
+  };
+}
 
 /// Exported for use by other verbs that need to fall back to grade operations.
 pub fn gradeDescend(vm: *VM, x: V) V { return dsc(vm, x); }
 pub fn gradeAscend(vm: *VM, x: V) V { return asc(vm, x); }
 
 // Grade-up (`<`) has no scalar-symbol slot; grade-down (`>`) does. Kept exact.
-const asc_kinds = [_]K{ .b, .i, .f, .n, .d, .h, .c, .B, .I, .F, .N, .D, .H, .S, .C, .L };
-const dsc_kinds = [_]K{ .b, .i, .f, .n, .d, .h, .s, .c, .B, .I, .F, .N, .D, .H, .S, .C, .L };
+const asc_kinds = [_]K{ .b, .i, .f, .n, .d, .h, .c, .m, .B, .I, .F, .N, .D, .H, .S, .C, .M, .L };
+const dsc_kinds = [_]K{ .b, .i, .f, .n, .d, .h, .s, .c, .m, .B, .I, .F, .N, .D, .H, .S, .C, .M, .L };
 pub const Ascend  = h._Y(.@"<", &asc_kinds, asc);
 pub const Descend = h._Y(.@">", &dsc_kinds, dsc);
 
@@ -135,5 +150,78 @@ pub fn sortIndices(alloc: Alloc, v: V, desc: bool) V {
 
   const res_slice = indices.slice();
   for (idx_buf, 0..) |idx, i| res_slice[i] = @intCast(idx);
+  return .{ .I = indices };
+}
+
+// ── mapping types ─────────────────────────────────────────────────────────────
+
+// Reorder a dict's entries by its values, keeping key↔value pairing. A keyed
+// table (`m` whose halves are both tables) orders by the value table's rows, so
+// the key rows follow along.
+fn sortDict(vm: *VM, x: V, desc: bool) V {
+  const keys = x.m.av();
+  const vals = x.m.bv();
+  // A scalar-key dict holds its lone value unwrapped — nothing to reorder.
+  if (keys.isAtom()) return x.ref();
+  const g = gradeAny(vm, vals, desc);
+  if (g.tag() == .err) return g;
+  defer g.deinit(vm.alloc);
+  const nk = permute(vm, keys, g);
+  if (nk.tag() == .err) return nk;
+  const nv = permute(vm, vals, g);
+  if (nv.tag() == .err) { nk.deinit(vm.alloc); return nv; }
+  const d = Dict.init(vm.alloc, nk, nv) catch {
+    nk.deinit(vm.alloc); nv.deinit(vm.alloc);
+    return V{ .err = .memory };
+  };
+  return V{ .m = d };
+}
+
+// Grade a dict half: tables grade by row, everything else by element.
+fn gradeAny(vm: *VM, v: V, desc: bool) V {
+  if (v.tag() == .M) return gradeTable(vm, v, desc);
+  return sortIndices(vm.alloc, v, desc);
+}
+
+fn permute(vm: *VM, v: V, g: V) V {
+  if (v.tag() == .M) return pick.pickTableRowVecFn(vm, v, g);
+  return pick.pickVecFn(vm, v, g);
+}
+
+// Row grade for a table: rows compare lexicographically over the columns, left
+// to right, on the same scalar order the vector grades use. Stable, so rows
+// equal on every column keep their original order in both directions.
+fn gradeTable(vm: *VM, x: V, desc: bool) V {
+  const ncols = x.M.av().len();
+  const vals = x.M.bv();
+  if (ncols == 0) return V{ .err = .length };
+  const cols = vm.alloc.alloc(V, ncols) catch return V{ .err = .memory };
+  defer {
+    for (cols) |c| c.deinit(vm.alloc);
+    vm.alloc.free(cols);
+  }
+  for (cols, 0..) |*c, j| c.* = vals.at(j);
+  const nrows = cols[0].len();
+
+  var idx_buf = vm.alloc.alloc(usize, nrows) catch return V{ .err = .memory };
+  defer vm.alloc.free(idx_buf);
+  for (0..nrows) |i| idx_buf[i] = i;
+  const Ctx = struct {
+    alloc: Alloc, cols: []const V, desc: bool,
+    fn cmp(self: @This(), lhs: usize, rhs: usize) bool {
+      for (self.cols) |c| {
+        if (lhs >= c.len() or rhs >= c.len()) continue; // ragged column: skip it
+        const a = c.at(lhs); defer a.deinit(self.alloc);
+        const b = c.at(rhs); defer b.deinit(self.alloc);
+        const ord = compareV(a, b);
+        if (ord != .eq) return if (self.desc) ord == .gt else ord == .lt;
+      }
+      return false;
+    }
+  };
+  std.sort.block(usize, idx_buf, Ctx{ .alloc = vm.alloc, .cols = cols, .desc = desc }, Ctx.cmp);
+
+  const indices = N(i32).init(vm.alloc, nrows) catch return V{ .err = .memory };
+  for (idx_buf, indices.slice()) |idx, *r| r.* = @intCast(idx);
   return .{ .I = indices };
 }
