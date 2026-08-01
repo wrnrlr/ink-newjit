@@ -47,12 +47,21 @@ fn readLinesById(vm: *VM, x: V) V {
   if (Conns.isConn(id)) return readSocketLine(vm, id);
   const text = vm.fs.getFileText(id);
   var list = std.ArrayList(V).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
-  defer list.deinit(vm.alloc);
+  // `V.Values` REFS every element it copies, so the reference each line was born
+  // with is still ours to release. Dropping only the ArrayList buffer left every
+  // line at rc 1 forever — `0:` leaked its whole result on each call.
+  defer {
+    for (list.items) |v| v.deinit(vm.alloc);
+    list.deinit(vm.alloc);
+  }
   var iter = std.mem.splitScalar(u8, text, '\n');
   while (iter.next()) |line| {
     const stripped = std.mem.trimEnd(u8, line, &[_]u8{'\r'});
     const s = V.Chars(vm.alloc, stripped) catch return V{ .err = .memory };
-    list.append(vm.alloc, s) catch return V{ .err = .memory };
+    list.append(vm.alloc, s) catch {
+      s.deinit(vm.alloc);
+      return V{ .err = .memory };
+    };
   }
   return V.Values(vm.alloc, list.items) catch return V{ .err = .memory };
 }

@@ -355,7 +355,12 @@ fn listDir(vm: *VM, args: []const V) V {
     else => return V{ .err = .@"type" },
   };
   var out = std.ArrayList(V).initCapacity(vm.alloc, 0) catch return V{ .err = .memory };
-  defer out.deinit(vm.alloc);
+  // `V.Values` refs what it copies, so release the entries we collected (see the
+  // note in io.zig's readLinesById — the same shape leaked there).
+  defer {
+    for (out.items) |v| v.deinit(vm.alloc);
+    out.deinit(vm.alloc);
+  }
   walkInto(vm, path, &out, 0);
   return V.Values(vm.alloc, out.items) catch V{ .err = .memory };
 }

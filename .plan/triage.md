@@ -98,14 +98,28 @@ f (N*N)#0.0        / ok
 
 ---
 
-## 11. `parse` of many files leaks IR-lowering scratch (Debug allocator)
+## 11. `parse` of many files leaks — FIXED (2026-08-01), and it wasn't the compiler
 
-Running the k language server (`tools/lsp.k`), which `parse`s every workspace
-`.k` file to build a cross-file index, ends with a DebugAllocator leak report at
-`src/compiler/compiler.zig:1025` (`lower`, the `offsets = alloc.alloc(usize, …)`
-scratch). A single `parse` does not leak; it accumulates over many parses. Debug-
-only (release uses `c_allocator`), so no functional impact, but the lowering
-scratch for `parse`'d chunks isn't freed. Low priority.
+The leak was real but the diagnosis was off: it is not the IR-lowering scratch
+(`lower`'s `offsets` has had a `defer free` all along), and it is **not
+Debug-only**. Two verbs built a list with `V.Values`, which REFS every element it
+copies, and then dropped only the ArrayList buffer — so every element stayed at
+rc 1 forever:
+
+- `0:` (ReadLines, `src/primitive/verb/io.zig`) leaked its entire result on
+  every call: one `` `C `` per line, plus the list. That is what the lsp saw —
+  it reads every workspace file — but any loop that reads a file leaks. Measured
+  on `#0:"lib/rope.k"` × 4000: **280 MB → 26 MB** peak RSS.
+- `` `dir `` (listDir, `src/runtime/syms.zig`) had the identical shape.
+
+With the DebugAllocator the report pointed at `peephole`/`Chars` frames; with
+`c_allocator` (release) nothing is reported but the memory still grows, so the
+old "no functional impact" note was wrong. The other `V.Values` callers
+(`split`, `doMakeList`, all three in `lib/shapefile`) already release their
+element references and were correct.
+
+Repro that now reports zero leaks: `ink tools/doc.k -check lib/*.k`, and
+`+/{#parse[0:x]}'` over a list of lib files.
 
 ---
 
