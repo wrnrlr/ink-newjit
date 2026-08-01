@@ -31,7 +31,7 @@ world.view:{[] ui.bg[0.96 0.96 0.98 1.; ui.pad[44.; ui.col[26.; (
       ui.sized[112.;34.; ui.label["Celsius  ="]]
       ui.input[`f; 110.; "°F"]
       ui.sized[112.;34.; ui.label["Fahrenheit"]] )]
-    ui.spacer[] )]]}
+    ui.spacer[] )]]]}
 
 run:{[props]
   W: ui.run[world.view[]; props]

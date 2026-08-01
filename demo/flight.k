@@ -42,7 +42,7 @@ world.view:{[] ui.bg[0.96 0.96 0.98 1.; ui.pad[40.; ui.col[16.; (
     world.d2field[]
     world.bookBtn[]
     world.msgLine[]
-    ui.spacer[] )]]}
+    ui.spacer[] )]]]}
 
 run:{[props]
   W: ui.run[world.view[]; props]

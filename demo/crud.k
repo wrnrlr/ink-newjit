@@ -37,7 +37,7 @@ world.view:{[] ui.bg[0.96 0.96 0.98 1.; ui.pad[26.; ui.col[14.; (
     world.fld["Name:"; `nm; "name"]
     world.fld["Surname:"; `sur; "surname"]
     ui.row[10.; ( ui.button["Create"; `create] ; ui.button["Update"; `update] ; ui.button["Delete"; `delete] )]
-    ui.spacer[] )]]}
+    ui.spacer[] )]]]}
 
 run:{[props]
   W: ui.run[world.view[]; props]

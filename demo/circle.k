@@ -51,7 +51,7 @@ world.paint:{[x;y;w;h] cnv.save[]; cnv.clip[x;y;w;h]; {world.drawOne x}'!#world.
 world.editBar:{[] ui.bg[0.90 0.92 0.96 1.; ui.pad[10.; ui.row[12.; (
     ui.sized[70.;30.; ui.label["Radius"]]
     ui.slider[`rad; 240.; 5.; 90.]
-    ui.button["Done"; `done] )]]}
+    ui.button["Done"; `done] )]]]}
   / kids built as a local: a newline before `,` INSIDE ui.col[…] would make it a separate arg.
 bar:{[] $[world.editing<0; (); ,world.editBar[]]}         / the radius bar, only while editing (0 or 1 node)
 view:{[]

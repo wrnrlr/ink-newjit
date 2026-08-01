@@ -227,10 +227,14 @@ doc/reference.md; regression test in `src/test.zig`. None of the 42 files under
 `demo/` and `tools/` trips the new error.
 
 `demo/timer.k`, where this was found, dropped its misleading workaround comment
-and declares its clock variables with `::`. It also had a **pre-existing parse
-error** — one `]` short on `ui.bg[…ui.pad[…ui.col[…]]]` at line 29, present on
-`ae225fb` too — which is fixed; it had been masked by the autoload cascade of
-issue 27 eating the timeout before the parse was ever reached.
+and declares its clock variables with `::`.
+
+Separately: **five ui demos did not parse** — `timer`, `crud`, `flight`,
+`temperature`, `circle` — all the same slip, one `]` short of closing
+`ui.bg[c; ui.pad[n; ui.col[m; (…)]]]`. Pre-existing (reproduced on `ae225fb`) and
+invisible because the issue-27 autoload cascade ate the timeout before the parse
+was ever reached. `demo/circle.k:60` had the correct bracket count all along.
+All five fixed and now open their window.
 
 ## A 5th vertex→fragment varying isn't delivered by shader.vertexPull/fragmentTexN (demo/earth.k)
 Adding a 5th varying to the earth pipeline (wNor v3, wTan v3, wUvF v4, wSun v3, **wLay v2**) read as
