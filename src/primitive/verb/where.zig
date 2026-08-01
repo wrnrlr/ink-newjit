@@ -9,6 +9,7 @@ pub const Where = struct {
   _i: VM.Monad = whereI,
   _B: VM.Monad = whereBVec,
   _I: VM.Monad = whereIVec,
+  _L: VM.Monad = whereList,
 };
 
 fn whereB(vm: *VM, x: V) V {
@@ -28,6 +29,34 @@ fn whereBVec(vm: *VM, x: V) V {
   var idx: usize = 0;
   for (x_slice, 0..) |elem, i| {
     if (elem) {
+      res.slice()[idx] = @intCast(i);
+      idx += 1;
+    }
+  }
+  return .{ .I = res };
+}
+
+// Where on a general list. An EMPTY one is the case that matters: `f'(0#0)` and
+// friends hand back an empty `L`, and `&` on it has to be the empty index vector
+// — no element is true — not a type error. A non-empty list still counts, as
+// long as every element is a boolean or a non-negative int.
+fn whereList(vm: *VM, x: V) V {
+  const items = x.L.slice();
+  var total: usize = 0;
+  for (items) |e| switch (e) {
+    .b => |v| total += @intFromBool(v),
+    .i => |v| { if (v < 0) return .{ .err = .domain }; total += @intCast(v); },
+    else => return .{ .err = .@"type" },
+  };
+  const res = N(i32).init(vm.alloc, total) catch return V{ .err = .memory };
+  var idx: usize = 0;
+  for (items, 0..) |e, i| {
+    const count: usize = switch (e) {
+      .b => |v| @intFromBool(v),
+      .i => |v| @intCast(v),
+      else => unreachable,
+    };
+    for (0..count) |_| {
       res.slice()[idx] = @intCast(i);
       idx += 1;
     }

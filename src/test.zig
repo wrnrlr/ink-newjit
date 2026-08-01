@@ -1651,6 +1651,28 @@ test "parse errors carry a source position" {
   try testing.expectEqual(@as(u32, 9), pos.col);   // the `;` where a `:` was due
 }
 
+test "an empty result keeps its type, and an error is not one element" {
+  var t = try Tester.init();
+  defer t.deinit();
+  // Each over an empty typed vector has nothing to infer a result type from, so
+  // it keeps the source's rather than boxing into `L — the one type `&` and the
+  // table columns downstream cannot take.
+  try t.check("@{[x]x}'(0#0)", "`I");
+  try t.check("@{[x]x}'\"\"", "`C");
+  try t.check("@{[x]x}'(0#`)", "`S");
+  try t.check("@{[x]x}'()", "`L");
+  // Where over an empty list: no element is true, so the answer is the empty
+  // index vector, not a type error.
+  try t.check("&()", "!0");
+  try t.check("&{[x]x}'(0#0)", "!0");
+  try t.check("&(1;0;1)", "0 2");
+  try t.check("&(1;`a)", "!type");
+  // `#` of an error used to be 1 — TRUE — so `$[#f x; recurse; stop]` on a
+  // failed call looped forever instead of stopping.
+  try t.check("#(1+`a)", "!type");
+  try t.check("$[#(1+`a);`yes;`no]", "`no");
+}
+
 test {
   // Pull in the sibling modules whose own unit tests would otherwise not be
   // reachable from this root.

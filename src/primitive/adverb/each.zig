@@ -8,6 +8,7 @@ const Dict = @import("../../noun/dict.zig").Dict;
 const pick = @import("../verb/pick.zig");
 const util = @import("../../util.zig");
 const promote = @import("../promote.zig").promote;
+const emptyOf = @import("../promote.zig").emptyOf;
 
 // Apply f to each element in x.
 //
@@ -55,6 +56,10 @@ fn eachRows(vm: *VM, base: V, x: V, f: util.ApplyFn) V {
 }
 
 fn eachItems(vm: *VM, base: V, x: V, n: usize, f: util.ApplyFn) V {
+  // Nothing to call, so nothing to infer a result type from: keep the source's.
+  // Falling through would `promote` a zero-length buffer into an empty general
+  // list, and `` `L `` is the one type most downstream primitives can't take.
+  if (n == 0) return emptyOf(vm.alloc, x.tag());
   var res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
   const is_lambda = base.tag() == .o and base.o.isLambda();
   const lambda_ref = if (is_lambda) base.o else undefined;

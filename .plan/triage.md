@@ -197,31 +197,28 @@ fragmentTexN. Workaround used: pack the flag into a spare lane of an existing va
 bordersOn in .w). Worth pinning down the real rule in shader.vertexPull location assignment so
 overlays can add channels without hunting for spare lanes.
 
-## `&` on an empty general list errors, and `#` of an error is 1 (silent infinite loop)
+## `&` on an empty general list errors, and `#` of an error is 1 — FIXED (2026-08-01)
 
-Found while writing `lib/doc.k` (the API-doc extractor); `ink tools/doc.k -check lib/agent.k`
-hung forever on a file with no comments in it.
+Found while writing `lib/doc.k` (the API-doc extractor); `ink tools/doc.k -check
+lib/agent.k` hung forever on a file with no comments in it. All three layers fixed:
 
-```
-e: {[x]x}'(0#0)   / each over an empty typed vector -> empty GENERAL list `L
-@e                / `L
-#e                / 0
-e=0               / ()      -- fine
-&e=0              / !type   -- Where on an empty `L` is a type error
-#&e=0             / 1       -- and `#` of an error value is 1, not an error
-```
+1. `f'(0#0)` lost the element type — each over an empty typed vector yielded an
+   empty general list. With nothing to call there is nothing to infer a result
+   type from, so `each` now keeps the SOURCE's type (`promote.emptyOf`):
+   ``@{[x]x}'(0#0)`` is `` `I ``, over `""` is `` `C ``, over `()` still `` `L ``.
+   (`src/primitive/adverb/each.zig`.)
+2. `&` on an empty `` `L `` raised `!type`. Where now has an `_L` kernel: an empty
+   list has no true elements, so the answer is the empty index vector, and a
+   non-empty list of bools/non-negative ints counts like `&I` does
+   (`&(1;0;1)` → `0 2`). (`src/primitive/verb/where.zig`.)
+3. `#` of an error VALUE returned 1 — TRUE — which is what turned (2) into a hang
+   rather than a report: `$[#h; recurse; stop]` saw a truthy 1 and recursed
+   forever. `#` now propagates the error (`src/primitive/verb/tally.zig`); the
+   conditional takes the else branch.
 
-Three separate things, in increasing order of nastiness:
-
-1. `f'(0#0)` loses the element type: each over an empty typed vector yields an empty
-   general list rather than an empty typed vector. (`lib/doc.k` works around this by
-   guarding every "no comments in this file" path explicitly.)
-2. `&` on an empty `L` raises `!type` where it should give an empty index vector — an
-   empty list has no true elements, so Where is well defined.
-3. `#` of an error VALUE returns 1. That is what turned (2) into a hang instead of a
-   report: `$[#h; recurse; stop]` saw a truthy 1 and recursed forever. Errors behaving
-   like 1-element values is the general shape of the "silent wrong answer" failure mode
-   — worth deciding whether primitives should propagate `!` instead of measuring it.
+Note the general question is still open: only `#` measured errors (it was the one
+verb whose type list included `.err`), so this was a point fix, not a policy. Whether
+`$[!type;a;b]` should propagate rather than pick `b` is undecided.
 
 ## Assigning the bare global `t` hangs the interpreter — FIXED, see issue 27
 
