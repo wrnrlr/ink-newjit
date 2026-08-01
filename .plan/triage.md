@@ -226,20 +226,27 @@ Both suggested fixes landed (a definition no longer autoloads; a namespace stem
 only resolves through a dotted reference), plus the block-comment fault that made
 the cascade big enough to look like a hang. Full write-up under issue 27 above.
 
-## `=` key order is sorted for I/S/B/C but first-occurrence for F/L
+## `=` key order sorted for I/S/B/C, first-occurrence for F/L — FIXED (2026-08-01)
 
-`=x` sorts its keys for ints, symbols, bools and chars (the k7/k9-2021 contract),
-but the float and general-list kernels return groups in first-occurrence order:
+Sorted for every key type now. The sorted-key guarantee is what makes the classic
+`,/f'|=x!x<*1?x` quicksort work (it is exactly why k9 2021 can run it and ngn/k
+cannot), so code relying on it silently got a different answer the moment the
+grouped values were floats or lists:
 
 ```
-="mississippi"        "imps"!(1 4 7 10;,0;8 9;2 3 5 6)   / sorted
-=2 1 2 2 1 1          1 2!(1 4 5;0 2 3)                  / sorted
-=1.5 0.5 1.5 0.5      1.5 0.5!(0 2;1 3)                  / NOT sorted
-=(2 2;1 1;2 2)        (2 2;1 1)!(0 2;,1)                 / NOT sorted
+=1.5 0.5 1.5 0.5      0.5 1.5!(1 3;0 2)       / was 1.5 0.5!(0 2;1 3)
+=(2 2;1 1;2 2)        (1 1;2 2)!(,1;0 2)      / was (2 2;1 1)!(0 2;,1)
+=3.0 1.0 0n 2.0 0n    0n 1.0 2.0 3.0!…        / 0n sorts first, matching `<`
 ```
 
-The sorted-key guarantee is what makes the classic `,/f'|=x!x<*1?x` quicksort
-work (it is exactly why k9 2021 can run it and ngn/k cannot), so code that relies
-on it silently gets a different answer as soon as the grouped values are floats or
-lists. Either sort F/L too, or document that `=` only orders the scalar-key types.
-`freq.zig` mirrors the same split deliberately, so both change together.
+`groupFloats`/`groupValues` sort the DISTINCT keys only — the same perm/rank
+shape `groupHash` already used, so the added cost is over group count, not
+element count. Floats order by the NaN-aware `sort.orderFloat`, general lists by
+`sort.compareV` (the same total order `<` grades a list with; both are now
+exported from `sort.zig`). `freq.zig`'s F/L kernels got the matching reorder
+(`countsInKeyOrder`) so the `#'=x` peephole still agrees with `#'` over `=`
+element for element — asserted in `src/test.zig`.
+
+Two existing expectations encoded the old order and were updated: `==
+"missisippi"` (the outer `=` groups by index-LIST values) and
+`#'=(2 2;1 1;2 2)`.

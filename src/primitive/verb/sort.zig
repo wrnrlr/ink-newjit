@@ -37,7 +37,7 @@ pub const Descend = h._Y(.@">", &dsc_kinds, dsc);
 
 // NaN-aware scalar order: NaNs sort below everything and compare equal to each
 // other (matches the grade semantics the vector/float paths rely on).
-inline fn orderFloat(a: anytype, b: @TypeOf(a)) std.math.Order {
+pub inline fn orderFloat(a: anytype, b: @TypeOf(a)) std.math.Order {
   const an = std.math.isNan(a); const bn = std.math.isNan(b);
   if (an and bn) return .eq;
   if (an) return .lt;
@@ -58,7 +58,9 @@ fn orderElems(comptime T: type, sa: []const T, sb: []const T) std.math.Order {
   return std.math.order(sa.len, sb.len);
 }
 
-fn compareV(a: V, b: V) std.math.Order {
+/// Total order over arbitrary values — the one `<`/`>` grade a general
+/// list by. Exported so `=`/`freq` can order their general-list keys the same way.
+pub fn compareV(a: V, b: V) std.math.Order {
   const at = a.tag();
   const bt = b.tag();
   if (at != bt) return std.math.order(@intFromEnum(at), @intFromEnum(bt));

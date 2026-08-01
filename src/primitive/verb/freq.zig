@@ -5,13 +5,14 @@ const V = @import("../../noun/value.zig").V;
 const N = @import("../../noun/array.zig").N;
 const VM = @import("../../runtime/vm.zig").VM;
 const keying = @import("keying.zig");
+const sort = @import("sort.zig");
 
 // freq x — frequency of each distinct value, as a plain count vector.
 //
 // This is the internal verb the compiler peephole emits for the idiom `#'=x`
 // (tally-each over group). It returns EXACTLY what `#'=x` returns: the per-group
-// counts, in the same order group lists its keys (I/S/B/C sorted by key; F and L
-// in first-occurrence order). It does the histogram directly — no index-list
+// counts, in the same order group lists its keys (ascending, every type). It
+// does the histogram directly — no index-list
 // materialization — which is the whole point of recognizing the idiom.
 pub const Freq = struct {
   pub const op = .freq;
@@ -156,7 +157,7 @@ fn freqByte(alloc: Alloc, data: []const u8) V {
   return .{ .I = res };
 }
 
-// F: counts in first-occurrence order (mirrors groupFloats — no sort).
+// F: counts in ascending-key order (mirrors groupFloats).
 fn freqFloats(alloc: Alloc, data: []const f32) V {
   if (data.len == 0) return intsFrom(alloc, &.{});
   const bits = alloc.alloc(u32, data.len) catch return V{ .err = .memory };
@@ -168,19 +169,38 @@ fn freqFloats(alloc: Alloc, data: []const f32) V {
   map.ensureTotalCapacity(alloc, @intCast(data.len)) catch return V{ .err = .memory };
   var counts: std.ArrayListUnmanaged(usize) = .empty;
   defer counts.deinit(alloc);
+  var uniq: std.ArrayListUnmanaged(u32) = .empty;
+  defer uniq.deinit(alloc);
 
   for (bits) |b| {
     const gop = map.getOrPutAssumeCapacity(b);
     if (!gop.found_existing) {
       gop.value_ptr.* = @intCast(counts.items.len);
       counts.append(alloc, 0) catch return V{ .err = .memory };
+      uniq.append(alloc, b) catch return V{ .err = .memory };
     }
     counts.items[gop.value_ptr.*] += 1;
   }
-  return intsFrom(alloc, counts.items);
+  return countsInKeyOrder(alloc, counts.items, uniq.items, struct {
+    fn lt(us: []const u32, a: usize, b: usize) bool {
+      return sort.orderFloat(@as(f32, @bitCast(us[a])), @as(f32, @bitCast(us[b]))) == .lt;
+    }
+  }.lt);
 }
 
-// L: counts in first-occurrence order (mirrors groupValues — content-hashed).
+// Reorder per-group counts into the key order `ctx`/`lt` define, so `freq` keeps
+// agreeing with `#'=x` element for element.
+fn countsInKeyOrder(alloc: Alloc, counts: []const usize, ctx: anytype, comptime lt: fn (@TypeOf(ctx), usize, usize) bool) V {
+  const perm = alloc.alloc(usize, counts.len) catch return V{ .err = .memory };
+  defer alloc.free(perm);
+  for (perm, 0..) |*p, i| p.* = i;
+  std.mem.sort(usize, perm, ctx, lt);
+  const res = N(i32).init(alloc, counts.len) catch return V{ .err = .memory };
+  for (perm, res.slice()) |g, *d| d.* = @intCast(counts[g]);
+  return .{ .I = res };
+}
+
+// L: counts in ascending-key order (mirrors groupValues — content-hashed).
 fn freqValues(alloc: Alloc, data: []const V) V {
   if (data.len == 0) return intsFrom(alloc, &.{});
 
@@ -194,5 +214,9 @@ fn freqValues(alloc: Alloc, data: []const V) V {
     if (g == counts.items.len) counts.append(alloc, 1) catch return V{ .err = .memory }
     else counts.items[g] += 1;
   }
-  return intsFrom(alloc, counts.items);
+  return countsInKeyOrder(alloc, counts.items, @as(*const keying.Distinct, &dis), struct {
+    fn lt(d: *const keying.Distinct, a: usize, b: usize) bool {
+      return sort.compareV(d.key(a), d.key(b)) == .lt;
+    }
+  }.lt);
 }

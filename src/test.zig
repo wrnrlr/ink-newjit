@@ -1290,7 +1290,9 @@ test "group dict" {
   try t.check("=`a`b`c`d!1 0 1 0", "0 1!(`b`d;`a`c)");
   try t.check("=\"quicksort\"!\"quicksort\"<\"k\"", "01b!(\"quksort\";\"ic\")");
   // All-distinct values still give one-element key lists, and `==` inverts.
-  try t.check("==\"missisippi\"", "(1 4 6 9;,0;7 8;2 3 5)!(,\"i\";,\"m\";,\"p\";,\"s\")");
+  // The outer `=` groups by index-LIST values, and those keys sort ascending
+  // like every other key type — `,0` < `1 4 6 9` < `2 3 5` < `7 8`.
+  try t.check("==\"missisippi\"", "(,0;1 4 6 9;2 3 5;7 8)!(,\"m\";,\"i\";,\"s\";,\"p\")");
   try t.check("=`a!3", ",3!,,`a"); //  scalar-key dict: one entry, one key list
   try t.check("=()!()", "()"); //      empty groups to an empty list, like `=()`
   try t.check("=`a`b!(1 2;1 2)", ",1 2!,`a`b"); // list values compare by value
@@ -1320,8 +1322,8 @@ test "freq peephole matches group" {
   try t.check("#'=\"mississippi\"", "4 1 2 4");
   try t.check("#'=1 1 2 3 3 3", "2 1 3");
   try t.check("#'=`a!3", ",1");
-  try t.check("#'=(2 2;1 1;2 2)", "2 1");
-  try t.check("#'=1.5 0.5 1.5", "2 1");
+  try t.check("#'=(2 2;1 1;2 2)", "1 2");   // keys (1 1) then (2 2)
+  try t.check("#'=1.5 0.5 1.5", "1 2");     // keys 0.5 then 1.5
   // Dense-bucket path and hash path must agree with each other and with group.
   try t.check("#'=-3 5 -3 5 0", "2 1 2");
   try t.check("#'=1000000 0 1000000", "1 2");
@@ -1671,6 +1673,25 @@ test "an empty result keeps its type, and an error is not one element" {
   // failed call looped forever instead of stopping.
   try t.check("#(1+`a)", "!type");
   try t.check("$[#(1+`a);`yes;`no]", "`no");
+}
+
+test "group orders its keys ascending for every key type" {
+  var t = try Tester.init();
+  defer t.deinit();
+  // Floats and general lists used to come back in FIRST-OCCURRENCE order, so
+  // code relying on the sorted-key contract — `,/f'|=x!x<*1?x`, the classic
+  // quicksort — silently got a different answer the moment the keys weren't
+  // scalars.
+  try t.check("=1.5 0.5 1.5 0.5", "0.5 1.5!(1 3;0 2)");
+  try t.check("=(2 2;1 1;2 2)", "(1 1;2 2)!(,1;0 2)");
+  // NaN sorts below everything, matching `<`.
+  try t.check("=3.0 1.0 0n 2.0 0n", "0n 1.0 2.0 3.0!(2 4;,1;,3;,0)");
+  // Unchanged for the scalar key types.
+  try t.check("=\"mississippi\"", "\"imps\"!(1 4 7 10;,0;8 9;2 3 5 6)");
+  try t.check("=2 1 2 2 1 1", "1 2!(1 4 5;0 2 3)");
+  // The `#'=x` peephole must report its counts in the same order.
+  try t.check("(#'=1.5 0.5 1.5 0.5 0.5)~{#x}'.(=1.5 0.5 1.5 0.5 0.5)", "1b");
+  try t.check("(#'=(2 2;1 1;2 2;3 3;1 1))~{#x}'.(=(2 2;1 1;2 2;3 3;1 1))", "1b");
 }
 
 test {

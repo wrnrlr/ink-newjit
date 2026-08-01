@@ -7,6 +7,7 @@ const Dict = @import("../../noun/dict.zig").Dict;
 const VM = @import("../../runtime/vm.zig").VM;
 const pick = @import("pick.zig");
 const keying = @import("keying.zig");
+const sort = @import("sort.zig");
 const promote = @import("../promote.zig").promote;
 
 pub const Group = struct {
@@ -317,7 +318,7 @@ fn groupFloats(alloc: Alloc, data: []const f32) V {
   defer alloc.free(bits);
   for (data, bits) |f, *b| b.* = @bitCast(f);
 
-  // One lookup per element; groups stay in first-occurrence order (no sort).
+  // One lookup per element, then a sort over the DISTINCT keys only.
   var map: std.AutoHashMapUnmanaged(u32, u32) = .empty;
   defer map.deinit(alloc);
   map.ensureTotalCapacity(alloc, @intCast(data.len)) catch return V{ .err = .memory };
@@ -340,10 +341,25 @@ fn groupFloats(alloc: Alloc, data: []const f32) V {
   }
   const n_groups = uniq.items.len;
 
+  // Ascending keys, the same guarantee the I/S/B/C kernels give — `,/f'|=x!x<*1?x`
+  // silently returned a different answer as soon as the keys were floats.
+  // perm[sorted position] = group id, rank[group id] = sorted position.
+  const perm = alloc.alloc(usize, n_groups) catch return V{ .err = .memory };
+  defer alloc.free(perm);
+  for (perm, 0..) |*p, i| p.* = i;
+  std.mem.sort(usize, perm, uniq.items, struct {
+    fn lt(us: []const u32, a: usize, b: usize) bool {
+      return sort.orderFloat(@as(f32, @bitCast(us[a])), @as(f32, @bitCast(us[b]))) == .lt;
+    }
+  }.lt);
+  const rank = alloc.alloc(u32, n_groups) catch return V{ .err = .memory };
+  defer alloc.free(rank);
+  for (perm, 0..) |g, s| rank[g] = @intCast(s);
+
   const result = N(V).init(alloc, n_groups) catch return V{ .err = .memory };
   @memset(result.slice(), .blank);
-  for (result.slice(), counts_l.items) |*slot, cnt| {
-    slot.* = .{ .I = N(i32).init(alloc, cnt) catch {
+  for (perm, 0..) |g, s| {
+    result.slice()[s] = .{ .I = N(i32).init(alloc, counts_l.items[g]) catch {
       (V{ .L = result }).deinit(alloc);
       return V{ .err = .memory };
     } };
@@ -355,15 +371,16 @@ fn groupFloats(alloc: Alloc, data: []const f32) V {
   defer alloc.free(cursor);
   @memset(cursor, 0);
   for (ids, 0..) |g, i| {
-    result.slice()[g].I.slice()[cursor[g]] = @intCast(i);
-    cursor[g] += 1;
+    const s = rank[g];
+    result.slice()[s].I.slice()[cursor[s]] = @intCast(i);
+    cursor[s] += 1;
   }
 
   const key_n = N(f32).init(alloc, n_groups) catch {
     result.deinit(alloc);
     return V{ .err = .memory };
   };
-  for (uniq.items, key_n.slice()) |b, *f| f.* = @bitCast(b);
+  for (perm, key_n.slice()) |g, *f| f.* = @bitCast(uniq.items[g]);
 
   const d = Dict.init(alloc, .{ .F = key_n }, .{ .L = result }) catch {
     key_n.deinit(alloc);
@@ -374,9 +391,9 @@ fn groupFloats(alloc: Alloc, data: []const f32) V {
 }
 
 // General lists: content-hash each element to its group (keying.Distinct), then
-// the same count/lay-out/fill shape as the dense path. Keys stay in
-// first-occurrence order. Was an eq-scan over every distinct key seen so far,
-// i.e. O(n · distinct).
+// the same count/lay-out/fill shape as the dense path, keys sorted by the same
+// total order `<` grades a general list with. Was an eq-scan over every distinct
+// key seen so far, i.e. O(n · distinct).
 fn groupValues(alloc: Alloc, data: []const V) V {
   if (data.len == 0) return V.Values(alloc, &.{}) catch return V{ .err = .memory };
 
@@ -392,25 +409,39 @@ fn groupValues(alloc: Alloc, data: []const V) V {
   @memset(counts, 0);
   for (ids) |g| counts[g] += 1;
 
+  // perm[sorted position] = group id, rank[group id] = sorted position
+  const perm = alloc.alloc(usize, n_groups) catch return V{ .err = .memory };
+  defer alloc.free(perm);
+  for (perm, 0..) |*p, i| p.* = i;
+  std.mem.sort(usize, perm, @as(*const keying.Distinct, &dis), struct {
+    fn lt(d: *const keying.Distinct, a: usize, b: usize) bool {
+      return sort.compareV(d.key(a), d.key(b)) == .lt;
+    }
+  }.lt);
+  const rank = alloc.alloc(u32, n_groups) catch return V{ .err = .memory };
+  defer alloc.free(rank);
+  for (perm, 0..) |g, s| rank[g] = @intCast(s);
+
   const result = N(V).init(alloc, n_groups) catch return V{ .err = .memory };
   @memset(result.slice(), .blank);
-  for (result.slice(), counts) |*slot, c| {
-    slot.* = .{ .I = N(i32).init(alloc, c) catch {
+  for (perm, 0..) |g, s| {
+    result.slice()[s] = .{ .I = N(i32).init(alloc, counts[g]) catch {
       (V{ .L = result }).deinit(alloc);
       return V{ .err = .memory };
     } };
   }
   @memset(counts, 0); // reused as the per-group write cursor
   for (ids, 0..) |g, i| {
-    result.slice()[g].I.slice()[counts[g]] = @intCast(i);
-    counts[g] += 1;
+    const s = rank[g];
+    result.slice()[s].I.slice()[counts[s]] = @intCast(i);
+    counts[s] += 1;
   }
 
   const key_n = N(V).init(alloc, n_groups) catch {
     (V{ .L = result }).deinit(alloc);
     return V{ .err = .memory };
   };
-  for (key_n.slice(), 0..) |*dst, g| dst.* = dis.key(g).ref();
+  for (key_n.slice(), perm) |*dst, g| dst.* = dis.key(g).ref();
 
   const d = Dict.init(alloc, .{ .L = key_n }, .{ .L = result }) catch {
     (V{ .L = key_n }).deinit(alloc);
