@@ -29,6 +29,7 @@ fn has_L_vec(vm: *VM, x: V, y: V) V  { return hasListVec(vm.alloc, x.L.slice(), 
 
 pub const Has = struct {
   pub const op = .has;
+  pub const fallback: VM.Dyad = hasFalse;
   _I_i: VM.Dyad = has_I_i,
   _I_I: VM.Dyad = has_I_I,
   _I_L: VM.Dyad = has_I_L,
@@ -57,6 +58,29 @@ pub const Has = struct {
   _L_L: VM.Dyad = has_L_vec,
 };
 
+// Membership across types that cannot compare — `` `a`b in 1 2 3 ``, or a probe
+// against an EMPTY typed vector, whose element type says nothing about what it
+// could have held — is not an error: nothing is a member, so the answer is
+// false, shaped like the probe. (`~` takes the same line for mismatched tags:
+// see matchFalse.) Dicts and tables are NOT covered — `in` has no kernel for
+// them at all, and answering "false" would hide that rather than report it.
+fn plainOperand(v: V) bool {
+  const t = v.tag();
+  return t.isAtom() or t.isVec() or t == .L;
+}
+
+fn falseLike(vm: *VM, probe: V) V {
+  if (!plainOperand(probe)) return V{ .err = .@"type" };
+  if (probe.isAtom()) return .{ .b = false };
+  const n = N(bool).init(vm.alloc, probe.len()) catch return V{ .err = .memory };
+  @memset(n.slice(), false);
+  return .{ .B = n };
+}
+
+// `x in y` answers about x; `x has y` answers about y.
+fn inFalse(vm: *VM, x: V, y: V) V { return if (plainOperand(y)) falseLike(vm, x) else V{ .err = .@"type" }; }
+fn hasFalse(vm: *VM, x: V, y: V) V { return if (plainOperand(x)) falseLike(vm, y) else V{ .err = .@"type" }; }
+
 // In: x in y? (x and y swapped relative to Has)
 fn in_b_B(_: *VM, x: V, y: V) V  { return .{ .b = hasBoolAtom(y.B.slice(), x.b) }; }
 fn in_i_I(vm: *VM, x: V, y: V) V { return .{ .b = containsOrdered(i32, vm.alloc, y.I.slice(), x.i) }; }
@@ -78,6 +102,7 @@ fn in_vec_L(vm: *VM, x: V, y: V) V  { return hasListVec(vm.alloc, y.L.slice(), x
 
 pub const In = struct {
   pub const op = .in;
+  pub const fallback: VM.Dyad = inFalse;
   _b_B: VM.Dyad = in_b_B,
   _i_I: VM.Dyad = in_i_I,
   _s_S: VM.Dyad = in_s_S,

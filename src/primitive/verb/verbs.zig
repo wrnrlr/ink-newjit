@@ -99,6 +99,11 @@ pub const stage2fb: [DYAD2_COUNT]VM.Dyad = blk: {
   for (broadcast_ops) |o| t[o.code() - Op2.QUICK_COUNT] = h.containerFallback(o);
   // ~ registers only same-tag slots; every mismatched pair is simply false.
   t[Op2.@"~".code() - Op2.QUICK_COUNT] = &@import("match.zig").matchFalse;
+  // in/has register only comparable pairs; across types nothing is a member, so
+  // the answer is false shaped like the probe rather than `!type` — which is what
+  // an EMPTY typed vector on the right always looks like.
+  t[Op2.in.code() - Op2.QUICK_COUNT] = @import("member.zig").In.fallback;
+  t[Op2.has.code() - Op2.QUICK_COUNT] = @import("member.zig").Has.fallback;
   break :blk t;
 };
 

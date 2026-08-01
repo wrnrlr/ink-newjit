@@ -1711,6 +1711,28 @@ test "a constant baked into a function cannot be rebound from a later unit" {
   try t.check("plain:1; plain:2; plain", "2");
 }
 
+test "membership across types is false, not a type error" {
+  var t = try Tester.init();
+  defer t.deinit();
+  // `in`/`has` register only comparable pairs; a miss used to be `!type`. But
+  // nothing IS a member of a list that cannot hold it, so the answer is false,
+  // shaped like the probe — the line `~` already takes for mismatched tags.
+  try t.check("`a`b in 1 2 3", "00b");
+  try t.check("`a in 1 2 3", "0b");
+  try t.check("1 2 in `a`b", "00b");
+  try t.check("\"ab\" in 1 2", "00b");
+  try t.check("1 2 3 has `a", "0b");
+  // An EMPTY typed vector is always such a miss — its element type says nothing
+  // about what it could have held. This is what `{[i] i}'(0#0)` hands back, and
+  // it silently broke shader.kernel's accumulator-parameter scan.
+  try t.check("`c`a`b in {[i] i}'(0#0)", "000b");
+  try t.check("`c`a`b in ()", "000b");
+  // Comparable pairs are untouched.
+  try t.check("`a`b in `a`c", "10b");
+  try t.check("1 2 3 in 2 3", "011b");
+  try t.check("(1;`a) in `a`b", "01b");
+}
+
 test {
   // Pull in the sibling modules whose own unit tests would otherwise not be
   // reachable from this root.

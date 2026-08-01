@@ -169,25 +169,58 @@ pub const ModuleLoader = struct {
     }
   }
 
-  // True when `i` starts a line that is exactly `fence` — the opener (`/`) or
-  // closer (`\`) of a markdown block comment.  Both must sit alone in column 0.
-  fn isBlockFence(source: []const u8, i: usize, fence: u8) bool {
+  // True when `i` starts a line that is exactly `fence` (in column 0, nothing
+  // else on it).
+  fn isFenceLine(source: []const u8, i: usize, fence: u8) bool {
     if (source[i] != fence) return false;
     if (i != 0 and source[i - 1] != '\n') return false;
-    var j = i + 1;
-    while (j < source.len and (source[j] == ' ' or source[j] == '\t' or source[j] == '\r')) j += 1;
-    return j >= source.len or source[j] == '\n';
+    return i + 1 >= source.len or source[i + 1] == '\n';
+  }
+
+  // The line above `i` is itself a line comment — so a lone `/` there is the
+  // blank DIVIDER idiom inside a run of comments, not a block opener.
+  fn prevLineIsComment(source: []const u8, i: usize) bool {
+    if (i == 0 or source[i - 1] != '\n') return false;
+    var b = i - 1; // the '\n' ending the previous line
+    while (b > 0 and source[b - 1] != '\n') b -= 1;
+    var j = b;
+    while (j < i - 1 and (source[j] == ' ' or source[j] == '\t')) j += 1;
+    return j < i - 1 and source[j] == '/';
+  }
+
+  // A closing `\` line exists somewhere after the `/` at `i`.
+  fn blockClosePresent(source: []const u8, i: usize) bool {
+    var j = i;
+    while (j < source.len and source[j] != '\n') j += 1;
+    while (j < source.len) {
+      j += 1;
+      if (j < source.len and isFenceLine(source, j, '\\')) return true;
+      while (j < source.len and source[j] != '\n') j += 1;
+    }
+    return false;
+  }
+
+  // Does the `/` at `i` open a markdown block comment?  This has to match the
+  // LEXER exactly (`prevLineIsComment`/`blockClosePresent` in parser/lexer.zig):
+  // alone in column 0, the line above not itself a comment, and a closing `\`
+  // present.  Mistaking a divider for an opener is silent and total — the skip
+  // runs to end of file and every module the rest of the file referenced just
+  // never loads, leaving `!type` at the first call.
+  fn opensBlockComment(source: []const u8, i: usize) bool {
+    return isFenceLine(source, i, '/') and
+      !prevLineIsComment(source, i) and
+      blockClosePresent(source, i);
   }
 
   // Index of the newline ending the `\` line that closes the block comment
-  // opened at `i` (end of source if it is never closed).
+  // opened at `i`.
   fn skipBlockComment(source: []const u8, i: usize) usize {
     var j = i;
     while (j < source.len and source[j] != '\n') j += 1; // past the opening `/`
     while (j < source.len) {
       j += 1; // past the newline — j now sits at a line start
       if (j >= source.len) break;
-      const closes = isBlockFence(source, j, '\\');
+      const closes = isFenceLine(source, j, '\\');
       while (j < source.len and source[j] != '\n') j += 1;
       if (closes) return j;
     }
@@ -227,7 +260,7 @@ pub const ModuleLoader = struct {
       // is exactly `\`.  Their body is PROSE — every lib module opens with one —
       // so a name mentioned there ("a ui.k frame", a fenced `csv.read` example)
       // must not drag that module, and its whole dependency tree, in.
-      if (c == '/' and isBlockFence(source, i, '/')) {
+      if (c == '/' and opensBlockComment(source, i)) {
         i = skipBlockComment(source, i);
         continue;
       }
@@ -329,7 +362,7 @@ pub const ModuleLoader = struct {
     var i: usize = 0;
     while (i < source.len) {
       const c = source[i];
-      if (c == '/' and isBlockFence(source, i, '/')) { i = skipBlockComment(source, i); continue; }
+      if (c == '/' and opensBlockComment(source, i)) { i = skipBlockComment(source, i); continue; }
       if (c == '/') { while (i < source.len and source[i] != '\n') i += 1; continue; }
 
       // Explicit module load: monadic 2: applied to a "...k" string literal.
@@ -408,14 +441,23 @@ test "block-comment prose does not name a dependency" {
     \\
   ;
   var i: usize = 0;
-  try testing.expect(ModuleLoader.isBlockFence(src, i, '/'));
+  try testing.expect(ModuleLoader.opensBlockComment(src, i));
   i = ModuleLoader.skipBlockComment(src, i);
   try testing.expectEqualStrings("\nx: 1\n", src[i..]);
 }
 
-test "an unterminated block comment swallows the rest of the source" {
-  const src = "/\n# no closing fence\njson.parse x\n";
-  try testing.expectEqual(src.len, ModuleLoader.skipBlockComment(src, 0));
+test "a lone / that is not a block opener leaves the rest of the source alone" {
+  // Unterminated: no closing `\` line, so it is an ordinary empty line comment.
+  try testing.expect(!ModuleLoader.opensBlockComment("/\n# no fence\njson.parse x\n", 0));
+  // The blank-`/` DIVIDER idiom: the line above is itself a comment. Treating
+  // this as an opener swallowed the rest of test/image.k, so `image.read` was
+  // never loaded and every call came back `!type`.
+  const div = "/ test/image.k\n/\n/ Run: ink test/image.k\npng: image.read p\n";
+  try testing.expect(!ModuleLoader.opensBlockComment(div, 15));
+  try testing.expectEqual(@as(u8, '/'), div[15]);
+  // A genuine opener: column 0, previous line is code, closer present.
+  const blk = "x:1\n/\ndoc prose naming json.parse\n\\\ny:2\n";
+  try testing.expect(ModuleLoader.opensBlockComment(blk, 4));
 }
 
 test "a binding target is not a module reference" {

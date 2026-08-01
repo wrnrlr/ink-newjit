@@ -19,7 +19,12 @@ Three compounding faults in `src/cmd/modules.zig`, all fixed:
    `/` … `\` doc header, and that prose names other modules ("A ui.k frame is a
    pure function…", fenced `csv.read` examples) — so one reference dragged in a
    whole tree of unrelated modules. `autoLoad`/`scanDeps` now skip block
-   comments (`isBlockFence`/`skipBlockComment`).
+   comments. NB the opener rule has to match the LEXER exactly
+   (`opensBlockComment` mirrors `prevLineIsComment`/`blockClosePresent`): a lone
+   `/` is only an opener when the line above is not itself a comment and a
+   closing `\` line follows. A first cut checked only "alone in column 0", which
+   read the blank-`/` DIVIDER idiom in `test/image.k`'s header as an opener,
+   skipped to end of file, and left `image.read` unloaded — every call `!type`.
 3. **A definition triggered an autoload.** `t:1` is a write; it can never need
    the module that exports that name. An identifier immediately followed by `:`
    is now skipped (`isBindTarget`).
@@ -256,6 +261,16 @@ lib/agent.k` hung forever on a file with no comments in it. All three layers fix
    rather than a report: `$[#h; recurse; stop]` saw a truthy 1 and recursed
    forever. `#` now propagates the error (`src/primitive/verb/tally.zig`); the
    conditional takes the else branch.
+
+(1) has blast radius worth knowing about: an empty typed vector now reaches dyads
+that only had a kernel for the empty `` `L ``. The first casualty was `in` —
+`` `S in (empty `I) `` was `!type`, which silently wrecked `shader.kernel`'s
+accumulator-param scan and made every GPU GEMM in `test/kkint.k` return zeros.
+Fixed at the source: `in`/`has` now answer **false, shaped like the probe**, for
+any pair they have no kernel for, the same line `~` takes for mismatched tags
+(`matchFalse`). So `` `a`b in 1 2 3 `` is `00b`, not an error. Dicts and tables
+are excluded — `in` has no kernel for them at all, and answering false would
+hide that.
 
 Note the general question is still open: only `#` measured errors (it was the one
 verb whose type list included `.err`), so this was a point fix, not a policy. Whether
