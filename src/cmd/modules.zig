@@ -10,6 +10,11 @@ pub const ModuleLoader = struct {
   alloc:  Alloc,
   /// identifier name → lib file path (owned slices)
   index:  std.StringHashMap([]const u8),
+  /// namespace stem → lib file path.  Consulted only for a DOTTED reference
+  /// (`nn.gemm` → `nn`), never for the bare stem: module stems are short
+  /// (`t`, `nn`, `ui`) and are also ordinary local-variable names, so a bare
+  /// `nn` must not drag lib/nn.k in.
+  prefix: std.StringHashMap([]const u8),
   /// set of already-loaded file paths
   loaded: std.StringHashMap(void),
 
@@ -17,6 +22,7 @@ pub const ModuleLoader = struct {
     return .{
       .alloc  = alloc,
       .index  = std.StringHashMap([]const u8).init(alloc),
+      .prefix = std.StringHashMap([]const u8).init(alloc),
       .loaded = std.StringHashMap(void).init(alloc),
     };
   }
@@ -28,6 +34,12 @@ pub const ModuleLoader = struct {
       self.alloc.free(e.value_ptr.*);
     }
     self.index.deinit();
+    var pt = self.prefix.iterator();
+    while (pt.next()) |e| {
+      self.alloc.free(e.key_ptr.*);
+      self.alloc.free(e.value_ptr.*);
+    }
+    self.prefix.deinit();
     var lt = self.loaded.iterator();
     while (lt.next()) |e| {
       self.alloc.free(e.key_ptr.*);
@@ -57,21 +69,30 @@ pub const ModuleLoader = struct {
   // Record `ident → path` in the index (skip if already present). Both slices
   // are duped and owned by self.alloc.
   fn addEntry(self: *ModuleLoader, ident: []const u8, path: []const u8) !void {
-    if (self.index.contains(ident)) return;
+    try addTo(self, &self.index, ident, path);
+  }
+
+  // Record a namespace stem (`nn` for `nn.gemm`) in the dotted-only prefix map.
+  fn addPrefix(self: *ModuleLoader, stem: []const u8, path: []const u8) !void {
+    try addTo(self, &self.prefix, stem, path);
+  }
+
+  fn addTo(self: *ModuleLoader, map: *std.StringHashMap([]const u8), ident: []const u8, path: []const u8) !void {
+    if (map.contains(ident)) return;
     const key = try self.alloc.dupe(u8, ident);
     errdefer self.alloc.free(key);
     const val = try self.alloc.dupe(u8, path);
     errdefer self.alloc.free(val);
-    try self.index.put(key, val);
+    try map.put(key, val);
   }
 
   /// Index the public identifiers defined in one module's `content`, mapping
   /// each to `path`.  A module's public surface is defined by its `\d`
   /// namespaces: `\d ns` exports every `ns.member`; `\d ns a b` exports only
-  /// `ns.a`/`ns.b`.  The bare namespace name (`ns`) and every top-level name at
-  /// global scope (outside any `\d`) are also indexed, so both `ns.member` and
-  /// a bare `ns` / `2:"ns"` reference trigger the load.  Works the same whether
-  /// the source comes from disk or an embedded bundle.
+  /// `ns.a`/`ns.b`.  The namespace name itself goes in the dotted-only `prefix`
+  /// map, so `ns.anything` triggers the load but a bare `ns` — an ordinary
+  /// variable name — does not.  Works the same whether the source comes from
+  /// disk or an embedded bundle.
   pub fn scanText(self: *ModuleLoader, path: []const u8, content: []const u8) !void {
     var ns: ?[]const u8 = null;      // current namespace (slice into content)
     var all_public = true;           // bare `\d ns` → every member public
@@ -104,7 +125,7 @@ pub const ModuleLoader = struct {
         var it = std.mem.tokenizeAny(u8, trimmed[2..], " \t");
         if (it.next()) |name| {
           ns = name;
-          try self.addEntry(name, path);
+          try self.addPrefix(name, path);
           all_public = true;
           while (it.next()) |p| { all_public = false; try pubs.append(self.alloc, p); }
         } else ns = null;
@@ -137,23 +158,57 @@ pub const ModuleLoader = struct {
         try self.addEntry(q, path);
       } else if (std.mem.indexOfScalar(u8, name, '.')) |dot| {
         // Explicit `stem.member` global (the dotted-convention parser modules):
-        // index the full name and its namespace prefix so both `stem` and
-        // `stem.member` references trigger the load.  Bare (undotted) global
-        // names are NOT indexed — they are almost always private helpers
-        // (`so`, `tmp`, …) and indexing them would flood autoload, pulling in
-        // half the library on any common identifier.
+        // index the full name, and the stem in the DOTTED-ONLY prefix map so an
+        // unlisted `stem.other` reference still triggers the load.  Bare
+        // (undotted) global names are NOT indexed — they are almost always
+        // private helpers (`so`, `tmp`, …) and indexing them would flood
+        // autoload, pulling in half the library on any common identifier.
         try self.addEntry(name, path);
-        try self.addEntry(name[0..dot], path);
+        try self.addPrefix(name[0..dot], path);
       }
     }
   }
 
-  /// Look up `ident` in the index, falling back from a qualified name to its
-  /// namespace: `csv.read` → try `csv.read`, then `csv`.
+  // True when `i` starts a line that is exactly `fence` — the opener (`/`) or
+  // closer (`\`) of a markdown block comment.  Both must sit alone in column 0.
+  fn isBlockFence(source: []const u8, i: usize, fence: u8) bool {
+    if (source[i] != fence) return false;
+    if (i != 0 and source[i - 1] != '\n') return false;
+    var j = i + 1;
+    while (j < source.len and (source[j] == ' ' or source[j] == '\t' or source[j] == '\r')) j += 1;
+    return j >= source.len or source[j] == '\n';
+  }
+
+  // Index of the newline ending the `\` line that closes the block comment
+  // opened at `i` (end of source if it is never closed).
+  fn skipBlockComment(source: []const u8, i: usize) usize {
+    var j = i;
+    while (j < source.len and source[j] != '\n') j += 1; // past the opening `/`
+    while (j < source.len) {
+      j += 1; // past the newline — j now sits at a line start
+      if (j >= source.len) break;
+      const closes = isBlockFence(source, j, '\\');
+      while (j < source.len and source[j] != '\n') j += 1;
+      if (closes) return j;
+    }
+    return j;
+  }
+
+  // True when the identifier ending at `end` is the target of a binding
+  // (`name:` / `name::`), i.e. a DEFINITION.  Defining a name cannot need the
+  // module that happens to export it, so a definition must not autoload.
+  fn isBindTarget(source: []const u8, end: usize) bool {
+    var j = end;
+    while (j < source.len and (source[j] == ' ' or source[j] == '\t')) j += 1;
+    return j < source.len and source[j] == ':';
+  }
+
+  /// Look up `ident` in the index: an exact hit on a public name, else — for a
+  /// DOTTED reference only — its namespace stem (`csv.read` → `csv`).
   fn indexLookup(self: *ModuleLoader, ident: []const u8) ?[]const u8 {
     if (self.index.get(ident)) |p| return p;
     if (std.mem.indexOfScalar(u8, ident, '.')) |dot|
-      if (self.index.get(ident[0..dot])) |p| return p;
+      if (self.prefix.get(ident[0..dot])) |p| return p;
     return null;
   }
 
@@ -167,6 +222,15 @@ pub const ModuleLoader = struct {
     var i: usize = 0;
     while (i < source.len) {
       const c = source[i];
+
+      // Skip markdown block comments: a line that is exactly `/` … a line that
+      // is exactly `\`.  Their body is PROSE — every lib module opens with one —
+      // so a name mentioned there ("a ui.k frame", a fenced `csv.read` example)
+      // must not drag that module, and its whole dependency tree, in.
+      if (c == '/' and isBlockFence(source, i, '/')) {
+        i = skipBlockComment(source, i);
+        continue;
+      }
 
       // Skip line comments: / ... \n
       if (c == '/') {
@@ -196,8 +260,10 @@ pub const ModuleLoader = struct {
           while (end < source.len and std.ascii.isAlphanumeric(source[end])) end += 1;
         }
         const ident = source[i..end];
+        const is_def = isBindTarget(source, end);
         i = end;
 
+        if (is_def) continue;
         if (self.indexLookup(ident)) |path| {
           if (!self.loaded.contains(path)) {
             const path_key = try self.alloc.dupe(u8, path);
@@ -263,6 +329,7 @@ pub const ModuleLoader = struct {
     var i: usize = 0;
     while (i < source.len) {
       const c = source[i];
+      if (c == '/' and isBlockFence(source, i, '/')) { i = skipBlockComment(source, i); continue; }
       if (c == '/') { while (i < source.len and source[i] != '\n') i += 1; continue; }
 
       // Explicit module load: monadic 2: applied to a "...k" string literal.
@@ -314,3 +381,47 @@ pub const ModuleLoader = struct {
     }
   }
 };
+
+const testing = std.testing;
+
+test "a namespace stem only autoloads through a dotted reference" {
+  var ml = ModuleLoader.init(testing.allocator);
+  defer ml.deinit();
+  try ml.scanText("lib/uitest.k", "t.EVK:`kind`code\nt.app:{[vf;af] vf}\n");
+
+  // `t.app` is a listed member; `t.shot` resolves through the stem.
+  try testing.expectEqualStrings("lib/uitest.k", ml.indexLookup("t.app").?);
+  try testing.expectEqualStrings("lib/uitest.k", ml.indexLookup("t.shot").?);
+  // …but the bare stem is just a variable name — issue 27, where `t:5` in any
+  // script dragged the whole UI stack in and looked like a compile-time hang.
+  try testing.expect(ml.indexLookup("t") == null);
+}
+
+test "block-comment prose does not name a dependency" {
+  const src =
+    \\/
+    \\# demo
+    \\
+    \\A ui.k frame is a pure function; see `csv.read` and json.parse.
+    \\\
+    \\x: 1
+    \\
+  ;
+  var i: usize = 0;
+  try testing.expect(ModuleLoader.isBlockFence(src, i, '/'));
+  i = ModuleLoader.skipBlockComment(src, i);
+  try testing.expectEqualStrings("\nx: 1\n", src[i..]);
+}
+
+test "an unterminated block comment swallows the rest of the source" {
+  const src = "/\n# no closing fence\njson.parse x\n";
+  try testing.expectEqual(src.len, ModuleLoader.skipBlockComment(src, 0));
+}
+
+test "a binding target is not a module reference" {
+  try testing.expect(ModuleLoader.isBindTarget("t:1", 1));
+  try testing.expect(ModuleLoader.isBindTarget("nn:5", 2));
+  try testing.expect(ModuleLoader.isBindTarget("gpu.buf :: 3", 7));
+  try testing.expect(!ModuleLoader.isBindTarget("json.parse s", 10));
+  try testing.expect(!ModuleLoader.isBindTarget("nn", 2));
+}

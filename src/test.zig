@@ -1650,3 +1650,9 @@ test "parse errors carry a source position" {
   try testing.expectEqual(@as(u32, 3), pos.line);
   try testing.expectEqual(@as(u32, 9), pos.col);   // the `;` where a `:` was due
 }
+
+test {
+  // Pull in the sibling modules whose own unit tests would otherwise not be
+  // reachable from this root.
+  _ = @import("cmd/modules.zig");
+}

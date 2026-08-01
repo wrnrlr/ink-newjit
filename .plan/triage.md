@@ -1,30 +1,33 @@
 # Issues
 
-## 27. A global named `t` hangs the process at COMPILE time
+## 27. A global named `t` "hangs" the process — FIXED (2026-08-01)
 
-```k
-t: 5
-`0 0: "END"
-```
+It was never a hang and never the compiler: `t: 5` was **autoloading half the
+library**, ~11 s of module compilation in a Debug build before the first
+statement ran. (`ink parse` was clean because parsing was never involved.) It
+duplicated the "Assigning the bare global `t` hangs the interpreter" entry
+below, whose diagnosis was right; the cascade behind it was the missing half.
 
-hangs forever. Not a runtime hang — **nothing at all executes**, not even a print
-placed *before* the assignment (`` `0 0: "before"; t: 5 `` prints nothing), so the
-unit never finishes compiling. `ink parse` on the same file is clean, so the
-parser is fine; it is the compiler or IR lowering.
+Three compounding faults in `src/cmd/modules.zig`, all fixed:
 
-- The value is irrelevant: `t: 5`, `t: 1 2 3`, `` t: `a`b!1 2 ``, `t: [[]a:1 2]`
-  all hang. So does `t[0]: 5`.
-- **`t` is the only single letter affected** — a loop over `a`…`z` assigning
-  `1 2 3` hangs on `t` and nothing else. `tt`, `ts`, `t0`, `tb` are all fine.
-- Not the module autoloader: it still hangs with `INK_HOME` pointed at a
-  nonexistent directory, and there is no `lib/t.k`.
-- Predates the IPC work — reproduced against a build of `cf7bf04` with the
-  working tree stashed.
+1. **A namespace stem was indexed as a bare name.** `t.EVK:` in `lib/uitest.k`
+   registered plain `t` → uitest.k, so any mention of `t` pulled the UI-test
+   harness in. Same for `nn` (a local in `lib/slug.k`) → `lib/nn.k`. Stems now
+   live in a separate `prefix` map consulted **only for a dotted reference**:
+   `t.click` loads uitest.k, bare `t` does not.
+2. **`autoLoad` scanned markdown block comments.** Every lib module opens with a
+   `/` … `\` doc header, and that prose names other modules ("A ui.k frame is a
+   pure function…", fenced `csv.read` examples) — so one reference dragged in a
+   whole tree of unrelated modules. `autoLoad`/`scanDeps` now skip block
+   comments (`isBlockFence`/`skipBlockComment`).
+3. **A definition triggered an autoload.** `t:1` is a write; it can never need
+   the module that exports that name. An identifier immediately followed by `:`
+   is now skipped (`isBindTarget`).
 
-Found while writing `test/ipccli.k`, which named a table `t`; renamed to `tb` to
-get around it. Nasty because the failure is total and silent: a script with a
-`t` global produces no output and no error, so it reads as a hang somewhere else
-entirely.
+Effect: `t:1` went 11.7 s → 0.26 s; `ui.*` loads 10 modules instead of 14 (10.4 s
+→ 7.7 s). **`make ui-test` was broken by this and now passes** (31 assertions) —
+it had read as a hang. `test/relpos.k`, which used to blow a 150 s timeout, now
+finishes. Regression tests are in `src/cmd/modules.zig` (206 unit tests pass).
 
 ## 22. `lib/color.k` legacy HSL/pct helpers are broken (disabled) + a `\`-swallow lexer bug
 
@@ -220,30 +223,11 @@ Three separate things, in increasing order of nastiness:
    like 1-element values is the general shape of the "silent wrong answer" failure mode
    — worth deciding whether primitives should propagate `!` instead of measuring it.
 
-## Assigning the bare global `t` hangs the interpreter (autoload of lib/uitest.k)
+## Assigning the bare global `t` hangs the interpreter — FIXED, see issue 27
 
-`t:1` — nothing else in the script — never returns:
-
-```
-echo 't:1' | ink      # hangs forever
-echo 'q:1' | ink      # fine
-```
-
-`lib/uitest.k` defines `t.EVK: …`, `t.VW: …` and friends at top level, so the module
-indexer (`src/cmd/modules.zig` scanText) registers the dotted name AND its namespace
-prefix — i.e. bare `t` → `lib/uitest.k`. Any mention of `t` then autoloads the headless
-UI-test harness, which does not come back.
-
-Two things are wrong here:
-
-1. A *definition* (`t:1`) should never trigger an autoload — only a read of an unset
-   name should. The write is what the user meant, and it can't need the module.
-2. Indexing a one-letter namespace prefix like `t` poisons one of the most common
-   variable names in the language for every script. Either uitest.k should use a longer
-   stem (`uit.`), or single-character prefixes should be excluded from the index.
-
-Found while implementing `<`/`>` on dicts and tables; the symptom there was that every
-test script using `t:` for a table hung before printing anything.
+Both suggested fixes landed (a definition no longer autoloads; a namespace stem
+only resolves through a dotted reference), plus the block-comment fault that made
+the cascade big enough to look like a hang. Full write-up under issue 27 above.
 
 ## `=` key order is sorted for I/S/B/C but first-occurrence for F/L
 
