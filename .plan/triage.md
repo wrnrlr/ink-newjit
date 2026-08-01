@@ -26,131 +26,6 @@ get around it. Nasty because the failure is total and silent: a script with a
 `t` global produces no output and no error, so it reads as a hang somewhere else
 entirely.
 
-## 24. FIXED — VM stack limits, and a nested-call unwind that corrupted `current_chunk`
-
-Originally filed as "kk elementwise chains are silently wrong at 28 ops". The emitter
-was never at fault: `spirv-dis` showed the modules at 27/28/29 ops were valid and had
-exactly the right `OpFAdd`/`OpFMul` counts. Three separate runtime defects, found by
-following the chain-length cliff (`doc/research/tropical.md` §7):
-
-1. **`FRAMES_MAX = 64` was far too shallow.** `kkClassify` (lib/dye.k) walks the CST by
-   recursion, once per operator, so a 28-op kernel expression exhausted the VM's call
-   frames. Raised to 4096 (a Frame is 32 bytes → 128 KB).
-2. **A nested run swallowed its error and popped garbage.** `callLambdaAndRun`/`…Move`
-   did `vm.runUntil(prev_frames) catch {}` and then `vm.pop()` — so a `StackOverflow`
-   became a plausible-looking wrong number instead of an error. This is what made the
-   28-op case return ~2x the right answer rather than failing. Now routed through
-   `abortNested`, which returns an error VALUE (`!StackOverflow`).
-3. **The unwind never restored `vm.current_chunk`** (neither the old `catch {}` nor the
-   first version of `abortNested`). Execution resumed in the caller's frame while
-   pointing at the abandoned callee's chunk, so the caller's ip indexed a foreign
-   constant array — surfacing as `panic: index out of bounds: index 260, len 2` in
-   `runUntil`, arbitrarily far from the real fault. `abortNested` now restores the
-   parent's chunk by the same rule `doReturn` uses.
-4. **`STACK_MAX = 2048` was the next wall.** With frames fixed, deep expressions ran the
-   VALUE stack out instead; the emitter then silently produced a 167-word stub kernel.
-   Raised to 16384.
-
-Result: kk elementwise chains went from a hard cap of 27 ops (silently wrong at 28) to
-correct GPU-vs-CPU agreement at 300 ops, verified across 27/28/32/64/100/128/200/300.
-All oracle rungs stay green including kkgold byte-identity and spirv-val.
-
-**Follow-up DONE: `kkClassify` is now a table scan** (lib/dye.k), so the classifier no
-longer consumes a VM frame per operator and has no depth budget at all. Every rule in
-the old `kkChk` was local — a node's verdict depends only on its own kind plus, for the
-three apply-ish kinds, the operator slot it consumes — so the whole classification is
-one pass over the CST rows. Row order is pre-order, which is exactly the order the
-recursion reported offenders in.
-
-Measured at 3000 ops: the recursive version produces no result; the scan returns in
-~125ms. `kkClassifyRec` is retained purely as the reference implementation, and
-`test/kkscan.k` (29 checks, wired into `test/oracles.sh`) asserts the two agree across
-every CST shape plus a 200-op chain — a silent divergence would make kk accept or reject
-the wrong kernels.
-
-The raised `FRAMES_MAX`/`STACK_MAX` are still there and still worth keeping (other
-recursive k code benefits), but kk no longer depends on them.
-
-## 23. RETRACTED — `$lambda` does NOT drop parentheses (bad repro)
-
-Filed during the tropical work as "a lambda taken out of a list loses its
-parentheses when stringified, so kk.plan re-parses a different expression". **It is
-not a bug.** The generator that produced the bench kernels was wrong:
-
-```python
-e = "x"
-for i in range(k): e = f"({e}*1.0001)+0.0001"   # WRONG: e already ends in +0.0001
-# k=2 emits ((x*1.0001)+0.0001*1.0001)+0.0001
-# intended  (((x*1.0001)+0.0001)*1.0001)+0.0001
-```
-
-The round-trip was compared against the string I *meant* to emit rather than the one
-actually emitted, so a faithful `$lambda` looked like it was dropping parens. Verified
-directly on a ReleaseFast build — a parenthesised body round-trips identically whether
-taken directly, out of a list, or out of a dict:
-
-```k
-TK2: {(((x*1.0001)+0.0001)*1.0001)+0.0001}
-FS: (TK1;TK2)
-(,/$ FS 1) ~ ,/$ TK2     / 1b
-```
-
-The two defects noticed alongside it ARE real and were verified independently — they
-keep their own entry as #25.
-
-## 26. FIXED — `gpuBufferFree` queue drain, and uninitialised `Vk` fields
-
-Two things, one of which matters much more than the other.
-
-**The real bug: `Vk` fields were never initialised.** Both constructors do
-`var self: Vk = undefined` and then assign field by field, so struct-field DEFAULTS IN
-THE DECLARATION ARE NEVER APPLIED. The `pending_len`/`pending_all` added for the
-`gpuBufferWrite` fix were therefore garbage at startup — safe only because every read of
-them is gated behind `recording`, which *is* explicitly set to false. That is luck, not
-design. Adding a `dead_len` with no such gate turned the latent problem into a hang:
-`sync()` walked `self.dead[0..garbage]` calling `vkDestroyBuffer` on junk handles, and it
-hung at the first READBACK, before any free was issued. Both constructors now set every
-field explicitly.
-
-**The drain itself: real but small.** `gpuBufferFree` called `v.sync()` before destroying.
-It now defers the destroy to the next `sync()` (`destroyLater`), so a free never drains.
-
-Measured on an MHSA block (T=64, D=256, interleaved best-of, 3 rounds):
-**1.03x** — inside the noise (rounds: 1.03x, 1.06x, 0.97x).
-
-**The earlier estimate in this entry was wrong** and the reason is worth recording:
-`sync()` opens with `if (!self.recording) return`, so a RUN of consecutive frees costs
-ONE drain, not one per buffer. `lib/nn.k` frees its scratch in single `gpu.free'(...)`
-batches, so a Conformer block was paying ~4 drains (one per batch), not the ~36 this
-entry originally claimed. At ~250us a drain against a ~4800us block, that is ~3% — which
-is what the measurement shows.
-
-Kept anyway: the fix is correct, low-risk, and the field-initialisation half is a genuine
-correctness fix independent of performance. But it is NOT the second 2x — the
-`gpuBufferWrite` drain was expensive because it sat between dispatches and broke
-pipelining; this one sits at a block boundary where a drain was about to happen anyway.
-
-## 25. FIXED — kk silently returned ZEROS in two cases instead of failing
-
-Both found while building the tropical benchmark harness. Neither errored; both handed
-back a buffer of zeros that looked like a legitimate result. Both now fixed (lib/kk.k).
-
-1. **A plan cached in one `gpu.computeRun` and reused in a later one.** `kkPlanCache`
-   is keyed on (lambda source; #inputs; placement signatures) but NOT on the device, so
-   the second session gets a plan holding pipeline handles from the destroyed first
-   device. Repro: run the same `kk.plan` + `kk.run` in two consecutive
-   `gpu.computeRun` blocks — the first is correct, the second is all zeros.
-   **Fixed**: `kk.plan` now checks `gpu.gen` (the device generation counter lib/slug.k
-   already uses) and drops `kkPlanCache`/`kkCache`/`kkGrpPipe`/caps on a change.
-
-2. **A lambda whose params are not named `x`/`y`/`z`.** kk maps params positionally
-   (`pn: nIn # \`x\`y\`z`), so `{[a] a+a}` compiles happily, binds nothing, and returns
-   zeros. `kkClassify` reports clean, so `kkWarn` never fires. It should reject any
-   lambda whose declared params are not the expected positional names.
-   **Fixed**: `kkBadParams` rejects any lambda whose declared params are not `x`/`y`/`z`
-   positionally, naming the offenders. Implicit-param bodies (no declared params) stay
-   legal. Note `:expr` is not an early return in this dialect — the guard is a branch.
-
 ## 22. `lib/color.k` legacy HSL/pct helpers are broken (disabled) + a `\`-swallow lexer bug
 
 `lib/color.k` could never be loaded (`2:"lib/color.k"`) because two legacy lines
@@ -290,29 +165,6 @@ Dawn/WebGPU path (whose Tint SPIR-V reader was permanently capped at Vulkan 1.1 
 SPIR-V 1.3, and thus refused any 1.4 module) is deleted. Full history in
 `doc/design/vulkan-migration.md`; migration status in `.plan/tasks.md`.
 
-### i32 / bool as shader I/O types
-
-v3 is fully supported (incl. I/O). `bool` and `i32` exist in the type system
-(`Tbool`/`Ti32`) and are used internally (comparisons, loop counters, buffer
-indices, atomics), but `PtrIn`/`PtrOut` (`lib/spirv.k`) have no i32/bool entries,
-so they cannot yet be declared shader inputs/outputs. **Fix:** add i32/bool
-`PtrIn`/`PtrOut` pointer types.
-
-### Multiple fragment outputs (MRT)
-
-The vertex→fragment varying interface is multi-output (`shader.vertexU` emits up
-to 4 varyings, each with its own `Location`), but fragment shaders emit a single
-Location-0 color output — `buildMod` has no loop over multiple outputs. **Fix:**
-generalise the fragment output var + `Location` decoration + store to a list of
-outputs.
-
-### User-facing int/float cast syntax
-
-`OpConvertSToF`/`OpConvertFToS` (`opI2f`/`opF2s`) exist and are exercised
-internally (index truncation, accumulator conversion) but there is no
-shader-source cast (`int x` / `float x`) in `mathFns`. **Fix:** bind cast names
-in the front-end to the existing convert stencils.
-
 ### Branching is eager `OpSelect` (no real control flow for expressions)
 
 `$[cond;a;b]` compiles via `OpSelect` (`compCond`/`compCondS`), which is **eager**
@@ -331,38 +183,6 @@ or run as the main script. Repro: file `\d world; el:0.; probe:{[] el}; \d`; the
 namespace fn) makes both align. Likely compile-time name-mangling treating read-only members as
 file-private. Workaround: set members via an internal setter fn. Found building demo/timer.k.
 
-## Deeply-nested INLINE layout expression silently halts execution — FIXED 2026-07-30
-Writing a nested `ui.col`/`ui.row` tree as ONE inline expression silently stops the script at that
-statement — no error, exit 0, and every following top-level statement (incl. `window.run`) never
-runs. Reliable repro (`2:"lib/ui.k"` first):
-```
-`0 0: "A"
-y: ui.col[0.; (ui.row[0.; (ui.col[10.; (,ui.label["E"])]; ui.spacer[])); ui.spacer[])]
-`0 0: "B"        / never prints
-```
-The SAME tree built in named steps works fine:
-```
-x0: ui.col[10.; (,ui.label["E"])]
-x1: ui.row[0.; (x0; ui.spacer[])]
-x2: ui.col[0.; (x1; ui.spacer[])]   / OK, "B" prints
-```
-So it's the inline nesting of bracket-calls inside parenthesized list literals `(call[…(…)…]; …)`,
-not the layout itself. Minimal non-UI isolation with a dummy `f[g;x]` was inconclusive (ran to
-completion), so the trigger is subtle — likely a compiler pass (constant-fold/DCE) on nested
-list/dict construction, aborting the chunk silently. A silent halt with exit 0 is the dangerous
-part. Workaround in demo/earth.k: build the HUD tree in named locals inside the lambda.
-
-**Root cause + fix (2026-07-30):** the repro expression is genuinely UNBALANCED (an extra
-`)`), and every closing bracket in the parser was consumed with `_ = self.eat(…)` — the
-result discarded. A missing closer left the cursor parked on someone else's token, so the
-production returned "successfully" and the rest of the file was swallowed: exit 0, no error.
-All 12 sites now go through `Parser.close()`, which errors mid-source but stays lenient at
-EOF (lib/syntax.k re-parses half-typed source on every keystroke to highlight, so `f:{[a;`
-must still yield a partial tree). The repro now reports
-`!parse_error: UnexpectedToken at 2:42` with a caret. No workaround needed — but note the
-expression was malformed all along, so the "named steps" version was not just a workaround,
-it was the correct code.
-
 ## A 5th vertex→fragment varying isn't delivered by shader.vertexPull/fragmentTexN (demo/earth.k)
 Adding a 5th varying to the earth pipeline (wNor v3, wTan v3, wUvF v4, wSun v3, **wLay v2**) read as
 0 in the fragment even when the vertex hardcoded it to 1.0 — the globe went black when output. The
@@ -373,35 +193,6 @@ location/packing interaction with the specific vec sizes (earth's 3+3+4+3+2) or 
 fragmentTexN. Workaround used: pack the flag into a spare lane of an existing varying (wSun v3→v4,
 bordersOn in .w). Worth pinning down the real rule in shader.vertexPull location assignment so
 overlays can add channels without hunting for spare lanes.
-
-## `test/llm.k` fails to parse (`!parse_error: UnexpectedToken`) — FIXED 2026-07-30
-`make test` runs `$(INK) test/llm.k` and it aborts immediately with
-`!parse_error: UnexpectedToken`; nothing in the file is exercised. Pre-existing —
-reproduces with an otherwise clean tree (confirmed by stashing unrelated changes),
-so it is not fallout from the nn/ASR work. `make test` does not stop on it because
-the recipe lines aren't `set -e`-guarded, so the failure is easy to miss.
-Unrelated to this task; found while running the suite for demo/asr.k.
-
-**FIXED:** once parse errors carried a location it took one line to see — the file had
-`{[in] "You rolled a 4"}`, a lambda parameter named after the keyword verb `in`, which
-the grammar rejects. Renamed to `arg`; the test now runs (18 assertions pass). Note the
-`make test` recipe still isn't `set -e`-guarded, so a future failure there is still easy
-to miss — worth fixing separately.
-
-## A SPACED `\` is the scan adverb, never the split verb — FIXED 2026-07-30
-`sep \ str` silently means "scan", so `"\n" \ 1: path` returned the whole file as a
-ONE-element list instead of splitting it into lines. This is what made
-`nnLoadVocab` (lib/nn.k) return a 1-entry vocab, so every detokenized transcript
-came out empty. The glued forms `"\n"\s` and `NL\s` both split correctly; only the
-spaced form is wrong. It is a silent wrong-answer rather than an error, which makes
-it nasty — worth either rejecting `verb-adverb` where a dyad was clearly intended,
-or at least calling it out in AGENT.md next to the other adverb-glue gotchas.
-
-**FIXED:** the lexer tested `had_space` when deciding adverb-vs-adverb_val for `'` and
-`\`. It no longer does — only the operand to the LEFT decides, so `sep \ str` means the
-same as `sep\str` and `f ' xs` the same as `f'xs`. `/` deliberately KEEPS its spacing
-rule, because ` / ` after a noun or verb is a comment; that asymmetry is now documented
-in AGENT.md rather than being a silent trap.
 
 ## `&` on an empty general list errors, and `#` of an error is 1 (silent infinite loop)
 
@@ -454,38 +245,6 @@ Two things are wrong here:
 Found while implementing `<`/`>` on dicts and tables; the symptom there was that every
 test script using `t:` for a table hung before printing anything.
 
-## FIXED — A lambda with 9+ parameters is accepted, then panics on partial application
-
-Fixed 2026-07-29. The cap is now one constant (`operator.zig MAX_ARGS`, = 16) that
-`Fn.arity`, `Partial`, the call buffers, the MakePartial bytecode mask and the compiler
-all size off; a 17th parameter is rejected at the definition with `TooManyParams`, and
-over-application raises `!rank`. Benchmarks for the 8/16/32 choice are in the changelog
-(2026-07-30 "later"). Original report:
-
-The parser/compiler accept any number of lambda parameters, but the call machinery is
-hard-capped at 8 in three independent places: `Fn.arity` is a `u4` (max 15),
-`Partial.args` is a `[8]V` with a `u8` `fill` bitmask, and `doCallWithMode` marshals
-through a fixed `[8]V` buffer (the compiler rejects a >8-arg *call site* with
-`error.TooManyArgs`, which is the only cap that reports).
-
-So a 9-param lambda can only ever be reached by projection, and that path is unsound:
-
-```
-f:{[a;b;c;d;e;g;h;i;j]a+j}
-((((((((f 1)2)3)4)5)6)7)8)9
-/ debug:       panic: integer does not fit in destination type
-/                     call.zig:160  @as(u8,1) << @intCast(i)   with i=8
-/ ReleaseFast: silently returns the 8-filled partial; merged[8] on a [8]V is OOB
-```
-
-`applyPartial` and `makePartialFromMerged` both loop `0..arity` over `[8]V` locals, so
-arity 9..15 reads/writes past the end. Fix: reject >8 parameters at lambda *definition*
-in the compiler (clear error at the point of the mistake), and assert the invariant in
-`makePartialFromArgs`.
-
-Related, and also silent: over-application drops the extra arguments instead of raising
-`!rank` — `{[a;b]a+b}[1;2;3]` → `3`, `{x+y}[1;;3]` → `{x+y}[1;]`.
-
 ## `=` key order is sorted for I/S/B/C but first-occurrence for F/L
 
 `=x` sorts its keys for ints, symbols, bools and chars (the k7/k9-2021 contract),
@@ -503,35 +262,3 @@ work (it is exactly why k9 2021 can run it and ngn/k cannot), so code that relie
 on it silently gets a different answer as soon as the grouped values are floats or
 lists. Either sort F/L too, or document that `=` only orders the scalar-key types.
 `freq.zig` mirrors the same split deliberately, so both change together.
-
-## `=` on a general list is O(n · distinct) — FIXED 2026-07-29
-
-`groupValues` (and `freqValues`) linear-scanned the accumulated distinct keys with
-`.eq` for every element, so an all-distinct list was quadratic:
-
-```
-L:,'!10000    #=L    0.16s
-L:,'!20000    #=L    0.55s     / 2x the data, 3.4x the time
-```
-
-**FIXED:** `keying.Distinct` hands out group ids through a content hash of the
-value (`keying.hashV`, ±0.0-normalized so it agrees with `V.eq`), with hash
-buckets chained so exactness still comes from `.eq`. Now linear — `,'!10000` and
-`,'!40000` both group in 0.01s, and the 1M-element `=L` bench line went 2561ms →
-14ms at 100k distinct.
-
-## Each over a dict drops the keys — FIXED 2026-07-29
-
-`f'd` applied f to the dict's values and returned a plain list, so the canonical
-group workflow lost its labels at the last step:
-
-```
-score@=player       [alice:1 8;bob:4 5;carol:2 7]   / good
-|/'score@=player    8 5 7                           / ngn/k: `alice`bob`carol!8 5 7
-```
-
-**FIXED:** `each` now branches on the mapping types — a dict maps over its values
-and comes back keyed the same way, and a table maps over its ROWS. The table half
-also fixes an out-of-bounds read: `#t` counts rows but `t.at(i)` reads the i'th
-COLUMN, so `{x}'` over a table with more rows than columns indexed past the end of
-the column list.

@@ -103,19 +103,6 @@ Maybe we can use the digram form of the each adverb for parallel each.
 There is already stencil and window, we can add `` `ncpu f'!1000 `` to mean
 that the function f should be applied to `!1000` distributed over number of cpu cores.
 
-## GPU: Dawn → Vulkan (MoltenVK) migration — DONE (cut over 2026-07-14)
-Full design + phase log: `doc/design/vulkan-migration.md`. Vulkan/MoltenVK is now
-the ONLY backend (no `-Dgpu-backend` flag; Dawn/zgpu/zdawn/zpool + the lazy
-`dawn_aarch64_macos` dep + `patches/` + `blit.wgsl`/`fill.wgsl` all deleted).
-`build.zig` links `libMoltenVK.a` + vulkan-headers + GLFW and merges them into one
-archive for the static bundle. `gpuWgsl` removed. **Phase 6 done unconditionally**:
-`lib/dye.k` emits SPIR-V **1.4 natively** (version word `0x00010400` + full-interface
-`OpEntryPoint`) at every assembler; `vk.maybeBump`/`INK_SPV14` are gone. The k-facing
-FFI (30 `gpu*` exports) is unchanged, so `lib/gpu.k` + all `test/*.k` still work.
-Toolchain: `brew install molten-vk vulkan-headers`. **glslang is NO LONGER a build
-dependency** — `fill.vert.spv`/`fill.frag.spv` are committed blobs `@embedFile`'d by
-`lib/gpu/vk.zig`; nothing regenerates them at build time.
-
 ### Remaining graphics work (in rough priority order)
 1. **Retire the native tessellation path — DONE (2026-07-25).** Deleted `lib/gpu/fill.frag`
    + `fill.frag.spv` + `lib/gpu/triangulate.zig` + the `gpuFill`/`gpuTess` exports +
@@ -153,71 +140,6 @@ dependency** — `fill.vert.spv`/`fill.frag.spv` are committed blobs `@embedFile
 8. **Perf pass**: compute is correctness-first (deferred submission, `vkQueueWaitIdle`
    at each readback). Revisit with fences / overlap if profiling shows it matters.
 
-## Canvas / Slug 2D renderer
-Full roadmap + architecture + gotchas: **`doc/design/canvas-slug.md`** (read §3 first).
-The 2D stack is now ONE analytic backend — fills, gradients, clips, strokes, text, and
-image paint all render through the Slug scene buffer (`lib/slug.k` + `lib/canvas.k`); no
-tessellation. DONE this cycle: gradients/clip in the fill shader, strokes as miter
-outlines, one-backend cutover, image paint (`shader.fragmentBufTex`), CFF/OTF `font.quads`
-(cubic→2 quads), scene-buffer compaction (indexed band layout), and scene/quad-pool
-double-buffering. Also DONE 2026-07-21: `&`/`|` polysemic in the shader dialect (task 3),
-text clipping (task 4), image sampler confirmed LINEAR (task 6).
-
-**OKLab gradient interpolation — DONE 2026-07-23.** Gradients now interpolate in OKLab
-(perceptually uniform; no muddy sRGB-lerp midpoint) instead of per-channel gamma sRGB. All
-in the dye-compiled FRAGF fragment (`lib/slug.k` ~L311-345) using existing dialect intrinsics
-(`pow`/`step`/`mix`/`|`-max) — same Ottosson matrices as `lib/color.k`'s `oklch`. SOLIDS stay
-BIT-EXACT: `sel: step[0.5;extx]` picks the untouched inner sRGB for solid paints (extx<0.5), so
-the OKLab round-trip never perturbs solid fills or glyphs → all UI logic + golden-pixel tests
-still pass (`test/ui.k` 26/26, `test/uishot.k` 3/3). Verified on `demo/canvas.k`: 24.9k px changed
-(exactly the two gradient regions), every sampled solid/text/stroke pixel identical. Cost: the
-eager-select computes OKLab for every fill pixel (no expression-branch in the dialect), but it's
-dwarfed by the existing per-pixel analytic-coverage band loop. Needed the CPU `cbrt` operator
-(`syms.zig`+prelude) for the palette path; the shader uses `pow[·;1/3]`. Remaining, rough priority:
-
-1. **Band-loop truncation cap — DONE 2026-07-21.** The scene-buffer fragment now loops the
-   REAL per-band count via `rsum[bcnt; …]` (a RUNTIME trip count — `loopOpen` already
-   compares the i32 counter against a runtime `Kmax`, so no `whileL` and no dye change were
-   needed, only slug.k). Removed the host-side `(#sel)&slugMPB` cap in `oneBandC` (compacted
-   path stores every overlapping curve; `oneBand`/texture path keeps its cap since its texture
-   width is fixed) and dropped the clamp+`valid` mask in FRAGF/FRAGFI. Verified with an
-   18-stripe single-fill test (36 curves/band): all render; re-adding the cap drops the dense
-   middle stripes (winding leak reproduced then fixed).
-2. **`dFdx`/`fwidth` AA.** AA width is host-computed per fill/glyph (~1.2px). A real
-   `OpDPdx`/`OpDPdy`/`OpFwidth` (207/208/210) intrinsic in dye makes edge AA exact under
-   any transform. Needs the `DerivativeControl`/no-cap fragment path.
-3. **`&`/`|` → min/max in the shader dialect — DONE 2026-07-21.** `dispBin`/`binRty`/
-   `xTransNorm` in `lib/dye.k` now dispatch `&`/`|` by operand type: bool→`OpLogicalAnd`/
-   `Or`, float/vector→`OpFMin`/`OpFMax`. slug.k's shader bodies use `&`/`|` (dropped the
-   `min[]`/`max[]` workaround); verified canvas + slug demos render unchanged. 6 golden
-   assertions added to `test/spirv.k` (float→FMin/FMax, bool→logical).
-4. **Text clipping — DONE 2026-07-21.** `slugText` snapshots the live clip (`TXCLM`/`TXCLE`)
-   per glyph; `txPaint` bakes it via `applyClipM`. Verified: text cropped to a clip band.
-5. **Retire the native tessellation files** (`triangulate.zig`, `fill.frag`) — IN PROGRESS.
-   - `gpu.fill`/`gpu.tessellate` DEPRECATED 2026-07-21 (marked in `lib/gpu.k`); use canvas.
-   - Migrated to canvas: `demo/{eyes,drawing,typeset}.k` (verified via `-snap`). Added
-     `cnv.rect`/`cnv.ellipse`/`cnv.circle` convenience path builders to `lib/canvas.k`.
-   - STILL on the deprecated API: `demo/{replay,edit,asr}.k` — interactive apps (audio
-     waveform = vertical bars, ASR viz, a text editor with a glyph-tessellation cache +
-     event table). Pure `gpu.fill`/`gpu.tessellate` (no mesh/shader draws → they CAN move to
-     canvas), but each needs restructuring (side-effecting rect/text fills, waveform as a
-     path, glyph cache → `cnv.text`) and interactive validation, so deferred.
-   - NOTE: `fill.vert` CANNOT be deleted — `gpu.drawShader` (circle/pbr/drive/demo/ir, NOT
-     deprecated) draws its custom fragment over the built-in fill VERTEX shader. Only
-     `fill.frag` + `triangulate.zig` + `gpuFill`/`gpuTess` can go, and only after the 3 apps
-     migrate. Also the Phase-7 self-host task above.
-6. **Image sampler filtering — DONE (already LINEAR).** `texture.upload` (vk.zig
-   `createTexture`, line 635) is `VK_FILTER_LINEAR`, so image paint already scales smoothly;
-   only the data texture (`createTextureF`) is NEAREST (required for exact per-texel reads).
-
-### Shader dialect
-- **`&`/`|` as min/max in shaders — DONE 2026-07-21.** The dye dialect now dispatches
-  `&`/`|` by operand type: `OpFMin`/`OpFMax` for float/vector operands, `OpLogicalAnd`/
-  `Or` for bool — so `y0&y2` in a shader is `min[y0;y2]`, matching ordinary ink. Touched
-  `dispBin` (route by `aty~bool`), `binRty`/`cmpOps` (result type propagates for numeric
-  `&`/`|`), and `xTransNorm` (drop the forced-bool operand hint). slug.k dropped its
-  `min[]`/`max[]` workaround. Golden coverage in `test/spirv.k` §9.
-
 ### Housekeeping
 - `spike/` (vkspike.zig + run.sh) is the throwaway Phase-0 proof — keep or delete.
 - `test/computevk.k` is the headless Vulkan compute smoke test — keep.
@@ -243,8 +165,6 @@ formulas. Likely compiler bug logged above: namespace member written only extern
 inside readers when file-loaded.
 
 ## larger Graphics Tasks
-- ~~**Retire native tessellation**~~ — DONE 2026-07-25 (see GPU migration §above): all 2D is
-  analytic through lib/canvas.k; triangulate.zig / fill.frag / gpuFill / gpuTess deleted.
 - **OKLab colormaps for dataviz** — generate perceptually-uniform colormap textures (the `texType 3` path) CPU-side; pairs naturally with the OKLab work.
 - **Self-host `fill.vert`** — the last GLSL blob; needs a vertex-attribute path in dye. Low value (build no longer depends on glslang; it's a committed `.spv`).
 
