@@ -89,6 +89,13 @@ div       = ";" | newline ;
 - `n::e` **Double Binding** - When in global scope set a global variable and when in local scope set a global variable;
 - `n f:e` **Compound Binding** - modify in place through verb `f`: `x+:1` is `x:x+1`, `x,:y` appends. The value is required (`x+:` alone is not a binding), so `1<:\y` still reads as a transit with the scanned grade-up verb `<:\`.
 
+"Constant" is enforced, not advisory: the value of a `:`-bound global is folded
+into every function that reads it, so a later `x::e` — from the script that
+loaded the module, say — would update the global while every function went on
+reading the old value. That is refused (`!AssignToFoldedConst`). A module global
+its callers are meant to set must be declared `x::e` in the first place; `x:e`
+is for values that never change.
+
 An empty right-hand side (`x:` continued on the next line) is allowed for plain
 `:`/`::` binding but not for the compound form.
 

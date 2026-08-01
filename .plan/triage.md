@@ -192,13 +192,40 @@ guard a side effect (why `scatterAdd`'s out-of-range guard selects value `0`
 rather than skipping the store). Promoting conditional *expressions* to real
 control flow is possible but not currently needed for pure expressions.
 
-## Namespace member written only externally is invisible to internal readers (file-load)
-A `\d ns` member that is only assigned from OUTSIDE the block (`ns.member:: v`) and read INSIDE by
-bare name resolves to a DIFFERENT global than the external write, when the file is loaded via `2:`
-or run as the main script. Repro: file `\d world; el:0.; probe:{[] el}; \d`; then `world.el::5`;
-`world.probe[]` → 0 (should be 5). Inline it returns 5. Adding any internal write (`el::…` in a
-namespace fn) makes both align. Likely compile-time name-mangling treating read-only members as
-file-private. Workaround: set members via an internal setter fn. Found building demo/timer.k.
+## Namespace member written only externally is invisible to internal readers — FIXED (2026-08-01), and it wasn't namespaces
+
+The repro is real but the diagnosis was wrong on both counts: nothing to do with
+namespaces, and nothing to do with file-loading. Stripped of the `\d`:
+
+```
+/tmp/g1.k:  gl:0.
+            probe:{[] gl}
+main:       2:"/tmp/g1.k"; gl::5.
+            probe[]   ->  0.     / but a direct `gl` reads 5.
+```
+
+`:` at global scope declares a **constant** (doc/reference.md, Binding), so the
+compiler folds its value into every function that reads it — `probe` carries a
+baked `0.`, not a load. The later `::` updates the global slot, which is why the
+direct read moves and the function does not. "Adding any internal write makes
+both align" fits exactly: `collectMutated` scans the whole unit, so a `::`
+anywhere in the file marks the name mutated and it is never folded. So does
+"inline it returns 5" — inline, the write is in the same unit.
+
+Fixed by making the violation loud instead of silent. The compiler now remembers
+which global slots it baked into a lambda body (`folded_consts`, persistent
+across units) and rejects a later `::` to one of them with
+`!AssignToFoldedConst`. A settable module global must be declared `x::e`; that
+already worked and still does. Constants no function folded are still freely
+re-bound, so the repl's `a:1; a:2` is unaffected. Documented in
+doc/reference.md; regression test in `src/test.zig`. None of the 42 files under
+`demo/` and `tools/` trips the new error.
+
+`demo/timer.k`, where this was found, dropped its misleading workaround comment
+and declares its clock variables with `::`. It also had a **pre-existing parse
+error** — one `]` short on `ui.bg[…ui.pad[…ui.col[…]]]` at line 29, present on
+`ae225fb` too — which is fixed; it had been masked by the autoload cascade of
+issue 27 eating the timeout before the parse was ever reached.
 
 ## A 5th vertex→fragment varying isn't delivered by shader.vertexPull/fragmentTexN (demo/earth.k)
 Adding a 5th varying to the earth pipeline (wNor v3, wTan v3, wUvF v4, wSun v3, **wLay v2**) read as

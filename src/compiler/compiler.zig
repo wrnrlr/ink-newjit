@@ -110,6 +110,14 @@ pub const Compiler = struct {
   // so it is excluded from const_globals / intrinsic_alias. Recomputed per unit by
   // collectMutated at the start of compile().
   mutated: std.StringHashMap(void),
+  // Global slots whose value has been BAKED into a lambda body by the constant
+  // propagation above. Those copies are frozen at the value the fold saw, and a
+  // lambda outlives the unit that compiled it, so a `::` from a LATER unit (a
+  // module's default rebound by the script that loaded it) would update the slot
+  // and leave every function still reading the old literal — a direct read
+  // showing the new value while a function shows the old one. Persistent across
+  // units, so the assign can be rejected instead (see compileBind).
+  folded_consts: std.AutoHashMap(u16, void),
 
   pub fn init(alloc: Alloc, chunk: *Chunk, globals: *std.StringHashMap(u16), symbols: *Pool, registry: *Fs, fn_tables: *fntable.FnTables) !Compiler {
     const scope = try alloc.create(Scope);
@@ -127,10 +135,12 @@ pub const Compiler = struct {
       .intrinsic_alias = std.StringHashMap(Op1).init(alloc),
       .const_globals = std.StringHashMap(*ast.Node).init(alloc),
       .mutated = std.StringHashMap(void).init(alloc),
+      .folded_consts = std.AutoHashMap(u16, void).init(alloc),
     };
   }
 
   pub fn deinit(self: *Compiler) void {
+    self.folded_consts.deinit();
     self.mutated.deinit();
     self.const_globals.deinit();
     self.intrinsic_alias.deinit();
@@ -592,6 +602,9 @@ pub const Compiler = struct {
     // load is elided. Skipped when a local/param of the same name shadows it. The rhs
     // is always a non-var literal, so this recurses at most once into compileLiteral.
     if (!self.isLocalName(name)) if (self.const_globals.get(name)) |rhs| {
+      // Inside a lambda the folded literal outlives this unit; remember the slot
+      // so a later `::` to it is refused rather than silently ignored.
+      if (self.scope.is_lambda) try self.folded_consts.put(try self.resolveGlobalRef(name), {});
       return try self.compileNode(rhs, false);
     };
 
@@ -705,6 +718,12 @@ pub const Compiler = struct {
 
       const is_global_assign = (b.f != null and std.mem.eql(u8, b.f.?, ":")) or
                                (b.a != null and b.a.?.* == .right);
+      // `x::v` on a name whose value is already baked into a compiled function.
+      // The write would take, and every function would go on reading the old
+      // literal. Declare the name `x::…` where it is DEFINED to make it a
+      // variable (doc/reference.md, Binding) — `x:…` declares a constant.
+      if (is_global_assign and self.folded_consts.contains(try self.resolveGlobalAssign(name)))
+        return error.AssignToFoldedConst;
       if (scope.is_lambda and !is_global_assign) {
         if (!scope.locals.contains(name)) try scope.locals.put(name, 0);
         const id = try self.emitOp(.AssignLocal, &.{rhs_id});

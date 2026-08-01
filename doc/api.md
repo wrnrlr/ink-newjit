@@ -19,7 +19,7 @@ block directly above it; everything else is private.
 | [bits](api/bits.md) | 12 | Runs a dye compute kernel on the CPU by interpreting its neutral IR. |
 | [camera](api/camera.md) | 4 | An orbit camera: folds one frame of input into a camera-state dict. |
 | [canvas](api/canvas.md) | 13 | A retained 2D drawing surface: record shapes into an ops table, then replay them. |
-| [color](api/color.md) | 7 | Colour conversion and the full Tailwind palette as OKLCh constants. |
+| [color](api/color.md) | 10 | Colour conversion and the full Tailwind palette as OKLCh constants. |
 | [compress](api/compress.md) | 8 | DEFLATE, gzip and zlib compression, plus crc32/adler32 checksums. |
 | [conformer](api/conformer.md) | 7 | Conformer blocks — convolution module, block and encoder stack. |
 | [crypto](api/crypto.md) | 31 | Hashes, MACs, key derivation, authenticated encryption and signatures. |

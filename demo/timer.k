@@ -13,9 +13,9 @@
 ui.setFont (font.read "font/FiraCode-Regular.ttf") 0
 ui.setv[`dur; 15.]                       / initial duration (s)
 
-world.t0: 0.; world.now: 0.; world.el: 0.                 / reset time, current time, clamped elapsed
-  / tick/reset WRITE el/now from INSIDE the namespace — a member only written from OUTSIDE
-  / (world.el::…) isn't visible to functions reading it by bare name when file-loaded.
+  / `::`, not `:` — these are VARIABLES. A `:` global is a constant and folds into
+  / every function that reads it, so tick's writes would never be seen.
+world.t0:: 0.; world.now:: 0.; world.el:: 0.              / reset time, current time, clamped elapsed
 world.tick:{[t;d] world.now::t; world.el:: (t-world.t0)&d}       / advance clock, clamp elapsed to duration
 world.reset:{[] world.t0::world.now}
 world.act:{[a] $[a~`reset; world.reset[]; 0]}
@@ -26,7 +26,7 @@ world.view:{[] d:ui.getv[`dur]; ui.bg[0.96 0.96 0.98 1.; ui.pad[40.; ui.col[22.;
     ui.row[16.; ( ui.sized[110.;28.; ui.label["Duration:"]] ; ui.slider[`dur; 300.; 0.; 60.] )]
     ui.sized[300.;26.; ui.label fmt.sec d]
     ui.button["Reset"; `reset]
-    ui.spacer[] )]]}
+    ui.spacer[] )]]]}
 
 run:{[props]
   world.tick[props`time; ui.getv[`dur]]              / advance the clock (internal setter)

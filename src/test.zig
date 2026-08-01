@@ -1694,6 +1694,23 @@ test "group orders its keys ascending for every key type" {
   try t.check("(#'=(2 2;1 1;2 2;3 3;1 1))~{#x}'.(=(2 2;1 1;2 2;3 3;1 1))", "1b");
 }
 
+test "a constant baked into a function cannot be rebound from a later unit" {
+  var t = try Tester.init();
+  defer t.deinit();
+  // `:` at global scope declares a CONSTANT (doc/reference.md, Binding), so its
+  // value folds into every function that reads it.
+  try t.check("gl:0.; probe:{[] gl}; probe[]", "0.0");
+  // A later unit — the script that loaded the module — rebinding it with `::`
+  // used to take on the global while `probe` went on reading the old literal, so
+  // a direct read said 5 and a function said 0. Refused now.
+  try testing.expectError(error.AssignToFoldedConst, t.vm.eval("gl::5."));
+  // Declaring it a variable up front is how a settable module global is written.
+  try t.check("vr::0.; probe2:{[] vr}; probe2[]", "0.0");
+  try t.check("vr::5.; probe2[]", "5.0");
+  // A constant no function ever folded is still freely re-bound (the repl case).
+  try t.check("plain:1; plain:2; plain", "2");
+}
+
 test {
   // Pull in the sibling modules whose own unit tests would otherwise not be
   // reachable from this root.
