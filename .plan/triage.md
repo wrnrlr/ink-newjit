@@ -29,29 +29,29 @@ Effect: `t:1` went 11.7 s → 0.26 s; `ui.*` loads 10 modules instead of 14 (10.
 it had read as a hang. `test/relpos.k`, which used to blow a 150 s timeout, now
 finishes. Regression tests are in `src/cmd/modules.zig` (206 unit tests pass).
 
-## 22. `lib/color.k` legacy HSL/pct helpers are broken (disabled) + a `\`-swallow lexer bug
+## 22. `lib/color.k` HSL/pct helpers + the `\`-swallow lexer bug — FIXED (2026-08-01)
 
-`lib/color.k` could never be loaded (`2:"lib/color.k"`) because two legacy lines
-choke the lexer:
+Both halves closed.
 
-- `perm:{,/'(|x,,s+&#*x)@*/1+\\~=1+s:#x}/[;!0]` — the literal `\\` (two backslashes)
-  makes the lexer **swallow the rest of the file** (no output, no error). Replacing
-  it with a single `\` lets the file load but then `perm 3` is `!type`, so the
-  algorithm is broken regardless. `hsl2rgb` depends on `perm`.
-- `tbl:+(-1+,/||:\!3)6!![6]+/:4*!3` (feeds `pct2rgb`) — the `||:\` similarly swallows
-  the following line at load. `pct2rgb` unusable.
+**(a) The lexer bug is gone**, fixed as a side effect of making adverb binding
+independent of spacing (see the "`/` is a comment when spaced" note in AGENT.md):
+after a noun or a verb a `\` is an ADVERB whatever follows it, so it can no
+longer be mistaken for a `\letter…` command that runs to end of line. Both
+reported lines now lex correctly — `\\` reports a parse error at 1:28 instead of
+silently swallowing the file, and `||:\` parses with the following statement
+still in the tree. Regression test: "a mid-expression backslash does not eat the
+rest of the line" (`src/parser/lexer.zig`).
 
-Because `perm` sat at line 4, the OKLCh palette + the new `oklch` converter below it
-were unreachable. **Fixed for the palette path** by commenting out `perm`/`hsl2rgb`
-and `tbl`/`pct2rgb` (2026-07-22); `2:"lib/color.k"` now loads and `oklch Blue500`
-etc. work (verified bit-exact on the neutral ramp vs Tailwind hex). The HSL/pct
-helpers remain DISABLED — reviving them needs (a) the underlying lexer bug fixed and
-(b) the perm/tbl math rewritten for this dialect. Root cause of (a): `src/parser/
-lexer.zig:184-207` — a `\` mid-expression, when the preceding token leaves the lexer
-in a state where the `\`+next char looks like a command (`\letter…`, line 194), runs
-`while … != '\n'` and eats to end of line. There is already a regression test
-"lexer divider not swallowed by later backslash" (lexer.zig:632); `\\` and `||:\`
-are cases it doesn't cover. Low priority (only bit legacy color helpers).
+**(b) `hsl2rgb`/`pct2rgb` rewritten** and enabled. The old versions reached the
+per-sector channel table through a `perm 3` permutation generator that never
+worked in this dialect; the table is six rows, so `HSLIX` writes it out. Float
+`mod` is not `!` here (that builds a dict) and `mod` is int-only, so the hue wrap
+is `h-360.*_h%360.`. `pct2rgb` is now just the fully saturated wheel through
+`hsl2rgb`. `c2`, only ever used by the old path, is deleted.
+
+`test/color.k` (21 assertions, wired into `make test`) pins the six primaries,
+a mid-sector value, s=0 / l=0 / l=1, hue wrap at 360/480/-120, and the OKLCh
+neutral ramp still bit-exact against the Tailwind hex.
 
 ## 4. Slab free-size fragility — `Rc` header must stay 16 bytes (design note)
 

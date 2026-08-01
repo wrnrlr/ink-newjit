@@ -662,6 +662,27 @@ test "lexer divider not swallowed by later backslash" {
   try std.testing.expectEqualStrings("/\nblk\n\\", blk.slice(src));
 }
 
+test "a mid-expression backslash does not eat the rest of the line" {
+  // Triage 22: `\\` and `||:\` used to leave the lexer looking at a command
+  // (`\letter…`), which runs to end of line — so loading lib/color.k silently
+  // swallowed everything after them, with no output and no error. After a noun
+  // or a verb a `\` is an ADVERB, whatever follows it.
+  const cases = [_][]const u8{ "a:1+\\\\~b\nval", "a:,/||:\\!3\nval" };
+  for (cases) |src| {
+    var lex = Lexer.init(src);
+    var saw_sep = false;
+    while (true) {
+      const t = lex.next();
+      if (t.tt == .eof) break;
+      if (t.tt == .sep) saw_sep = true;
+      // Nothing on the first line may be lexed as a command…
+      try std.testing.expect(t.tt != .command);
+    }
+    // …and the newline plus the code after it must still be there.
+    try std.testing.expect(saw_sep);
+  }
+}
+
 test "lexer symbol" {
   const src = "`abc";
   var lex = Lexer.init(src);

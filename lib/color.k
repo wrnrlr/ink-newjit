@@ -15,27 +15,31 @@ ui.fill[box; oklch Red500]
 Verified bit-exact against the Tailwind hex values on the neutral ramp
 (neutral-500 = #737373, -800 = #262626, -50 = #fafafa, -950 = #0a0a0a).
 
-The older HSL/percentage converters below are disabled — see the note in the
-source; `oklch` is the live path.
+`hsl2rgb[h;s;l]` and `pct2rgb x` convert from HSL to `0..255` rgb triples, for
+code that wants the classic wheel rather than a perceptual space; `oklch` is
+what ui.k and canvas.k use.
 
 Pure k — loads on the first reference to any `color.*` name.
 \
 
-// [[https://en.wikipedia.org/wiki/HSL_and_HSV]]
+/ ── HSL → RGB ────────────────────────────────────────────────────────────────
+/ [[https://en.wikipedia.org/wiki/HSL_and_HSV]]
+/ Chroma of an (s;l) pair: the width of the colour's rgb range.
 chroma:{[s;l]s*(1-{x|-x}1-2*l)}
-c2:{[h;c](_h1;c*1-{x|-x}1-%[;A](2*A)!(h1:%[h;60])*A:1000)}
-/ NOTE: `perm`/`hsl2rgb` are DISABLED — the `\\` in `perm` swallows the rest of the
-/ file at load time (lexer bug), and with a single `\` `perm 3` is `!type`. Both are
-/ triaged. The OKLCh palette + `oklch` below are the live path (see doc/design/ui.md).
-/ perm:{,/'(|x,,s+&#*x)@*/1+\\~=1+s:#x}/[;!0]
-/ hsl2rgb:{[h;s;l]
-/   c: chroma[s;l]; (h;x): c2[h;c]; m: l-c%2;
-/   _255*m+(c;x;0.0)((@/1<:\+perm 3)0 2 4 5 3 1)@(!7)'h
-/ }
-
-/ less fanfare but only chroma component (also disabled: `||:\` swallows at load, triaged)
-/ tbl:+(-1+,/||:\!3)6!![6]+/:4*!3
-/ pct2rgb:{_255*1&0|tbl[s]+(f;1-f)@2!s:_s-f:1!s:6*1!x}
+/ Which of (c;x;0) each channel takes, per 60° sector of the hue wheel.
+HSLIX:(0 1 2;1 0 2;2 0 1;2 1 0;1 2 0;0 2 1)
+/ `hsl2rgb[h;s;l]` — h in degrees (any real, wrapped), s/l in 0..1 → (r;g;b) each
+/ 0..255. The earlier version reached the sector table through a `perm 3`
+/ permutation generator that never worked in this dialect; the table is six rows,
+/ so it is written out.
+hsl2rgb:{[h;s;l]
+  hp:(h-360.*_h%360.)%60.
+  c:chroma[s;l]
+  xv:c*1.-{x|-x}(hp-2.*_hp%2.)-1.
+  m:l-c%2.
+  _255.*m+(c;xv;0.)@HSLIX@_hp}
+/ `pct2rgb x` — x in 0..1 (wrapped) around the fully-saturated hue wheel → (r;g;b).
+pct2rgb:{[x] hsl2rgb[360.*x-_x; 1.; 0.5]}
 
 / ── OKLab / OKLCh → gamma sRGB (Björn Ottosson's matrices, exact) ──────────────
 / The Tailwind palette below is stored as OKLCh 4-tuples (l;c;h;a): l,a in [0,1],
