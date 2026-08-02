@@ -89,6 +89,87 @@ ext-inst number for the GPU. A parity test in `src/test.zig` asserts the table
 stays faithful to the live enums, so later phases can *generate* the lexer keyword
 list / syms dispatch / fuse map / dye lowering from it instead of hand-syncing.
 
+## Swizzles (DONE)
+
+Applying a symbol to a vector-typed value selects lanes by name — GLSL's `v.xz`
+spelled `` v`x`z ``, in the juxtaposed or the bracketed form (`` v[`x`z] ``):
+
+```k
+shader.fragment[[uv:`v2; out:`v4]; {[uv]
+  c: (uv[0]; uv[1]; 0.5; 1.0)
+  bgr: (c`b`g`r)          / rgba aliases xyzw — lanes 2 1 0
+  (bgr[0]; bgr[1]; bgr[2]; c`w)}]
+```
+
+This is **not new syntax**. `` v`x`z `` already parses as a symbol vector applied
+to a value, which is exactly the shape of a dict/table column read — the same
+"named index into fixed-arity data", with a built-in lane map standing in for a
+schema. Only the *type* is new, not the grammar.
+
+- **One name** → the existing `extract` node → `OpCompositeExtract`; `` c`z `` is
+  byte-identical to `c[2]`. **Two or more** → a `shuf` node → `OpVectorShuffle`,
+  with the source passed as both vector operands (the single-vector idiom).
+- **Repeats are free**: `` c`x`x`x`x `` is a splat, so broadcasting needs no
+  separate path.
+- Result type comes from the lane count (2→`v2`, 3→`v3`, 4→`v4`), so a swizzle
+  narrows and widens without any annotation.
+- Two disjoint name sets, `` `x`y`z`w `` and `` `r`g`b`a ``. Mixing them in one
+  swizzle is rejected, as is an unknown name, a lane past the source's width, and
+  more than 4 lanes — all four latch `xErr`, so the assemblers return `` !xErr ``.
+
+**Parse tax.** `` c`x*2. `` reads as ``c@(`x*2.)`` — the before-operator trap from
+CLAUDE.md, and shader code is operator-dense, so a swizzle feeding an operator
+needs parens: ``(c`x)*2.``. This is k's right-to-left rule, not a local bug, so it
+can't be fixed without breaking uniformity. In practice bind the swizzle to a
+local first, which shader bodies do anyway.
+
+Where it lives: `swzSets`/`swzLanes`/`swzRty` next to the type helpers,
+`xIsSwzF`/`xSwzF`/`xSwzOn` beside `xAppos` (ordered after the placed-table column
+read, which has the same `` (var`sym) `` shape, and before `xApposOp`, which would
+otherwise read the var name as a monadic op), `xLoShuf` beside `xLoExtract`, and
+`opShuffle` in `lib/spirv.k`.
+
+### Component writes
+
+```k
+c: (uv[0]; uv[1]; 0.5; 1.0)
+c[`y]:     0.25          / one lane      → OpCompositeInsert
+c[`x`z]:   (0.5; 0.75)   / two lanes     → OpVectorShuffle %c %new 4 1 5 3
+c[2]:      uv[0]         / positional — same path as c[`z]:
+c[`x`y`w]: uv[1]         / scalar right-hand side broadcasts across the lanes
+```
+
+**A component write is a rebind, not a mutation.** The body is SSA, so there is
+nothing to mutate: `` v[`x`z]: e `` simply rebinds `v` to `merge(v, e)`. No
+lvalue machinery, no pointer, no store — which is why this cost one new IR node
+(`insert`) and a second operand on `shuf` rather than a new address space.
+
+The merge is exactly the two-source `OpVectorShuffle`: result lane `i` takes
+selector `n+p` when `i` is the `p`-th written lane, and `i` otherwise. A single
+lane is `OpCompositeInsert` instead, which is the same thing with one index.
+
+Note the spelling is **bracketed only**. `` v`x: e `` cannot work — k reads the
+`` `x: e `` as a bind and the whole statement as `v` applied to it. `` v[`x]: e ``
+parses as an ordinary indexed-assign lvalue (identical in shape to `v[0]: e`), so
+the write form matches host k's indexed assign rather than inventing a spelling.
+
+Rejected: a lane written twice (no defined value — GLSL's rule too), a lane past
+the target's width, a right-hand side whose width is neither 1 nor the lane count,
+and an unknown lane name.
+
+Two bugs fell out of building this, both previously **silent**:
+- `v[0]: e` on any target used to compile to a module with the assignment simply
+  missing — `kVal` of a non-var lvalue is `` ` ``, so the old bind bound the empty
+  name and dropped the write. An unsupported assignment target now latches `xErr`.
+- Rebinding any name (`c: 1.` then `c: 2.`) appended a **duplicate key** to the
+  env dict, and a dict resolves to the FIRST match — so every rebind read back the
+  stale value. `xEnvSet` now replaces in place. (`test/kkswz.k` pins this.)
+
+Oracles: `test/kkswz.k` (40 checks — reads the lane operands straight out of the
+module, since a wrongly-permuted shuffle still passes `spirv-val`, then dispatches
+on the device to confirm the values come back in that order), plus a `fragSwizzle`
+entry (plus `fragCompWrite`) in `test/kkgold.k` for the byte-identity and `spirv-val` rungs.
+
 ## Roadmap
 
 ### Phase 0 — foundation (DONE)

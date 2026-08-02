@@ -113,6 +113,15 @@ opStore:{[ptr;val] (0x0003003E;ptr;val)}   / OpStore 62
 opConst:{[t;r;v]   (0x0004002B;t;r;$[t=Tf32;`I$v;v])}  / OpConstant 43
 opVTS:  {[t;r;v;s] (0x0005008E;t;r;v;s)}  / OpVectorTimesScalar 142
 opXtract:{[t;r;v;i](0x00050051;t;r;v;i)}   / OpCompositeExtract 81
+/ OpVectorShuffle 79: build a vector from lanes of two source vectors — a lane
+/ index i < #a picks a[i], i >= #a picks b[i-#a]. A single-vector swizzle passes
+/ the same id for both a and b. Variable word count = 5 + one word per lane
+/ (same computed-header idiom as xLoConsC's OpConstantComposite).
+opShuffle:{[t;r;a;b;sel] (0x4F+(0x10000*(5+#sel));t;r;a;b),sel}
+/ OpCompositeInsert 82: a copy of composite `c with lane `i replaced by `obj.
+/ NOTE the operand order — Object comes BEFORE Composite, the reverse of
+/ OpCompositeExtract's. One index here (a vector lane), so the width is fixed.
+opInsert:{[t;r;obj;c;i] (0x00060052;t;r;obj;c;i)}
 opCons2:{[t;r;a;b]     (0x00050050;t;r;a;b)}        / OpCompositeConstruct vec2
 opCons3:{[t;r;a;b;c]   (0x00060050;t;r;a;b;c)}      / OpCompositeConstruct vec3
 opCons4:{[t;r;a;b;c;d] (0x00070050;t;r;a;b;c;d)}    / OpCompositeConstruct vec4

@@ -130,6 +130,26 @@ ck["fragTex"; shader.fragmentTexN[[uv:`v2; out:`v4]; 2; {[uv]
   c0: sample[0; uv]
   c1: sample[1; uv]
   (mix[c0[0];c1[0];0.5]; c0[1]; c1[2]; 1.0)}]]
+/ Swizzles: symbol application on a vector value selects lanes by name. Covers the
+/ 4-lane reorder, the rgba alias, a repeat (splat), a narrowing v4→v2, and the
+/ single-lane form that reuses OpCompositeExtract instead of a shuffle. Here mainly
+/ for the spirv-val rung — test/kkswz.k pins the lane operands themselves.
+ck["fragSwizzle"; shader.fragment[[uv:`v2; out:`v4]; {[uv]
+  c: (uv[0]; uv[1]; 0.5; 1.0)
+  rev: (c`z`y`x`w)
+  dup: (c`x`x`x`x)
+  pair: (c`r`a)
+  (rev[0]+dup[1]; pair[0]; pair[1]; c`w)}]]
+/ Component writes: in SSA a rebind, not a mutation — one lane is OpCompositeInsert,
+/ two or more a two-source OpVectorShuffle whose selector reaches past the first
+/ vector's width for the written lanes. A scalar right-hand side broadcasts.
+ck["fragCompWrite"; shader.fragment[[uv:`v2; out:`v4]; {[uv]
+  c: (uv[0]; uv[1]; 0.5; 1.0)
+  c[`y]:    0.25                / single lane  → OpCompositeInsert
+  c[`x`z]:  (0.5; 0.75)         / two lanes    → OpVectorShuffle
+  c[2]:     uv[0]               / positional, same path as c[`z]:
+  c[`x`y`w]: uv[1]              / scalar broadcast across three lanes
+  c}]]
 / Vertex shaders are vertex-PULLED now (shader.vertexPull): geometry rides a stride-N
 / storage buffer read at N*vid, and uniforms ride a second buffer (uCam/uPan → ub).
 ck["vtxPlanes"; shader.vertexPull[[vNor:`v3]; {[vb;vid]

@@ -8,7 +8,8 @@ that actually bite are repeated per task below.
 ## State of the tree (all green)
 
 `main` is clean. `zig build`, `zig build gpu`, `zig build test`, and the full
-oracle suite all pass (10 rungs + spirv-val 20/20).
+oracle suite all pass (11 rungs + spirv-val 24/24; `kkswz` is the newest rung —
+vector swizzles, see doc/design/dye.md "Swizzles").
 
 ### Landed since this handoff was written (2026-07-18)
 

@@ -40,6 +40,11 @@ check kkwg    test/kkwg.k    'FAIL '     'kkwg: [0-9]+ ok, 0 fail'
 # kkscan: the table-scan kkClassify agrees with the recursive reference on every CST
 # shape, and has no depth budget (200-op chain). CPU only — no device needed.
 check kkscan  test/kkscan.k  'FAIL '     'kkscan: [0-9]+ ok, 0 fail'
+# kkswz: swizzle lane selection (`v`x`z`). Reads the emitted OpVectorShuffle's lane
+# operands out of the module — spirv-val can't catch a wrong lane ORDER, since a
+# shuffle with any permutation validates fine — then dispatches on the device and
+# checks the values actually come back in that order.
+check kkswz   test/kkswz.k   'FAIL '     'kkswz: [0-9]+ ok, 0 fail'
 check walkgpu test/walkgpu.k 'walkgpu: FAIL'  'walkgpu: PASS'
 # clothgpu: native f32-atomic XPBD (kk2 §7). INK_CLOTH_CHECK runs the headless
 # drape invariant instead of opening a window; asserts no NaN + physical drape.

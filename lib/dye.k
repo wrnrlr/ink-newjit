@@ -290,6 +290,19 @@ isVecTy: {[ty] (ty~`v4) | (ty~`v2) | (ty~`v3)}
 ncVec: [f32:1; v2:2; v3:3; v4:4]
 jnRty: {[a;b] n: ncVec[a]+ncVec[b]; $[n=2;`v2;n=3;`v3;`v4]}
 
+/ ── Swizzle lane names (dye.md §swizzle) ─────────────────────────────────────
+/ A swizzle is symbol application on a vector-typed value — the same "named index
+/ into fixed-arity data" as a table column read, with a built-in lane map standing
+/ in for the schema. Two disjoint name sets, exactly GLSL's rule: mixing them in
+/ one swizzle (`v`x`g`) is a typo, not a feature, and swzLanes rejects it by
+/ construction — every name has to resolve inside ONE set.
+swzSets: (`x`y`z`w; `r`g`b`a)
+/ Lane indices for a symbol list, or () when no single set holds all the names.
+/ `?` (Find) yields 4 — the set's length — for a name a set doesn't contain, so
+/ "every name found in this set" is `4>|/`.
+swzLanes: {[ss] a: swzSets[0]?ss; b: swzSets[1]?ss; $[4>|/a; a; 4>|/b; b; ()]}
+swzRty:   {[n] $[n=2;`v2; n=3;`v3; `v4]}
+
 / Comparison ops always produce bool; others propagate vector type or use operand type.
 / &/| are POLYSEMIC (like host k): logical and/or on bool operands, min/max on float/vector
 / operands — so `y0&y2` in a shader is min[y0;y2], matching ordinary ink (dispBin routes it).
@@ -1529,7 +1542,43 @@ xAppos: {[i;env;oty]
   fN: kF1[i;`f]
   $[(kKind fN)~`term;   xApposAdv[i;fN;env;oty]
     xIsTableCol[i;env]; xTableCol[i;env]
+    xIsSwz[i;env];      xSwz[i;env]
     xApposOp[i;fN;env;oty]]}
+/ ── Swizzle: `v`x`z` / `v[`x`z]` ─────────────────────────────────────────────
+/ Symbol application on a vector-typed value selects lanes by name. One name
+/ extracts a scalar (the EXISTING `extract` node — no new lowering); two or more
+/ emit a `shuf` node → OpVectorShuffle with the source passed as BOTH operands
+/ (the single-vector swizzle idiom). Repeats are free, so `v`x`x`x` is a splat.
+/ Ordered AFTER the placed-table column read, which has the same (var`sym) shape
+/ but binds a `table env entry, and BEFORE xApposOp, which would otherwise read
+/ the var name as a monadic op name and silently emit garbage.
+/ `fld` is the arg field: `a for the juxtaposed form, `arg for the bracketed one.
+xIsSwzF: {[i;env;fld]
+  fN: kF1[i;`f]
+  $[~(kKind fN)~`var;                       0b
+    ~(kVal fN) in !env;                     0b
+    ~(kKind kF1[i;fld]) in `symbol`symbols; 0b
+    isVecTy[env[kVal fN] 1]]}
+xIsSwz:  {[i;env] xIsSwzF[i;env;`a]}
+xIsSwzB: {[i;env] xIsSwzF[i;env;`arg]}
+/ Normalize the lane names to a symbol VECTOR by CST kind — `,kVal`, not `(),kVal`:
+/ joining onto an empty general list boxes a typed vector up to an L, which then
+/ formats as (`x;`y) rather than `x`y in the rejection messages.
+xSwzF: {[i;env;fld] aN: kF1[i;fld]; ss: $[(kKind aN)~`symbol; ,kVal aN; kVal aN]
+  xSwzOn[xNode[kF1[i;`f];env;`f32]; ss]}
+xSwz:  {[i;env] xSwzF[i;env;`a]}
+xSwzB: {[i;env] xSwzF[i;env;`arg]}
+xSwzOn: {[ap;ss]
+  ln: swzLanes[ss]
+  $[0=#ln;                 xSwzBad[ss;"unknown or mixed lane name"]
+    ~(|/ln) < ncVec[ap 1]; xSwzBad[ss;"lane out of range for a ",$ap 1]
+    4<#ln;                 xSwzBad[ss;"more than 4 lanes"]
+    1=#ln;                 (xEmit[`extract;`f32;,ap 0;*ln]; `f32)
+    xSwzEmit[ap 0; ln]]}
+xSwzEmit: {[n;ln] rty: swzRty[#ln]; (xEmit[`shuf;rty;,n;ln]; rty)}
+/ Latch the error and bake NaN (like xFoldBad) so the emit walk finishes; the
+/ module assemblers turn a set xErr into `!xErr instead of returning words.
+xSwzBad: {[ss;msg] xErr:: `$"dye: ",msg," in swizzle ",$ss; (xEmit[`const;`f32;();0n]; `f32)}
 xApposOp: {[i;fN;env;oty]
   op: kVal fN; ap: xNode[kF1[i;`a];env;oty]; aty: ap 1
   $[op in mathFns; (xEmit[`math; $[op~`length;`f32;aty]; ,ap 0; op]; $[op~`length;`f32;aty])
@@ -1607,6 +1656,7 @@ xApply: {[i;env;oty]
     nm~`rmax;        xRmax[i;env]
     nm in mathFns;   xFnCall[nm;i;env;oty]
     isBuf[nm;env];   xBufIdx[(env nm) 0; i; env]
+    xIsSwzB[i;env];  xSwzB[i;env]
     xApplyIdx[fr;i;env;oty]]}
 
 / ── IR builders for the compute dialect (mirror the comp* direct walkers) ────
@@ -1795,8 +1845,77 @@ xSeqTail: {[stmts;env;oty]
   s: stmts 0
   isb: ((kKind s)~`bind) & (0<#kF[s;`a])
   sfx: $[isb; 0; xNode[s;env;oty]]
-  e2: $[isb; ((!env),kVal kF1[s;`v])!(env[!env],(,xNode[kF1[s;`a];env;oty])); env]
+  e2: $[isb; xBind[s;env;oty]; env]
   xSeq[1_stmts;e2;oty]}
+/ ── Binding a statement into the env ─────────────────────────────────────────
+/ A plain `c: e` extends the env with c. A COMPONENT WRITE `v[`x`z]: e` (or the
+/ positional `v[0]: e`) rebinds v instead: in SSA there is nothing to mutate, so
+/ the write is just v' = merge(v, e) — see xBindSwz. Any other lvalue shape is
+/ rejected rather than bound: `kVal` of a non-var lvalue is `` ` ``, so the old
+/ code silently bound the empty name and DROPPED the write (c[0]: 0.25 compiled
+/ to a module with no 0.25 in it at all).
+xBind: {[s;env;oty]
+  lv: kF1[s;`v]
+  $[(kKind lv)~`var;      xBindVar[s;env;oty]
+    xIsLvComp[lv;env];    xBindComp[s;lv;env]
+    xBindBad[lv;env;oty]]}
+xBindVar: {[s;env;oty] xEnvSet[env; kVal kF1[s;`v]; xNode[kF1[s;`a];env;oty]]}
+/ Bind nm→p, REPLACING an existing entry rather than appending a second one:
+/ a dict with a duplicate key resolves to the FIRST match, so appending would make
+/ every rebind (`c: 1.` then `c: 2.`, and every component write) read back stale.
+/ Rebuilt by hand rather than amended: env values are (node;ty) PAIRS, and a
+/ single-entry env stores its lone value unwrapped, which the amend spellings
+/ round-trip inconsistently. The env is a handful of names, so O(n) is free.
+xEnvSet: {[env;nm;p]
+  $[~nm in !env; ((!env),nm)!(env[!env],,p)
+    (!env)!xEnvRepl[env;nm;p]]}
+xEnvRepl: {[env;nm;p] {[env;nm;p;k] $[k~nm; p; env k]}[env;nm;p]' !env}
+xBindBad: {[lv;env;oty] xErr:: `$"dye: unsupported assignment target — only a name (c: e) or a vector component write (v[`x`z]: e)"; env}
+
+/ ── Component write: `v[`x`z]: e` / `v[0]: e` ────────────────────────────────
+/ The lvalue is an apply on a vector-typed var — the SAME node shape as a read
+/ swizzle, just in the bind's `v` field (the juxtaposed `v`x`: e` CANNOT work:
+/ k reads the `` `x: e `` as a bind and the whole statement as v applied to it).
+xIsLvComp: {[lv;env]
+  $[~(kKind lv)~`apply;                            0b
+    ~(kKind kF1[lv;`f])~`var;                      0b
+    ~(kVal kF1[lv;`f]) in !env;                    0b
+    ~(kKind kF1[lv;`arg]) in `symbol`symbols`int;  0b
+    isVecTy[env[kVal kF1[lv;`f]] 1]]}
+/ Target lanes: names go through the swizzle lane map, a positional `v[0]` is
+/ already an index. `v[0]: e` and ``v[`x]: e`` are therefore one code path.
+xLvLanes: {[lv]
+  aN: kF1[lv;`arg]
+  $[(kKind aN)~`int; ,kVal aN; (kKind aN)~`symbol; swzLanes[,kVal aN]; swzLanes[kVal aN]]}
+/ A lane written twice has no defined value, so reject it (GLSL's rule too).
+xLvDup: {[ln] ~(#ln)=#?ln}
+xBindComp: {[s;lv;env]
+  nm: kVal kF1[lv;`f]
+  vp: env nm
+  ln: xLvLanes[lv]
+  $[0=#ln;                    xBindCompBad[env;"unknown or mixed lane name"]
+    ~(|/ln) < ncVec[vp 1];    xBindCompBad[env;"lane out of range for a ",$vp 1]
+    xLvDup[ln];               xBindCompBad[env;"lane written twice"]
+    xBindCompOk[s;env;nm;vp;ln]]}
+xBindCompBad: {[env;msg] xErr:: `$"dye: ",msg," in component write"; env}
+/ Compile the right-hand side under the width the lanes want, then merge. A scalar
+/ RHS broadcasts to every written lane, matching how this dialect already splats a
+/ scalar across a vector in arithmetic (xTransNorm's bcast).
+xBindCompOk: {[s;env;nm;vp;ln]
+  n:  #ln
+  rp: xNode[kF1[s;`a]; env; $[n=1; `f32; swzRty[n]]]
+  vN: $[(n>1) & ~isVecTy[rp 1]; xSplat[swzRty[n]; rp 0]; rp 0]
+  vT: $[(n>1) & ~isVecTy[rp 1]; swzRty[n]; rp 1]
+  $[~(ncVec[vT])=n; xBindCompBad[env;"right-hand side is a ",($vT)," but ",($n)," lanes are written"]
+    xEnvSet[env; nm; xCompMerge[vp;vN;ln]]]}
+/ One lane ← a scalar is exactly OpCompositeInsert. Two or more ← a vector is the
+/ TWO-source OpVectorShuffle: result lane i takes the replacement (selector n+p,
+/ where p is i's position in the written-lane list) or keeps the original (i).
+xCompMerge: {[vp;vN;ln]
+  ty: vp 1; n: ncVec[ty]
+  $[1=#ln; (xEmit[`insert; ty; (vp 0; vN); *ln]; ty)
+    (xEmit[`shuf; ty; (vp 0; vN); xCompSel[ln;n]]; ty)]}
+xCompSel: {[ln;n] {[ln;n;i] p: ln?i; $[p<#ln; n+p; i]}[ln;n]' !n}
 xSeq: {[stmts;env;oty] n:#stmts; $[n=0;(0;oty); n=1;xNode[stmts 0;env;oty]; xSeqTail[stmts;env;oty]]}
 / Binds-only prefix walk for the vertex body: build bind nodes, return the extended
 / env (mirror of the retired compSeqEnv — bare non-final statements are dropped,
@@ -1804,7 +1923,7 @@ xSeq: {[stmts;env;oty] n:#stmts; $[n=0;(0;oty); n=1;xNode[stmts 0;env;oty]; xSeq
 xSeqEnvTail: {[stmts; env]
   s:   stmts 0
   isb: ((kKind s)~`bind) & (0<#kF[s;`a])
-  e2:  $[isb; ((!env),kVal kF1[s;`v])!(env[!env],(,xNode[kF1[s;`a];env;`v4])); env]
+  e2:  $[isb; xBind[s;env;`v4]; env]
   xSeqEnv[1_stmts; e2]}
 xSeqEnv: {[stmts; env] $[0=#stmts; env; xSeqEnvTail[stmts; env]]}
 / One varying output: compile its expression with the varying's type hint, then
@@ -1895,6 +2014,13 @@ xLoSample:  {[k]
   r:newId[];  emitBuf (0x00050057; Tv4; r; ci; (xId@xArg k)0)
   xId[k]::r}
 xLoExtract: {[k] r:newId[]; emitBuf opXtract[Tf32;r;(xId@xArg k)0;xVal k]; xId[k]::r}
+/ Swizzle: OpVectorShuffle with xVal holding the selector. A READ swizzle has one
+/ operand — the source, passed as both vectors (the single-vector idiom). A
+/ component WRITE has two: the original and the replacement, with the selector
+/ reaching past the first vector's width for the written lanes.
+xLoShuf:    {[k] r:newId[]; ids:xId@xArg k; b:$[1=#ids; ids 0; ids 1]; emitBuf opShuffle[Tid[xTy k];r;ids 0;b;xVal k]; xId[k]::r}
+/ Single-lane component write: OpCompositeInsert (object, composite, lane).
+xLoInsert:  {[k] r:newId[]; ids:xId@xArg k; emitBuf opInsert[Tid[xTy k];r;ids 1;ids 0;xVal k]; xId[k]::r}
 xLoSelect:  {[k] r:newId[]; ids:xId@xArg k; emitBuf opSel[Tid[xTy k];r;ids 0;ids 1;ids 2]; xId[k]::r}
 xLoNeg:     {[k] r:newId[]; emitBuf opFneg[Tid[xTy k];r;(xId@xArg k)0]; xId[k]::r}
 xLoLnot:    {[k] r:newId[]; emitBuf opLNot[Tbool;r;(xId@xArg k)0]; xId[k]::r}
@@ -1984,6 +2110,8 @@ xLowerOne: {[k]
     op~`consc;   xLoConsC[k]
     op~`sample;  xLoSample[k]
     op~`extract; xLoExtract[k]
+    op~`shuf;    xLoShuf[k]
+    op~`insert;  xLoInsert[k]
     op~`select;  xLoSelect[k]
     op~`neg;     xLoNeg[k]
     op~`lnot;    xLoLnot[k]
