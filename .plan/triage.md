@@ -81,3 +81,17 @@ location/packing interaction with the specific vec sizes (earth's 3+3+4+3+2) or 
 fragmentTexN. Workaround used: pack the flag into a spare lane of an existing varying (wSun v3→v4,
 bordersOn in .w). Worth pinning down the real rule in shader.vertexPull location assignment so
 overlays can add channels without hunting for spare lanes.
+
+---
+
+## Monadic `|` (reverse) is not wired for a native table
+`|t` on an `M` table returns `` `! `` — `reverse.zig`'s table entry is missing
+(it has `_m: reverseDict` for `m` dicts, but no `_M`). This looks unintended
+rather than by design: `pick.permute` explicitly handles `.M` ("a table gathers
+rows, everything else gathers elements") and is documented as shared by the grade
+AND reverse verbs, and grade-on-a-table works (`t@<t`col`, covered in
+test/tables.k). So reverse is the odd one out — it should be one dispatch entry
+routing through the same `permute` path sort.zig already uses.
+
+Found while writing test/tables.k; not fixed there because it is a separate gap
+from the row-gather work that test covers.

@@ -113,12 +113,14 @@ fn pickTypedVec(comptime xk: K, alloc: Alloc, x: V, indices: []const i32) V {
 }
 
 fn pickIntVec(alloc: Alloc, x: V, indices: []const i32) V {
+  // Every scalar-backed vector kind gathers into its own element type — one pass,
+  // no boxing. Derived from class.zig's one table rather than a hand-listed switch,
+  // so the tier-2 float columns (.N/.D/.H) get the typed path too instead of
+  // silently falling through to the box-and-promote branch below.
+  inline for (K.backed) |e| {
+    if (x.tag() == e.vec) return pickTypedVec(e.vec, alloc, x, indices);
+  }
   return switch (x.tag()) {
-    .B => pickTypedVec(.B, alloc, x, indices),
-    .I => pickTypedVec(.I, alloc, x, indices),
-    .F => pickTypedVec(.F, alloc, x, indices),
-    .C => pickTypedVec(.C, alloc, x, indices),
-    .S => pickTypedVec(.S, alloc, x, indices),
     else => blk: {
       // Generic list: build N(V) and promote
       const res = N(V).init(alloc, indices.len) catch break :blk V{ .err = .memory };
@@ -410,7 +412,13 @@ fn pickTableRowVec(alloc: Alloc, x: V, indices: []const i32) V {
   for (0..ncols) |j| {
     const col = vals.at(j);
     defer col.deinit(alloc);
-    res_vals.slice()[j] = pickVec(alloc, col, indices);
+    // pickIntVec, NOT pickVec: a table's columns are typed vectors, and the
+    // generic pickVec allocates an N(V) (16 bytes per element), boxes every
+    // element into a tagged union, then promote()s the whole thing back to a
+    // typed vector — three passes and 4x the memory traffic, per column. That
+    // made `t@&mask` (recs.k's Where/Get/Despawn) ~9x slower per element than
+    // the same gather on a bare column, at every N. See bench/ecs.k.
+    res_vals.slice()[j] = pickIntVec(alloc, col, indices);
   }
   return V{ .M = Dict.init(alloc, keys.ref(), promote(alloc, res_vals)) catch return V{ .err = .memory } };
 }

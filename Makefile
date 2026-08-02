@@ -48,6 +48,7 @@ test:
 	$(INK) test/color.k
 	$(INK) test/regex.k
 	$(INK) test/rope.k
+	$(INK) test/tables.k
 	$(INK) test/syntax.k
 	$(INK) test/fbx.k
 	$(INK) test/usd.k
