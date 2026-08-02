@@ -104,3 +104,21 @@ watchexec -r -w demo/cloth.k -- ./zig-out/bin/ink -unfocus -top -monitor 1 demo/
 
 [[]id:!20;w:?20]
 ```
+
+```k
+plot:{[x;y;f]
+ ax:`lo`hi`tk`px{x!y@!#x}/:(x;y) /axes definitions
+ $[&/^ax`px; ax[1;`px]:120;]     /default h if both w/h missing
+ ax[`px]:_(|(%;*)@'/(ax`px;%/-/ax`hi`lo))^'ax`px /calc w/h
+ ax[`pu]:((ax`px)-1)%-/ax`hi`lo  /compute px per unit
+ u2p:{_(x`pu)*y-x`lo}; p2u:{(x`lo)+y%x`pu} /map px<>units
+ cnv:(ax`px)#0; (X;Y):ax; fix:{_x+(x<0)&x>_x} /canvas
+ set:{[ax;cnv;x]$[|/(x<0),x>(ax`px)-1;cnv;.[cnv;x;:;1]]}[ax]
+ cnv[u2p[X]0;]:1; cnv[;u2p[Y]0]:1 /draw axes
+ tk:(ax`tk)*{x+!1+y-x}'/fix@(ax`lo`hi)%\:ax`tk /axis ticks
+ $[^X`tk;; cnv:set/[cnv;,/(u2p[X]tk.0),/:\:(u2p[Y]0)+3-!7]]
+ $[^Y`tk;; cnv:set/[cnv;,/((u2p[X]0)+3-!7),/:\:u2p[Y]tk.1]]
+ cnv:set/[cnv;x,'u2p[Y]@f'p2u[X]@x:!X`px] /plot function
+ sixel@|+cnv
+}
+```
