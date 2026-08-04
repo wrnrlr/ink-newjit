@@ -13,7 +13,6 @@ pub const TT = enum {
   @"{", @"}",
   @"[", @"]",
   @"$[",
-  @"[[]", @"[[",
   sep,
   comment,
   command,
@@ -229,17 +228,6 @@ pub const Lexer = struct {
       self.tag = .phrase;
       return .{ .tt = .@"$[", .start = start, .end = self.i };
     }
-    if (c == '[' and self.ch(1) == '[' and self.ch(2) == ']') {
-      self.i += 3;
-      self.tag = .phrase;
-      return .{ .tt = .@"[[]", .start = start, .end = self.i };
-    }
-    if (c == '[' and self.ch(1) == '[') {
-      self.i += 2;
-      self.tag = .phrase;
-      return .{ .tt = .@"[[", .start = start, .end = self.i };
-    }
-
     // Simple delimiters
     if (c == '(') { self.adv(); self.tag = .phrase; return .{ .tt = .@"(", .start = start, .end = self.i }; }
     if (c == ')') { self.adv(); self.tag = .noun;   return .{ .tt = .@")", .start = start, .end = self.i }; }

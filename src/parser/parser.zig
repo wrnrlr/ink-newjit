@@ -11,7 +11,9 @@ const Lexer = lex.Lexer;
 const eql = std.mem.eql;
 const trim = std.mem.trim;
 
-pub const ParseError = error{ OutOfMemory, Overflow, InvalidCharacter, UnexpectedToken };
+pub const ParseError = error{ OutOfMemory, Overflow, InvalidCharacter, UnexpectedToken, AssignInParens };
+
+const TableForm = enum { plain, keyed };
 
 pub const Parser = struct {
   arena: std.heap.ArenaAllocator,
@@ -79,9 +81,34 @@ pub const Parser = struct {
   fn isNounStart(self: *Parser) bool {
     return switch (self.tok.tt) {
       .int, .float, .bit, .bits, .nat, .dbl, .hlf, .string, .symbol, .iden,
-      .@"(", .@"{", .@"[", .@"$[", .@"[[]", .@"[[", .adverb_val => true,
+      .@"(", .@"{", .@"[", .@"$[", .adverb_val => true,
       else => false,
     };
+  }
+  // Token types that can spell a dict/table column name in `k:v`.
+  fn isKeyTok(tt: TT) bool { return switch (tt) { .iden, .symbol, .string, .int => true, else => false }; }
+  // Pure lookahead: does the stream at the cursor start a `key:` entry? Copies
+  // the lexer rather than advancing, so no token is consumed and no comment is
+  // double-recorded. `a::1` is a global assign, not an entry, hence the third
+  // token check.
+  fn peeksItem(self: *Parser) bool {
+    if (!isKeyTok(self.tok.tt)) return false;
+    var lx = self.lex;
+    if (lx.next().tt != .@":") return false;
+    return lx.next().tt != .@":";
+  }
+  // Pure lookahead for the `(`-productions that begin with '['. `.plain` is
+  // `([]col:…)`, `.keyed` is `([key:…]col:…)`; null means the '[' merely opens a
+  // progn as the list's first item, as in `([1;2];3)`.
+  fn peeksTable(self: *Parser) ?TableForm {
+    if (self.tok.tt != .@"[") return null;
+    var lx = self.lex;
+    const t2 = lx.next();
+    if (t2.tt == .@"]") return .plain;
+    if (!isKeyTok(t2.tt)) return null;
+    if (lx.next().tt != .@":") return null;
+    if (lx.next().tt == .@":") return null;
+    return .keyed;
   }
   fn isVerbStart(self: *Parser) bool { return switch (self.tok.tt) { .op, .keyword, .io => true, else => false }; }
   fn isEnd(self: *Parser) bool { return switch (self.tok.tt) { .sep, .eof, .@"}", .@"]", .@")" => true, else => false }; }
@@ -165,6 +192,19 @@ pub const Parser = struct {
     return self.node(.{ .terse = .{ .stmts = try stmts.toOwnedSlice(self.al()) } });
   }
 
+  // Statement position: a leading ':' is an early return from the enclosing
+  // lambda (`{$[x<0;:0;x]}`), and `:` on its own returns null. Anywhere else the
+  // token keeps its verb reading, so this is a thin wrapper over parseStmt rather
+  // than a flag threaded through it.
+  fn parseStmtPos(self: *Parser) ParseError!*Node {
+    self.skipComments();
+    if (!self.is(.@":")) return self.parseStmt();
+    const start = self.tok.start;
+    self.advance();
+    const clause: ?*Node = if (self.isEnd() or self.is(.comment)) null else try self.parseStmt();
+    return self.rec(try self.node(.{ .ret = .{ .clause = clause } }), start);
+  }
+
   fn parseStmt(self: *Parser) ParseError!*Node {
     self.skipComments();
 
@@ -205,8 +245,6 @@ pub const Parser = struct {
   fn parseAfterNoun(self: *Parser, noun: *Node) ParseError!*Node {
     self.skipComments();
     if (self.is(.@"[")) return self.parseAfterNoun(try self.parseApply(noun));
-    // f[[dict;...];...] — [[ is lexed as a single token; treat as apply where first arg is a dict.
-    if (self.is(.@"[[")) return self.parseAfterNoun(try self.parseApplyWithDict(noun));
     if (self.is(.@":")) return self.parseBind(noun, null);
 
     if (self.is(.op) or self.is(.keyword)) {
@@ -299,9 +337,7 @@ pub const Parser = struct {
       .int, .float, .bit, .bits, .nat, .dbl, .hlf, .string, .symbol, .iden => try self.parseLiteralOrVector(),
       .@"(" => try self.parseGroupOrList(),
       .@"{" => try self.parseLambda(),
-      .@"[" => try self.parseDictOrArgs(),
-      .@"[[]" => try self.parseTable(),
-      .@"[[" => try self.parseUTable(),
+      .@"[" => try self.parseProgn(),
       .@"$[" => try self.parseCond(),
       .adverb_val => blk: {
         const adv = self.slice(); self.advance();
@@ -430,15 +466,37 @@ pub const Parser = struct {
     }
   }
 
+  // Everything spelled with round brackets: group, list, dict, table, keyed table.
+  //
+  //   ()                  empty list          (x)            group
+  //   (1;2)               list                (a:1;b:2)       dict
+  //   ([]a:1 2;b:3 4)     table               ([a:1 2]b:3 4)  keyed table
+  //
+  // A dict is decided by the FIRST item alone: `(` + `key:` (and not `key::`)
+  // commits to a dict, after which every item must be `key:value` or parseItems
+  // errors. One rule, two tokens of lookahead, no backtracking — and the two
+  // mixed shapes `(a:1;2)` and `(1;a:2)` are both rejected rather than quietly
+  // meaning something else.
   fn parseGroupOrList(self: *Parser) ParseError!*Node {
     self.advance(); // consume '('
+    self.skipComments();
     if (self.eat(.@")")) return self.node(.{ .list = .{ .seq = null } });
     if (self.is(.adverb_val) and self.lex.peekNext().tt == .@")") {
       const adv = self.slice(); self.advance(); try self.close(.@")");
       return self.node(.{ .group = .{ .stmt = try self.node(.{ .adverb_val = adv }) } });
     }
-    const seq = try self.parseSeq(.@")");
+    if (self.peeksTable()) |form| return self.parseTableLit(form);
+    if (self.peeksItem()) {
+      const items = try self.parseItems(.@")");
+      try self.close(.@")");
+      return self.node(.{ .dict = .{ .items = if (items.len > 0) items else null } });
+    }
+    const seq = try self.parseSeq(.@")", false);
     try self.close(.@")");
+    // A bind as a top-level item means someone wrote `(1;a:2)` — either a
+    // half-formed dict or the old sequence-inside-parens idiom. Both belong in a
+    // progn now, so say so instead of silently building a list of assignments.
+    for (seq) |it| if (it.* == .bind or it.* == .pending) return error.AssignInParens;
     if (seq.len == 1) {
       defer self.al().free(seq);
       return self.node(.{ .group = .{ .stmt = seq[0] } });
@@ -446,7 +504,41 @@ pub const Parser = struct {
     return self.node(.{ .list = .{ .seq = seq } });
   }
 
-  fn parseSeq(self: *Parser, end_tt: TT) ParseError!ast.Seq {
+  // `([]col:…)` and `([keycol:…]col:…)`. The cursor sits on the inner '['.
+  fn parseTableLit(self: *Parser, form: TableForm) ParseError!*Node {
+    self.advance(); // consume '['
+    if (form == .plain) {
+      try self.close(.@"]");
+      const items = try self.parseItems(.@")");
+      try self.close(.@")");
+      return self.node(.{ .table = .{ .items = if (items.len > 0) items else null } });
+    }
+    const keys = try self.parseItems(.@"]");
+    try self.close(.@"]");
+    const vals = try self.parseItems(.@")");
+    try self.close(.@")");
+    return self.node(.{ .utable = .{
+      .keys = if (keys.len > 0) keys else null,
+      .items = if (vals.len > 0) vals else null,
+    } });
+  }
+
+  // `[a;b;c]` in noun position — a statement block. Runs every statement, yields
+  // the last one's value. (After a noun, '[' is still apply/index; see
+  // parseAfterNoun.)
+  fn parseProgn(self: *Parser) ParseError!*Node {
+    self.advance(); // consume '['
+    if (self.eat(.@"]")) return self.node(.{ .progn = .{ .seq = null } });
+    const seq = try self.parseSeq(.@"]", true);
+    try self.close(.@"]");
+    return self.node(.{ .progn = .{ .seq = if (seq.len > 0) seq else null } });
+  }
+
+  // `stmt_pos` marks the elements as STATEMENTS rather than values, which is what
+  // licenses a leading ':' to mean early-return (lambda bodies, progn blocks).
+  // List elements and call arguments are values, so there `:` keeps its old
+  // reading as the bare right/assign verb — `@[v;`px;:;99.]` still works.
+  fn parseSeq(self: *Parser, end_tt: TT, stmt_pos: bool) ParseError!ast.Seq {
     // Consecutive expressions become separate elements regardless of what
     // delimits them, so a newline always separates items. What differs is
     // null-injection: only a ';' (`counts`) can add a blank (`;;`, a trailing
@@ -474,7 +566,7 @@ pub const Parser = struct {
       last_sep = false;
       last_sep_is_sc = false;
       const before = self.tok.start;
-      try stmts.append(self.al(), try self.parseStmt());
+      try stmts.append(self.al(), if (stmt_pos) try self.parseStmtPos() else try self.parseStmt());
       // Guard against a non-advancing parseStmt (stray closer / unexpected
       // token) spinning the loop forever before `end_tt`/eof is reached.
       if (self.tok.start == before) break;
@@ -490,7 +582,7 @@ pub const Parser = struct {
     var args: ?ast.Args = null;
     if (self.is(.@"[")) { self.advance(); args = try self.parseArgList(); }
     var seq: ?ast.Seq = null;
-    if (!self.is(.@"}")) seq = try self.parseSeq(.@"}");
+    if (!self.is(.@"}")) seq = try self.parseSeq(.@"}", true);
     const end = self.tok.end;
     try self.close(.@"}");
     return self.node(.{ .lambda = .{ .a = args, .b = seq, .start = start, .end = end } });
@@ -519,33 +611,6 @@ pub const Parser = struct {
       try args.append(self.al(), .{ .is_some = false, .value = "", .start = self.tok.start, .end = self.tok.start });
     try self.close(.@"]");
     return args.toOwnedSlice(self.al());
-  }
-
-  fn parseDictOrArgs(self: *Parser) ParseError!*Node {
-    self.advance(); // consume '['
-    if (self.is(.@"]")) { self.advance(); return self.node(.{ .dict = .{ .items = null } }); }
-    const items = try self.parseItems(.@"]");
-    try self.close(.@"]");   // don't leave the cursor mid-bracket
-    return self.node(.{ .dict = .{ .items = if (items.len > 0) items else null } });
-  }
-
-  fn parseTable(self: *Parser) ParseError!*Node {
-    self.advance(); // consume '[[]'
-    const items = try self.parseItems(.@"]");
-    try self.close(.@"]");
-    return self.node(.{ .table = .{ .items = if (items.len > 0) items else null } });
-  }
-
-  fn parseUTable(self: *Parser) ParseError!*Node {
-    self.advance(); // consume '[['
-    const keys = try self.parseItems(.@"]");
-    try self.close(.@"]");
-    const vals = try self.parseItems(.@"]");
-    try self.close(.@"]");
-    return self.node(.{ .utable = .{
-      .keys = if (keys.len > 0) keys else null,
-      .items = if (vals.len > 0) vals else null,
-    } });
   }
 
   fn parseItems(self: *Parser, end_tt: TT) ParseError!ast.Items {
@@ -584,24 +649,9 @@ pub const Parser = struct {
     const st = self.startOf(f) orelse self.tok.start;
     self.advance(); // consume '['
     if (self.eat(.@"]")) return self.recEnd(try self.node(.{ .apply = .{ .f = f, .a = null } }), st, self.prev_end);
-    const seq = try self.parseSeq(.@"]");
+    const seq = try self.parseSeq(.@"]", false);
     try self.close(.@"]");
     return self.recEnd(try self.node(.{ .apply = .{ .f = f, .a = seq } }), st, self.prev_end);
-  }
-
-  // Handles f[[dict;...];arg2;...] where [[ was lexed as a single token.
-  // The [[ acts as the opening [ of the apply call, and [dict;...] is the first argument.
-  fn parseApplyWithDict(self: *Parser, f: *Node) ParseError!*Node {
-    self.advance(); // consume '[['
-    const dict_items = try self.parseItems(.@"]");
-    try self.close(.@"]");
-    const first_arg = try self.node(.{ .dict = .{ .items = if (dict_items.len > 0) dict_items else null } });
-    const rest = try self.parseSeq(.@"]");
-    try self.close(.@"]");
-    var seq = try std.ArrayList(*Node).initCapacity(self.al(), rest.len + 1);
-    try seq.append(self.al(), first_arg);
-    for (rest) |r| try seq.append(self.al(), r);
-    return self.node(.{ .apply = .{ .f = f, .a = try seq.toOwnedSlice(self.al()) } });
   }
 
   fn parseCond(self: *Parser) ParseError!*Node {
@@ -612,7 +662,7 @@ pub const Parser = struct {
       if (self.is(.@"]")) break;
       if (self.is(.sep)) { self.advance(); continue; }
       const before = self.tok.start;
-      try stmts.append(self.al(), try self.parseStmt());
+      try stmts.append(self.al(), try self.parseStmtPos());
       // parseStmt yields a .blank without consuming on a token it can't start a
       // statement from (a stray ')'/'}'/'[' or other closer). Without this guard
       // the loop would spin forever, never reaching ']' or eof — e.g. a '[...]'
@@ -680,7 +730,7 @@ test "parser" {
   const s1 = n1.terse.stmts[0].node;
   try std.testing.expect(s1.* == .transit);
   try std.testing.expectEqualStrings("+", s1.transit.v.op);
-  const n2 = try p.parse("[name:\"Bob\";age:42]");
+  const n2 = try p.parse("(name:\"Bob\";age:42)");
   const s2 = n2.terse.stmts[0].node;
   try std.testing.expect(s2.* == .dict);
   try std.testing.expect(s2.dict.items.?.len == 2);

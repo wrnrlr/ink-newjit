@@ -223,6 +223,8 @@ pub const Compiler = struct {
       .list => |l| if (l.seq) |seq| for (seq) |x| try self.collectMutated(x),
       .lambda => |lm| if (lm.b) |seq| for (seq) |x| try self.collectMutated(x),
       .cond => |cd| for (cd.stmts) |x| try self.collectMutated(x),
+      .progn => |p| if (p.seq) |seq| for (seq) |x| try self.collectMutated(x),
+      .ret => |r| if (r.clause) |c| try self.collectMutated(c),
       .dict, .table => |d| if (d.items) |items| for (items) |it| try self.collectMutated(it.v),
       .utable => |u| { if (u.keys) |k| for (k) |it| try self.collectMutated(it.v); if (u.items) |i| for (i) |it| try self.collectMutated(it.v); },
       .bind => |b| { try self.markMutation(b.v, b.f, b.a); if (b.a) |a| try self.collectMutated(a); try self.collectMutated(b.v); },
@@ -346,6 +348,8 @@ pub const Compiler = struct {
       .apply => |ap| try self.compileApply(ap, is_tail),
       .term => |t| try self.compileTerm(t),
       .cond => |c| try self.compileCond(c, is_tail),
+      .progn => |p| try self.compileProgn(p, is_tail),
+      .ret => |r| try self.compileRet(r, is_tail),
       .right => |r| try self.compileNode(r.clause, is_tail),
       .list => |l| try self.compileList(l),
       .dict => |d| try self.compileDict(d, false),
@@ -1165,6 +1169,39 @@ pub const Compiler = struct {
     });
     chunk_owned = false;
     return try self.emitConst(V{ .o = Fn.lambda(lambda_idx, arity_res) });
+  }
+
+  // `[a;b;c]` — run every statement, keep the last one's value, drop the rest.
+  // Same shape as a lambda body, minus the frame: no new scope, so the names it
+  // binds are the enclosing function's locals.
+  fn compileProgn(self: *Compiler, p: ast.Progn, is_tail: bool) anyerror!ir.ValueId {
+    const seq = p.seq orelse return try self.emitOp(.Gap, &.{});
+    var end = seq.len;
+    while (end > 0 and seq[end - 1].* == .blank) end -= 1;
+    if (end == 0) return try self.emitOp(.Gap, &.{});
+    const stmts = seq[0..end];
+    var res: ir.ValueId = ir.NO_VALUE;
+    for (stmts, 0..) |stmt, idx| {
+      const last = idx == stmts.len - 1;
+      const val = try self.compileNode(stmt, is_tail and last);
+      if (last) res = val
+      else if (val != ir.NO_VALUE) _ = try self.emitOp(.Drop, &.{val});
+    }
+    return res;
+  }
+
+  // `:x` — return x from the enclosing lambda. `.Return` is a block terminator the
+  // CFG builder already understands and is never pure, so it survives DCE even
+  // though nothing consumes its result. The trailing Gap is unreachable filler
+  // that keeps the surrounding expression's value-id chain well formed (a cond
+  // branch that returns still has to hand compileCond an id).
+  fn compileRet(self: *Compiler, r: ast.Ret, is_tail: bool) anyerror!ir.ValueId {
+    const val = if (r.clause) |c| try self.compileNode(c, is_tail) else try self.emitOp(.Gap, &.{});
+    // At top level there is no frame to unwind, so `:x` is plain identity — the
+    // same thing it meant before early return existed.
+    if (!self.scope.is_lambda) return val;
+    _ = try self.emitOp(.Return, &.{val});
+    return try self.emitOp(.Gap, &.{});
   }
 
   fn compileCond(self: *Compiler, c: ast.Cond, is_tail: bool) anyerror!ir.ValueId {

@@ -54,6 +54,7 @@ fn kindName(node: *Node) []const u8 {
     .apposit => "apposit", .bind => "bind", .right => "right", .term => "term",
     .group => "group", .list => "list", .lambda => "lambda", .apply => "apply",
     .dict => "dict", .table => "table", .utable => "utable", .cond => "cond",
+    .progn => "progn", .ret => "ret",
     .op => "op", .io => "io", .monad => "monad", .adverb_val => "adverb_val",
     .blank => "blank", .command => "command",
     .literal => |lit| switch (lit) {
@@ -174,7 +175,13 @@ fn emit(vm: *VM, p: *parser_mod.Parser, cp: []const u32, cols: *Cols, node: *Nod
       if (l.b) |seq| for (seq) |e| { if (e.* != .blank) try collect(vm, p, cp, cols, e, row, "stmt", cd, &lo, &hi); };
     },
     .dict, .table => |d| if (d.items) |items| for (items) |it| try collect(vm, p, cp, cols, it.v, row, it.k, cd, &lo, &hi),
+    .utable => |u| {
+      if (u.keys) |ks| for (ks) |it| try collect(vm, p, cp, cols, it.v, row, it.k, cd, &lo, &hi);
+      if (u.items) |is| for (is) |it| try collect(vm, p, cp, cols, it.v, row, it.k, cd, &lo, &hi);
+    },
     .cond => |co| for (co.stmts) |st| try collect(vm, p, cp, cols, st, row, "stmt", cd, &lo, &hi),
+    .progn => |pg| if (pg.seq) |seq| for (seq) |st| { if (st.* != .blank) try collect(vm, p, cp, cols, st, row, "stmt", cd, &lo, &hi); },
+    .ret => |r| if (r.clause) |c| try collect(vm, p, cp, cols, c, row, "clause", cd, &lo, &hi),
     else => {},
   }
 

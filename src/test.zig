@@ -68,15 +68,15 @@ test "basic syntax" {
   try t.check("(1;2;3)", "1 2 3");
   try t.check("(1;2.3;`c;%)", "(1;2.3;`c;%)");
   try t.check(",()", ",()");
-  try t.check("[a:1]", "[a:1]");
-  try t.check("[a:1;b:2 3]", "[a:1;b:2 3]");
-  try t.check("[[]n:`b`c;i:2 3]", "[[]n:`b`c;i:2 3]");
-  try t.check("[[n:`b`c]i:2 3]", "[[n:`b`c]i:2 3]"); // keyed table (utable)
+  try t.check("(a:1)", "(a:1)");
+  try t.check("(a:1;b:2 3)", "(a:1;b:2 3)");
+  try t.check("([]n:`b`c;i:2 3)", "([]n:`b`c;i:2 3)");
+  try t.check("([n:`b`c]i:2 3)", "([n:`b`c]i:2 3)"); // keyed table (utable)
 }
 
 test "pretty repl dict/table rendering" {
   var t = try Tester.init(); defer t.deinit();
-  _ = try t.eval("d:[a:1 2 3;c:\"abc\"]");
+  _ = try t.eval("d:(a:1 2 3;c:\"abc\")");
   // Dict: one key|value per line, char data shown as raw text.
   try t.checkPretty("d", "a|1 2 3\nc|abc");
   // Misaligned keys pad so the bars line up.
@@ -84,14 +84,14 @@ test "pretty repl dict/table rendering" {
   // Table: header row, dashed separator, then a row of values per record.
   try t.checkPretty("+d", "a c\n- -\n1 a\n2 b\n3 c");
   // Numeric columns right-align (k9-style); symbol/char columns left-align.
-  _ = try t.eval("e:[a:100 2 30;s:`x`yy`z]");
+  _ = try t.eval("e:(a:100 2 30;s:`x`yy`z)");
   try t.checkPretty("+e", "  a s\n--- --\n100 x\n  2 yy\n 30 z");
   // Keyed table: key columns and value columns share rows, joined by `|`.
-  try t.checkPretty("[[n:`b`c]i:2 3]", "n|i\n-|-\nb|2\nc|3");
+  try t.checkPretty("([n:`b`c]i:2 3)", "n|i\n-|-\nb|2\nc|3");
   // Single-key dict still renders one line.
-  try t.checkPretty("[a:1]", "a|1");
+  try t.checkPretty("(a:1)", "a|1");
   // Without pretty (raw / leading-whitespace path) the k literal is unchanged.
-  try t.check("d", "[a:1 2 3;c:\"abc\"]");
+  try t.check("d", "(a:1 2 3;c:\"abc\")");
 }
 
 test "parse preserves vector literal values" {
@@ -158,18 +158,18 @@ test "vector" {
 
 test "dict syntax" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("[a:1]", "[a:1]");
-  try t.check("[a:,1]", "[a:,1]");
-  try t.check("[a:1 2 3]", "[a:1 2 3]");
-  try t.check("i:!3; [a:i]", "[a:0 1 2]");
+  try t.check("(a:1)", "(a:1)");
+  try t.check("(a:,1)", "(a:,1)");
+  try t.check("(a:1 2 3)", "(a:1 2 3)");
+  try t.check("i:!3; (a:i)", "(a:0 1 2)");
   // Empty dict literal: [] is a proper type-`m` dict with no keys/values,
   // and round-trips to its [] literal form.
-  try t.check("[]", "[]");
-  try t.check("d:[]; @d", "`m");
-  try t.check("d:[]; #d", "0");
-  try t.check("d:[]; !d", "()");   // keys: empty list prints ()
-  try t.check("d:[]; .d", "()");   // values: empty list prints ()
-  try t.check("[],[a:1;b:2]", "[a:1;b:2]");
+  try t.check("()!()", "()!()");
+  try t.check("d:()!(); @d", "`m");
+  try t.check("d:()!(); #d", "0");
+  try t.check("d:()!(); !d", "()");   // keys: empty list prints ()
+  try t.check("d:()!(); .d", "()");   // values: empty list prints ()
+  try t.check("(()!()),(a:1;b:2)", "(a:1;b:2)");
   // Empty list round-trips as () (not ,() which is a one-element list).
   try t.check("()", "()");
   try t.check(",()", ",()");
@@ -186,8 +186,8 @@ test "arithmetic" {
   try t.check("10 20 - 1 2", "9 18");
   try t.check("1 2 + 3 4", "4 6");
   try t.check("1+2 3 4", "3 4 5");
-  try t.check("1+`a`b!1 2", "[a:2;b:3]");
-  try t.check("1+[a:1;b:2]", "[a:2;b:3]");
+  try t.check("1+`a`b!1 2", "(a:2;b:3)");
+  try t.check("1+(a:1;b:2)", "(a:2;b:3)");
   try t.check("1+1 2!`a`b", "!type");
   try t.check("1 2+2 3 4", "!length");
   try t.check("15 mod 15", "0");
@@ -292,7 +292,7 @@ test "amend" {
   try t.check("@[1 2 3 4; 0 2; :; 8 9]", "8 2 9 4");
   try t.check("@[1 2 3 4; 1 2; {x*2}]", "1 4 6 4");
   try t.check("@[1; 0; :; 5 ]", "!type");
-  try t.check("d:[a:10;b:20]; @[d; `a; +; 5]", "[a:15;b:20]");
+  try t.check("d:(a:10;b:20); @[d; `a; +; 5]", "(a:15;b:20)");
   // `:`-assign fast path: typed scatter (float) and list assign
   try t.check("@[0.0 0.0 0.0; 0 2; :; 1.5 2.5]", "1.5 0.0 2.5");
   try t.check("@[(1;\"ab\";3); 1; :; 9]", "(1;9;3)");
@@ -314,7 +314,7 @@ test "drill" {
   var t = try Tester.init(); defer t.deinit();
   try t.check(".[(1 2; 3 4); 1 0; :; 9]", "(1 2;9 4)");
   try t.check(".[(1 2; (3 4; 5 6)); 1 1 0; +; 10]", "(1 2;(3 4;15 6))");
-  try t.check("u: `name`settings!(`Bob; `theme`vol!(0; 50)); .[u; `settings`vol; +; 10]", "[name:`Bob;settings:[theme:0;vol:60]]");
+  try t.check("u: `name`settings!(`Bob; `theme`vol!(0; 50)); .[u; `settings`vol; +; 10]", "(name:`Bob;settings:(theme:0;vol:60))");
 }
 
 test "deep indexed assign" {
@@ -325,15 +325,15 @@ test "deep indexed assign" {
   // three levels deep
   try t.check("G:(((1 2 3);(4 5 6));((7 8 9);(0 1 2))); G[0][1][2]:99; G 0", "(1 2 3;4 5 99)");
   // a dict slot, then a list element inside it
-  try t.check("G:`xs`ys!((1 2 3);(4 5 6)); G[`xs][1]:99; G", "[xs:1 99 3;ys:4 5 6]");
+  try t.check("G:`xs`ys!((1 2 3);(4 5 6)); G[`xs][1]:99; G", "(xs:1 99 3;ys:4 5 6)");
   // compound op folds into the amend at depth (G[`c][1] += 100)
-  try t.check("G:`c!,1 2 3; G[`c][1]+:100; G", "[c:,1 102 3]");
+  try t.check("G:`c!,1 2 3; G[`c][1]+:100; G", "(c:,1 102 3)");
   // a deep write EXTENDS a nested dict with a new key (8 absent -> added)
-  try t.check("G:()!(); G[`loc]:7 9!3 5; G[`loc][8]:99; G", "[loc:,7 9 8!3 5 99]");
+  try t.check("G:()!(); G[`loc]:7 9!3 5; G[`loc][8]:99; G", "(loc:,7 9 8!3 5 99)");
   // the global form `::` works from inside a lambda (no closure over G)
   try t.check("G::((1 2 3);(4 5 6)); {G[1][2]::99}[]; G", "(1 2 3;4 5 99)");
   // regressions: single-level and the semicolon multi-index drill are unaffected
-  try t.check("G:`x`y!(1;2); G[`x]:9; G", "[x:9;y:2]");
+  try t.check("G:`x`y!(1;2); G[`x]:9; G", "(x:9;y:2)");
   try t.check("G:((1 2 3);(4 5 6)); G[1;2]:99; G", "(1 2 3;4 5 99)");
 }
 
@@ -580,80 +580,80 @@ test "+X flip" {
 }
 test "flip dict & table" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("+`a`b!(1 2;3 4)", "[[]a:1 2;b:3 4]");
-  try t.check("+([a:1 2;b:3 4])", "[[]a:1 2;b:3 4]");
-  try t.check("+([[]a:1 2;b:3 4])", "[a:1 2;b:3 4]");
+  try t.check("+`a`b!(1 2;3 4)", "([]a:1 2;b:3 4)");
+  try t.check("+((a:1 2;b:3 4))", "([]a:1 2;b:3 4)");
+  try t.check("+(([]a:1 2;b:3 4))", "(a:1 2;b:3 4)");
 }
 test "amend a table column" {
   // A table (M) shares the Dict payload with a dict (m); amend-by-key replaces a COLUMN.
   // Regression: this used to crash (the amend path assumed the `.m` union tag).
   var t = try Tester.init(); defer t.deinit();
-  try t.check("v:[[]px:10. 20.;vx:1. 2.]; @[v;`px;:;99. 99.]", "[[]px:99.0 99.0;vx:1.0 2.0]");
-  try t.check("v:[[]px:10. 20.;vx:1. 2.]; @[v;`px;:;(v`px)+v`vx]", "[[]px:11.0 22.0;vx:1.0 2.0]");
+  try t.check("v:([]px:10. 20.;vx:1. 2.); @[v;`px;:;99. 99.]", "([]px:99.0 99.0;vx:1.0 2.0)");
+  try t.check("v:([]px:10. 20.;vx:1. 2.); @[v;`px;:;(v`px)+v`vx]", "([]px:11.0 22.0;vx:1.0 2.0)");
   // dict amend (m) still works
-  try t.check("d:`px`vx!((10. 20.);(1. 2.)); @[d;`px;:;99. 99.]", "[px:99.0 99.0;vx:1.0 2.0]");
+  try t.check("d:`px`vx!((10. 20.);(1. 2.)); @[d;`px;:;99. 99.]", "(px:99.0 99.0;vx:1.0 2.0)");
 }
 test "single-column table column access" {
   // A 1-column table's column names must be a typed S vector (not L), so column
   // access by symbol works the same as a multi-column table.
   var t = try Tester.init(); defer t.deinit();
-  try t.check("@!([[]n:`b`c])", "`S");
-  try t.check("t:[[]n:`b`c]; t`n", "`b`c");
-  try t.check("t:[[]id:1 2 3]; t`id", "1 2 3");
+  try t.check("@!(([]n:`b`c))", "`S");
+  try t.check("t:([]n:`b`c); t`n", "`b`c");
+  try t.check("t:([]id:1 2 3); t`id", "1 2 3");
   // Multi-column read returns a LIST of columns (like a dict m`a`b), NOT a sub-table, so
   // column arithmetic is positional: (t`px`py)+t`vx`vy pairs px with vx.
-  try t.check("t:[[]px:10. 20.;py:5. 6.;vx:1. 2.;vy:3. 4.]; @t`px`py", "`L");
-  try t.check("t:[[]px:10. 20.;py:5. 6.;vx:1. 2.;vy:3. 4.]; (t`px`py)+t`vx`vy", "(11.0 22.0;8.0 10.0)");
-  try t.check("t:[[]px:10. 20.;py:5. 6.;vx:1. 2.;vy:3. 4.]; @[t;`px`py;:;(t`px`py)+t`vx`vy]",
-              "[[]px:11.0 22.0;py:8.0 10.0;vx:1.0 2.0;vy:3.0 4.0]");
+  try t.check("t:([]px:10. 20.;py:5. 6.;vx:1. 2.;vy:3. 4.); @t`px`py", "`L");
+  try t.check("t:([]px:10. 20.;py:5. 6.;vx:1. 2.;vy:3. 4.); (t`px`py)+t`vx`vy", "(11.0 22.0;8.0 10.0)");
+  try t.check("t:([]px:10. 20.;py:5. 6.;vx:1. 2.;vy:3. 4.); @[t;`px`py;:;(t`px`py)+t`vx`vy]",
+              "([]px:11.0 22.0;py:8.0 10.0;vx:1.0 2.0;vy:3.0 4.0)");
 }
 test "utable (keyed table)" {
   var t = try Tester.init(); defer t.deinit();
   // construction + round-trip formatting; a keyed table is a dict (m) of rows
-  try t.check("[[n:`b`c]i:2 3]", "[[n:`b`c]i:2 3]");
-  try t.check("@[[n:`b`c]i:2 3]", "`m");
-  try t.check("#[[n:`b`c]i:2 3]", "2");
-  try t.check("@!([[n:`b`c]i:2 3])", "`M");        // keys are a table
+  try t.check("([n:`b`c]i:2 3)", "([n:`b`c]i:2 3)");
+  try t.check("@([n:`b`c]i:2 3)", "`m");
+  try t.check("#([n:`b`c]i:2 3)", "2");
+  try t.check("@!(([n:`b`c]i:2 3))", "`M");        // keys are a table
   // index by key -> value row; absent key -> null
-  try t.check("u:[[n:`b`c]i:2 3]; u@`c", "[i:,3]");
-  try t.check("u:[[id:1 2 3]px:10. 20. 30.]; u@2", "[px:,20.0]");
+  try t.check("u:([n:`b`c]i:2 3); u@`c", "(i:,3)");
+  try t.check("u:([id:1 2 3]px:10. 20. 30.); u@2", "(px:,20.0)");
   // upsert: insert a new key, then replace an existing key's value row
-  try t.check("[[id:1 2]px:10. 20.],`id`px!(3;30.)", "[[id:1 2 3]px:10.0 20.0 30.0]");
-  try t.check("[[id:1 2]px:10. 20.],`id`px!(2;99.)", "[[id:1 2]px:10.0 99.0]");
+  try t.check("([id:1 2]px:10. 20.),`id`px!(3;30.)", "([id:1 2 3]px:10.0 20.0 30.0)");
+  try t.check("([id:1 2]px:10. 20.),`id`px!(2;99.)", "([id:1 2]px:10.0 99.0)");
   // columns are TYPE-STABLE: an upsert/insert with a wrong-typed value is a domain
   // error, not a silent re-type (int into a float column → !type).
-  try t.check("[[id:1 2]px:10. 20.],`id`px!(3;30)", "!type");
+  try t.check("([id:1 2]px:10. 20.),`id`px!(3;30)", "!type");
 }
 test "utable as ECS archetype" {
   var t = try Tester.init(); defer t.deinit();
   // reading a value column by name (so a system can do W`px)
-  try t.check("W:[[id:1 2]px:10. 20.;vx:1. 2.]; W`px", "10.0 20.0");
+  try t.check("W:([id:1 2]px:10. 20.;vx:1. 2.); W`px", "10.0 20.0");
   // amend a value column by name = a whole-column system; keys preserved, stays a utable
-  try t.check("W:[[id:1 2]px:10. 20.;vx:1. 2.]; @[W;`px;:;(W`px)+W`vx]", "[[id:1 2]px:11.0 22.0;vx:1.0 2.0]");
-  try t.check("W:[[id:1 2]px:10. 20.]; @@[W;`px;:;99. 99.]", "`m");
+  try t.check("W:([id:1 2]px:10. 20.;vx:1. 2.); @[W;`px;:;(W`px)+W`vx]", "([id:1 2]px:11.0 22.0;vx:1.0 2.0)");
+  try t.check("W:([id:1 2]px:10. 20.); @@[W;`px;:;99. 99.]", "`m");
   // int-key lookup returns a row; a value-column symbol is NOT mistaken for a key
-  try t.check("W:[[id:1 2]px:10. 20.]; W@2", "[px:,20.0]");
+  try t.check("W:([id:1 2]px:10. 20.); W@2", "(px:,20.0)");
   // despawn: drop the row(s) whose key is in x
-  try t.check("W:[[id:1 2 3]px:10. 20. 30.]; 2 _ W", "[[id:1 3]px:10.0 30.0]");
-  try t.check("W:[[id:1 2 3]px:10. 20. 30.]; 1 3 _ W", "[[id:,2]px:,20.0]");
+  try t.check("W:([id:1 2 3]px:10. 20. 30.); 2 _ W", "([id:1 3]px:10.0 30.0)");
+  try t.check("W:([id:1 2 3]px:10. 20. 30.); 1 3 _ W", "([id:,2]px:,20.0)");
   // amend BY KEY = upsert the row: replace an existing entity, or insert a new one
-  try t.check("W:[[id:1 2]px:10. 20.]; @[W;2;:;(`px!99.)]", "[[id:1 2]px:10.0 99.0]");
-  try t.check("W:[[id:1 2]px:10. 20.]; @[W;3;:;(`px!30.)]", "[[id:1 2 3]px:10.0 20.0 30.0]");
+  try t.check("W:([id:1 2]px:10. 20.); @[W;2;:;(`px!99.)]", "([id:1 2]px:10.0 99.0)");
+  try t.check("W:([id:1 2]px:10. 20.); @[W;3;:;(`px!30.)]", "([id:1 2 3]px:10.0 20.0 30.0)");
   // the `u[key]:valrow` sugar lowers to that amend (replace, then insert)
-  try t.check("W:[[id:1 2]px:10. 20.]; W[2]:(`px!99.); W", "[[id:1 2]px:10.0 99.0]");
-  try t.check("W:[[id:1 2]px:10. 20.]; W[3]:(`px!30.); W", "[[id:1 2 3]px:10.0 20.0 30.0]");
+  try t.check("W:([id:1 2]px:10. 20.); W[2]:(`px!99.); W", "([id:1 2]px:10.0 99.0)");
+  try t.check("W:([id:1 2]px:10. 20.); W[3]:(`px!30.); W", "([id:1 2 3]px:10.0 20.0 30.0)");
 }
 test "utable joins" {
   var t = try Tester.init(); defer t.deinit();
   // left join t,k — keep every row of t; merge k's columns by key (shared col overridden
   // where matched, k-only col 0-filled where unmatched). This is the k9 manual example.
-  try t.check("t:[[]s:`a`b`c;p:1 2 3;q:7 8 9]; k:[[s:`a`b`x`y`z]q:101 102 103 104 105;r:51 52 53 54 55]; t,k",
-              "[[]s:`a`b`c;p:1 2 3;q:101 102 9;r:51 52 0]");
+  try t.check("t:([]s:`a`b`c;p:1 2 3;q:7 8 9); k:([s:`a`b`x`y`z]q:101 102 103 104 105;r:51 52 53 54 55); t,k",
+              "([]s:`a`b`c;p:1 2 3;q:101 102 9;r:51 52 0)");
   // outer join k1,k2 — union of keys, k2 wins on shared keys (k9 manual example)
-  try t.check("k1:[[s:`a`b]p:1 2;q:3 4]; k2:[[s:`b`c]p:9 8;q:7 6]; k1,k2",
-              "[[s:`a`b`c]p:1 9 8;q:3 7 6]");
+  try t.check("k1:([s:`a`b]p:1 2;q:3 4); k2:([s:`b`c]p:9 8;q:7 6); k1,k2",
+              "([s:`a`b`c]p:1 9 8;q:3 7 6)");
   // ECS use: dense archetype left-joined with a sparse keyed component = ssetAlign(default 0)
-  try t.check("a:[[]id:1 2 3 4;px:10. 20. 30. 40.]; b:[[id:2 4]boost:5. 9.]; (a,b)`boost",
+  try t.check("a:([]id:1 2 3 4;px:10. 20. 30. 40.); b:([id:2 4]boost:5. 9.); (a,b)`boost",
               "0.0 5.0 0.0 9.0");
 }
 test "nulls verb" {
@@ -689,7 +689,7 @@ test "user errors via monadic !" {
 test "group verb" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("=1 2 1", "1 2!(0 2;,1)");
-  try t.check("=`a`b`b`c", "[b:1 2;c:,3;a:,0]");
+  try t.check("=`a`b`b`c", "(b:1 2;c:,3;a:,0)");
   try t.check("=\"mississippi\"", "\"imps\"!(1 4 7 10;,0;8 9;2 3 5 6)");
 }
 test "distinct verb" {
@@ -725,8 +725,8 @@ test "@x type" {
   try t.check("@`a!1", "`m"); // dict
   try t.check("@()", "`L");
   try t.check("@(1;2.3;`c)", "`L");
-  try t.check("@([n:1 2])", "`m");
-  try t.check("@([[]n:`a`b`c;i:0 1 2])", "`M"); // table
+  try t.check("@((n:1 2))", "`m");
+  try t.check("@(([]n:`a`b`c;i:0 1 2))", "`M"); // table
   
   // try t.check("@{x}", "`o"); // partial
   try t.check("@(1+)", "`p"); // partial
@@ -736,7 +736,7 @@ test "@x type" {
   // try t.check("@(')", "`w"); // adverb
   // try t.check("@(/:)", "`w"); // adverb — bare / inside parens is parsed as comment
   
-  // try t.check("@([[n:`b`c]i:2 3])", "`m"); // incorrect but ignore for now
+  // try t.check("@(([n:`b`c]i:2 3))", "`m"); // incorrect but ignore for now
   // try t.check("@+`a!1", "`M"); // should be a table, but you can ignore for now
 }
 // TODO: @*| --> @:*:|
@@ -765,8 +765,8 @@ test "i_X drop verb" {
 }
 test "X_d drop keys verb" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("`a_`a`b`c!0 1 2", "[b:1;c:2]");
-  try t.check("`a`c_`a`b`c!0 1 2", "[b:1]");
+  try t.check("`a_`a`b`c!0 1 2", "(b:1;c:2)");
+  try t.check("`a`c_`a`b`c!0 1 2", "(b:1)");
   try t.check("(,2)_1 2 3!\"abc\"", "1 3!\"ac\"");
   try t.check("2 1_1 2 3!\"abc\"", ",3!,\"c\"");
 }
@@ -779,16 +779,16 @@ test "&x where" {
 }
 test "X!X dict" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("`a`b`c!0N", "[a:0N;b:0N;c:0N]"); // broadcast
-  try t.check("`a!1 2 3", "[a:1 2 3]");
-  try t.check("`a`b`c!1 2 3", "[a:1;b:2;c:3]");
-  try t.check("`a`b`c!(1 2;3 4;5 6)", "[a:1 2;b:3 4;c:5 6]");
+  try t.check("`a`b`c!0N", "(a:0N;b:0N;c:0N)"); // broadcast
+  try t.check("`a!1 2 3", "(a:1 2 3)");
+  try t.check("`a`b`c!1 2 3", "(a:1;b:2;c:3)");
+  try t.check("`a`b`c!(1 2;3 4;5 6)", "(a:1 2;b:3 4;c:5 6)");
   try t.check("1 2!`a`b", "1 2!`a`b");
   try t.check("1.2 3.4!\"ab\"", "1.2 3.4!\"ab\"");
   try t.check("`a`b!1 2 3", "!length");
   try t.check("(,`a)!1 2 3", "!length");
   // try t.check("(1;2.3;`c)!1 2 3", "!nyi");
-  // try t.check("(`a!(1 2 3);`b!(4 5 6))", "[a:1 2 3];[b:4 5 6]");
+  // try t.check("(`a!(1 2 3);`b!(4 5 6))", "(a:1 2 3);(b:4 5 6)");
 }
 
 // Adverbs
@@ -937,8 +937,8 @@ test "!I odometer" {
 test "!m keys" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("!`a`b!1 2", "`a`b");
-  // try t.check("![[]a:1 2;b:3 4]", "`a`b");
-  // try t.check("![[n:`b`c]i:2 3]", "[[]n:`b`c]");
+  // try t.check("!([]a:1 2;b:3 4)", "`a`b");
+  // try t.check("!([n:`b`c]i:2 3)", "([]n:`b`c)");
 }
 
 test "=i unimat" {
@@ -1005,7 +1005,7 @@ test "I#y reshape" {
 
 test "m,m merge dictionaries" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("[a:1;b:2],[b:3;c:4]", "[a:1;b:3;c:4]");
+  try t.check("(a:1;b:2),(b:3;c:4)", "(a:1;b:3;c:4)");
 }
 
 test "m,m merge dictionaries with general-list values" {
@@ -1025,7 +1025,7 @@ test "i#y take i number of elements from y" {
 test "X#d take key from dictionary d" {
   var t = try Tester.init(); defer t.deinit();
   _ = try t.eval("d: `a`b`c!1 2 3");
-  try t.check("`b`c`d#d", "[b:2;c:3;d:0N]");
+  try t.check("`b`c`d#d", "(b:2;c:3;d:0N)");
 }
 
 test "null verb" {
@@ -1092,7 +1092,7 @@ test "s$y cast y into type of s" {
   try t.check("`s$\"Hi\"", "`Hi");
   // try t.check("`$\"Hi\"", "`Hi"); // TODO: `$ is parsed as symbol named "$", not empty symbol
   try t.check("`i$(1;2.3)", "1 2");
-  try t.check("`f$`a`b!1 2", "[a:1.0;b:2.0]");
+  try t.check("`f$`a`b!1 2", "(a:1.0;b:2.0)");
 }
 
 test "s$y to int/float" {
@@ -1229,7 +1229,7 @@ test "csv parsing quoted fields via file" {
     try file.writePositionalAll(zio, csv_content, 0);
   }
   defer std.Io.Dir.cwd().deleteFile(zio, tmp_file) catch {};
-  // try t.check("`csv$1:<`\"tmp_test_quoted.csv\"", "[[]name:(\"Alice\";\"Bob\");city:(\"NYC\";\"LA\")]");
+  // try t.check("`csv$1:<`\"tmp_test_quoted.csv\"", "([]name:(\"Alice\";\"Bob\");city:(\"NYC\";\"LA\"))");
 }
 
 test "io and csv integration" {
@@ -1244,7 +1244,7 @@ test "io and csv integration" {
   }
   defer std.Io.Dir.cwd().deleteFile(zio, tmp_file) catch {};
 
-  // try t.check("data: 1: <`\"tmp_test.csv\"; `csv$ data", "[[]name:(\"Alice\";\"Bob\");age:30 25]");
+  // try t.check("data: 1: <`\"tmp_test.csv\"; `csv$ data", "([]name:(\"Alice\";\"Bob\");age:30 25)");
 }
 
 test "io verbs" {
@@ -1303,14 +1303,14 @@ test "group dict" {
 // end of the column list).
 test "each over dict and table" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("{x}'`a`b!(1 2;3 4)", "[a:1 2;b:3 4]");
-  try t.check("(+/)'`a`b!(1 2;3 4)", "[a:3;b:7]");
-  try t.check("p:`x`y`x`y;s:1 4 8 5;(|/)'s@=p", "[x:8;y:5]");
-  try t.check("p:`x`y`x`y;s:1 4 8 5;(+/)'s@=p", "[x:9;y:9]");
-  try t.check("{x}'`a!1 2 3", "[a:1 2 3]"); // scalar-key dict: one call, whole value
-  try t.check("{x}'()!()", "[]");
-  try t.check("{x}'[[]a:1 2 3;b:4 5 6]", "([a:1;b:4];[a:2;b:5];[a:3;b:6])");
-  try t.check("#'[[]a:1 2 3;b:4 5 6]", "2 2 2"); // 3 rows of 2 fields
+  try t.check("{x}'`a`b!(1 2;3 4)", "(a:1 2;b:3 4)");
+  try t.check("(+/)'`a`b!(1 2;3 4)", "(a:3;b:7)");
+  try t.check("p:`x`y`x`y;s:1 4 8 5;(|/)'s@=p", "(x:8;y:5)");
+  try t.check("p:`x`y`x`y;s:1 4 8 5;(+/)'s@=p", "(x:9;y:9)");
+  try t.check("{x}'`a!1 2 3", "(a:1 2 3)"); // scalar-key dict: one call, whole value
+  try t.check("{x}'()!()", "()!()");
+  try t.check("{x}'([]a:1 2 3;b:4 5 6)", "((a:1;b:4);(a:2;b:5);(a:3;b:6))");
+  try t.check("#'([]a:1 2 3;b:4 5 6)", "2 2 2"); // 3 rows of 2 fields
 }
 
 // `#'=` compiles to the freq verb, so every type group accepts must have a freq
@@ -1348,20 +1348,20 @@ test "dense and sparse key paths agree" {
 // x@d maps the index through the dict's VALUES, keys unchanged.
 test "pick through dict" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("1 2 3 4@`x`y!(0 2;1)", "[x:1 3;y:2]");
-  try t.check("1 2 3 4 `x`y!(0 2;1)", "[x:1 3;y:2]"); // juxtaposition, same thing
+  try t.check("1 2 3 4@`x`y!(0 2;1)", "(x:1 3;y:2)");
+  try t.check("1 2 3 4 `x`y!(0 2;1)", "(x:1 3;y:2)"); // juxtaposition, same thing
   try t.check("\"quicksort\"@=\"quicksort\"<\"k\"", "01b!(\"quksort\";\"ic\")");
-  try t.check("`a`b`c@`x`y!(2;0 1)", "[x:`c;y:`a`b]");
+  try t.check("`a`b`c@`x`y!(2;0 1)", "(x:`c;y:`a`b)");
   try t.check("1 2 3@`x!,7", "!length");
 }
 
 test "reverse dict" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("|`a`b`c!1 2 3", "[c:3;b:2;a:1]");
+  try t.check("|`a`b`c!1 2 3", "(c:3;b:2;a:1)");
   try t.check("|=\"missisippi\"", "\"spmi\"!(2 3 5;7 8;,0;1 4 6 9)");
-  try t.check("|()!()", "[]");
-  try t.check("|`a!3", "[a:3]"); //                single entry — identity
-  try t.check("|[[k:`c`a`b]v:3 1 2]", "[[k:`b`a`c]v:2 1 3]"); // keyed table: rows
+  try t.check("|()!()", "()!()");
+  try t.check("|`a!3", "(a:3)"); //                single entry — identity
+  try t.check("|([k:`c`a`b]v:3 1 2)", "([k:`b`a`c]v:2 1 3)"); // keyed table: rows
 }
 
 // The three together are what the classic k quicksort needs: partition by a
@@ -1381,32 +1381,32 @@ test "ascend/descend dict" {
   var t = try Tester.init(); defer t.deinit();
   try t.check("<=\"mississippi\"", "\"misp\"!(,0;1 4 7 10;2 3 5 6;8 9)");
   try t.check(">=\"mississippi\"", "\"psim\"!(8 9;2 3 5 6;1 4 7 10;,0)");
-  try t.check("<`a`b`c!3 1 2", "[b:1;c:2;a:3]");
-  try t.check(">`a`b`c!3 1 2", "[a:3;c:2;b:1]");
-  try t.check("<`a`b!(2 3;1 5)", "[b:1 5;a:2 3]");
-  try t.check("<`a`b`c!\"cab\"", "[b:\"a\";c:\"b\";a:\"c\"]");
-  try t.check("<()!()", "[]");
+  try t.check("<`a`b`c!3 1 2", "(b:1;c:2;a:3)");
+  try t.check(">`a`b`c!3 1 2", "(a:3;c:2;b:1)");
+  try t.check("<`a`b!(2 3;1 5)", "(b:1 5;a:2 3)");
+  try t.check("<`a`b`c!\"cab\"", "(b:\"a\";c:\"b\";a:\"c\")");
+  try t.check("<()!()", "()!()");
   // A scalar-key dict stores its lone value unwrapped — sorting is identity.
-  try t.check("<(,`a)!,3", "[a:,3]");
+  try t.check("<(,`a)!,3", "(a:,3)");
 }
 
 // A table grades to the row indices that order it, so `t@<t` sorts it. Rows
 // compare column by column, left to right.
 test "ascend/descend table" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("<[[]a:3 1 2;b:`x`y`z]", "1 2 0");
-  try t.check(">[[]a:3 1 2;b:`x`y`z]", "0 2 1");
-  try t.check("tb:[[]a:3 1 2;b:`x`y`z]; tb@<tb", "[[]a:1 2 3;b:`y`z`x]");
-  try t.check("tb:[[]a:3 1 2;b:`x`y`z]; tb@>tb", "[[]a:3 2 1;b:`x`z`y]");
-  try t.check("<[[]a:3 1 2]", "1 2 0");
+  try t.check("<([]a:3 1 2;b:`x`y`z)", "1 2 0");
+  try t.check(">([]a:3 1 2;b:`x`y`z)", "0 2 1");
+  try t.check("tb:([]a:3 1 2;b:`x`y`z); tb@<tb", "([]a:1 2 3;b:`y`z`x)");
+  try t.check("tb:([]a:3 1 2;b:`x`y`z); tb@>tb", "([]a:3 2 1;b:`x`z`y)");
+  try t.check("<([]a:3 1 2)", "1 2 0");
   // Ties on the first column break on the next one; equal rows keep their order.
-  try t.check("<[[]a:1 1 2;b:`z`y`x]", "1 0 2");
-  try t.check(">[[]a:1 1 2;b:`z`y`x]", "2 0 1");
-  try t.check("<[[]a:!0;b:!0]", "!0");
+  try t.check("<([]a:1 1 2;b:`z`y`x)", "1 0 2");
+  try t.check(">([]a:1 1 2;b:`z`y`x)", "2 0 1");
+  try t.check("<([]a:!0;b:!0)", "!0");
   // A keyed table is an `m`, so it follows the dict rule: reordered by its value
   // rows, with the key rows following along.
-  try t.check("<[[k:`c`a`b]v:3 1 2]", "[[k:`a`b`c]v:1 2 3]");
-  try t.check(">[[k:`c`a`b]v:3 1 2]", "[[k:`c`b`a]v:3 2 1]");
+  try t.check("<([k:`c`a`b]v:3 1 2)", "([k:`a`b`c]v:1 2 3)");
+  try t.check(">([k:`c`a`b]v:3 1 2)", "([k:`c`b`a]v:3 2 1)");
 }
 
 // Shape (monadic %; the dyad stays divide). Ragged lists stop at the first
@@ -1622,11 +1622,17 @@ test "adverb binding does not depend on spacing" {
 test "a malformed dict entry is refused, not silently desynced" {
   var t = try Tester.init();
   defer t.deinit();
-  // `[3;4]` has no `key:` so it is not a dict. It used to yield an EMPTY dict plus a
-  // stray `4` statement, and inside `$[…]` it ate the `]` and absorbed the following
-  // statement — trailing code vanished with exit 0.
-  try testing.expectError(error.UnexpectedToken, t.vm.parser.?.parse("[3;4]"));
-  try testing.expectError(error.UnexpectedToken, t.vm.parser.?.parse("$[1;2;[3;4]]"));
+  // `(a:1;4)` commits to a dict on its first item and then meets an entry with no
+  // `key:`. A malformed entry used to yield an EMPTY dict plus a stray statement,
+  // and inside `$[…]` it ate the `]` and absorbed the following statement —
+  // trailing code vanished with exit 0.
+  try testing.expectError(error.UnexpectedToken, t.vm.parser.?.parse("(a:1;4)"));
+  try testing.expectError(error.UnexpectedToken, t.vm.parser.?.parse("$[1;2;(a:1;4)]"));
+  // The mirror image: a list that grows an assignment. Both mixed shapes are
+  // rejected rather than quietly meaning something other than a dict.
+  try testing.expectError(error.AssignInParens, t.vm.parser.?.parse("(1;a:2)"));
+  // `[3;4]` is no longer a broken dict — it is a progn, and yields its last value.
+  try t.check("[3;4]", "4");
   // An unmatched closer mid-source used to truncate the REST OF THE FILE silently
   // (exit 0) — this is the demo/earth.k "deeply-nested inline layout halts" report.
   try testing.expectError(error.UnexpectedToken,
@@ -1634,23 +1640,23 @@ test "a malformed dict entry is refused, not silently desynced" {
   // But HALF-TYPED source must still parse — lib/syntax.k re-parses on every
   // keystroke to highlight, so a missing closer at EOF is tolerated, not an error.
   _ = try t.vm.parser.?.parse("f:{[a;");
-  _ = try t.vm.parser.?.parse("[a:1;b");
+  _ = try t.vm.parser.?.parse("(a:1;b");
   _ = try t.vm.parser.?.parse("f[1;2");
   // Valid dict/table forms are unaffected.
-  try t.check("[x:1;y:2]", "[x:1;y:2]");
-  try t.check("a:[]; #a", "0");
-  try t.check("a:[[]x:1 2;y:3 4]; #a", "2");
+  try t.check("(x:1;y:2)", "(x:1;y:2)");
+  try t.check("a:()!(); #a", "0");
+  try t.check("a:([]x:1 2;y:3 4); #a", "2");
 }
 
 test "parse errors carry a source position" {
   var t = try Tester.init();
   defer t.deinit();
   const p = t.vm.parser.?;
-  // line 3, at the `;` that should have been the `:` of a dict entry
-  try testing.expectError(error.UnexpectedToken, p.parse("a:1\nb:2\n$[1;2;[3;4]]\n"));
-  const pos = @import("cmd/repl.zig").SrcPos.of("a:1\nb:2\n$[1;2;[3;4]]\n", p.err_pos);
+  // line 3, at the `)` that should have been the `:` of a dict entry
+  try testing.expectError(error.UnexpectedToken, p.parse("a:1\nb:2\n$[1;2;(a:1;4)]\n"));
+  const pos = @import("cmd/repl.zig").SrcPos.of("a:1\nb:2\n$[1;2;(a:1;4)]\n", p.err_pos);
   try testing.expectEqual(@as(u32, 3), pos.line);
-  try testing.expectEqual(@as(u32, 9), pos.col);   // the `;` where a `:` was due
+  try testing.expectEqual(@as(u32, 13), pos.col);  // the `)` where a `:` was due
 }
 
 test "an empty result keeps its type, and an error is not one element" {

@@ -46,13 +46,20 @@ pub const Lambda = struct { a: ?Args, b: ?Seq, start: u32, end: u32 };
 pub const Cond = struct { stmts: []*Node };
 pub const Dict = struct { items: ?Items };
 pub const UTable = struct { keys: ?Items, items: ?Items };
+// `[a;b;c]` — a statement block ("progn"): every statement runs, the last one's
+// value is the block's value. This is where assignments live now that `(…)` is
+// reserved for list/dict/table literals.
+pub const Progn = struct { seq: ?Seq };
+// `:x` in statement position — return `x` from the enclosing lambda. At top
+// level (no enclosing lambda) it degrades to plain identity.
+pub const Ret = struct { clause: ?*Node };
 
 const NodeType = enum {
   terse, verb, stmt_clause, stmt_adjunct, right, bind,
   transit, affix, apposit, phrase, @"defer", pending,
   intrans, prefix, compose, noun, phrase_verb, apply,
   group, list, lambda, dict, table, utable, literal, term,
-  op, io, blank, cond,
+  op, io, blank, cond, progn, ret,
   command, monad, adverb_val,
 };
 
@@ -88,6 +95,8 @@ pub const Node = union(NodeType) {
   io: Io,
   blank: void,
   cond: Cond,
+  progn: Progn,
+  ret: Ret,
   command: Command,
   monad: VerbMonad,
   adverb_val: Adverb,
@@ -165,6 +174,32 @@ pub const Node = union(NodeType) {
           for (seq, 0..) |stmt, i| {
             if (i > 0) try writer.writeAll("; ");
             try stmt.format(writer);
+          }
+        }
+        try writer.writeAll(")");
+      },
+      .progn => |p| {
+        try writer.writeAll("[");
+        if (p.seq) |seq| {
+          for (seq, 0..) |stmt, i| {
+            if (i > 0) try writer.writeAll("; ");
+            try stmt.format(writer);
+          }
+        }
+        try writer.writeAll("]");
+      },
+      .ret => |r| {
+        try writer.writeAll(":");
+        if (r.clause) |c| try c.format(writer);
+      },
+      .dict => |d| {
+        try writer.writeAll("(");
+        if (d.items) |items| {
+          for (items, 0..) |it, i| {
+            if (i > 0) try writer.writeAll(";");
+            try writer.writeAll(it.k);
+            try writer.writeAll(":");
+            try it.v.format(writer);
           }
         }
         try writer.writeAll(")");

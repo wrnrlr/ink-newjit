@@ -355,25 +355,26 @@ pub const TerseFormatter = struct {
     const vals = d.bv();
     const n = keys.len();
     // A keyed table (utable) is an `m` dict whose keys AND values are tables (M):
-    // print it in the k9 `[[keycols]valcols]` literal form.
+    // print it in the `([keycols]valcols)` literal form.
     if (keys.tag() == .M and vals.tag() == .M) {
-      try w.writeAll("[[");
+      try w.writeAll("([");
       try self.formatTableCols(keys.M, w);
       try w.writeAll("]");
       try self.formatTableCols(vals.M, w);
-      try w.writeAll("]");
+      try w.writeAll(")");
       return;
     }
-    // Empty dict prints as [] (its literal form); otherwise only symbol keys
-    // can use the bracket syntax.
-    const can_use_syntax = (n == 0) or (keys.tag() == .S) or (keys.tag() == .s) or (keys.tag() == .L and self.allSymbols(keys.L.slice()));
+    // There is no empty-dict literal, so an empty dict round-trips through its
+    // constructor. Otherwise only symbol keys can use the `(k:v;…)` syntax.
+    if (n == 0) { try w.writeAll("()!()"); return; }
+    const can_use_syntax = (keys.tag() == .S) or (keys.tag() == .s) or (keys.tag() == .L and self.allSymbols(keys.L.slice()));
     if (!can_use_syntax) {
       try self.formatValue(keys, w);
       try w.writeAll("!");
       try self.formatValue(vals, w);
       return;
     }
-    try w.writeAll("[");
+    try w.writeAll("(");
     for (0..n) |i| {
       if (i > 0) try w.writeAll(";");
       try self.formatDictKey(keys.at(i), w);
@@ -382,10 +383,10 @@ pub const TerseFormatter = struct {
       defer v.deinit(self.alloc);
       try self.formatValue(v, w);
     }
-    try w.writeAll("]");
+    try w.writeAll(")");
   }
 
-  // The `col:vals;col:vals` body shared by the table `[[]…]` and utable `[[…]…]` forms.
+  // The `col:vals;col:vals` body shared by the table `([]…)` and utable `([…]…)` forms.
   fn formatTableCols(self: *Self, d: Dict, w: anytype) anyerror!void {
     const keys = d.av();
     const vals = d.bv();
@@ -401,9 +402,9 @@ pub const TerseFormatter = struct {
   }
 
   fn formatTable(self: *Self, d: Dict, w: anytype) anyerror!void {
-    try w.writeAll("[[]");
+    try w.writeAll("([]");
     try self.formatTableCols(d, w);
-    try w.writeAll("]");
+    try w.writeAll(")");
   }
 
   // Top-level entry. In `pretty` mode dicts/tables/keyed-tables get the
