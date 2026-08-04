@@ -43,7 +43,7 @@ fn eachDict(vm: *VM, base: V, x: V, f: util.ApplyFn) V {
 fn eachRows(vm: *VM, base: V, x: V, f: util.ApplyFn) V {
   const n = x.len();
   const res = N(V).init(vm.alloc, n) catch return V{ .err = .memory };
-  @memset(res.slice(), .blank);
+  @memset(res.slice(), .nil);
   for (res.slice(), 0..) |*slot, i| {
     const row = pick.pickTableRowFn(vm, x, V{ .i = @intCast(i) });
     if (row.tag() == .err) {

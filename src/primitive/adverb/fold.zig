@@ -36,7 +36,7 @@ pub fn fold(vm: *VM, base: V, init: ?V, x: V, f: util.ApplyFn) V {
   const n = x.len();
 
   var accum = if (init) |v| v.ref() else blk: {
-    if (n == 0) return .blank;
+    if (n == 0) return .nil;
     break :blk x.at(0);
   };
 

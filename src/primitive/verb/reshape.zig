@@ -82,7 +82,7 @@ fn reshapeVec(comptime k: K) VM.Dyad {
       for (shape[1..]) |d| inner *= @intCast(d);
       const n: usize = if (shape[0] == V.@"0N") flat.len / inner else @intCast(shape[0]);
       const rows = N(V).init(alloc, n) catch return V{ .err = .memory };
-      @memset(rows.slice(), .blank);
+      @memset(rows.slice(), .nil);
       for (0..n) |i| rows.slice()[i] = fromFlat(alloc, shape[1..], flat[i * inner ..]);
       return .{ .L = rows };
     }
@@ -121,7 +121,7 @@ fn reshapeListN(alloc: Alloc, shape: []const i32, y: V) V {
     (V{ .L = flat }).deinit(alloc);
     return V{ .err = .memory };
   };
-  @memset(rows.slice(), .blank);
+  @memset(rows.slice(), .nil);
 
   for (0..nrows) |i| {
     const offset = i * inner_total;

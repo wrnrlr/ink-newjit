@@ -1,7 +1,10 @@
 const std = @import("std");
 
+// Note: raw value 0 is deliberately unused. `blank` used to live there; null is
+// now the identity verb `::` (a plain `.o`), so there is no null *type* at all.
+// The remaining raw values are unchanged so the VEC_BIT layout below still holds.
 pub const K = enum(u8) {
-  blank = 0, err = 1,
+  err = 1,
   b = 2, i = 3, f = 4, n = 5, s = 6, c = 7,
   o = 8, p = 9,
   L = 10, m = 11, M = 12, x = 13,
@@ -13,7 +16,7 @@ pub const K = enum(u8) {
   D = 14 | VEC_BIT, H = 15 | VEC_BIT,
 
   pub const VEC_BIT: u8       = 16;   // bit 4
-  pub const COUNT: usize      = @typeInfo(K).@"enum".fields.len; // 24
+  pub const COUNT: usize      = @typeInfo(K).@"enum".fields.len; // 23
 
   // ── Single source of truth ──────────────────────────────────────────────────
   // Every K→element-type / atom↔vector mapping derives from this one table, so
@@ -35,7 +38,7 @@ pub const K = enum(u8) {
   // Order must not change: it is the on-disk tag encoding (binary.zig) and the
   // key space for the dispatch tables (verbs.zig).
   pub const serial_order = [_]K{
-    .blank, .err, .b, .i, .f, .n, .s, .c, .o, .p, .L, .m, .M, .x,
+    .err, .b, .i, .f, .n, .s, .c, .o, .p, .L, .m, .M, .x,
     .B, .I, .F, .N, .S, .C, .d, .h, .D, .H,
   };
   const code_table: [32]u8 = blk: {
@@ -55,7 +58,6 @@ pub const K = enum(u8) {
     return if (c < serial_order.len) serial_order[c] else null;
   }
   pub fn backing(comptime k: K) type {
-    if (k == .blank) return void;
     inline for (backed) |e| if (k == e.atom or k == e.vec) return e.T;
     @compileError("no backing type for " ++ @tagName(k));
   }

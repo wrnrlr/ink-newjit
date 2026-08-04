@@ -299,7 +299,7 @@ pub fn amend(vm: *VM, args: []V) V {
     .C => if (atom_idx) Amend3.chars.single(vm, a.C, idx.i, f) else Amend3.chars.multiple(vm, a.C, idx.I, f),
     .B => if (atom_idx) Amend3.bools.single(vm, a.B, idx.i, f) else Amend3.bools.multiple(vm, a.B, idx.I, f),
     .L => if (atom_idx) Amend3.list.single(vm, a.L, idx.i, f) else Amend3.list.multiple(vm, a.L, idx.I, f),
-    .m, .M => return amendMap(vm, a, idx, f, .blank),
+    .m, .M => return amendMap(vm, a, idx, f, .nil),
     else => { a.deinit(vm.alloc); return .{ .err = .@"type" }; },
   } else if (args.len == 4) blk: {
     const b = args[3];
@@ -328,8 +328,8 @@ pub fn dmend(vm: *VM, args: []V) V {
   if (args.len < 2) return .{ .err = .rank };
   var target = args[0].ref();
   const path = args[1];
-  const func = if (args.len > 2) args[2] else V{ .blank = {} };
-  const val  = if (args.len > 3) args[3] else V{ .blank = {} };
+  const func = if (args.len > 2) args[2] else V.nil;
+  const val  = if (args.len > 3) args[3] else V.nil;
   drill(vm, &target, path, 0, func, val) catch |e| {
     target.deinit(vm.alloc);
     return switch (e) {
@@ -344,10 +344,10 @@ pub fn dmend(vm: *VM, args: []V) V {
 // Recurses along `path`, cow-ing each level, then applies func at the leaf.
 // Caller owns *target and must deinit it on error.
 fn drill(vm: *VM, target: *V, path: V, path_idx: usize, func: V, val: V) !void {
-  const path_len = if (path.tag() == .blank) 0 else path.len();
+  const path_len = if (path.isNil()) 0 else path.len();
 
   if (path_idx == path_len) {
-    if (func.tag() == .blank) return;
+    if (func.isNil()) return;
 
     if (func.tag() == .o and func.o.isBuiltinFn() and opmod.isOp2Idx(func.o.idx) and func.o.getOp2() == .@":") {
       target.deinit(vm.alloc);
@@ -357,7 +357,7 @@ fn drill(vm: *VM, target: *V, path: V, path_idx: usize, func: V, val: V) !void {
 
     const old = target.*;
     var fc = Call{ .vm = vm };
-    const f_args = if (val.tag() == .blank) &[_]V{old} else &[_]V{old, val};
+    const f_args = if (val.isNil()) &[_]V{old} else &[_]V{old, val};
     target.* = fc.apply(func, f_args, false);
     old.deinit(vm.alloc);
     return;
@@ -377,7 +377,7 @@ fn drill(vm: *VM, target: *V, path: V, path_idx: usize, func: V, val: V) !void {
       defer k.deinit(vm.alloc);
       if (k.eq(key)) { found_idx = i; break; }
     }
-    break :blk if (found_idx) |i| d.bv().at(i) else V{ .blank = {} };
+    break :blk if (found_idx) |i| d.bv().at(i) else V.nil;
   } else blk: {
     const i = try asIndex(key, target.len());
     break :blk target.at(i);
@@ -419,7 +419,7 @@ fn applyAt(vm: *VM, target: *V, key: V, func: V, val: V) !void {
       defer k.deinit(vm.alloc);
       if (k.eq(key)) { found_idx = i; break; }
     }
-    break :blk if (found_idx) |i| d.bv().at(i) else .blank;
+    break :blk if (found_idx) |i| d.bv().at(i) else V.nil;
   } else blk: {
     const i = try asIndex(key, target.len());
     break :blk target.at(i);
@@ -427,7 +427,7 @@ fn applyAt(vm: *VM, target: *V, key: V, func: V, val: V) !void {
   defer current.deinit(vm.alloc);
 
   var fc = Call{ .vm = vm };
-  const f_args = if (val.tag() == .blank) &[_]V{current} else &[_]V{current, val};
+  const f_args = if (val.isNil()) &[_]V{current} else &[_]V{current, val};
   const result = fc.apply(func, f_args, false);
   val.deinit(vm.alloc);
   try setAt(vm, target, key, result);

@@ -34,9 +34,9 @@ pub fn apply(vm: *VM, sym_idx: u32, args: []const V) !V {
   const name = vm.getSymbol(sym_idx);
   if (eql(u8, name, "t")) return .{ .i = @truncate(microsNow()) };
   if (eql(u8, name, "argv")) {
-    const has_arg = args.len == 1 and args[0] != .blank;
+    const has_arg = args.len == 1 and !args[0].isNil();
     if (!has_arg) return vm.argv.ref();
-    if (vm.argv == .blank) return V{ .err = .domain };
+    if (vm.argv.isNil()) return V{ .err = .domain };
     const items = vm.argv.L.slice();
     const arg = args[0];
     if (arg.tag() != .i) return V{ .err = .@"type" };
@@ -47,21 +47,21 @@ pub fn apply(vm: *VM, sym_idx: u32, args: []const V) !V {
   if (eql(u8, name, "env")) return getEnv(vm);
   if (eql(u8, name, "dir")) return listDir(vm, args);
   if (eql(u8, name, "prng")) {
-    const has_arg = args.len == 1 and args[0] != .blank;
+    const has_arg = args.len == 1 and !args[0].isNil();
     if (!has_arg) return getPrngState(vm);
     return setPrngState(vm, args[0]);
   }
   if (eql(u8, name, "x")) {
-    if (args.len == 1 and args[0] != .blank) return forkExec(vm, args[0], null);
-    if (args.len == 2 and args[0] != .blank) return forkExec(vm, args[0], args[1]);
+    if (args.len == 1 and !args[0].isNil()) return forkExec(vm, args[0], null);
+    if (args.len == 2 and !args[0].isNil()) return forkExec(vm, args[0], args[1]);
     return V{ .err = .rank };
   }
   // ── IPC / event loop ──────────────────────────────────────────────────────
   // Verbs move data (`> < 2:`); these symbols configure the runtime around it.
   // See doc/reference.md "IPC".
   if (eql(u8, name, "sleep")) return sleepMs(args);
-  if (eql(u8, name, "poll"))  { serve.pollOnce(vm, .blank); return .blank; }
-  if (eql(u8, name, "serve")) { serve.runLoop(vm); return .blank; }
+  if (eql(u8, name, "poll"))  { serve.pollOnce(vm, .nil); return .nil; }
+  if (eql(u8, name, "serve")) { serve.runLoop(vm); return .nil; }
   if (eql(u8, name, "conns")) return listConns(vm);
   if (eql(u8, name, "peer"))  return peerName(vm, args);
   if (eql(u8, name, "on"))    return setHandler(vm, args);
@@ -72,7 +72,7 @@ pub fn apply(vm: *VM, sym_idx: u32, args: []const V) !V {
   // below). This is what lets the lib/prelude.k projections (`` sin:{`sin x} ``,
   // `` first:{`first x} ``, …) work. args are borrowed (as in call.zig applyCallable's
   // dispatch1 sites), so pass through without ref.
-  if (args.len == 1 and args[0] != .blank) {
+  if (args.len == 1 and !args[0].isNil()) {
     if (Op1.fromString(name)) |op1| return dispatch1(vm, op1, args[0]);
   }
   // Inverse-trig helpers exposed as `sym@x rather than as new verb glyphs.
@@ -94,24 +94,24 @@ pub fn apply(vm: *VM, sym_idx: u32, args: []const V) !V {
 /// (`` `sleep[0.5] ``); a negative or null delay is a no-op rather than an error,
 /// so a computed backoff that goes negative just doesn't sleep.
 fn sleepMs(args: []const V) V {
-  if (args.len != 1 or args[0] == .blank) return V{ .err = .rank };
+  if (args.len != 1 or args[0].isNil()) return V{ .err = .rank };
   const ms: f64 = switch (args[0]) {
-    .i => |x| if (x == V.@"0N") return .blank else @floatFromInt(x),
+    .i => |x| if (x == V.@"0N") return .nil else @floatFromInt(x),
     .n => |x| @floatFromInt(x),
     .b => |x| if (x) 1.0 else 0.0,
-    .f => |x| if (std.math.isNan(x)) return .blank else @floatCast(x),
-    .d => |x| if (std.math.isNan(x)) return .blank else x,
-    .h => |x| if (std.math.isNan(x)) return .blank else @floatCast(x),
+    .f => |x| if (std.math.isNan(x)) return .nil else @floatCast(x),
+    .d => |x| if (std.math.isNan(x)) return .nil else x,
+    .h => |x| if (std.math.isNan(x)) return .nil else @floatCast(x),
     else => return V{ .err = .@"type" },
   };
-  if (ms <= 0) return .blank;
+  if (ms <= 0) return .nil;
   const ns_total = ms * std.time.ns_per_ms;
   // Cap at ~1 year so a runaway computation can't wedge the process forever.
   const capped = @min(ns_total, @as(f64, 365 * 24 * 3600) * std.time.ns_per_s);
   const secs: i64 = @intFromFloat(@divFloor(capped, std.time.ns_per_s));
   const nsec: i64 = @intFromFloat(@mod(capped, std.time.ns_per_s));
   sleepFor(secs, nsec);
-  return .blank;
+  return .nil;
 }
 
 fn sleepFor(secs: i64, nsec: i64) void {
@@ -177,20 +177,20 @@ fn setHandler(vm: *VM, args: []const V) V {
   if (args.len == 0 or args[0].tag() != .i) return V{ .err = .@"type" };
   const id: u32 = @intCast(args[0].i);
   if (!Conns.isConn(id) or vm.conns.get(id) == null) return V{ .err = .io };
-  if (args.len == 1 or args[1] == .blank) {
+  if (args.len == 1 or args[1].isNil()) {
     if (args.len == 1) return vm.conns.getCallback(id).ref();
     vm.conns.clearCallback(id);
-    return .blank;
+    return .nil;
   }
   if (args.len != 2) return V{ .err = .rank };
   vm.conns.setCallback(id, args[1].ref()) catch return V{ .err = .memory };
-  return .blank;
+  return .nil;
 }
 
 /// `` `timer[ms] `` — call the global `z.ts` every `ms` milliseconds while the
 /// event loop runs.  `` `timer[0] `` stops it, `` `timer[] `` reads the interval.
 fn timerCtl(vm: *VM, args: []const V) V {
-  const has_arg = args.len == 1 and args[0] != .blank;
+  const has_arg = args.len == 1 and !args[0].isNil();
   if (!has_arg) return .{ .i = @intCast(vm.timer_ms) };
   const ms: i64 = switch (args[0]) {
     .i => |x| if (x == V.@"0N") 0 else x,
@@ -202,7 +202,7 @@ fn timerCtl(vm: *VM, args: []const V) V {
   if (ms < 0) return V{ .err = .domain };
   vm.timer_ms = @intCast(@min(ms, std.math.maxInt(u32)));
   vm.timer_next = microsNow() + @as(i64, vm.timer_ms) * 1000;
-  return .blank;
+  return .nil;
 }
 
 fn fAsin(x: f32) f32 { return std.math.asin(x); }
@@ -222,7 +222,7 @@ fn toF(v: V) ?f32 {
 }
 
 fn mapUnary(vm: *VM, args: []const V, comptime fun: fn (f32) f32) V {
-  if (args.len != 1 or args[0] == .blank) return V{ .err = .rank };
+  if (args.len != 1 or args[0].isNil()) return V{ .err = .rank };
   return mapUnaryV(vm, args[0], fun);
 }
 
@@ -270,7 +270,7 @@ fn elemF(v: V, i: usize) ?f32 {
 // atan2 over a 2-element list (y;x). Both may be scalars, both equal-length
 // vectors, or one scalar + one vector (broadcast). Returns f32 / F vector.
 fn atan2Apply(vm: *VM, args: []const V) V {
-  if (args.len != 1 or args[0] == .blank) return V{ .err = .rank };
+  if (args.len != 1 or args[0].isNil()) return V{ .err = .rank };
   const pair = args[0];
   if (pair.len() != 2) return V{ .err = .length };
   const yv = pair.at(0);
@@ -313,7 +313,7 @@ fn setPrngState(vm: *VM, v: V) V {
   for (0..4) |i| {
     vm.prng.s[i] = @as(u64, @as(u32, @bitCast(src[i*2]))) | (@as(u64, @as(u32, @bitCast(src[i*2+1]))) << 32);
   }
-  return .blank;
+  return .nil;
 }
 
 // `dir@"path" — recursively list file paths under "path" (relative to CWD),
@@ -348,7 +348,7 @@ fn walkInto(vm: *VM, dir_path: []const u8, out: *std.ArrayList(V), depth: u8) vo
 }
 
 fn listDir(vm: *VM, args: []const V) V {
-  if (args.len != 1 or args[0] == .blank) return V{ .err = .rank };
+  if (args.len != 1 or args[0].isNil()) return V{ .err = .rank };
   const path: []const u8 = switch (args[0]) {
     .C => |c| c.slice(),
     .s => |s| vm.getSymbol(s),
@@ -383,7 +383,7 @@ fn getEnvPosix(vm: *VM) !V {
 
   const vals_n = try N(V).init(vm.alloc, n);
   errdefer (V{ .L = vals_n }).deinit(vm.alloc);
-  @memset(vals_n.slice(), .blank);
+  @memset(vals_n.slice(), .nil);
 
   var i: usize = 0;
   var j: usize = 0;

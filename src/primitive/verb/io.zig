@@ -80,11 +80,11 @@ pub const ReadLines = struct {
 fn writeLinesConsole(vm: *VM, _: V, y: V) V {
   if (y.tag() == .C) {
     vm.print("{s}\n", .{y.C.slice()});
-    return .blank;
+    return .nil;
   }
   if (y.tag() == .s) {
     vm.print("{s}\n", .{vm.getSymbol(y.s)});
-    return .blank;
+    return .nil;
   }
   if (y.tag() == .L) {
     for (y.L.slice(), 0..) |item, i| {
@@ -93,7 +93,7 @@ fn writeLinesConsole(vm: *VM, _: V, y: V) V {
       else if (item.tag() == .s) vm.print("{s}", .{vm.getSymbol(item.s)});
     }
     vm.print("\n", .{});
-    return .blank;
+    return .nil;
   }
   return V{ .err = .@"type" };
 }
@@ -127,7 +127,7 @@ fn writeLinesById(vm: *VM, x: V, y: V) V {
   }
   out.append(vm.alloc, '\n') catch return V{ .err = .memory };
   writeFile(vm, id, out.items) catch return V{ .err = .io };
-  return .blank;
+  return .nil;
 }
 
 pub const WriteLines = struct {
@@ -168,14 +168,14 @@ fn writeStdRaw(vm: *VM, comptime is_stdout: bool, data: []const u8) V {
   if (is_stdout) if (vm.out) |out| {
     out.writeAll(data) catch return V{ .err = .io };
     out.flush() catch return V{ .err = .io };
-    return .blank;
+    return .nil;
   };
   // Streaming (appending) write — a fresh file.writer() would positional-write
   // from offset 0 each call, so successive writes would clobber each other.
   const io = std.Io.Threaded.global_single_threaded.io();
   const file = if (is_stdout) std.Io.File.stdout() else std.Io.File.stderr();
   file.writeStreamingAll(io, data) catch return V{ .err = .io };
-  return .blank;
+  return .nil;
 }
 
 // ---------------------------------------------------------------------------
@@ -233,7 +233,7 @@ fn writeBytesByHandle(vm: *VM, x: V, y: V) V {
   const bytes = ybytes(y, &one);
   if (Conns.isConn(id)) return writeSocketBytes(vm, id, bytes);
   writeFile(vm, id, bytes) catch return V{ .err = .io };
-  return .blank;
+  return .nil;
 }
 
 pub const WriteBytes = struct {
@@ -360,7 +360,7 @@ pub fn writeDataFallback(vm: *VM, x: V, y: V) V {
   var w = mock.writer();
   formatter.formatter().fmt(y, &w.interface) catch return V{ .err = .io };
   writeFile(vm, id, mock.getText()) catch return V{ .err = .io };
-  return .blank;
+  return .nil;
 }
 
 // ---------------------------------------------------------------------------
@@ -377,7 +377,7 @@ pub fn writeDataFallback(vm: *VM, x: V, y: V) V {
 fn callGlobal(vm: *VM, name: []const u8, args: []const V) V {
   const idx = vm.names.get(name) orelse return V{ .err = .io };
   const f = vm.globals[idx];
-  if (f.tag() == .blank) return V{ .err = .io };
+  if (f.isNil()) return V{ .err = .io };
   var fc = Call{ .vm = vm };
   return fc.apply(f, args, true);
 }
@@ -507,7 +507,7 @@ pub fn writeConnBinary(vm: *VM, id: u32, y: V) V {
   w.interface.writeAll(&len_buf) catch return V{ .err = .io };
   w.interface.writeAll(data) catch return V{ .err = .io };
   w.interface.flush() catch return V{ .err = .io };
-  return .blank;
+  return .nil;
 }
 
 fn readSocketLine(vm: *VM, id: u32) V {
@@ -564,7 +564,7 @@ fn writeSocketRaw(vm: *VM, id: u32, data: []const u8) V {
   w.interface.writeAll(data) catch return V{ .err = .io };
   w.interface.writeByte('\n') catch return V{ .err = .io };
   w.interface.flush() catch return V{ .err = .io };
-  return .blank;
+  return .nil;
 }
 
 // ---------------------------------------------------------------------------
@@ -612,7 +612,7 @@ pub fn closeHandle(vm: *VM, x: V) V {
   const id: u32 = @intCast(x.i);
   if (Conns.isConn(id)) {
     vm.conns.remove(id);
-    return .blank;
+    return .nil;
   }
   // Not a socket handle — fall back to grade-ascending (degenerate scalar case)
   return sort.gradeAscend(vm, x);

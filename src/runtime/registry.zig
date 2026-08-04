@@ -155,9 +155,9 @@ pub const Conns = struct {
     try self.callbacks.put(id, v);
   }
 
-  /// Returns the callback for `id`, or `.blank` if none is set.
+  /// Returns the callback for `id`, or `.nil` if none is set.
   pub fn getCallback(self: *const Conns, id: u32) V {
-    return self.callbacks.get(id) orelse .blank;
+    return self.callbacks.get(id) orelse .nil;
   }
 
   pub fn clearCallback(self: *Conns, id: u32) void {

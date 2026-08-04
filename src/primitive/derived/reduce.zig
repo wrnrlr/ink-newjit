@@ -1,6 +1,6 @@
 // Shared SIMD horizontal reductions for the fused derived verbs
 // (+/ */ &/ |/). Each routine assumes a non-empty slice; callers handle the
-// empty case (which yields .blank).
+// empty case (which yields .nil).
 //
 // Integer sum/product use wrapping arithmetic, so vectorised reordering is
 // bit-exact with the scalar left fold. min/max are associative+commutative, so
@@ -135,7 +135,7 @@ pub fn typedFold(comptime T: type, comptime op2: Op2) VM.Monad {
   const KK = comptime foldKind(T);
   return &struct { fn f(_: *VM, x: V) V {
     const s = @field(x, @tagName(KK.vec)).slice();
-    if (s.len == 0) return .blank;
+    if (s.len == 0) return .nil;
     const r = switch (op2) {
       .@"+" => sum(T, s),
       .@"*" => product(T, s),
@@ -151,7 +151,7 @@ pub fn typedFold(comptime T: type, comptime op2: Op2) VM.Monad {
 pub fn listFold(comptime op2: Op2) VM.Monad {
   return &struct { fn f(vm: *VM, x: V) V {
     const n = x.len();
-    if (n == 0) return .blank;
+    if (n == 0) return .nil;
     var accum = x.at(0);
     for (1..n) |i| {
       const item = x.at(i);
@@ -173,13 +173,13 @@ fn sumB(_: *VM, x: V) V {
 }
 fn minB(_: *VM, x: V) V {
   const s = x.B.slice();
-  if (s.len == 0) return .blank;
+  if (s.len == 0) return .nil;
   for (s) |v| if (!v) return .{ .b = false };
   return .{ .b = true };
 }
 fn maxB(_: *VM, x: V) V {
   const s = x.B.slice();
-  if (s.len == 0) return .blank;
+  if (s.len == 0) return .nil;
   for (s) |v| if (v) return .{ .b = true };
   return .{ .b = false };
 }

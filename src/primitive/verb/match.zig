@@ -13,7 +13,6 @@ const all_k_types = blk: {
 };
 
 pub fn matchFalse(_: *VM, _: V, _: V) V { return .{ .b = false }; }
-fn matchBlank  (_: *VM, _: V, _: V) V { return .{ .b = true }; }
 fn matchErr    (_: *VM, x: V, y: V) V { return .{ .b = x.err == y.err }; }
 fn matchB      (_: *VM, x: V, y: V) V { return .{ .b = x.b == y.b }; }
 fn matchI      (_: *VM, x: V, y: V) V { return .{ .b = x.i == y.i }; }
@@ -81,7 +80,6 @@ fn matchDict(comptime k: K) VM.Dyad {
 
 fn getMatchHandler(comptime k: K) VM.Dyad {
   return switch (k) {
-    .blank   => &matchBlank,
     .err     => &matchErr,
     .b       => &matchB,
     .i       => &matchI,

@@ -995,8 +995,16 @@ pub const Compiler = struct {
     return try self.emitOpWithArg(if (is_tail) .TailCall else .Call, 1, &inputs);
   }
 
+  /// `::` — the identity verb written as a value, i.e. null. It parses as a
+  /// `.monad` node but behaves as data: `@::` is `@` applied to null, not a
+  /// tacit composition, and `1,::` joins rather than trains.
+  fn isNilMonad(node: *ast.Node) bool {
+    return node.* == .monad and std.mem.eql(u8, node.monad.f, ":");
+  }
+
   // Returns true if the node statically produces a function (verb-like expression).
   fn isVerbLike(node: *ast.Node) bool {
+    if (isNilMonad(node)) return false;
     return switch (node.*) {
       .op, .monad, .adverb_val => true,
       .term => true,

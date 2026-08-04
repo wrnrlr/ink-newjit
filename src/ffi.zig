@@ -123,7 +123,7 @@ fn box(v: V) !*KBox {
 
 fn unbox(b: *KBox, _: Alloc) V {
   const v = b.v;
-  b.v = .blank;
+  b.v = .nil;
   c_alloc.destroy(b);
   return v;
 }
@@ -173,7 +173,7 @@ export fn KF(n: i32) ?*KBox {
 export fn KL(n: i32) ?*KBox {
   if (n < 0) return null;
   const arr = N(V).init(c_alloc, @intCast(n)) catch return null;
-  @memset(arr.slice(), .blank);
+  @memset(arr.slice(), .nil);
   return box(.{ .L = arr }) catch { arr.deinit(c_alloc); return null; };
 }
 export fn KS(n: i32) ?*KBox {
@@ -253,8 +253,8 @@ export fn k_list_set(list_k: ?*KBox, index: i32, val_k: ?*KBox) callconv(.c) i32
   const sl = lb.v.L.slice();
   if (index < 0 or index >= @as(i32, @intCast(sl.len))) return -1;
   sl[@intCast(index)].deinit(c_alloc);
-  sl[@intCast(index)] = if (val_k) |vb| vb.v else .blank;
-  if (val_k) |vb| { vb.v = .blank; c_alloc.destroy(vb); }
+  sl[@intCast(index)] = if (val_k) |vb| vb.v else .nil;
+  if (val_k) |vb| { vb.v = .nil; c_alloc.destroy(vb); }
   return 0;
 }
 export fn ku(x: ?*KBox) void {
@@ -337,7 +337,7 @@ fn makeMap(comptime tag: K, n: i32, keys: [*]const [*:0]const u8, vals: [*]const
     return null;
   };
   for (0..count) |i| {
-    val_arr.slice()[i] = if (vals[i]) |b| b.v.ref() else .blank;
+    val_arr.slice()[i] = if (vals[i]) |b| b.v.ref() else .nil;
   }
 
   const keys_v = V{ .S = sym_arr };
@@ -398,10 +398,10 @@ fn reallocV(v: V, dest: Alloc) V {
     .L => |n| {
       const len = n.ptr.len;
       const new_n = N(V).init(dest, len) catch return .{ .err = .memory };
-      for (new_n.slice()) |*s| s.* = .blank;  // safe baseline for errdefer path
+      for (new_n.slice()) |*s| s.* = .nil;  // safe baseline for errdefer path
       for (n.slice(), 0..) |elem, i| {
         const copy = elem;
-        n.slice()[i] = .blank;    // prevent n.deinit from double-freeing
+        n.slice()[i] = .nil;    // prevent n.deinit from double-freeing
         new_n.slice()[i] = reallocV(copy, dest);
       }
       n.deinit(c_alloc);          // all slots blanked; frees only the Rc shell
@@ -411,8 +411,8 @@ fn reallocV(v: V, dest: Alloc) V {
     inline .m, .M => |d, tag| {
       const keys_v = d.av();
       const vals_v = d.bv();
-      d.avPtr().* = .blank;       // prevent d.deinit from double-freeing
-      d.bvPtr().* = .blank;
+      d.avPtr().* = .nil;       // prevent d.deinit from double-freeing
+      d.bvPtr().* = .nil;
       d.deinit(c_alloc);          // frees only the Rc shell
       const new_keys = reallocV(keys_v, dest);
       const new_vals = reallocV(vals_v, dest);
@@ -427,7 +427,7 @@ fn reallocV(v: V, dest: Alloc) V {
   }
 }
 
-// Box each borrowed arg (no ref(): the .blank defer skips the rc decrement so a
+// Box each borrowed arg (no ref(): the .nil defer skips the rc decrement so a
 // ref() would leak), call the C function of matching arity, then clone the result
 // out of c_alloc into the VM allocator. Shared by every arity (1..8).
 fn ffiCallImpl(data: *anyopaque, args: []const V) V {
@@ -438,7 +438,7 @@ fn ffiCallImpl(data: *anyopaque, args: []const V) V {
   setCurrentVm(d.vm);
   defer current_vm = prev_vm;
   var boxes: [MAX_FFI_ARITY]?*KBox = .{null} ** MAX_FFI_ARITY;
-  defer for (&boxes) |*b| if (b.*) |bb| { bb.v = .blank; c_alloc.destroy(bb); };
+  defer for (&boxes) |*b| if (b.*) |bb| { bb.v = .nil; c_alloc.destroy(bb); };
   for (args, 0..) |a, i| boxes[i] = box(a) catch return .{ .err = .memory };
   const p = d.fn_ptr;
   const b = &boxes;

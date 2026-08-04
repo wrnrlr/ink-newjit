@@ -24,14 +24,14 @@ fn insert(vm: *VM, t: V, d: V) V {
   const t_data = t.M.bv();
   const ncols = t_cols.len();
   const new_data = N(V).init(vm.alloc, ncols) catch return V{ .err = .memory };
-  @memset(new_data.slice(), .blank);
+  @memset(new_data.slice(), .nil);
   for (0..ncols) |ci| {
     const col_name = t_cols.at(ci);
     const col = t_data.at(ci);
     defer col.deinit(vm.alloc);
     const dv = findDictVal(d.m, col_name) orelse {
       // Shape mismatch: free the rows already built (slots [0,ci)) plus the
-      // remaining .blank slots and the N(V) shell, so the partial result
+      // remaining .nil slots and the N(V) shell, so the partial result
       // doesn't leak. (col itself is freed by the defer above.)
       new_data.deinit(vm.alloc);
       return .{ .err = .length };
@@ -74,7 +74,7 @@ pub fn upsert(vm: *VM, u: V, d: V) V {
   // rebuild the value columns (replace at row, or append a new row)
   const nval = val_names.len();
   const new_val_data = N(V).init(alloc, nval) catch return V{ .err = .memory };
-  @memset(new_val_data.slice(), .blank);
+  @memset(new_val_data.slice(), .nil);
   for (0..nval) |ci| {
     const cn = val_names.at(ci);
     defer cn.deinit(alloc);
@@ -295,7 +295,7 @@ fn colGather(alloc: Alloc, kcol: V, kidx: []const i64) V {
     },
     .L => |n| {
       const r = N(V).init(alloc, kidx.len) catch return V{ .err = .memory };
-      for (kidx, 0..) |ix, i| r.slice()[i] = if (ix >= 0) n.slice()[@intCast(ix)].ref() else V.blank;
+      for (kidx, 0..) |ix, i| r.slice()[i] = if (ix >= 0) n.slice()[@intCast(ix)].ref() else V.nil;
       return V{ .L = r };
     },
     else => return V{ .err = .@"type" },

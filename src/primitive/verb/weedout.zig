@@ -45,7 +45,7 @@ fn filterTable(alloc: Alloc, mask: []const bool, t: Dict) V {
   const vals = t.bv();
   const n_cols = keys.len();
   const res_vals_n = N(V).init(alloc, n_cols) catch return V{ .err = .memory };
-  @memset(res_vals_n.slice(), .blank);
+  @memset(res_vals_n.slice(), .nil);
   for (0..n_cols) |i| {
     const col = vals.at(i);
     defer col.deinit(alloc);

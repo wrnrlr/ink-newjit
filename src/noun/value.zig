@@ -2,6 +2,7 @@ const std = @import("std");
 const Alloc = std.mem.Allocator;
 const ArrayFlags = @import("array.zig").ArrayFlags;
 const Fn = @import("operator.zig").Fn;
+const Op1 = @import("operator.zig").Op1;
 const Partial = @import("partial.zig").Partial;
 const K = @import("class.zig").K;
 const N = @import("array.zig").N;
@@ -32,7 +33,7 @@ comptime {
 }
 
 pub const V = union(K) {
-  blank, err: Err,
+  err: Err,
   b: bool, i: i32, f: f32, n: u32, s: u32, c: u8,
   o: Fn, p: *Partial,
   L: N(V), m: Dict, M: Dict, x: *ExtObj,
@@ -41,6 +42,18 @@ pub const V = union(K) {
   D: N(f64), H: N(f16),
 
   pub const @"0N" = std.math.minInt(i32);
+
+  // ── Null ────────────────────────────────────────────────────────────────────
+  // There is no null *type*: k's null is the monadic identity verb `::`, exactly
+  // as in ngn/k. It is an ordinary `.o` value, so `@::` is `` `o ``, `$::` is
+  // "::" and it dispatches through the function slots — nothing special. Only
+  // three places treat it specially: it is falsy (`isTrue`), it marks an elided
+  // argument (`f[;2]`), and the REPL prints nothing for it.
+  pub const nil: V = .{ .o = Fn.monad(.@":") };
+  const nil_bits: u64 = @bitCast(Fn.monad(.@":"));
+  pub inline fn isNil(v: V) bool {
+    return v == .o and @as(u64, @bitCast(v.o)) == nil_bits;
+  }
   pub inline fn wrap(comptime k: K, v: holder(k)) V { return @unionInit(V, @tagName(k), v); }
   pub inline fn unwrap(v: V, comptime k: K) holder(k) { return @field(v, @tagName(k)); }
   pub inline fn tag(v: V) K { return std.meta.activeTag(v); }
@@ -57,7 +70,6 @@ pub const V = union(K) {
   
   fn holder(comptime k: K) type {
     return switch (k) {
-      .blank => void,
       .m, .M => Dict,
       .L => V,
       // Backed scalar/vector kinds derive from class.zig's one table:
@@ -125,7 +137,7 @@ pub const V = union(K) {
     const t = std.meta.activeTag(x);
     if (t != std.meta.activeTag(y)) return false;
     return switch (x) {
-      .blank => true, .err => x.err == y.err,
+      .err => x.err == y.err,
       .b => x.b == y.b, .i => x.i == y.i, .f => x.f == y.f,
       .d => x.d == y.d, .h => x.h == y.h,
       .n => x.n == y.n, .s => x.s == y.s, .c => x.c == y.c,
@@ -160,16 +172,15 @@ pub const V = union(K) {
 
   pub fn arity(v: V) u8 {
     return switch (v) {
-      .o => |r| r.getRealArity(),
+      // `::` is data, not a callable — an elided argument has arity 0.
+      .o => |r| if (v.isNil()) 0 else r.getRealArity(),
       .p => |p| p.remaining(),
-      .blank => 0,
       else => 1,
     };
   }
 
   pub fn isNull(v: V) bool {
     return switch (v) {
-      .blank => false,
       inline .b, .i, .f, .n, .s, .c, .d, .h => |a, kt| kt.isNullFn()(a),
       inline .B, .I, .F, .N, .S, .C, .L, .D, .H => |n| n.ptr.len == 0,
       inline .m, .M => |n| n.ptr.len == 0,
@@ -186,7 +197,8 @@ pub const V = union(K) {
       .n => |a| a != 0 and a != std.math.maxInt(u32),
       inline .B, .I, .F, .N, .S, .C, .L, .D, .H => |n| n.ptr.len > 0,
       inline .m, .M => |n| n.ptr.len > 0,
-      .o, .p => true,
+      .o => !v.isNil(),   // `::` is falsy; every other verb/lambda is truthy
+      .p => true,
       else => false,
     };
   }

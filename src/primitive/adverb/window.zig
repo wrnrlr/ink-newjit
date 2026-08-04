@@ -15,7 +15,7 @@ pub fn window(vm: *VM, xn: V, x: V) V {
   if (xlen < n) return vm.aList() catch return .{ .err = .memory };
   const count = xlen - n + 1;
   var res = N(V).init(vm.alloc, count) catch return .{ .err = .memory };
-  @memset(res.slice(), .blank);
+  @memset(res.slice(), .nil);
   for (0..count) |i| {
     res.slice()[i] = makeWindow(vm.alloc, x, i, n) catch return .{ .err = .memory };
   }

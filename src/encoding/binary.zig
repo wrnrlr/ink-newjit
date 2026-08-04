@@ -1,15 +1,14 @@
 // Binary serialization format for Terse values.
 //
 // Format:
-//   [VERSION: 1 byte = 0x03]
+//   [VERSION: 1 byte = 0x06]
 //   [value: recursive]
 //
 // Each value:
-//   [type tag: 1 byte = K.serCode() compact index 0–19]
+//   [type tag: 1 byte = K.serCode() compact index 0–22]
 //   [payload]
 //
 // Atoms:
-//   blank: (no payload)
 //   err:   length-prefixed UTF-8 (the error's symbol name, re-interned on read)
 //   b:     1 byte (0=false, 1=true)
 //   i:     8 bytes LE i32
@@ -57,7 +56,7 @@ const format = @import("../noun/format.zig");
 const util = @import("../util.zig");
 const Err = value.Err;
 
-const VERSION: u8 = 0x05;
+const VERSION: u8 = 0x06;
 
 // Serialization.  `vm` is needed only to print/compile function values; pass
 // null from contexts that have no VM (the unit tests below).
@@ -84,7 +83,6 @@ fn fnText(alloc: Alloc, vm: *VM, v: V) ![]u8 {
 fn serVal(buf: *std.ArrayList(u8), alloc: Alloc, pool: *const Pool, v: V, vm: ?*VM) anyerror!void {
   try buf.append(alloc, v.tag().serCode());
   switch (v) {
-    .blank => {},
     .err   => |e| try writeStr(buf, alloc, pool.get(@intFromEnum(e))),
     .b     => |b| try buf.append(alloc, if (b) 1 else 0),
     .i     => |i| try writeI32(buf, alloc, i),
@@ -192,7 +190,6 @@ fn desVal(alloc: Alloc, pool: *Pool, bytes: []const u8, pos: *usize, vm: ?*VM) a
   pos.* += 1;
   const k: K = K.fromCode(tag) orelse return error.UnsupportedType;
   return switch (k) {
-    .blank => .blank,
     .err => blk: {
       // Errors serialize by text (the error's symbol name), not pool index, so
       // they survive a round-trip into a fresh pool. Re-intern on read.
@@ -326,7 +323,7 @@ fn desVal(alloc: Alloc, pool: *Pool, bytes: []const u8, pos: *usize, vm: ?*VM) a
       const vec = try N(V).init(alloc, n);
       errdefer vec.deinit(alloc);
       for (vec.slice()) |*item| {
-        item.* = .blank;
+        item.* = .nil;
         item.* = try desVal(alloc, pool, bytes, pos, vm);
       }
       break :blk .{ .L = vec };
@@ -398,15 +395,6 @@ fn roundTrip(alloc: Alloc, pool: *Pool, v: V) !V {
   const bytes = try serialize(alloc, pool, v, null);
   defer bytes.deinit(alloc);
   return deserialize(alloc, pool, bytes.C.slice(), null);
-}
-
-test "binary round-trip: blank" {
-  const alloc = testing.allocator;
-  var pool = Pool.init(alloc);
-  defer pool.deinit();
-  const got = try roundTrip(alloc, &pool, .blank);
-  defer got.deinit(alloc);
-  try testing.expect(got.tag() == .blank);
 }
 
 test "binary round-trip: bool atom" {

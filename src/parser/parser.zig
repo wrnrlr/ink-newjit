@@ -111,7 +111,41 @@ pub const Parser = struct {
     return .keyed;
   }
   fn isVerbStart(self: *Parser) bool { return switch (self.tok.tt) { .op, .keyword, .io => true, else => false }; }
+  // `::` written where a statement or value can start is the identity verb used
+  // as data — k's null (there is no blank type; see noun/value.zig `V.nil`).
+  // AFTER a noun the same two tokens are still the global-assign digram
+  // (`a::1`), which parseAfterNoun/parseBind reach before this ever runs.
+  fn isNilLit(self: *Parser) bool {
+    if (!self.is(.@":")) return false;
+    var lx = self.lex;   // copy: pure lookahead, consumes nothing
+    return lx.next().tt == .@":";
+  }
+  // `::` with nothing after it. A compound global assign needs a right-hand side,
+  // so `a~::` can only be a null comparison while `a,::b` is still an assign.
+  fn isNilLitAtEnd(self: *Parser) bool {
+    if (!self.isNilLit()) return false;
+    var lx = self.lex;
+    _ = lx.next();
+    return switch (lx.next().tt) { .sep, .eof, .@"}", .@"]", .@")", .comment => true, else => false };
+  }
+  // Consume `::` and continue as if it were any other noun, so `::x` applies it
+  // (identity), `::~::` is an infix match, and `::` alone is just the value.
+  fn parseNilLit(self: *Parser) ParseError!*Node {
+    const start = self.tok.start;
+    self.advance(); self.advance(); // consume '::'
+    return self.parseAfterNoun(self.rec(try self.node(.{ .monad = .{ .f = ":" } }), start));
+  }
   fn isEnd(self: *Parser) bool { return switch (self.tok.tt) { .sep, .eof, .@"}", .@"]", .@")" => true, else => false }; }
+  // Can this noun be the target of an assignment? Decides `x op:: y` between a
+  // global compound assign (`a,::b`) and the verb applied to the null literal
+  // (`1,::`, `::~::`) — only a name, or an indexed/dotted name, can be assigned.
+  fn isLvalue(n: *Node) bool {
+    return switch (n.*) {
+      .literal => |l| l == .@"var",
+      .apply => |a| isLvalue(a.f),
+      else => false,
+    };
+  }
   fn node(self: *Parser, val: Node) ParseError!*Node {
     const m = try self.al().create(Node);
     m.* = val;
@@ -198,7 +232,8 @@ pub const Parser = struct {
   // than a flag threaded through it.
   fn parseStmtPos(self: *Parser) ParseError!*Node {
     self.skipComments();
-    if (!self.is(.@":")) return self.parseStmt();
+    // `::` is the null literal, not a return of the `:` verb.
+    if (!self.is(.@":") or self.isNilLit()) return self.parseStmt();
     const start = self.tok.start;
     self.advance();
     const clause: ?*Node = if (self.isEnd() or self.is(.comment)) null else try self.parseStmt();
@@ -228,6 +263,9 @@ pub const Parser = struct {
       self.advance();
       return m;
     }
+
+    // '::' → the null literal (identity verb as a value)
+    if (self.isNilLit()) return self.parseNilLit();
 
     // ':' alone (at stmt end) → standalone ':' op; otherwise → right clause
     if (self.is(.@":")) {
@@ -263,7 +301,12 @@ pub const Parser = struct {
           } else mv;
           return self.rhs(noun, adv);
         }
-        return self.parseBind(noun, op_tok.slice(self.src));
+        // `x op:: y` is a global compound assign only when x can be assigned AND
+        // a right-hand side follows; otherwise the `::` is the null literal and
+        // op an ordinary dyad (`a~::`, `1,::`, `::~::`), so fall through to the
+        // infix path below.
+        const nil_operand = self.isNilLit() and (self.isNilLitAtEnd() or !isLvalue(noun));
+        if (!nil_operand) return self.parseBind(noun, op_tok.slice(self.src));
       }
       const verb = try self.applyAdverb(try self.verbNode(op_tok));
       return self.rhs(noun, verb);
@@ -278,7 +321,7 @@ pub const Parser = struct {
     if (self.is(.adverb)) {
       const term = try self.chainAdverbs(noun);
       if (self.is(.@"[")) return self.parseAfterNoun(try self.parseApply(term));
-      if (self.isNounStart() or self.isVerbStart())
+      if (self.isNounStart() or self.isVerbStart() or self.isNilLit())
         return self.node(.{ .apposit = .{ .f = term, .a = try self.parseStmt() } });
       return term;
     }
@@ -309,8 +352,12 @@ pub const Parser = struct {
     const vn = try self.verbNode(op_tok);
     self.advance();
 
-    // op ':' → first-class monad value, optionally followed by adverb then apposit
-    if (self.is(.@":")) {
+    // op ':' → first-class monad value, optionally followed by adverb then apposit.
+    // `op ::` is NOT that: with no lvalue to its left the `::` can only be the
+    // null literal, so `@::` is `@` applied to `::` (`op:[::]` spells the other
+    // reading). Only the verb-led form is exempt — after a noun, `a+::1` is still
+    // a global compound assign, and parseAfterNoun handles that.
+    if (self.is(.@":") and !self.isNilLit()) {
       self.advance();
       const op_str = if (vn.* == .op) vn.op else "";
       self.al().destroy(vn);
@@ -319,14 +366,14 @@ pub const Parser = struct {
         const t = try self.node(.{ .term = .{ .f = mv, .a = self.slice() } });
         self.advance(); break :blk t;
       } else mv;
-      if (!self.isEnd() and !self.is(.comment) and (self.isNounStart() or self.isVerbStart()))
+      if (!self.isEnd() and !self.is(.comment) and (self.isNounStart() or self.isVerbStart() or self.isNilLit()))
         return self.node(.{ .apposit = .{ .f = verb, .a = try self.parseStmt() } });
       return verb;
     }
 
     const verb = try self.chainAdverbs(vn);
     if (self.is(.@"[")) return self.parseAfterNoun(try self.parseApply(verb));
-    if (!self.isEnd() and !self.is(.comment) and (self.isNounStart() or self.isVerbStart()))
+    if (!self.isEnd() and !self.is(.comment) and (self.isNounStart() or self.isVerbStart() or self.isNilLit()))
       return self.node(.{ .apposit = .{ .f = verb, .a = try self.parseStmt() } });
     return verb;
   }
@@ -654,23 +701,16 @@ pub const Parser = struct {
     return self.recEnd(try self.node(.{ .apply = .{ .f = f, .a = seq } }), st, self.prev_end);
   }
 
+  // `$[…]` sequences its branches by the same rule as `[…]` and `(…)`: a newline
+  // separates, and only `;;` / a trailing `;` inject a null branch — so an elided
+  // branch is `::`, and `$[1b;;2]` is null (ngn/k's `:[1b;;2]`). parseSeq also
+  // carries the no-forward-progress guard, without which a stray closer inside
+  // the brackets spins forever.
   fn parseCond(self: *Parser) ParseError!*Node {
     self.advance(); // consume '$['
-    var stmts = try std.ArrayList(*Node).initCapacity(self.al(), 0);
-    while (!self.is(.@"]") and !self.is(.eof)) {
-      self.skipComments();
-      if (self.is(.@"]")) break;
-      if (self.is(.sep)) { self.advance(); continue; }
-      const before = self.tok.start;
-      try stmts.append(self.al(), try self.parseStmtPos());
-      // parseStmt yields a .blank without consuming on a token it can't start a
-      // statement from (a stray ')'/'}'/'[' or other closer). Without this guard
-      // the loop would spin forever, never reaching ']' or eof — e.g. a '[...]'
-      // block written as a $[] branch. Stop on no forward progress.
-      if (self.tok.start == before) break;
-    }
+    const stmts = try self.parseSeq(.@"]", true);
     try self.close(.@"]");
-    return self.node(.{ .cond = .{ .stmts = try stmts.toOwnedSlice(self.al()) } });
+    return self.node(.{ .cond = .{ .stmts = stmts } });
   }
 
   // Promote an int-vector accumulator to floats in place (int run met a decimal

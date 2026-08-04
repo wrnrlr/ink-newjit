@@ -17,7 +17,7 @@ const Lexer = @import("../parser/lexer.zig").Lexer;
 /// within their own event loop.  No-ops when current_vm is not set.
 export fn terse_poll() callconv(.c) void {
   const vm_ptr = ffi.getCurrentVm() orelse return;
-  serve.pollOnce(@ptrCast(@alignCast(vm_ptr)), .blank);
+  serve.pollOnce(@ptrCast(@alignCast(vm_ptr)), .nil);
 }
 
 const build_options = @import("build_options");
@@ -172,7 +172,7 @@ fn setupArgs(vm: *VM, exe_name: []const u8, script_path: ?[]const u8, extra_args
   parts += extra_args.len;
   const argv_n = try N(V).init(vm.alloc, parts);
   errdefer (V{ .L = argv_n }).deinit(vm.alloc);
-  @memset(argv_n.slice(), .blank);
+  @memset(argv_n.slice(), .nil);
   var i: usize = 0;
   argv_n.slice()[i] = try V.Chars(vm.alloc, exe_name); i += 1;
   if (script_path) |sp| { argv_n.slice()[i] = try V.Chars(vm.alloc, sp); i += 1; }
@@ -183,7 +183,7 @@ fn setupArgs(vm: *VM, exe_name: []const u8, script_path: ?[]const u8, extra_args
   if (extra_args.len > 0) {
     const x_n = try N(V).init(vm.alloc, extra_args.len);
     errdefer (V{ .L = x_n }).deinit(vm.alloc);
-    @memset(x_n.slice(), .blank);
+    @memset(x_n.slice(), .nil);
     for (extra_args, x_n.slice()) |arg, *slot| slot.* = try V.Chars(vm.alloc, arg);
     const key = try vm.alloc.dupe(u8, "x");
     errdefer vm.alloc.free(key);

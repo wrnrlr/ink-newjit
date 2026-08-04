@@ -124,7 +124,7 @@ fn pickIntVec(alloc: Alloc, x: V, indices: []const i32) V {
     else => blk: {
       // Generic list: build N(V) and promote
       const res = N(V).init(alloc, indices.len) catch break :blk V{ .err = .memory };
-      @memset(res.slice(), .blank);
+      @memset(res.slice(), .nil);
       const length = x.len();
       for (indices, 0..) |idx, k| {
         if (idx < 0 or idx >= @as(i32, @intCast(length))) {
@@ -148,7 +148,7 @@ fn pickElement(alloc: Alloc, x: V, y: V) V {
     .L => blk: {
       const items = y.L.slice();
       const res = N(V).init(alloc, items.len) catch break :blk V{ .err = .memory };
-      @memset(res.slice(), .blank);
+      @memset(res.slice(), .nil);
       for (items, 0..) |item, k| {
         const r = pickElement(alloc, x, item);
         if (r.tag() == .err) {
@@ -167,7 +167,7 @@ fn pickElement(alloc: Alloc, x: V, y: V) V {
 fn pickListFn(vm: *VM, x: V, y: V) V {
   const items = y.L.slice();
   const res = N(V).init(vm.alloc, items.len) catch return V{ .err = .memory };
-  @memset(res.slice(), .blank);
+  @memset(res.slice(), .nil);
   for (items, 0..) |item, k| {
     const r = pickElement(vm.alloc, x, item);
     if (r.tag() == .err) {
@@ -234,7 +234,7 @@ pub fn pickDictSymFn(vm: *VM, x: V, y: V) V  {
     // u@`col: a value-column name reads that whole column (so a system can do u`px);
     // any other symbol falls through to a key lookup (e.g. a symbol-keyed utable).
     const col = pickTableCol(x.m.bv().M, y.s);
-    if (col.tag() != .blank) return col;
+    if (!col.isNil()) return col;
     return pickUTable(vm.alloc, x.m, y);
   }
   return pickDictSym(x.m, y.s);
@@ -272,7 +272,7 @@ fn pickVec(alloc: Alloc, x: V, indices: []const i32) V {
   // elements → it would return an untyped `L`, breaking downstream =/&/columns).
   if (indices.len == 0) return emptyOf(alloc, x.tag());
   const res = N(V).init(alloc, indices.len) catch return V{ .err = .memory };
-  @memset(res.slice(), .blank);
+  @memset(res.slice(), .nil);
   for (indices, 0..) |idx, k| {
     if (idx < 0 or idx >= @as(i32, @intCast(length))) {
       for (res.slice()[0..k]) |*v| v.deinit(alloc);
@@ -305,7 +305,7 @@ fn pickMask(alloc: Alloc, x: V, mask: []const bool) V {
 
 fn pickSymAtom(x: V, s: u32) V {
   for (x.S.slice(), 0..) |k, idx| if (k == s) return x.at(idx);
-  return .blank;
+  return .nil;
 }
 
 fn pickSymVec(alloc: Alloc, x: V, keys: []const u32) V {
@@ -326,25 +326,25 @@ fn pickDictSym(m: Dict, s: u32) V {
     // first element) — the long-standing single-key-dict indexing bug.
     return vals.ref();
   }
-  return .blank;
+  return .nil;
 }
 
 // Generic key lookup for non-symbol/int key types (chars, floats, …): scan the
 // key array comparing each candidate with `.eq()` and return its value (or the
-// null `.blank` on a miss). Symbols keep their dedicated u32 path; ints stay
+// null `.nil` on a miss). Symbols keep their dedicated u32 path; ints stay
 // positional (see pickDictIntFn) so `(1 2 3!…)0` indexes by position.
 fn pickDictKey(alloc: Alloc, m: Dict, key: V) V {
   const keys = m.av();
   const vals = m.bv();
   // Single-key dict (scalar key): the value is stored unwrapped — return it whole
   // rather than indexing into it (see pickDictSym).
-  if (keys.isAtom()) return if (keys.eq(key)) vals.ref() else .blank;
+  if (keys.isAtom()) return if (keys.eq(key)) vals.ref() else .nil;
   for (0..keys.len()) |idx| {
     const k = keys.at(idx);
     defer k.deinit(alloc);
     if (k.eq(key)) return vals.at(idx);
   }
-  return .blank;
+  return .nil;
 }
 
 fn pickDictSymVec(alloc: Alloc, m: Dict, keys: []const u32) V {
@@ -374,7 +374,7 @@ fn uFindRow(alloc: Alloc, key_table: Dict, key: V) i32 {
 
 fn pickUTable(alloc: Alloc, u: Dict, key: V) V {
   const idx = uFindRow(alloc, u.av().M, key);
-  if (idx < 0) return .blank;             // absent key → null
+  if (idx < 0) return .nil;             // absent key → null
   return pickTableRow(alloc, u.bv().M, idx);
 }
 
@@ -429,7 +429,7 @@ fn pickTableCol(t: Dict, s: u32) V {
   if (keys.tag() == .S) {
     for (keys.S.slice(), 0..) |k, idx| if (k == s) return vals.at(idx);
   } else if (keys.tag() == .s and keys.s == s) return vals.at(0);
-  return .blank;
+  return .nil;
 }
 
 // t`a`b → the selected columns as a LIST (one per name), the same shape a dict gives for

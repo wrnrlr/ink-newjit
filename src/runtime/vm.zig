@@ -66,7 +66,7 @@ pub const VM = struct {
   ext: ExtRegistry,
   out: ?*std.Io.Writer = null,
   prng: std.Random.DefaultPrng,
-  argv: V = .blank,
+  argv: V = .nil,
   // Optional in-memory file overlay (path → content), consulted before disk by
   // load()/mapFile().  Set by `ink bundle` executables to read their embedded
   // k modules; null for normal runs.
@@ -114,7 +114,7 @@ pub const VM = struct {
     vm.compiler = try vm.alloc.create(Compiler);
     try vm.symbols.prefill();
     vm.compiler.* = try Compiler.init(vm.alloc, chunk, &vm.names, &vm.symbols, &vm.fs, &vm.fn_tables);
-    @memset(&vm.globals, .blank);
+    @memset(&vm.globals, .nil);
     std.Io.Threaded.global_single_threaded.allocator = alloc;
     vm.pushFrame(.{ .base = 0, .result_slot = 0, .lambda_idx = NO_LAMBDA });
     vm.loadPrelude();
@@ -273,7 +273,7 @@ pub const VM = struct {
     // code.len (and its own code-end detection) is restored — else the caller runs
     // past its end into the appended module code. (Lambda chunks the module created
     // are separate and survive; the globals it defined persist.)
-    const result = if (vm.stack_len > res_slot) vm.pop() else V.blank;
+    const result = if (vm.stack_len > res_slot) vm.pop() else V.nil;
     for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
     vm.stack_len = res_slot;
     vm.frames_len = prev_frames;
@@ -317,7 +317,7 @@ pub const VM = struct {
   pub fn callLambdaAndRun(vm: *VM, ref: opmod.Fn, args: []const V) V {
     const prev_frames = vm.frames_len;
     const res_slot = vm.stack_len;
-    vm.push(.blank) catch return V{ .err = .memory };
+    vm.push(.nil) catch return V{ .err = .memory };
     for (args) |arg| vm.push(arg.ref()) catch return vm.cleanStack(res_slot);
     vm.callLambda(ref, args.len, res_slot) catch return vm.cleanStack(res_slot);
     vm.runUntil(prev_frames) catch |e| return vm.abortNested(prev_frames, res_slot, e);
@@ -332,7 +332,7 @@ pub const VM = struct {
   pub fn callLambdaAndRunMove(vm: *VM, ref: opmod.Fn, args: []const V) V {
     const prev_frames = vm.frames_len;
     const res_slot = vm.stack_len;
-    vm.push(.blank) catch return V{ .err = .memory };
+    vm.push(.nil) catch return V{ .err = .memory };
     for (args) |arg| vm.push(arg) catch return vm.cleanStack(res_slot);
     vm.callLambda(ref, args.len, res_slot) catch return vm.cleanStack(res_slot);
     vm.runUntil(prev_frames) catch |e| return vm.abortNested(prev_frames, res_slot, e);
@@ -352,7 +352,7 @@ pub const VM = struct {
       frame.ip += 1;
       switch (@as(OpCode, @enumFromInt(b))) {
         .Nop => {},
-        .Gap => try vm.push(.blank),
+        .Gap => try vm.push(.nil),
         .Drop => vm.pop().deinit(vm.alloc),
         .Dup => try vm.push(vm.peek(0).ref()),
         .Const => {
@@ -380,7 +380,7 @@ pub const VM = struct {
           frame.ip += 1;
           const slot = frame.base + idx;
           const v = vm.stack[slot];
-          vm.stack[slot] = .blank;
+          vm.stack[slot] = .nil;
           try vm.push(v);
         },
         .AssignGlobal => {
@@ -389,7 +389,7 @@ pub const VM = struct {
           const val = vm.pop();
           vm.globals[index].deinit(vm.alloc);
           vm.globals[index] = val;
-          try vm.push(.blank);
+          try vm.push(.nil);
         },
         .AssignLocal => {
           const index = code[frame.ip];
@@ -398,7 +398,7 @@ pub const VM = struct {
           const stack_idx = frame.base + index;
           vm.stack[stack_idx].deinit(vm.alloc);
           vm.stack[stack_idx] = val;
-          try vm.push(.blank);
+          try vm.push(.nil);
         },
         .ListAssignGlobal => try vm.doListAssignGlobal(),
         .ListAssignLocal => try vm.doListAssignLocal(),
@@ -456,7 +456,7 @@ pub const VM = struct {
         vm.globals[index].deinit(vm.alloc);
         vm.globals[index] = val.at(i);
       }
-      try vm.push(.blank);
+      try vm.push(.nil);
     }
   }
 
@@ -476,7 +476,7 @@ pub const VM = struct {
         vm.stack[stack_idx].deinit(vm.alloc);
         vm.stack[stack_idx] = val.at(i);
       }
-      try vm.push(.blank);
+      try vm.push(.nil);
     }
   }
   
@@ -501,7 +501,7 @@ pub const VM = struct {
 
   fn doTailCall(vm: *VM) !void {
     const argc = vm.readByte();
-    // `undefined`, not `.{.blank} ** N`: every one of the argc slots is written
+    // `undefined`, not `.{V.nil} ** N`: every one of the argc slots is written
     // by the pop loop below and nothing reads past argc, so the buffer costs a
     // stack-pointer adjustment and MAX_ARGS can grow for free.
     var buf: [opmod.MAX_ARGS]V = undefined;
@@ -525,11 +525,11 @@ pub const VM = struct {
         for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
         vm.stack_len = res_slot;
 
-        try vm.push(.blank);
+        try vm.push(.nil);
         for (incoming) |arg| try vm.push(arg);
         const total_slots = @as(usize, entry.arity) + @as(usize, entry.locals);
         const locals_to_push = if (total_slots > argc) total_slots - argc else 0;
-        for (0..locals_to_push) |_| try vm.push(.blank);
+        for (0..locals_to_push) |_| try vm.push(.nil);
 
         frame.lambda_idx = lambda_idx.?;
         frame.ip = 0;
@@ -653,7 +653,7 @@ pub const VM = struct {
     // Extract base func and existing args from func (possibly already a partial).
     // `existing` aliases the source partial's slots rather than copying them —
     // only the filled ones are read, and each is ref()'d into `merged` below.
-    const no_args: [opmod.MAX_ARGS]V = .{.blank} ** opmod.MAX_ARGS;
+    const no_args: [opmod.MAX_ARGS]V = .{V.nil} ** opmod.MAX_ARGS;
     var base_ref: opmod.Fn = undefined;
     var existing: *const [opmod.MAX_ARGS]V = &no_args;
     var existing_fill: opmod.ArgMask = 0;
@@ -671,7 +671,7 @@ pub const VM = struct {
     }
 
     const arity = base_ref.getRealArity();
-    var merged: [opmod.MAX_ARGS]V = .{.blank} ** opmod.MAX_ARGS;
+    var merged: [opmod.MAX_ARGS]V = .{V.nil} ** opmod.MAX_ARGS;
     var fill: opmod.ArgMask = 0;
     for (0..arity) |i| {
       if (existing_fill & (@as(opmod.ArgMask, 1) << @intCast(i)) != 0) {
@@ -761,7 +761,7 @@ pub const VM = struct {
     const entry = vm.fn_tables.lambdaAt(idx);
     const total_slots = @as(usize, entry.arity) + @as(usize, entry.locals);
     const locals_to_push = if (total_slots > argc) total_slots - argc else 0;
-    for (0..locals_to_push) |_| try vm.push(.blank);
+    for (0..locals_to_push) |_| try vm.push(.nil);
     const base = vm.stack_len - argc - locals_to_push;
     vm.pushFrame(.{ .lambda_idx = idx, .base = base, .result_slot = slot });
     vm.current_chunk = entry.chunk;
@@ -827,7 +827,7 @@ pub const VM = struct {
 };
 
 fn hasBlank(vals:[]V) bool {
-   for (vals) |a| if (a == .blank) return true;
+   for (vals) |a| if (a.isNil()) return true;
    return false;
 }
 

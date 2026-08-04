@@ -238,19 +238,23 @@ implemented (see the note at the end of this file / doc/design).
 > group on any Tier-2 type — these need per-bit-width NaN-safe dedup helpers and
 > a kind-tagged key vector. `&` where is int/bool-only by definition.
 
-### Mapping Types
-- **Dict**
-  - The syntax `` (a:1; b:2; c: 3) `` is equivalent to `` `a`b`c!1 2 3 ``
-  - Empty dict `` [] ``
-  - Type symbol `` `m ``
-- **Table**
-  - The syntax `` ([]a:1 2; b:3 4) `` is equivalent to `` `a`b`c!1 2 3 ``
-  - Type symbol `` `M ``.
+### Dict
+Dict is a collection of 2 arrays that accosiate one value with another value.
+The syntax `` (a:1; b:2; c: 3) `` is equivalent to `` `a`b`c!1 2 3 ``
+Empty dict `` ()!() ``, Type symbol `` `m ``
+
+### Table
+Table is a collection of 2 arrays that accosiate one value with another value.
+The syntax `` ([]a:1 2; b:3 4) `` is equivalent to `` `a`b`c!1 2 3 ``
+Empty dict `` ([]) ``, Type symbol `` `M ``.
 
 ### Error Values
 - `!type` **Type Error**
 - `!rank` **Rank Error**
 - `!domain` **Domain Error**
+- `!nyi` **Not Yet Implemented**
+- `!io` **IO Error**
+- `!memory` **Memory Error**
 
 ### Other types
 - **Error**
@@ -261,8 +265,35 @@ implemented (see the note at the end of this file / doc/design).
 - **Partial** - partialy applied operator/lambda, type `` `p ``
 - **Composition** - A composition is a sequence of variadics applied in succession, type `` `q ``
 
-### Blank
-Blanks are used for empty assignment and defining partials.
+### Null — `::`
+
+There is no blank/null *type*. Null is the **identity verb written as a value**,
+spelled `::`, exactly as in ngn/k. It is an ordinary callable, so `@::` is
+`` `o ``, `` $:: `` is `"::"` and `#::` is `1`; test for it with `` x~:: ``.
+
+```k
+a: ::                  / bind null explicitly
+a: ;                   / an empty right-hand side binds the same value
+@a                     / `o
+a~::                   / 1b
+::5                    / 5     — applying it is identity
+$[::;`t;`f]            / `f    — :: is falsy
+(1;;2)                 / (1;::;2)  — an elided list item IS ::
+```
+
+Null is what every side-effecting verb returns (`` `0 0:"hi" ``), what a binding
+evaluates to, what an unset global reads as, what `,/()` and an empty fold
+produce, and what a dict lookup returns on a miss. **The REPL prints nothing for
+a null result**, so assignments and I/O stay quiet.
+
+In *bracket* argument position `::` is the elision marker that builds a
+projection — `f[::;2]` and `f[;2]` are the same thing — so a function cannot be
+handed null through brackets. Juxtaposition still applies: `@a` with `a` null
+gives `` `o ``.
+
+Two spellings stay assignments, because `noun ::` is the global-bind digram:
+`a::1` (global assign) and `a,::x` (global compound assign). With nothing after
+it the `::` is the null literal again, so `a~::` is a null test, not a binding.
 
 ## Variables
 A variable is a name associated with a value, a name is an alphanumeric identifier starting with an alphabetic character.
@@ -356,7 +387,8 @@ while assigment of globals in a lambda happen with a double colon `::`
 - `?[C;I;C]` **Splice** - `` ?["abcd";1 3;"xyz"] -> "axyzd" `` TODO: does this work for non-char arrays as well
 
 ### Monadic Operators
-- `:x` **Identity** - return right-hand side
+- `:x` **Identity** - return right-hand side. As a *value* the monadic form is
+  written `::` and is k's null (see [Null](#null--)).
 - `%x` **Shape** - rectangular extent as an int vector (APL rho): `%5`→`!0` (atom, rank 0), `%1 2 3`→`,3`, `%(1 2;3 4;5 6)`→`3 2`. Ragged lists stop at the first non-uniform level (`%(1 2;3 4 5)`→`,2`). Inverse of reshape: `(%m)#,/m ~ m`. Placed arrays carry it as the descriptor's `s` field.
 - `&I` **Where** - convert counts to repeated indices
 - `=X` **Group** - for each distinct value, the indices where it occurs

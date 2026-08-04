@@ -48,7 +48,7 @@ fn groupDense(comptime T: type, alloc: Alloc, data: []const T, r: keying.Dense) 
   const gid = alloc.alloc(u32, r.span) catch return V{ .err = .memory };
   defer alloc.free(gid);
   const result = N(V).init(alloc, n_groups) catch return V{ .err = .memory };
-  @memset(result.slice(), .blank);
+  @memset(result.slice(), .nil);
   const key_n = N(T).init(alloc, n_groups) catch {
     result.deinit(alloc);
     return V{ .err = .memory };
@@ -113,7 +113,7 @@ fn groupDictFn(vm: *VM, x: V) V {
   defer g.deinit(vm.alloc);
   const idx = g.m.bv();
   const out = N(V).init(vm.alloc, idx.len()) catch return V{ .err = .memory };
-  @memset(out.slice(), .blank);
+  @memset(out.slice(), .nil);
   for (out.slice(), 0..) |*slot, i| {
     const iv = idx.at(i);
     defer iv.deinit(vm.alloc);
@@ -234,7 +234,7 @@ fn groupHash(comptime T: type, alloc: Alloc, data: []const T) V {
   for (perm, 0..) |g, s| rank[g] = @intCast(s);
 
   const result = N(V).init(alloc, n_groups) catch return V{ .err = .memory };
-  @memset(result.slice(), .blank);
+  @memset(result.slice(), .nil);
   const cursor = alloc.alloc(u32, n_groups) catch {
     result.deinit(alloc);
     return V{ .err = .memory };
@@ -285,7 +285,7 @@ fn groupByte(alloc: Alloc, data: []const u8) V {
   }.lt);
 
   const result = N(V).init(alloc, n_groups) catch return V{ .err = .memory };
-  for (result.slice()) |*s| s.* = .blank;
+  for (result.slice()) |*s| s.* = .nil;
 
   var slot: [256]u32 = undefined;
   for (order[0..n_groups], 0..) |c, g| {
@@ -357,7 +357,7 @@ fn groupFloats(alloc: Alloc, data: []const f32) V {
   for (perm, 0..) |g, s| rank[g] = @intCast(s);
 
   const result = N(V).init(alloc, n_groups) catch return V{ .err = .memory };
-  @memset(result.slice(), .blank);
+  @memset(result.slice(), .nil);
   for (perm, 0..) |g, s| {
     result.slice()[s] = .{ .I = N(i32).init(alloc, counts_l.items[g]) catch {
       (V{ .L = result }).deinit(alloc);
@@ -423,7 +423,7 @@ fn groupValues(alloc: Alloc, data: []const V) V {
   for (perm, 0..) |g, s| rank[g] = @intCast(s);
 
   const result = N(V).init(alloc, n_groups) catch return V{ .err = .memory };
-  @memset(result.slice(), .blank);
+  @memset(result.slice(), .nil);
   for (perm, 0..) |g, s| {
     result.slice()[s] = .{ .I = N(i32).init(alloc, counts[g]) catch {
       (V{ .L = result }).deinit(alloc);

@@ -229,7 +229,6 @@ pub const TerseFormatter = struct {
           if (isIdentSym(nm)) try w.print("!{s}", .{nm}) else try w.print("!\"{s}\"", .{nm});
         }
       },
-      .blank => {},
     }
   }
 

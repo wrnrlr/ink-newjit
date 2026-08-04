@@ -17,7 +17,7 @@ pub fn odometer(alloc: Alloc, shape: N(i32)) !N(V) {
   for (shape_slice) |xi| {
     if (xi <= 0) {
       const r_list = try N(V).init(alloc, shape.ptr.len);
-      @memset(r_list.slice(), .blank);
+      @memset(r_list.slice(), .nil);
       return r_list;
     }
     ncols *= @as(usize, @intCast(xi));

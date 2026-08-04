@@ -3,7 +3,6 @@ const VM = @import("../../runtime/vm.zig").VM;
 
 pub const Type = struct {
   pub const op = .@"@";
-  _blank: VM.Monad = ktype(""),
   _b:     VM.Monad = ktype("b"),
   _i:     VM.Monad = ktype("i"),
   _f:     VM.Monad = ktype("f"),

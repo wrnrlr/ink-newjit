@@ -215,3 +215,18 @@ one. It prints all 15 of its `ok` lines — the last being `circle SDF via IR �
 valid SPIR-V header` — and then hangs after the final assertion rather than
 exiting, so the assertions themselves still pass. Pre-existing; unrelated to the
 progn refactor (byte-identical output before and after).
+
+---
+
+## A tacit composition of two verbs prints as nothing
+
+`@+:` and `@(+:)` evaluate to the compose-lambda `{f (g x)}` that
+`compileTacitCompose` synthesises (compiler.zig), and that lambda is built with
+`.start = 0, .end = 0` — so `formatFn` asks the file store for the source range
+`[0,0)` and writes an empty string. The value itself is fine (`(@+:)1 2` works);
+only its printed form is blank, which reads as "the expression produced null".
+
+Pre-existing — byte-identical on `ff55a56`, unrelated to the `::` null change
+that surfaced it. Fix is either to record the real source span of the composed
+expression when building the lambda, or to have `formatFn` fall back to
+reconstructing `f g` from the two operands when the range is empty.

@@ -9,18 +9,18 @@ pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
   const io = std.Io.Threaded.global_single_threaded.io();
   if (std.mem.eql(u8, verb, "p")) {
     const port_str = std.mem.trim(u8, args, " \t");
-    if (port_str.len == 0) return .blank;
+    if (port_str.len == 0) return .nil;
     const port = std.fmt.parseInt(u16, port_str, 10) catch return V{ .err = .domain };
     const h = verb_io.netListenOnly(vm, port);
     if (h.tag() == .err) return h;
     vm.listen_handle = @intCast(h.i);
-    return .blank;
+    return .nil;
   } else if (std.mem.eql(u8, verb, "h")) {
     std.debug.print("{s}\n", .{"TODO"});
-    return .blank;
+    return .nil;
   } else if (std.mem.eql(u8, verb, "l")) {
     _ = try vm.load(args);
-    return .blank;
+    return .nil;
   } else if (std.mem.eql(u8, verb, "v")) {
     var it_v = vm.names.iterator();
     while (it_v.next()) |entry| {
@@ -28,7 +28,7 @@ pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
       const idx = entry.value_ptr.*;
       {
         const val = vm.globals[idx];
-        if (val != .blank) {
+        if (!val.isNil()) {
           var mw = try MockWriter.init(vm.alloc);
           defer mw.deinit();
           var w = mw.writer();
@@ -38,7 +38,7 @@ pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
         }
       }
     }
-    return .blank;
+    return .nil;
   } else if (std.mem.eql(u8, verb, "f")) {
     var it_f = vm.names.iterator();
     while (it_f.next()) |entry| {
@@ -48,20 +48,20 @@ pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
         std.debug.print("{s}\n", .{name});
       }
     }
-    return .blank;
+    return .nil;
   } else if (std.mem.eql(u8, verb, "cd")) {
     const dir = try std.Io.Dir.openDir(std.Io.Dir.cwd(), io, args, .{});
     try std.process.setCurrentDir(io, dir);
-    return .blank;
+    return .nil;
   } else if (std.mem.eql(u8, verb, "d")) {
     std.debug.print("\\d {s}\n", .{args});
-    return .blank;
+    return .nil;
   } else if (std.mem.eql(u8, verb, "e")) {
     // `\e a b c` — export bare names for autoload.  Consumed by the module
     // indexer (cmd/modules.zig scanText) at scan time; no runtime effect.
-    return .blank;
+    return .nil;
   } else if (std.mem.eql(u8, verb, "t")) {
-    if (args.len == 0) return .blank;
+    if (args.len == 0) return .nil;
     const count = if (n == 0) 1 else n;
     // Compile the expression once, then time only its repeated execution —
     // re-parsing/compiling each iteration would dominate the measurement.
@@ -87,6 +87,6 @@ pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
     defer vm.alloc.free(result.stderr);
     if (result.stdout.len > 0) std.debug.print("{s}", .{result.stdout});
     if (result.stderr.len > 0) std.debug.print("{s}", .{result.stderr});
-    return .blank;
+    return .nil;
   }
 }

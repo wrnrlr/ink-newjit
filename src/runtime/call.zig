@@ -65,7 +65,7 @@ pub const Call = struct {
     var has_gaps = false;
     if (is_bracket) {
       filled = 0;
-      for (args) |a| if (a != .blank) { filled += 1; };
+      for (args) |a| if (!a.isNil()) { filled += 1; };
       has_gaps = filled < args.len;
     }
     switch (ref.kind) {
@@ -163,7 +163,7 @@ pub const Call = struct {
     // More arguments than the projection has empty slots is a rank error —
     // the same rule as calling the underlying function directly.
     if (args.len > p.remaining()) return V{ .err = .rank };
-    var merged: [MAX_ARGS]V = .{.blank} ** MAX_ARGS;
+    var merged: [MAX_ARGS]V = .{V.nil} ** MAX_ARGS;
     var fill: ArgMask = p.fill;
     for (0..arity) |i| {
       if (p.fill & (@as(ArgMask, 1) << @intCast(i)) != 0)
@@ -244,17 +244,17 @@ fn allocPartial(vm: *VM, ref: Fn, arity: u8, pa: *const [MAX_ARGS]V, fill: ArgMa
 
 pub fn makePartialFromArgs(vm: *VM, ref: Fn, args: []const V) V {
   const arity = ref.getRealArity();
-  var pa: [MAX_ARGS]V = .{.blank} ** MAX_ARGS;
+  var pa: [MAX_ARGS]V = .{V.nil} ** MAX_ARGS;
   var fill: ArgMask = 0;
   for (args, 0..) |a, i| {
     if (i >= arity) break;
-    if (a != .blank) { pa[i] = a.ref(); fill |= @as(ArgMask, 1) << @intCast(i); }
+    if (!a.isNil()) { pa[i] = a.ref(); fill |= @as(ArgMask, 1) << @intCast(i); }
   }
   return allocPartial(vm, ref, arity, &pa, fill);
 }
 
 fn makePartialFromMerged(vm: *VM, ref: Fn, arity: u8, merged: *const [MAX_ARGS]V, fill: ArgMask) V {
-  var pa: [MAX_ARGS]V = .{.blank} ** MAX_ARGS;
+  var pa: [MAX_ARGS]V = .{V.nil} ** MAX_ARGS;
   var new_fill: ArgMask = 0;
   for (0..arity) |i| {
     if (fill & (@as(ArgMask, 1) << @intCast(i)) != 0) {

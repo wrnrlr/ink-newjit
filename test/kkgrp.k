@@ -12,6 +12,12 @@ chk: {[nm; b] $[b; ok:: ok + 1; nok:: nok + 1]; $[b; 0; `0 0: "FAIL ",nm,"\n"]}
 / CPU histogram reference: counts[b] = number of indices equal to b.
 cpuFreq: {[idx; nb] `f$ @[nb#0; idx; +; (#idx)#1]}
 
+/ Per-bucket index SETS, sorted so intra-bucket order does not matter. Both take
+/ everything they read as ARGUMENTS: lambdas do not close over the caller's
+/ locals, so an inner `{[b] … perm …}` would silently read an unset global.
+gset: {[g; b] p: (g 0) @ ((g 1) b) + ! (g 2) b; p @ < p}   / g = (perm;goff;gcnt)
+cset: {[idx; b] & idx = b}
+
 / CPU group reference + the order-independent checks (helpers are top-level: the
 / inner set-builders and chk/cpuFreq are globals — no closure over run's locals).
 grpChk: {[nb; idx]
@@ -23,8 +29,8 @@ grpChk: {[nb; idx]
   cnt:  `i$ cpuFreq[idx; nb]
   coff: 0 , +\ -1 _ cnt                        / exclusive offsets = 0, running Σ of all-but-last
   dp:   idx @ perm
-  gsets: {[b] p: perm @ (goff b) + ! gcnt b; p @ < p}' ! nb
-  csets: {[b] & idx = b}' ! nb
+  gsets: gset[(perm; goff; gcnt)]' ! nb
+  csets: cset[idx]' ! nb
   chk["group nb=",($nb)," counts match";        gcnt ~ cnt]
   chk["group nb=",($nb)," offsets match";        goff ~ coff]
   chk["group nb=",($nb)," perm is permutation";  (perm @ < perm) ~ ! n]

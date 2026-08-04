@@ -111,7 +111,7 @@ fn acceptClient(vm: *VM, listen_id: u32) void {
   };
   // New client inherits the callback set on the listening socket.
   const cb = vm.conns.getCallback(listen_id);
-  if (cb.tag() != .blank) {
+  if (!cb.isNil()) {
     vm.conns.setCallback(new_id, cb.ref()) catch {};
   }
   callHook(vm, "z.po", new_id);
@@ -135,7 +135,7 @@ fn dispatchMsg(vm: *VM, conn_id: u32, handler: V) void {
   defer msg.deinit(vm.alloc);
 
   const h = resolveHandler(vm, conn_id, handler);
-  if (h.f.tag() == .blank) return;
+  if (h.f.isNil()) return;
 
   var c = Call{ .vm = vm };
   // Arity picks the calling convention: ink has no `.z.w`, so a handler that
@@ -151,28 +151,28 @@ fn dispatchMsg(vm: *VM, conn_id: u32, handler: V) void {
   // Blank means "no reply".  An error is REPLIED, not swallowed: errors are
   // ordinary values in ink, and a caller blocked on `2: h` would otherwise wait
   // forever because the handler happened to fail.
-  if (h.reply == .on_value and result.tag() != .blank) {
+  if (h.reply == .on_value and !result.isNil()) {
     // The handler may have closed this handle; writeConnBinary errors safely.
     _ = verb_io.writeConnBinary(vm, conn_id, result);
   }
 }
 
 fn resolveHandler(vm: *VM, conn_id: u32, explicit: V) Handler {
-  if (explicit.tag() != .blank) return .{ .f = explicit, .reply = .on_value };
+  if (!explicit.isNil()) return .{ .f = explicit, .reply = .on_value };
   // Per-handle handler (`on[h;f]`) takes priority over the globals.
   const cb = vm.conns.getCallback(conn_id);
-  if (cb.tag() != .blank) return .{ .f = cb, .reply = .on_value };
+  if (!cb.isNil()) return .{ .f = cb, .reply = .on_value };
   if (globalFn(vm, "z.pg")) |g| return .{ .f = g, .reply = .on_value };
   // `z.ps` is the async side: it is called for its effect and never answers,
   // even when it happens to return a value.
   if (globalFn(vm, "z.ps")) |g| return .{ .f = g, .reply = .never };
-  return .{ .f = .blank, .reply = .never };
+  return .{ .f = .nil, .reply = .never };
 }
 
 fn globalFn(vm: *VM, name: []const u8) ?V {
   const slot = vm.names.get(name) orelse return null;
   const g = vm.globals[slot];
-  if (g.tag() == .blank) return null;
+  if (g.isNil()) return null;
   return g;
 }
 
@@ -197,7 +197,7 @@ fn fireTimer(vm: *VM) void {
   ffi.setCurrentVm(vm);
   defer ffi.restoreVm(prev_vm);
   var c = Call{ .vm = vm };
-  const r = if (f.arity() >= 1) c.apply(f.ref(), &.{.blank}, false) else c.apply(f.ref(), &.{}, false);
+  const r = if (f.arity() >= 1) c.apply(f.ref(), &.{.nil}, false) else c.apply(f.ref(), &.{}, false);
   r.deinit(vm.alloc);
 }
 
@@ -213,7 +213,7 @@ pub fn runLoop(vm: *VM) void {
 
 fn runLoopPosix(vm: *VM) void {
   while (true) {
-    pollOncePosix(vm, .blank);
+    pollOncePosix(vm, .nil);
     _ = std.c.nanosleep(&.{ .sec = 0, .nsec = 1_000_000 }, null);
   }
 }

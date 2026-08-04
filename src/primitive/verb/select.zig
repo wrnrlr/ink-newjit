@@ -78,7 +78,7 @@ pub fn takeKeysTable(vm: *VM, x: V, y: V) V {
         break;
       }
     }
-    if (!found) res_vals.slice()[i] = .blank;
+    if (!found) res_vals.slice()[i] = .nil;
   }
   const dict = Dict.init(vm.alloc, .{ .S = res_keys }, promote(vm.alloc, res_vals)) catch return V{ .err = .memory };
   return V{ .M = dict };

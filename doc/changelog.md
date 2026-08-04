@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-08-04 — Null is the identity verb `::`
+
+The `blank` type is gone from `K` and `V`. k's null is now the monadic identity
+verb written as a value, `::`, exactly as in ngn/k — one fewer type in the value
+model, one fewer row in every dispatch table.
+
+- **`V.nil` is `{ .o = Fn.monad(.@":") }`** — an ordinary function value. So
+  `@::` is `` `o `` (it used to be `` ` ``), `` $:: `` is `"::"`, `#::` is `1`,
+  and the null test is `` x~:: ``. Three places treat it specially: it is falsy,
+  it marks an elided argument, and the REPL prints nothing for it (so
+  assignments and I/O stay quiet, as before).
+- **`::` parses as a noun wherever a statement or value can start** — as a list
+  item, a call argument, a `$[]` branch, an operand. `(1;;2)` now prints
+  `(1;::;2)` and round-trips. Typing `::` at the prompt used to print `:`, the
+  *dyadic* right verb, because it parsed as "return the `:` verb".
+- **The global-bind digram still wins after a noun.** `a::1` and `a,::x` are
+  assignments. With nothing after it the `::` is the null literal again, so
+  `a~::` is a null test and `1,::` a join — a non-assignable left operand
+  (`1`, `::`) reads the same way.
+- **`K.COUNT` 24 → 23.** The monad table drops 352 B, the sparse dyad rows 94
+  slots (~1.3 KB of dispatch tables in total). Raw K value 0 is now unused; the
+  other tags keep their numbers so the `VEC_BIT` layout is unchanged, but
+  `serCode()` shifts by one — the binary serialization VERSION is bumped to
+  0x06 and old blobs will not load.
+- **`#` now counts callables**, so `#{x}` and `#::` are both `1` instead of
+  `!type`; that restores the old `#null` answer.
+- **`test/kkgrp.k`'s last assertion was passing vacuously.** Its inner
+  set-builders read `perm`/`goff`/`gcnt`/`idx`, which are the *caller's* locals —
+  and lambdas do not capture. Both sides degenerated to the same error value, so
+  `~` said `1b`. They are top-level helpers taking explicit arguments now, and
+  the check actually runs.
+
 ## 2026-08-03 — Round brackets for literals, square brackets for statements
 
 `[…]` was doing two unrelated jobs — dict literal and, after a noun, apply — and

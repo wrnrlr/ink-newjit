@@ -29,7 +29,8 @@ pub const Tester = struct {
     defer res.deinit(self.vm.alloc);
     self.w.buffer.clearRetainingCapacity();
     var mw = self.w.writer();
-    try self.fmt.formatter().fmt(res, &mw.interface);
+    // Mirror the REPL: a null (`::`) result prints nothing.
+    if (!res.isNil()) try self.fmt.formatter().fmt(res, &mw.interface);
     try testing.expectEqualStrings(expected, self.w.getText());
   }
   fn checkPretty(self: *Tester, txt: []const u8, expected: []const u8) !void {
@@ -709,9 +710,31 @@ test "!x iota" {
   try t.check("!-3", "-3 -2 -1");
   try t.check("!2 3", "(0 0 0 1 1 1;0 1 2 0 1 2)");
 }
+// Null is the identity verb `::` (ngn/k's convention); there is no blank type.
+test ":: null" {
+  var t = try Tester.init(); defer t.deinit();
+  try t.check("::", "");            // a null result prints nothing, as in the REPL
+  try t.check("@::", "`o");         // it is an ordinary verb value
+  try t.check("$::", "\"::\"");
+  try t.check("::~::", "1b");
+  try t.check("1~::", "0b");
+  try t.check("::5", "5");          // applying it is identity
+  try t.check("::`a", "`a");
+  try t.check("(1;;2)", "(1;::;2)");   // an elided list item IS ::
+  try t.check("(1;::;2)", "(1;::;2)");
+  try t.check("$[1;;2]", "");       // an elided `$[]` branch is :: too
+  try t.check("@$[1;;2]", "`o");
+  try t.check("$[0;;2]", "2");
+  try t.check("$[::;1;2]", "2");    // :: is falsy
+  try t.check("a:;a~::", "1b");     // an empty binding stores ::
+  try t.check("1,::", "(1;::)");
+  try t.check("a:1;a::2;a", "2");   // `::` after a name is still a global assign
+  try t.check("a:1;a+::2;a", "3");  // …including the compound form
+  try t.check("{x+y}[;3]2", "5");   // an elided call argument still projects
+}
 test "@x type" {
   var t = try Tester.init(); defer t.deinit();
-  try t.check("a:;@a", "`"); // blank
+  try t.check("a:;@a", "`o"); // null is the identity verb `::`
   try t.check("@1", "`i");
   try t.check("@12.3", "`f");
   try t.check("@`a", "`s");

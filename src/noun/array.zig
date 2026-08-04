@@ -103,7 +103,7 @@ pub fn N(comptime T: type) type {
     }
     pub fn zeros(alloc: Alloc, count: usize) !Self {
       const res = try Self.init(alloc, count);
-      @memset(res.slice(), if (T == V) .blank else std.mem.zeroes(T));
+      @memset(res.slice(), if (T == V) .nil else std.mem.zeroes(T));
       return res;
     }
   };

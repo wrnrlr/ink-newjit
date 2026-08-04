@@ -76,7 +76,7 @@ pub const Repl = struct {
       const msg = try std.fmt.allocPrint(self.alloc, "!parse_error: {s} at {d}:{d}",
         .{ @errorName(err), p.line, p.col });
       const results = try self.alloc.alloc(Result, 1);
-      results[0] = .{ .source = try self.alloc.dupe(u8, source), .output = msg, .value = .blank };
+      results[0] = .{ .source = try self.alloc.dupe(u8, source), .output = msg, .value = V.nil };
       return EvalResult{ .results = results, .is_error = true, .vm_alloc = self.vm.alloc };
     };
     defer self.vm.parser.?.free(node);
@@ -148,13 +148,13 @@ pub const Repl = struct {
 
       var res = self.vm.eval(stmt_src) catch |err| {
         const msg = try std.fmt.allocPrint(self.alloc, "!{s}", .{@errorName(err)});
-        try results_list.append(self.alloc, .{ .source = stmt_src, .output = msg, .value = .blank });
+        try results_list.append(self.alloc, .{ .source = stmt_src, .output = msg, .value = V.nil });
         return EvalResult{ .results = try results_list.toOwnedSlice(self.alloc), .is_error = true, .vm_alloc = self.vm.alloc };
       };
 
       if (is_suppressed) {
         res.deinit(self.vm.alloc);
-        res = .blank;
+        res = V.nil;
       }
 
       var mock_out = try MockWriter.init(self.alloc);
@@ -162,7 +162,8 @@ pub const Repl = struct {
       var t_fmt = TerseFormatter.init(self.vm, self.alloc, .Repl);
       t_fmt.pretty = pretty;
       var mw_out = mock_out.writer();
-      if (!is_suppressed) {
+      // A null (`::`) result prints nothing, as in ngn/k.
+      if (!is_suppressed and !res.isNil()) {
         t_fmt.formatter().fmt(res, &mw_out.interface) catch {};
       }
 
@@ -240,7 +241,9 @@ pub const Repl = struct {
       };
       defer res.deinit(self.vm.alloc);
   
-      if (!is_suppressed) {
+      // A null (`::`) result prints nothing, as in ngn/k — assignments, `\d`,
+      // and the side-effecting verbs all yield it.
+      if (!is_suppressed and !res.isNil()) {
         var mock_out = try MockWriter.init(self.alloc);
         defer mock_out.deinit();
         var t_fmt = TerseFormatter.init(self.vm, self.alloc, .Repl);
@@ -272,7 +275,7 @@ fn emitGapComments(alloc: std.mem.Allocator, gap: []const u8, results_list: *std
       try results_list.append(alloc, .{
         .source = try alloc.dupe(u8, trimmed),
         .output = try alloc.dupe(u8, ""),
-        .value = .blank,
+        .value = V.nil,
       });
     }
   }
