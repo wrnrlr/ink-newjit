@@ -6,8 +6,9 @@
 / NB: ink string literals cannot express CR or backslash-letter escapes (`"\r"`
 / decodes to 'r', `"\d"` to 'd'), so those bytes come from `c$<code>.
 / Lambdas do not capture parent locals — map with PROJECTION `f[ctx]'items`, not a
-/ nested lambda; mutate globals with `::` in a helper (never a `[a::x;b::y]` block,
-/ which is a dict literal). Raw byte IO uses the stdin/stdout handles in the runtime.
+/ nested lambda; mutate globals with `::` in a helper or a `[a::x;b::y]` progn (a
+/ dict is `(a:x;b:y)` now, so a square-bracket block is a statement sequence and
+/ safe here). Raw byte IO uses the stdin/stdout handles in the runtime.
 /
 / Symbol documentation comes from lib/doc.k — the same extractor `ink tools/doc.k`
 / uses for doc/api/ — so a hover popup and the published reference never diverge.
@@ -113,7 +114,12 @@ symOf:{[t;src;bi]
   kind:$[((t`kind)@ai)=`lambda;12;13]
   r:nrng[t;src;vi]
   (`name`kind`range`selectionRange)!(fqn;kind;r;r)}
-topBinds:{[t] &((t`kind)=`bind)&0=t`parent}
+/ A progn opens NO scope, so a bind inside a top-level `[…]` block defines a
+/ global exactly like a bare `n:v` and has to be a document symbol too. Walk up
+/ through progn ancestors before calling a bind top-level; the walk stops at the
+/ first non-progn (a lambda, a dict item, …), whose binds are not file-level.
+topAnc:{[t;i] $[0=i;1;`progn=(t`kind)@i;topAnc[t;(t`parent)@i];0]}
+topBinds:{[t] b:&(t`kind)=`bind; $[#b;b@&topAnc[t]'(t`parent)@b;b]}
 docSym:{[src] t:parse src; b:topBinds t; symOf[t;src]'b}
 
 / ── workspace index (cross-file top-level defs) ─────────────────────────────
@@ -201,7 +207,7 @@ frd:("**Sum** `+/x` — total of x *(fused reduce)*";"**Product** `*/x` — prod
 / look up doc string in (keys;vals) parallel table by a name string; "" if absent
 look:{[keys;vals;nm] i:keys?`s$nm; $[i<#keys;vals@i;""]}
 sense:{[dy;m;d] $[dy;$[0<#d;d;m];$[0<#m;m;d]]}
-hoverMd:{[id;md] reply[id;[contents:[kind:"markdown";value:md]]]}
+hoverMd:{[id;md] reply[id;(contents:(kind:"markdown";value:md))]}
 / arity from the CST: an op/term that is the verb of a `transit` has a left arg
 isDyad:{[t;ni] `transit=(t`kind)@(t`parent)@ni}
 isMono:{[t;ni] `apposit=(t`kind)@(t`parent)@ni}
@@ -230,9 +236,14 @@ hoverAdv:{[t;ni;id]
 / block directly above a line-leading binding), so hover shows exactly what
 / `ink tools/doc.k` publishes — signature, arity/type, and the prose.  Falls
 / back to the bare "defined at line N" note for an undocumented binding.
+/ doc.at keys on the LINE alone, so a local that shares a line with the top-level
+/ binding enclosing it — `f:{[x] [y:x*2; :y+1]}`, routine now that a progn puts a
+/ whole statement block on one line — would otherwise hover as `f`. Only consult
+/ the extractor when the definition IS that line's top-level binding.
+isTopDef:{[t;di] b:topBinds t; $[#b;|/di=cfield[t;`v]'b;0b]}
 hvVar:{[t;src;di;nm;id]
   l0:*lc[src;(t`start)@di]
-  r:doc.at[doc.of["";src]; l0]
+  r:$[isTopDef[t;di]; doc.at[doc.of["";src]; l0]; `]
   $[`m~@r; hoverMd[id;doc.hoverMd r]; hvPlain[t;src;di;nm;id;l0]]}
 hvPlain:{[t;src;di;nm;id;l0]
   bi:(t`parent)@di; ai:childF[t;bi;`a]
@@ -337,7 +348,7 @@ wsymUser:{[i] w:windex@i; (`name`kind`location)!(w`name;w`kind;(`uri`range)!(w`u
 onWsym:{[req] q:(req`params)`query; bi:&wmatch[q]'!#bsym; ui:&uMatch[q]'!#windex; reply[req`id;(wsymOf'bi),wsymUser'ui]}
 
 / ── dispatch ───────────────────────────────────────────────────────────────
-caps:[textDocumentSync:1;documentSymbolProvider:1b;definitionProvider:1b;hoverProvider:1b;referencesProvider:1b;renameProvider:[prepareProvider:1b];documentHighlightProvider:1b;workspaceSymbolProvider:1b]
+caps:(textDocumentSync:1;documentSymbolProvider:1b;definitionProvider:1b;hoverProvider:1b;referencesProvider:1b;renameProvider:(prepareProvider:1b);documentHighlightProvider:1b;workspaceSymbolProvider:1b)
 initResult:(`capabilities`serverInfo)!(caps;(`name`version)!("ink";"0.1.0"))
 
 / NB: bind side-effecting helper results to a local (u:) — a discarded
