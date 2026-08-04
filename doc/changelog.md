@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-08-04 — The repl is written in ink
+
+`ink` on a terminal now runs `tools/repl.k`. The prompt, the entry reader, the
+`\q` / `exit` / EOF handling and the multi-line dict, table and keyed-table grids
+are all k; the Zig loop (`runRepl`, ~55 lines of byte-at-a-time line reading) is
+gone. `ink repl` starts the same tool explicitly. Session output is byte-identical
+to the old loop — `test/repl.k` pins the grids, the trimming and the continuation
+rule.
+
+- **`. "1+2"` evaluates source**, as in ngn/k. Monadic `.` on a char vector used
+  to parse a *number* out of the string (undocumented, unused; `` `i$"12" ``
+  is the cast). A failure is an error VALUE, never an abort, so the repl can
+  print it: a runtime failure is the usual `!type`, a parse failure interns its
+  whole message, `` !"parse_error: UnexpectedToken at 1:7" ``.
+- **`` `show x ``** renders a value the way the repl prints it — `$x` for atoms
+  and flat vectors, but nested lists may break across lines.
+- **Module auto-loading no longer runs on repl input.** Typing `json.parse …`
+  at the prompt will not pull in the module; `\l json` or `2:"json"` first.
+  Scripts and `\l` are unaffected.
+- **`\t:n expr` no longer resets the stack**, so it is safe inside a nested eval
+  (`2:` a module, or the repl's `. src`). It used to run through `runFrom`, whose
+  `resetStack` cut the caller's values out from under it — the k repl turned that
+  latent bug into a panic on the first `\t` typed at the prompt. `runFrom` is now
+  `runNested`, which pushes a frame above the caller's stack the way `2:` does.
+- **A tool is resolved once**, by `runTool` — `ink <tool>`, `ink repl` and the
+  bare-`ink` terminal path share it.
+- **`src/cmd/repl.zig` → `src/cmd/eval.zig`, `Repl` → `Eval`.** Nothing outside
+  `tools/repl.k` is called "repl" any more: what is left evaluates a source text
+  statement by statement, printing as it goes (`stream`, for scripts and piped
+  stdin) or collecting (`collect`, for a Jupyter cell). With the interactive
+  caller gone, `Result.source`, the byte-offset bookkeeping that built it and
+  `emitGapComments` (comment pass-through results the only remaining caller
+  skipped) all went with it, along with the now-unreachable `VM.runFrom` — 282
+  lines out, 190 back, and the two entry points share one statement splitter and
+  one renderer instead of each having their own.
+
 ## 2026-08-04 — Null is the identity verb `::`
 
 The `blank` type is gone from `K` and `V`. k's null is now the monadic identity

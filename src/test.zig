@@ -1677,7 +1677,7 @@ test "parse errors carry a source position" {
   const p = t.vm.parser.?;
   // line 3, at the `)` that should have been the `:` of a dict entry
   try testing.expectError(error.UnexpectedToken, p.parse("a:1\nb:2\n$[1;2;(a:1;4)]\n"));
-  const pos = @import("cmd/repl.zig").SrcPos.of("a:1\nb:2\n$[1;2;(a:1;4)]\n", p.err_pos);
+  const pos = @import("cmd/eval.zig").SrcPos.of("a:1\nb:2\n$[1;2;(a:1;4)]\n", p.err_pos);
   try testing.expectEqual(@as(u32, 3), pos.line);
   try testing.expectEqual(@as(u32, 13), pos.col);  // the `)` where a `:` was due
 }

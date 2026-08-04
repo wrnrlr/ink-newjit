@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const VM = @import("../runtime/vm.zig").VM;
-const Repl = @import("repl.zig").Repl;
+const Eval = @import("eval.zig").Eval;
 const serve = @import("../runtime/serve.zig");
 const ffi = @import("../ffi.zig");
 const home = @import("../home.zig");
@@ -11,7 +11,6 @@ const help = @import("help.zig");
 const disasm = @import("disasm.zig");
 const cmdparse = @import("parse.zig");
 const bundle = @import("bundle.zig");
-const Lexer = @import("../parser/lexer.zig").Lexer;
 
 /// Called by C extensions (e.g. GPU) to process pending IPC messages from
 /// within their own event loop.  No-ops when current_vm is not set.
@@ -67,59 +66,26 @@ const V = @import("../noun/value.zig").V;
 const K = @import("../noun/class.zig").K;
 const N = @import("../noun/array.zig").N;
 
-// Read one physical line (up to '\n') from fd, appending its bytes (without the
-// newline) to buf. Returns false on EOF when nothing was read on this line.
-fn readPhysicalLine(allocator: std.mem.Allocator, buf: *std.ArrayList(u8)) !bool {
+// Run a k tool — `tools/<name>.k`, resolved from the CWD (dev tree) or
+// `$INK_HOME/tools/` (installed), the same way `\l` resolves libraries.
+// Returns false when there is no such tool file; a failure inside it exits.
+// `vm.eval` (not evalSource) so a self-running tool's terminal value isn't
+// echoed onto its stdout stream.
+fn runTool(allocator: std.mem.Allocator, vm: *VM, loader: *modules.ModuleLoader, name: []const u8) bool {
   const io = std.Io.Threaded.global_single_threaded.io();
-  var byte: [1]u8 = undefined;
-  var any = false;
-  while (true) {
-    const n = std.Io.File.stdin().readStreaming(io, &.{byte[0..]}) catch |err| {
-      if (err == error.EndOfStream) return any;
-      return err;
-    };
-    if (n == 0) return any; // EOF
-    any = true;
-    if (byte[0] == '\n') return true;
-    try buf.append(allocator, byte[0]);
-  }
-}
-
-fn runRepl(allocator: std.mem.Allocator, vm: *VM, loader: *modules.ModuleLoader) !void {
-  var repl = Repl.init(allocator, vm);
-  var buf = try std.ArrayList(u8).initCapacity(allocator, 64);
-  defer buf.deinit(allocator);
-  while (true) {
-    std.debug.print("  ", .{});
-    buf.clearRetainingCapacity();
-    // Read a logical input, spanning multiple physical lines while an
-    // unterminated multi-line string keeps the buffer open.
-    var eof = false;
-    while (true) {
-      if (!try readPhysicalLine(allocator, &buf)) { eof = true; break; }
-      try buf.append(allocator, '\n');
-      if (!Lexer.endsOpenString(buf.items)) break;
-      std.debug.print("  ", .{}); // continuation prompt
-    }
-    // A leading space/tab on the entry requests the raw k literal instead of
-    // the pretty multi-line dict/table rendering.
-    const lead_ws = buf.items.len > 0 and (buf.items[0] == ' ' or buf.items[0] == '\t');
-    const line = std.mem.trim(u8, buf.items, " \t\r\n");
-    if (eof and line.len == 0) return;
-    if (std.mem.eql(u8, line, "\\q") or std.mem.eql(u8, line, "exit")) break;
-    if (line.len > 0) {
-      loader.autoLoad(vm, line) catch {};
-      if (repl.eval(line, !lead_ws)) |res| {
-        defer res.deinit(allocator);
-        for (res.results) |r| {
-          if (r.output.len > 0) std.debug.print("{s}\n", .{r.output});
-        }
-      } else |err| {
-        std.debug.print("Error: {s}\n", .{@errorName(err)});
-      }
-    }
-    if (eof) return;
-  }
+  const tool_path = resolveToolPath(allocator, name) orelse return false;
+  defer allocator.free(tool_path);
+  const src = std.Io.Dir.cwd().readFileAlloc(io, tool_path, allocator, std.Io.Limit.limited(10 * 1024 * 1024)) catch return false;
+  defer allocator.free(src);
+  var stdout_buf: [4096]u8 = undefined;
+  var w = std.Io.File.stdout().writer(io, &stdout_buf);
+  vm.out = &w.interface;
+  loader.autoLoad(vm, src) catch {};
+  _ = vm.eval(src) catch |e| {
+    std.debug.print("ink {s}: {}\n", .{ name, e });
+    std.process.exit(1);
+  };
+  return true;
 }
 
 fn evalStdin(allocator: std.mem.Allocator, vm: *VM, loader: *modules.ModuleLoader) !void {
@@ -135,8 +101,8 @@ fn evalStdin(allocator: std.mem.Allocator, vm: *VM, loader: *modules.ModuleLoade
   var stdout_buf: [4096]u8 = undefined;
   var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
   vm.out = &stdout_writer.interface;
-  var repl = Repl.init(allocator, vm);
-  _ = try repl.evalStream(trimmed, &stdout_writer.interface);
+  var ev = Eval.init(allocator, vm);
+  _ = try ev.stream(trimmed, &stdout_writer.interface);
 }
 
 // Scan both the working-directory lib (dev tree) and $INK_HOME/lib (installed)
@@ -204,8 +170,8 @@ fn evalSource(allocator: std.mem.Allocator, vm: *VM, loader: *modules.ModuleLoad
 
   const trimmed = std.mem.trim(u8, source, " \t\r\n");
   loader.autoLoad(vm, trimmed) catch {};
-  var repl = Repl.init(allocator, vm);
-  _ = repl.evalStream(trimmed, &stdout_writer.interface) catch |err| {
+  var ev = Eval.init(allocator, vm);
+  _ = ev.stream(trimmed, &stdout_writer.interface) catch |err| {
     std.debug.print("error in {s}: {}\n", .{ label, err });
     std.process.exit(1);
   };
@@ -362,28 +328,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
   defer loader.deinit();
   scanLibDirs(&loader);
 
-  // `ink <tool>` — run a k tool `tools/<tool>.k`, resolved from CWD `tools/` (dev)
-  // or `$INK_HOME/tools/` (installed) — the same way `\l` resolves libraries.
-  // `ink lsp` is one such tool; future tools are just new files under tools/.
-  // `vm.eval` (not `evalSource`) so a self-running tool's terminal value isn't
-  // echoed onto its stdout stream.
+  // `ink <tool>` — run a k tool `tools/<tool>.k`.  `ink lsp` and `ink repl` are
+  // two such tools; future ones are just new files under tools/.
   if (script_path) |sp| if (std.mem.indexOfScalar(u8, sp, '/') == null and
       std.mem.indexOfScalar(u8, sp, '.') == null) {
-    if (resolveToolPath(allocator, sp)) |tool_path| {
-      defer allocator.free(tool_path);
-      if (std.Io.Dir.cwd().readFileAlloc(io, tool_path, allocator, std.Io.Limit.limited(10 * 1024 * 1024))) |tool_src| {
-        defer allocator.free(tool_src);
-        var stdout_buf: [4096]u8 = undefined;
-        var w = std.Io.File.stdout().writer(io, &stdout_buf);
-        vm.out = &w.interface;
-        loader.autoLoad(vm, tool_src) catch {};
-        _ = vm.eval(tool_src) catch |e| {
-          std.debug.print("ink {s}: {}\n", .{ sp, e });
-          std.process.exit(1);
-        };
-        return;
-      } else |_| {}
-    }
+    if (runTool(allocator, vm, &loader, sp)) return;
   };
 
   // `ink disasm <script.k>` — compile without running, print bytecode, exit.
@@ -401,7 +350,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
     return cmdparse.run(vm, extra_args.items);
   };
 
-  if (script_path == null and stdin_is_tty) return runRepl(allocator, vm, &loader);
+  // The interactive loop is itself a k tool (tools/repl.k) — the prompt, the
+  // entry reader and the pretty dict/table grids all live there.
+  if (script_path == null and stdin_is_tty) {
+    if (runTool(allocator, vm, &loader, "repl")) return;
+    std.debug.print("ink: cannot find tools/repl.k (set INK_HOME to the install prefix)\n", .{});
+    std.process.exit(1);
+  }
   if (script_path == null) return evalStdin(allocator, vm, &loader);
 
   try setupArgs(vm, exe_name, script_path, extra_args.items);

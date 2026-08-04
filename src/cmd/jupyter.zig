@@ -24,7 +24,7 @@ const json = std.json;
 const Fd = posix.fd_t;
 const Alloc = std.mem.Allocator;
 const VM = @import("../runtime/vm.zig").VM;
-const Repl = @import("repl.zig").Repl;
+const Eval = @import("eval.zig").Eval;
 const MockWriter = @import("../util.zig").MockWriter;
 const modules = @import("modules.zig");
 const Lexer = @import("../parser/lexer.zig").Lexer;
@@ -215,7 +215,7 @@ const Kernel = struct {
   gpa: Alloc,
   vm: *VM,
   loader: *modules.ModuleLoader,
-  repl: Repl,
+  eval: Eval,
   key: []const u8,
   shell: Socket,
   control: Socket,
@@ -385,7 +385,7 @@ const Kernel = struct {
     defer self.vm.out = saved_out;
 
     self.loader.autoLoad(self.vm, trimmed) catch {};
-    const ev = self.repl.eval(trimmed, true) catch |err| {
+    const ev = self.eval.collect(trimmed, true) catch |err| {
       self.vm.out = saved_out;
       const ev_msg = std.fmt.allocPrint(gpa, "eval error: {s}", .{@errorName(err)}) catch "eval error";
       defer if (!std.mem.eql(u8, ev_msg, "eval error")) gpa.free(ev_msg);
@@ -663,7 +663,7 @@ pub fn run(gpa: Alloc, conn_path: []const u8) !void {
     .gpa = gpa,
     .vm = vm,
     .loader = &loader,
-    .repl = Repl.init(gpa, vm),
+    .eval = Eval.init(gpa, vm),
     .key = try gpa.dupe(u8, cfg.key),
     .shell = try Socket.bind(cfg, cfg.shell_port, .router),
     .control = try Socket.bind(cfg, cfg.control_port, .router),

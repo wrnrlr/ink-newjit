@@ -65,10 +65,13 @@ src/
 │   ├── tape.zig      # OpCode enum and Chunk (bytecode storage)
 │   └── ir.zig        # Intermediate representation
 ├── ffi.zig        # FFI bridge to C shared libraries
-├── repl.zig       # REPL
-├── runner.zig     # Main entry point
+├── cmd/
+│   ├── runner.zig # Main entry point (argv, tools, script/stdin evaluation)
+│   ├── repl.zig   # Statement streaming for scripts + the Jupyter kernel's cell eval
+│   └── …          # bundle, jupyter, modules, parse, disasm, help
 └── test.zig       # Unit test harness (Tester struct, vm.eval())
 lib/               # Native extensions (gpu, font, json, csv, md5)
+tools/             # k tools run by `ink <tool>` — repl.k (the interactive loop), lsp.k, doc.k, klint.k
 test/              # Integration test scripts (.k files)
 doc/               # changelog.md
 ```

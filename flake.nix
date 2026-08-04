@@ -63,11 +63,15 @@
           zig build data -Dcore-only=true -Doptimize=ReleaseFast
         '';
 
-        # Install the k library (*.k + *.kb, preserving layout) into $out/lib.
+        # Install the k library (*.k + *.kb, preserving layout) into $out/lib,
+        # and the k tools `ink <tool>` runs into $out/tools.  tools/repl.k IS the
+        # interactive repl, so a package without it has no prompt at all.
         installLib = ''
-          mkdir -p "$out/lib"
+          mkdir -p "$out/lib" "$out/tools"
           ( cd lib && find . \( -name '*.k' -o -name '*.kb' \) -print0 \
             | tar --null -cf - -T - ) | ( cd "$out/lib" && tar -xf - )
+          ( cd tools && find . -name '*.k' -print0 \
+            | tar --null -cf - -T - ) | ( cd "$out/tools" && tar -xf - )
         '';
 
         # The host package: a single core-only ink binary, the k library, and a

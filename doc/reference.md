@@ -377,6 +377,10 @@ while assigment of globals in a lambda happen with a double colon `::`
 
 ### Other Verbs
 - `.s` **GetSymbol** - retrieve global by symbol name
+- `.C` **Eval** - evaluate ink source in the global scope: `. "1+2"` → `3`. Failure
+  comes back as an error *value*, never an abort — a runtime failure is the usual
+  `!type`, a parse failure is `` !"parse_error: UnexpectedToken at 1:7" ``, message
+  and position included. Locals of the calling lambda are not in scope.
 - `s$y` **Cast** - cast y to type s. `` `I$"-12" `` → `-12`; `` `F$"-12.3" `` → `-12.3`
 
 ### Bulk Verbs
@@ -601,6 +605,10 @@ Runnable versions of all three tiers are in `test/ipcback.k`,
 - `` `env[] `` **Environment variables** - dict of env variables
 - `` `dir p `` **Directory walk** - recursively list file paths under directory `p` (a char vector), skipping hidden/build dirs; returns a list of path strings. Apply by **juxtaposition** (`` `dir p ``), not `@`.
 - `` `prng[] `` **Random number**
+- `` `show x `` **Repl rendering** - `x` as the REPL prints it. The same text as `$x`
+  for atoms and flat vectors, but a nested list may break across lines, which `$`
+  never does. `tools/repl.k` prints results with it and layers the multi-line dict
+  and table grids on top.
 - `` `t[] `` **Clock** - microseconds on a monotonic clock; for elapsed time, not wall time
 - `` `sleep[ms] `` **Sleep** - block for `ms` milliseconds (fractional is fine; ≤0 is a no-op)
 - `` `timer[ms] `` **Timer** - call the global `z.ts` every `ms` ms while the event

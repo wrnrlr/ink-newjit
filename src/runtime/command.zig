@@ -66,9 +66,13 @@ pub fn exec(vm: *VM, verb: []const u8, n: u32, args: []const u8) !V {
     // Compile the expression once, then time only its repeated execution —
     // re-parsing/compiling each iteration would dominate the measurement.
     const start_ip = try vm.compileOnce(args);
+    // runNested, not runFrom: `\t` also runs inside a nested eval (a `2:` load, or
+    // the k repl's `. src`), and resetting the stack there would cut the caller's
+    // values out from under it.  The appended code is dropped after the last run.
+    defer vm.chunk.code.shrinkRetainingCapacity(start_ip);
     const start = std.Io.Clock.awake.now(io);
     for (0..@as(usize, count)) |_| {
-      var r = try vm.runFrom(start_ip);
+      var r = try vm.runNested(start_ip);
       r.deinit(vm.alloc);
     }
     const end = std.Io.Clock.awake.now(io);

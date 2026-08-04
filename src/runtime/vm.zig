@@ -236,16 +236,6 @@ pub const VM = struct {
     return start_ip;
   }
 
-  // Execute bytecode previously compiled at `start_ip` to completion on the
-  // persistent top-level frame, returning the result value.
-  pub fn runFrom(vm: *VM, start_ip: usize) !V {
-    vm.resetStack();
-    vm.current_chunk = vm.chunk;
-    vm.currentFrame().ip = start_ip;
-    try vm.run();
-    return vm.pop();
-  }
-
   // Re-entrant module eval for a NESTED `2:` load (a `2:` executed while another
   // file is running). Unlike interpret(), it does NOT resetStack/reset the caller's
   // frame — it compiles the module, runs it on its OWN top-level frame above the
@@ -253,33 +243,48 @@ pub const VM = struct {
   // stack/frame/chunk and returns the module's result. This is what lets a
   // `2:`-loaded file itself `2:`-load another (e.g. dye.k → spirv.k).
   pub fn evalNested(vm: *VM, txt: []const u8) anyerror!V {
+    const start_ip = try vm.compileOnce(txt);   // appends to vm.chunk, returns its start ip
+    // Truncate the module's appended top-level code off the shared chunk so the
+    // caller's code.len (and its own code-end detection) is restored — else the
+    // caller runs past its end into the appended code. (Lambda chunks the module
+    // created are separate and survive; the globals it defined persist.)
+    defer vm.chunk.code.shrinkRetainingCapacity(start_ip);
+    return vm.runNested(start_ip);
+  }
+
+  // Run already-compiled top-level code at `start_ip` on a frame of its own,
+  // above the caller's stack, and hand back its last value. The caller owns the
+  // appended code and must truncate it once the code will not be run again —
+  // `\t:n expr` times the same `start_ip` repeatedly, so it truncates after the
+  // last run rather than per run.
+  pub fn runNested(vm: *VM, start_ip: usize) anyerror!V {
     const prev_frames = vm.frames_len;
     const res_slot = vm.stack_len;
     const saved_chunk = vm.current_chunk;
-    const start_ip = try vm.compileOnce(txt);   // appends to vm.chunk, returns its start ip
     vm.current_chunk = vm.chunk;
     vm.pushFrame(.{ .ip = start_ip, .base = res_slot, .result_slot = res_slot, .lambda_idx = NO_LAMBDA });
     vm.runUntil(prev_frames) catch |e| {
       vm.frames_len = prev_frames;
       vm.current_chunk = saved_chunk;
-      vm.chunk.code.shrinkRetainingCapacity(start_ip);
-      for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
-      vm.stack_len = res_slot;
+      vm.dropAbove(res_slot);
       return e;
     };
-    // The module's top-level code has no Return, so it ran to code end and broke out
-    // of runUntil with its frame still on. Take its last value, then restore. Truncate
-    // the module's appended top-level code off the shared chunk so the caller's
-    // code.len (and its own code-end detection) is restored — else the caller runs
-    // past its end into the appended module code. (Lambda chunks the module created
-    // are separate and survive; the globals it defined persist.)
+    // The code has no Return, so it ran to code end and broke out of runUntil with
+    // its frame still on. Take its last value, then restore the caller's stack,
+    // frame level and chunk.
     const result = if (vm.stack_len > res_slot) vm.pop() else V.nil;
-    for (vm.stack[res_slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
-    vm.stack_len = res_slot;
+    vm.dropAbove(res_slot);
     vm.frames_len = prev_frames;
     vm.current_chunk = saved_chunk;
-    vm.chunk.code.shrinkRetainingCapacity(start_ip);
     return result;
+  }
+
+  // Release everything the nested run left above `slot`. A callee that reset the
+  // stack (a `\t` in an older build did) leaves stack_len BELOW slot; clamp
+  // rather than slicing backwards, which would panic in the middle of a repl.
+  fn dropAbove(vm: *VM, slot: usize) void {
+    if (vm.stack_len > slot) for (vm.stack[slot..vm.stack_len]) |*v| v.deinit(vm.alloc);
+    vm.stack_len = slot;
   }
 
   fn executeCall(vm: *VM, func: V, incoming: []const V, mode: call.CallMode) !void {

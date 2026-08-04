@@ -18,6 +18,7 @@ const HELP =
   \\                              -t <platform>   cross-bundle (e.g. linux-x64)
   \\                              --static        link native extensions in (needs zig)
   \\                              --trailer       append-to-binary mode (no zig)
+  \\  repl                      Start the REPL explicitly (tools/repl.k)
   \\  lsp                       Run the language server over stdio (JSON-RPC)
   \\  jupyter -f <conn-file>    Run a Jupyter kernel over ZeroMQ
   \\  jupyter install           Install the Jupyter kernelspec

@@ -124,7 +124,8 @@ This directory contains the ink executable for all platforms, shared libraries a
 - Build debug: `time zig build`
 - Build release: `time zig build -Doptimize=ReleaseFast`
 - Unit tests: `time zig build test`
-- REPL test: `` echo "1+2" | ./zig-out/bin/ink ``
+- REPL test: `` echo "1+2" | ./zig-out/bin/ink `` (that is the piped path; the
+  interactive loop is `tools/repl.k`, run by a bare `ink` on a terminal or `ink repl`)
 - Walk example: `./zig-out/bin/ink test/walk.k`
 - Eyes example: `./zig-out/bin/ink demo/eyes.k`
 - Artifact sizes: `du -h zig-out/*/*`

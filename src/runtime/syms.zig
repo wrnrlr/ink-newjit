@@ -10,6 +10,8 @@ const Op1 = @import("../noun/operator.zig").Op1;
 const dispatch1 = @import("../primitive/dispatch.zig").dispatch1;
 const serve = @import("serve.zig");
 const Conns = @import("registry.zig").Conns;
+const TerseFormatter = @import("../noun/format.zig").TerseFormatter;
+const MockWriter = @import("../util.zig").MockWriter;
 
 // Microsecond clock.  std.time has no timestamp fns and posix clock_gettime
 // doesn't compile for Windows, so branch at comptime per platform.
@@ -46,6 +48,7 @@ pub fn apply(vm: *VM, sym_idx: u32, args: []const V) !V {
   }
   if (eql(u8, name, "env")) return getEnv(vm);
   if (eql(u8, name, "dir")) return listDir(vm, args);
+  if (eql(u8, name, "show")) return showValue(vm, args);
   if (eql(u8, name, "prng")) {
     const has_arg = args.len == 1 and !args[0].isNil();
     if (!has_arg) return getPrngState(vm);
@@ -363,6 +366,20 @@ fn listDir(vm: *VM, args: []const V) V {
   }
   walkInto(vm, path, &out, 0);
   return V.Values(vm.alloc, out.items) catch V{ .err = .memory };
+}
+
+/// `` `show x `` — a value rendered the way the REPL prints it.  Same text as
+/// `$x` for atoms and flat vectors, but nested lists may break across lines
+/// (the formatter's `.Repl` mode, which `$` never uses).  tools/repl.k layers
+/// the multi-line dict/table grids on top of this.
+fn showValue(vm: *VM, args: []const V) V {
+  if (args.len != 1 or args[0].isNil()) return V{ .err = .rank };
+  var mock = MockWriter.init(vm.alloc) catch return V{ .err = .memory };
+  defer mock.deinit();
+  var tf = TerseFormatter.init(vm, vm.alloc, .Repl);
+  var w = mock.writer();
+  tf.formatter().fmt(args[0], &w.interface) catch return V{ .err = .io };
+  return V.Chars(vm.alloc, mock.getText()) catch V{ .err = .memory };
 }
 
 fn getEnv(vm: *VM) !V {

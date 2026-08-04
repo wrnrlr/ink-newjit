@@ -33,12 +33,13 @@ jobs:
           VERSION="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
           VERSION="${VERSION#v}"
           mkdir -p dist staging
-          # result/ is the ink-cross output: bin/ink-<platform> + lib/
+          # result/ is the ink-cross output: bin/ink-<platform> + lib/ + tools/
           for bin in result/bin/ink-*; do
             name="$(basename "$bin")"            # e.g. ink-linux-x64 or ink-windows-x64.exe
             plat="${name#ink-}"; plat="${plat%.exe}"
             rm -rf staging/ink && mkdir -p staging/ink
             cp -rL result/lib staging/ink/lib
+            cp -rL result/tools staging/ink/tools   # tools/repl.k is the interactive repl
             case "$plat" in
               windows-*)
                 cp -L "$bin" staging/ink/ink.exe

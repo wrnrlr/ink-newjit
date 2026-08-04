@@ -230,3 +230,28 @@ Pre-existing — byte-identical on `ff55a56`, unrelated to the `::` null change
 that surfaced it. Fix is either to record the real source span of the composed
 expression when building the lambda, or to have `formatFn` fall back to
 reconstructing `f g` from the two operands when the range is empty.
+
+---
+
+## A stack overflow wedges the REPL — every later entry evaluates to nothing
+
+`g:{g x}` then `g 1` at the prompt: the recursion exhausts the [64] call frames,
+and from that point on every entry prints nothing. `3+4` typed afterwards is
+echoed by the terminal but produces no result line, so the session looks alive
+and answers nothing.
+
+Pre-existing and byte-identical on `c08ba78` (the Zig loop) and on the k repl —
+so it is the VM's post-overflow state, not the loop's. The overflow unwinds
+frames but leaves the top-level frame's `ip` past the code it was running, so the
+next compile-and-run starts from a position that immediately falls off the end.
+Fix is to reset the top-level frame (`ip`, stack, `frames_len`) when a run aborts
+with StackOverflow, the way `interpret` does on entry.
+
+## `&` on a boolean ATOM counts instead of locating (and `X?y` on a one-element vector answers with an atom)
+
+`&,1b` → `,0` (where), but `&1b` → `1` (the repeat-count reading of `&i`). That
+is defensible on its own, but `" \t"?x` collapses to an ATOM when `x` has one
+element, so `&(#w)=w?x` silently switches meaning between a 1-char string and a
+2-char one. It cost a wrong answer in `tools/repl.k` (`repl.keep`, which now
+reshapes the mask with `(#s)#m` first). Worth deciding whether monadic `&` on a
+boolean atom should locate (`0b`→`!0`, `1b`→`,0`) rather than count.

@@ -49,6 +49,7 @@ test:
 	$(INK) test/regex.k
 	$(INK) test/rope.k
 	$(INK) test/tables.k
+	$(INK) test/repl.k
 	$(INK) test/syntax.k
 	$(INK) test/fbx.k
 	$(INK) test/usd.k
