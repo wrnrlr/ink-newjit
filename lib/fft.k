@@ -55,24 +55,21 @@ ctwiddle:{[m;n]
 
 / ── FFT helpers (global — ink lambdas don't close over parent locals) ──────────
 
-/ Radix-2 butterfly: combine even/odd sub-FFTs into full-length FFT.
-/ Carries n explicitly because ink lambdas cannot close over parent locals.
-fftBfly:{[x;n]
-  m:n div 2
-  even:2*!m
-  E:fft cindex[x;even]
-  O:fft cindex[x;1+even]
-  R:cmul[ctwiddle[m;n];O]
-  ccat[cadd[E;R];csub[E;R]]
-}
-
 / ── public API ────────────────────────────────────────────────────────────────
 
 / fft[x] — DFT of complex vector x=(re;im). Length must be a power of 2.
+/ The else-branch is the radix-2 butterfly: recurse on the even/odd halves,
+/ then combine them into the full-length transform.
 / Ex: fft[(?8;8#0.)]    / FFT of 8 random reals with zero imaginary part
 fft:{[x]
   n:#x@0
-  $[n=1;x;fftBfly[x;n]]
+  $[n=1;x
+    [ m:n div 2
+      even:2*!m
+      E:fft cindex[x;even]
+      O:fft cindex[x;1+even]
+      R:cmul[ctwiddle[m;n];O]
+      ccat[cadd[E;R];csub[E;R]]]]
 }
 
 / ifft[x] — inverse DFT. Uses ifft(x) = conj(fft(conj(x))) / n.

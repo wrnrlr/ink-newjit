@@ -31,7 +31,7 @@ Pure k — loads on the first reference to any `pbr.*` name.
 / Material arrives per-vertex as wMat = (r; g; b; roughness) and wLit = sun
 / factor.  Key light L1 is the sun; L2 is a soft sky fill; ambient is a simple
 / sky/ground hemisphere term so shadowed faces still read.
-PbrFragment: shader.fragment[[wNor:`v3; wMat:`v4; wLit:`f32; out:`v4]; {[wNor;wMat;wLit]
+PbrFragment: shader.fragment[(wNor:`v3; wMat:`v4; wLit:`f32; out:`v4); {[wNor;wMat;wLit]
   ar: wMat[0]; ag: wMat[1]; ab: wMat[2]; rough: wMat[3]
   V: normalize 0.5774 0.5774 0.5774
   L1: normalize 0.5 1.5 0.3; H1: normalize V+L1
@@ -68,7 +68,7 @@ PbrFragment: shader.fragment[[wNor:`v3; wMat:`v4; wLit:`f32; out:`v4]; {[wNor;wM
 / lives in a resident storage buffer (stride 11) PULLED by gl_VertexIndex — no
 / vertex-input state. The near-flat depth term relies on painter-order draws /
 / mostly-convex meshes; self-occluding geometry (e.g. cloth) uses a stronger term.
-pbrVtx: shader.vertexPull[[wNor:`v3;wMat:`v4;wLit:`f32]; {[vb;vid]
+pbrVtx: shader.vertexPull[(wNor:`v3;wMat:`v4;wLit:`f32); {[vb;vid]
   b:11.*vid
   px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.3

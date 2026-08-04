@@ -44,7 +44,7 @@ gBendAlpha::1.0;gSdt::0.0
 / Flat 1×1 sheet in the xz-plane centred on the origin, held at y=1, at rest.
 Grid:{[w;h]c:w*h;i:!c;
   px:((i mod w)%w-1)-.5;py:((i div w)%h-1)-.5
-  [[]px:px;py:c#1.;pz:py;vx:c#0.;vy:c#0.;vz:c#0.]
+  ([]px:px;py:c#1.;pz:py;vx:c#0.;vy:c#0.;vz:c#0.)
 }
 g::Grid[nCols;nRows]
 
@@ -73,7 +73,7 @@ eLen:{[i;j] vlen3[((g`px)@j)-(g`px)@i; ((g`py)@j)-(g`py)@i; ((g`pz)@j)-(g`pz)@i]
 buildCons:{[rows]                                / rows: list of (i;j;restLen;alpha)
   i:{x@0}'rows; j:{x@1}'rows; l0:{x@2}'rows; al:{x@3}'rows
   w0:gIm@i; w1:gIm@j
-  [[]i:i; j:j; l0:l0; al:al; w0:w0; w1:w1; wt:w0+w1]}
+  ([]i:i; j:j; l0:l0; al:al; w0:w0; w1:w1; wt:w0+w1)}
 
 / Edge rows are pre-computed, then handed to buildCons: writing
 / `buildCons {..}'!n` misparses as `(buildCons {..})'!n`, so keep two steps.
@@ -132,7 +132,7 @@ buildClothMesh:{[]
 / wNor;wMat;wLit varyings so lib/pbr.k's PbrFragment can shade it.
 / Vertex pulling: the (per-frame rebuilt) stride-11 cloth mesh lives in a resident
 / buffer overwritten each frame with gpu.write and pulled at 11*vid.
-clothVtx: shader.vertexPull[[wNor:`v3;wMat:`v4;wLit:`f32]; {[vb;vid]
+clothVtx: shader.vertexPull[(wNor:`v3;wMat:`v4;wLit:`f32); {[vb;vid]
   b:11.*vid
   px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.6

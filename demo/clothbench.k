@@ -16,10 +16,10 @@ SDT::(1.%60.)%15.
 FR::20                                    / frames to time per size
 
 / ── CPU solver (cloth.k physics, size set by cpuSetup) ────────────────────────
-Grid:{[w;h]c:w*h;i:!c; px:((i mod w)%w-1)-.5;py:((i div w)%h-1)-.5; [[]px:px;py:c#1.;pz:py;vx:c#0.;vy:c#0.;vz:c#0.]}
+Grid:{[w;h]c:w*h;i:!c; px:((i mod w)%w-1)-.5;py:((i div w)%h-1)-.5; ([]px:px;py:c#1.;pz:py;vx:c#0.;vy:c#0.;vz:c#0.)}
 Pp:{[i] ((g`px)@i;(g`py)@i;(g`pz)@i)}
 eLen:{[i;j] vlen3[((g`px)@j)-(g`px)@i; ((g`py)@j)-(g`py)@i; ((g`pz)@j)-(g`pz)@i]}
-buildCons:{[rows] i:{x@0}'rows; j:{x@1}'rows; l0:{x@2}'rows; al:{x@3}'rows; w0:gIm@i; w1:gIm@j; [[]i:i;j:j;l0:l0;al:al;w0:w0;w1:w1;wt:w0+w1]}
+buildCons:{[rows] i:{x@0}'rows; j:{x@1}'rows; l0:{x@2}'rows; al:{x@3}'rows; w0:gIm@i; w1:gIm@j; ([]i:i;j:j;l0:l0;al:al;w0:w0;w1:w1;wt:w0+w1)}
 applyPass:{[c] i:c`i;j:c`j;l0:c`l0;al:c`al;w0:c`w0;w1:c`w1;wt:c`wt; px:g`px;py:g`py;pz:g`pz; dxs:(px@j)-px@i;dys:(py@j)-py@i;dzs:(pz@j)-pz@i; ds:vlen3[dxs;dys;dzs]; safe:ds>0.0001;dsc:ds|0.0001; ndx:dxs%dsc;ndy:dys%dsc;ndz:dzs%dsc; Cs:ds-l0; lams:0.5*(Cs*safe)%wt+al%gSdt*gSdt; dlx:ndx*lams;dly:ndy*lams;dlz:ndz*lams; k:i,j; g[`px]::@[px;k;+;(dlx*w0),0.-dlx*w1]; g[`py]::@[py;k;+;(dly*w0),0.-dly*w1]; g[`pz]::@[pz;k;+;(dlz*w0),0.-dlz*w1]}
 clothSubstep:{[x] free:gIm>0.; g[`vy]::(g`vy)+free*(-9.81*gSdt); prev:g; g[`px`py`pz]::(g`px`py`pz)+gSdt*g`vx`vy`vz; g[`py]|::-2.; applyPass'(hCons;vCons;dCons;bCons); g[`vx`vy`vz]::free*/:((g`px`py`pz)-prev`px`py`pz)%gSdt; x}
 clothFrame:{[] gSdt::SDT; 15 clothSubstep/ 0}

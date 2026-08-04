@@ -183,14 +183,12 @@ concatStep: {[i]
   cv:: cv,$[nc;(0;v);,v]
   0
 }
-insertConcatDo: {[types;vals]
+insertConcat: {[types;vals]
+  $[~#types; :(types;vals); ]
   cTypes::types; cVals::vals; cN::#cTypes
   ct::,cTypes@0; cv::,cVals@0
   $[cN>1; concatStep'1+!cN-1; 0]
   (ct;cv)
-}
-insertConcat: {[types;vals]
-  $[#types; insertConcatDo[types;vals]; (types;vals)]
 }
 
 / shunting-yard → postfix
@@ -288,18 +286,15 @@ finish: {
   f: *|frags
   m: emit[5;0;0]
   patchAll[f@1;m]
-  [ops:ops;a1:arg1;a2:arg2;cls:clsTab;start:f@0]
+  (ops:ops;a1:arg1;a2:arg2;cls:clsTab;start:f@0)
 }
-finishEmpty: {
-  m: emit[5;0;0]
-  [ops:ops;a1:arg1;a2:arg2;cls:clsTab;start:m]
-}
-
 build: {[types;vals;cls]
   ops::!0; arg1::!0; arg2::!0; clsTab::cls; frags::()
   pTypes::types; pVals::vals
   compStep'!#pTypes
-  $[#frags; finish[]; finishEmpty[]]
+  $[#frags; finish[]
+    [ m: emit[5;0;0]
+      (ops:ops;a1:arg1;a2:arg2;cls:clsTab;start:m)]]
 }
 
 / ── NFA execution (Pike VM) ──────────────────────────────────────────────────
@@ -333,14 +328,11 @@ step: {[pcs;pos]
   $[#nextPcs; epsClosure[nextPcs;pos+1]; !0]
 }
 
-stepUpdate: {[pcs;pos;prevLm]
-  np: step[pcs;pos]
-  nm: $[(#np)&hasMatch[np]; pos+1; prevLm]
-  (np;nm;pos+1)
-}
-
 advance: {[st]
-  $[#st 0; stepUpdate[st 0;st 2;st 1]; (st 0;st 1;slen)]
+  $[~#st 0; :(st 0;st 1;slen); ]
+  np: step[st 0;st 2]
+  nm: $[(#np)&hasMatch[np]; (st 2)+1; st 1]
+  (np;nm;(st 2)+1)
 }
 
 matchAt: {[prog;str;start]

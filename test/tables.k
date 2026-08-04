@@ -13,7 +13,7 @@
 ok:: 0; nok:: 0
 chk: {[nm;b] $[b; ok::ok+1; nok::nok+1]; $[b; 0; `0: "FAIL ",nm,"\n"]}
 
-T: [[]i:1 2 3 4 5; f:1.5 2.5 3.5 4.5 5.5; s:`a`b`c`d`e; b:10011b; c:"vwxyz"]
+T: ([]i:1 2 3 4 5; f:1.5 2.5 3.5 4.5 5.5; s:`a`b`c`d`e; b:10011b; c:"vwxyz")
 
 run: {[]
   / ── select by mask ────────────────────────────────────────────────────────
@@ -48,9 +48,23 @@ run: {[]
   chk["grade by a column"; ((T@<T`f)`i)~1 2 3 4 5]
   chk["grade descending";  ((T@>T`f)`i)~5 4 3 2 1]
 
+  / ── tier-2 float columns (`d`/`h`) take the typed path too ────────────────
+  / These USED to fall through to the boxed gather because the dispatch was a
+  / hand-listed switch; it is derived from class.zig's K.backed table now, so
+  / adding a numeric type can't silently leave a column on the slow path again.
+  Dv: `d$1.5 2.5 3.5 4.5
+  Hv: `h$1.5 2.5 3.5 4.5
+  P: ([]k:1 2 3 4; d:Dv; h:Hv)
+  chk["D/H columns keep their types"; (@'.P)~`I`D`H]
+  p: P@&0101b
+  chk["row-select keeps D/H types";   (@'.p)~`I`D`H]
+  chk["row-select D values";          (p`d)~`d$2.5 4.5]
+  chk["row-select H values";          (p`h)~`h$2.5 4.5]
+  chk["row-select sibling column";    (p`k)~2 4]
+
   / ── a general-list column CANNOT take the typed path: its elements are
   / boxed values that have to be ref-counted, so it keeps the generic gather.
-  L: [[]k:1 2 3; v:((1;`a);(2;`b);(3;`c))]
+  L: ([]k:1 2 3; v:((1;`a);(2;`b);(3;`c)))
   lr: L@&101b
   chk["L column: values gathered"; (lr`v)~((1;`a);(3;`c))]
   chk["L column: stays a list";    (@lr`v)~`L]

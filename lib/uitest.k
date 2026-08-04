@@ -151,26 +151,35 @@ t.render:{[fn] t.RFN::fn; window.test[{[x] t.RFN[]; 0}; (t.VW*t.DPR),(t.VH*t.DPR
 t.fontPath:"font/FiraCode-Regular.ttf"
 t.fontSet:0
 t.setFont:{[p] t.fontPath::p; t.fontSet::0; `}
-t.loadFont:{[] ui.setFont (font.read t.fontPath) 0; t.fontSet::1}
-t.ensureFont:{[] $[t.fontSet; 0; t.loadFont[]]}
+t.ensureFont:{[] $[t.fontSet; 0; [ui.setFont (font.read t.fontPath) 0; t.fontSet::1]]}
   / render the current view to the GPU frame queue (call inside a shot, before gpu.shot flushes it).
 t.paintNow:{[] t.ensureFont[]; p:t.props (); W:ui.run[t.VIEW[]; p]; ui.draw[W; t.VW*t.DPR; t.VH*t.DPR]}
   / pixel diff of two image.read dicts → fraction of bytes that differ (1.0 if dims mismatch).
-  / (helpers, not bracketed $-branches: a `[stmt;stmt]` block inside $[…] breaks the parser.)
 t.imDims:{[x] (x`width; x`height)}
-t.byteDiff:{[da;db] n:(#da)&#db; $[n=0; 1.; (+/~(n#da)=n#db)%n]}
-t.pngDiff:{[a;b] $[(t.imDims a)~t.imDims b; t.byteDiff[a`data; b`data]; 1.]}
+t.pngDiff:{[a;b]
+  $[~(t.imDims a)~t.imDims b; :1.; ]
+  da:a`data; db:b`data; n:(#da)&#db
+  $[n=0; 1.; (+/~(n#da)=n#db)%n]}
   / path builder — kept as a var so `gpu.shot p` (not `gpu.shot dir,"/",…`, which parses as
   / `(gpu.shot dir),"/",…` — a monadic call binds before the `,`) targets the whole path.
 t.shotPath:{[name;ext] t.shotDir,"/",name,ext}
   / t.shot[name] — capture the current view to <shotDir>/<name>.png (no assertion).
 t.shot:{[name] t.paintNow[]; p:t.shotPath[name;".png"]; gpu.shot p; `}
-  / golden branches as functions (again: no bracketed $-branches). Compare = render to <name>.out.png
-  / and diff vs the golden; save = write the golden and pass (baseline on first run).
-t.shotCmp:{[name;tol;g] out:t.shotPath[name;".out.png"]; gpu.shot out; o:image.read out; t.ok[name; (t.pngDiff[g;o])<tol]}
-t.shotSave:{[name;gold] gpu.shot gold; `0:"  NOTE ",name," saved new golden (review + rerun)\n"; t.pass name}
-  / t.shotEq[name;tol] — golden-diff the current view. Baseline-on-first-run; else assert diff<tol.
-t.shotEq:{[name;tol] gold:t.shotPath[name;".png"]; g:image.read gold; t.paintNow[]; $[`m~@g; t.shotCmp[name;tol;g]; t.shotSave[name;gold]]}
+  / t.shotEq[name;tol] — golden-diff the current view.  With no golden yet, write one and pass
+  / (baseline on first run); otherwise render to <name>.out.png and assert diff<tol.
+t.shotEq:{[name;tol]
+  gold:t.shotPath[name;".png"]
+  g:image.read gold
+  t.paintNow[]
+  $[~`m~@g
+    [ gpu.shot gold
+      `0:"  NOTE ",name," saved new golden (review + rerun)\n"
+      :t.pass name]
+    ]
+  out:t.shotPath[name;".out.png"]
+  gpu.shot out
+  o:image.read out
+  t.ok[name; (t.pngDiff[g;o])<tol]}
 
   / ── report ───────────────────────────────────────────────────────────────────
 t.report:{[]

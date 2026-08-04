@@ -13,7 +13,7 @@
 2: "lib/gpu.k"
 
 / ── Compile SPIR-V shaders ──────────────────────────────────────────────────
-spirvWds:   shader.fragment[[uv:`v2; out:`v4]; {[uv] (uv[0]; uv[1]; 0.5; 1.0)}]
+spirvWds:   shader.fragment[(uv:`v2; out:`v4); {[uv] (uv[0]; uv[1]; 0.5; 1.0)}]
 computeWds: compCompute[{[x] x*2}]
 
 / ── Full-screen quad vertices: [x, y, u, v] for 800x600 window ──────────────

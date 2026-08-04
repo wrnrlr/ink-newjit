@@ -100,7 +100,7 @@ earthMesh: ,/ +(X;Y;Z;X;Y;Z;us;v)
 / floats, same layout the old uniform block used) — both PULLED by gl_VertexIndex, no
 / vertex-input state.  ub: [0..3]=yaw/pitch cos/sin, 4=zoom, 7=aspect, 8=cloudsOn,
 / 9=atmosphere, 10=bordersOn, 12..14=view-space sun.  The math is identical to the attribute version.
-earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v4]; {[vb;ub;vid]
+earthVtx: shader.vertexPull[(wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v4); {[vb;ub;vid]
   b:8.*vid
   px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
   nx:vb[b+3.]; ny:vb[b+4.]; nz:vb[b+5.]
@@ -132,7 +132,7 @@ earthVtx: shader.vertexPull[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v4]; {[vb;ub;vid]
 / night city lights); the specular mask gates an ocean sun-glint; clouds (white)
 / overlay both, lit by the sun and toggled by wUvF.z.  Output is clamped so the
 / glint/lights can't blow out to a white seam.
-earthFrag:shader.fragmentTexN[[wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v4;out:`v4]; 6; {[wNor;wTan;wUvF;wSun]
+earthFrag:shader.fragmentTexN[(wNor:`v3;wTan:`v3;wUvF:`v4;wSun:`v4;out:`v4); 6; {[wNor;wTan;wUvF;wSun]
   uv:    (wUvF[0]; wUvF[1])
   flag:  wUvF[2]
   atm:   wUvF[3]
@@ -189,7 +189,7 @@ STARFOV:  0.85      / how much sky fills the view
 / Pulled too: qb = the quad (stride 2), ub = 12 uniform floats (0..3 yaw/pitch, 4=asp, 5=fov,
 / 6=zoom, 7=atmos, 8..10=view-space sun).  Extra varyings feed the atmosphere halo (below):
 / wScr = raw NDC pos, wPar = (zoom;atmos;asp), wSun2 = the sun's screen-plane direction.
-starVtx: shader.vertexPull[[wRay:`v2;wRot:`v4;wScr:`v2;wPar:`v4;wSun2:`v2]; {[qb;ub;vid]
+starVtx: shader.vertexPull[(wRay:`v2;wRot:`v4;wScr:`v2;wPar:`v4;wSun2:`v2); {[qb;ub;vid]
   b:2.*vid
   px:qb[b]; py:qb[b+1.]
   cy:ub[0.]; sy:ub[1.]; cp:ub[2.]; sp:ub[3.]
@@ -197,7 +197,7 @@ starVtx: shader.vertexPull[[wRay:`v2;wRot:`v4;wScr:`v2;wPar:`v4;wSun2:`v2]; {[qb
   ((px; py; 0.9999; 1.0); (px*fov%asp; py*fov); (cy;sy;cp;sp); (px;py); (zoom;atm;asp;0.0); (Lx;Ly))
 }]
 
-starFrag: shader.fragmentTexN[[wRay:`v2; wRot:`v4; wScr:`v2; wPar:`v4; wSun2:`v2; out:`v4]; 1; {[wRay;wRot;wScr;wPar;wSun2]
+starFrag: shader.fragmentTexN[(wRay:`v2; wRot:`v4; wScr:`v2; wPar:`v4; wSun2:`v2; out:`v4); 1; {[wRay;wRot;wScr;wPar;wSun2]
   cy:wRot[0]; sy:wRot[1]; cp:wRot[2]; sp:wRot[3]
   dx:wRay[0]; dy:wRay[1]; dz:0.0-1.0
   / rotate the view ray by yaw-about-Y then pitch-about-X (same as the globe)

@@ -106,6 +106,8 @@ syn.KTAB: (
   (`dict;     `key;     `brace;   `brace;   1b)
   (`table;    `key;     `brace;   `brace;   1b)
   (`utable;   `key;     `brace;   `brace;   1b)
+  (`progn;    `bracket; `bracket; `brace;   1b)
+  (`ret;      `mono;    `mono;    `brace;   1b)
   (`cond;     `cond;    `cond;    `cond;    1b)
   (`command;  `cmd;     `cmd;     `cmd;     0b)
   (`op;       `op;      `op;      `op;      0b)

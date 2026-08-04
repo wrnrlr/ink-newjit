@@ -102,7 +102,7 @@ watchexec -r -w demo/cloth.k -- ./zig-out/bin/ink -unfocus -top -monitor 1 demo/
 ```k
 !10;
 
-[[]id:!20;w:?20]
+([]id:!20;w:?20)
 ```
 
 ```k

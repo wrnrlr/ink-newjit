@@ -131,11 +131,12 @@ first reference to any `image.*` name.
   at: {[img;x;y] w: img`width; c: img`comp; o: c * x + y * w; (img`data) @ o + !c}
 
   / Write a structure dict back (raw pixels preserved), or re-encode an image dict.
-  wrStruct: {[path;b] d: b`dib;
+  write: {[path;b]
+    $[~`pixels in !b; :enc (path; b`width; b`height; b`comp; b`data); ]
+    d: b`dib
     hasm: `masks in !b
     m:   $[hasm; b`masks; ()]
     msk: $[hasm; (m`r; m`g; m`b; m`a); 0 0 0 0]
     pal: $[`palette in !b; ,/ b`palette; !0]
     cc:  ccode d`compression
     wrs (path; d`width; d`height; d`depth; cc; msk; pal; b`pixels)}
-  write: {[path;b] $[`pixels in !b; wrStruct[path;b]; enc (path; b`width; b`height; b`comp; b`data)]}

@@ -58,7 +58,9 @@ row["x+:1";               "v==N"]                 / modify-assign is all red
 row["f:{[a;b]a+b}[]";     "v={[p[p[vDv{[["]
 row["$[0b;\"x\";\"y\"]";  "??BB?SSS?SSS?"]
 row["(1;2)";              "(N(N("]
-row["[a:1;b:2]";          "{kkN{kkN{"]
+row["(a:1;b:2)";          "{kkN{kkN{"]
+row["[a:1;b:2]";          "[v=N[v=N["]           / progn: a statement block
+row["{:x}";               "{mv{"]                / early return: ':' is mono, braces are the lambda's
 row["@[x;I;:;1]";         "=[v[v[[[N["]           / amend reads as assignment
 row["a;b";                "v;v"]
 

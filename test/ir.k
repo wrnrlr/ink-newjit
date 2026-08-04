@@ -22,25 +22,25 @@ both: {[io;fn] xOpt::0; a: shader.fragment[io;fn]; xOpt::1; b: shader.fragment[i
 
 / ── 1. neutral IR (textual back-end) for a small fragment body ───────────────
 `0 0: "── neutral IR for {[uv] (uv[0]; uv[1]; 0.5; 1.0)} ──"
-w0: shader.fragment[[uv:`v2; out:`v4]; {[uv] (uv[0]; uv[1]; 0.5; 1.0)}]
+w0: shader.fragment[(uv:`v2; out:`v4); {[uv] (uv[0]; uv[1]; 0.5; 1.0)}]
 xDump[]                                    / textual IR of the just-compiled body
 
 / ── 2. xOpt=1 byte-identical to xOpt=0 when nothing folds (optimizer is safe) ─
-b1: both[[x:`f32;out:`f32];{[x] x+x}]
+b1: both[(x:`f32;out:`f32);{[x] x+x}]
 chk[b1 0; b1 1; "x+x   : xOpt=1 ≡ xOpt=0 (nothing to fold)"]
-b2: both[[uv:`v2;out:`v2];{[uv] uv+0.5}]
+b2: both[(uv:`v2;out:`v2);{[uv] uv+0.5}]
 chk[b2 0; b2 1; "uv+0.5 : xOpt=1 ≡ xOpt=0 (splat, nothing to fold)"]
-b3: both[[uv:`v2;out:`v4];{[uv](uv[0];uv[1];0.5;1.0)}]
+b3: both[(uv:`v2;out:`v4);{[uv](uv[0];uv[1];0.5;1.0)}]
 chk[b3 0; b3 1; "v2→v4  : xOpt=1 ≡ xOpt=0 (nothing to fold)"]
 
 / ── 3. const-fold: 1.0+2.0 folds to 3.0, so xOpt=1 is shorter ────────────────
-bF: both[[x:`f32;out:`f32]; {[x] x+1.0+2.0}]
+bF: both[(x:`f32;out:`f32); {[x] x+1.0+2.0}]
 chk[1b; (#bF 1)<#bF 0;      "x+1.0+2.0 : xOpt=1 folds 1.0+2.0 (shorter module)"]
 chk[1b; |/(bF 1)=`I$3.0;    "folded constant 3.0 present"]
 chk[0b; |/(bF 1)=`I$2.0;    "un-folded 2.0 gone"]
 
 / ── 4. render a real circle SDF compiled through the IR path ────────────────
-spirvWds: shader.fragment[[uv:`v2; out:`v4]; {[uv]
+spirvWds: shader.fragment[(uv:`v2; out:`v4); {[uv]
   ux: ((uv[0]*2.0)-1.0)*4.0%3.0
   uy: (uv[1]*2.0)-1.0
   d: sqrt[(sqr ux)+(sqr uy)]-0.45

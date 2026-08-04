@@ -29,9 +29,9 @@ shufTy: {[w;n] i:findW[w;shufW n]; $[i<0; -1; w i+1]}
 
 / A v4 local `c` built from the two uv lanes plus two constants, then swizzled.
 / Every case compiles the SAME body shape so the shuffle is the only difference.
-f4: {[body] shader.fragment[[uv:`v2; out:`v4]; body]}
-f2: {[body] shader.fragment[[uv:`v2; out:`v2]; body]}
-f3: {[body] shader.fragment[[uv:`v2; out:`v3]; body]}
+f4: {[body] shader.fragment[(uv:`v2; out:`v4); body]}
+f2: {[body] shader.fragment[(uv:`v2; out:`v2); body]}
+f3: {[body] shader.fragment[(uv:`v2; out:`v3); body]}
 / A rejection latches xErr and yields `!xErr`; bind the result and never index it —
 / reading the latch IS the assertion. xReset clears it at the start of every compile.
 bad: {[body] f4[body]; xErr}

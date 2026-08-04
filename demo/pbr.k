@@ -21,7 +21,7 @@
 2: "lib/camera.k"  / orbit camera (WASD pan, scroll zoom, right-drag rotate)
 
 / ── Sky shader ───────────────────────────────────────────────────────────────
-skyWds: shader.fragment[[uv:`v2; out:`v4]; {[uv]
+skyWds: shader.fragment[(uv:`v2; out:`v4); {[uv]
   t: uv[1]
   sr: mix[0.22; 0.88; t]; sg: mix[0.45; 0.68; t]; sb: mix[0.92; 0.35; t]
   px: uv[0]*10.0; py: uv[1]*5.0

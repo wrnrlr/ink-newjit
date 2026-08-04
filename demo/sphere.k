@@ -62,7 +62,7 @@ icoMesh: ,/ sphVert' icoTris
 / in-shader (no CPU normal pass), then emits the standard wNor;wMat;wLit varyings
 / so lib/pbr.k's PbrFragment shades it.
 / Vertex pulling: geometry (stride 11) lives in a resident buffer, read at 11*vid.
-sphereVtx: shader.vertexPull[[wNor:`v3;wMat:`v4;wLit:`f32]; {[vb;vid]
+sphereVtx: shader.vertexPull[(wNor:`v3;wMat:`v4;wLit:`f32); {[vb;vid]
   b:11.*vid
   px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
   nx:vb[b+3.]; ny:vb[b+4.]; nz:vb[b+5.]

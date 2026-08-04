@@ -157,9 +157,9 @@ gpu.hold:     {[x] $[`M~@x; gpu.holdT x; `m~@x; gpu.holdD x; gpu.holdA x]}
 / Placed dict (kk2 §2.5): each value is its own resident buffer, resolved by KEY.
 / Values may be ragged (CSR data/off) — no length constraint. The kernel indexes a
 / dict column as a gather source ((D`data)@i), never elementwise at the thread index.
-gpu.holdD:    {[d] ks: !d; vs: d[ks]; ln: {#x}' vs; [keys: ks; hand: gpu.buffer' {0. + gpu.flat x}' vs; lens: ln; t: `dict; s: ln]}
+gpu.holdD:    {[d] ks: !d; vs: d[ks]; ln: {#x}' vs; (keys: ks; hand: gpu.buffer' {0. + gpu.flat x}' vs; lens: ln; t: `dict; s: ln)}
 gpu.fetchD:   {[dd] (dd`keys) ! {[h;n] n # gpu.read h}'[dd`hand; dd`lens]}
-gpu.holdA:    {[x] f: gpu.flat x; [gpu: gpu.buffer[0.+f]; t: `f; n: #f; s: %x]}
+gpu.holdA:    {[x] f: gpu.flat x; (gpu: gpu.buffer[0.+f]; t: `f; n: #f; s: %x)}
 gpu.holdInto: {[d;x] gpu.write[d`gpu; 0.+gpu.flat x]; d}
 / 8: d — a `tbl descriptor reads every column back and reassembles the table
 / (flip of the column dict); plain placements reshape to the recorded shape.
@@ -189,7 +189,7 @@ gpu.holdT: {[t] cols: !t; nr: #t cols 0; nc: #cols
   il: $[gpu.tblLay~`il; 1; gpu.tblLay~`planar; 0; (nc + 1) > gpu.tblBudget]
   $[il; gpu.holdTI[t; cols; nr; nc]; gpu.holdTP[t; cols; nr; nc]]}
 gpu.holdTP: {[t; cols; nr; nc] [cols: cols; hand: gpu.buffer' {0.+x}' t[cols]; n: nr; t: `tbl; s: ,nr; lay: `planar]}
-gpu.holdTI: {[t; cols; nr; nc] flat: 0. + ,/ + {0. + x}' t[cols]; [cols: cols; hand: gpu.buffer flat; n: nr; t: `tbl; s: ,nr; lay: `il; nc: nc]}
+gpu.holdTI: {[t; cols; nr; nc] flat: 0. + ,/ + {0. + x}' t[cols]; (cols: cols; hand: gpu.buffer flat; n: nr; t: `tbl; s: ,nr; lay: `il; nc: nc)}
 gpu.fetchN:   {[n;d] n # gpu.read[d`gpu]}
 
 / Solid-color fragment uniforms (44 floats matching the built-in fill shader FragUniforms).

@@ -57,7 +57,7 @@ swStatic:: ,/swBase,'swNor,'swMrep
 / Vertex pulling: the static mesh (stride 11) and the 8-float camera uniform both
 / live in resident storage buffers pulled by gl_VertexIndex; the uniform buffer is
 / overwritten each frame with the orbit-camera pose. uCam=ub[0..3], uPan=ub[4..6].
-swVtx: shader.vertexPull[[wNor:`v3;wMat:`v4;wLit:`f32]; {[vb;ub;vid]
+swVtx: shader.vertexPull[(wNor:`v3;wMat:`v4;wLit:`f32); {[vb;ub;vid]
   b:11.*vid
   px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
   nx:vb[b+3.]; ny:vb[b+4.]; nz:vb[b+5.]

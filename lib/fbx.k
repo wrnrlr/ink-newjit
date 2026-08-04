@@ -218,8 +218,10 @@ clorder:16 17 18 0 8 7 9 6 10 5 11 4 12 3 13 2 14 1 15
 / build a canonical Huffman table from per-symbol code lengths
 firstcodes:{[cnt]0,0{(x+y)*2}\-1_cnt}
 firstidx:{[cnt]0,-1_+\cnt}
-htable:{[L]ml:|/L;$[ml=0;(0#0;0#0;0#0;0#0);htable1[L;ml]]}
-htable1:{[L;ml]cnt:0,L{+/x=y}/:1+!ml;(cnt;firstcodes cnt;firstidx cnt;,/L{&x=y}/:1+!ml)}
+htable:{[L]
+  ml:|/L
+  $[ml=0;(0#0;0#0;0#0;0#0)
+    [cnt:0,L{+/x=y}/:1+!ml;(cnt;firstcodes cnt;firstidx cnt;,/L{&x=y}/:1+!ml)]]}
 
 / decode one symbol from table T (codes are read MSB-first)
 decsym:{[T;code;len]c:(2*code)+getbit[];l:len+1;cnt:T@0;fc:T@1;fi:T@2;syms:T@3;off:c-fc@l;$[(((cnt@l)>0)&(~off<0))&off<cnt@l;syms@(fi@l)+off;decsym[T;c;l]]}

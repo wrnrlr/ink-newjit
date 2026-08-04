@@ -8,10 +8,10 @@
 
 / vertex-pull: pos[3*vid .. +2] → gl_Position (clip space, w=1), plus a per-vertex
 / colour varying (here derived from vid so the three corners differ).
-vpull:: shader.vertexPull[[wc:`v3]; {[pos; vid] i:3.*vid
+vpull:: shader.vertexPull[(wc:`v3); {[pos; vid] i:3.*vid
   ((pos[i]; pos[i+1.]; pos[i+2.]; 1.); (0.9; 0.5*vid; 0.2))}]
 / fragment reads the interpolated colour varying
-fsolid:: shader.fragment[[wc:`v3; out:`v4]; {[wc] (wc[0]; wc[1]; wc[2]; 1.)}]
+fsolid:: shader.fragment[(wc:`v3; out:`v4); {[wc] (wc[0]; wc[1]; wc[2]; 1.)}]
 
 / one triangle, 3 verts × (x;y;z) in clip space (z=0)
 tri:: 0. 0.6 0.  -0.6 -0.5 0.  0.6 -0.5 0.

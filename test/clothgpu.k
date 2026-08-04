@@ -107,7 +107,7 @@ tris::(nTris;3)#triIds
 / normal (cross of the two edges), and outputs this corner's projected clip position
 / + the standard PBR varyings. Material/lighting are constants (clothMat), baked in.
 / (Rasterizer cull is NONE, so the sheet shows from both sides with one draw.)
-clothVtxPull:: shader.vertexPull[[wNor:`v3; wMat:`v4; wLit:`f32]; {[p; tri; vid]
+clothVtxPull:: shader.vertexPull[(wNor:`v3; wMat:`v4; wLit:`f32); {[p; tri; vid]
   t:floor[vid%3.]                     / triangle id (3 verts per triangle)
   cor:vid-3.*t                        / corner 0/1/2
   b:3.*t

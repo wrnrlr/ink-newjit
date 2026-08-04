@@ -78,16 +78,12 @@ kkStorePlan: {[key;p] kkPlanCache[key]:: p; p}
 / returned a buffer of ZEROS — no error, no kkWarn. Reject it up front instead.
 / (Implicit-param bodies declare no params at all, which stays legal.)
 kkArgNames: {[fn] lamArgs lamOf fn}
-kkBadParams: {[fn;nIn]
-  an: kkArgNames fn
-  $[0=#an; 0; ~ an ~ (#an) # `x`y`z; 1; 0]}
-/ `:expr` is not an early return in this dialect, so the guard is a branch: a bad
-/ lambda returns kkBadParamErr's error value, everything else falls through to
-/ kkPlanBuild2 (the original body).
-kkBadParamErr: {[fn] !"kk.compile: params must be named x/y/z positionally, got ",","/$'kkArgNames fn}
 kkPlanBuild: {[fn;args]
-  $[kkBadParams[fn; #args]; kkBadParamErr fn; kkPlanBuild2[fn;args]]}
-kkPlanBuild2: {[fn;args]
+  an: kkArgNames fn
+  $[(0<#an) & ~ an ~ (#an) # `x`y`z
+    [ e: !"kk.compile: params must be named x/y/z positionally, got ",","/$'an
+      :e]
+    ]
   kkPlanMisses:: kkPlanMisses + 1
   nIn: #args
   lamOf fn                                  / set Cst for the classify scans
@@ -111,27 +107,28 @@ kk.run: {[plan;args]
     kd~`ti;    kkRunTableI[plan;args]
     kd~`dict;  kkRunDict[plan;args]
     plan]}
-kkMiss: {[fn;nIn;key] p: gpu.compileCompute[shader.map[fn;nIn]; nIn+1]; kkCache[key]:: p; p}
 / Reject: signal an error (monadic ! on the message string) instead of warning to
 / stdout + returning !0 — kk.compile now fails loudly like any primitive.
 kkWarn: {[bad;nIn] !"kk.compile: ",$[3<nIn; "more than 3 inputs unsupported"; "unsupported verb/kind ",$bad]," (elementwise subset: arith/math over x/y/z)"}
 / Key is a SYMBOL, not a string: `str in !dict` runs char-wise (a string is a char
 / vector, not an atom) and `$[]` reads the resulting non-empty vector as true — so
 / a string key makes every cache probe a false hit. Symbols are atoms → scalar in.
-kkMapPipe: {[fn;nIn] key: `$ ($fn),"|",($nIn); $[key in !kkCache; kkCache key; kkMiss[fn;nIn;key]]}
+kkMapPipe: {[fn;nIn]
+  key: `$ ($fn),"|",($nIn)
+  $[key in !kkCache; kkCache key
+    [p: gpu.compileCompute[shader.map[fn;nIn]; nIn+1]; kkCache[key]:: p; p]]}
 kkRunMap: {[plan;args]
   a0: args 0; n: a0`n; sh: a0`s
   ob: gpu.buffer[(kkPad n)#0.]
   ih: {[d] d`gpu}' args
   gpu.dispatch[plan`pipe; ih,ob; n]
-  [gpu: ob; t: `f; n: n; s: sh]}
+  (gpu: ob; t: `f; n: n; s: sh)}
 / ── Gather path (kk2 §2.4-3): x@y → out[d] = x[y[d]] ─────────────────────────
 / A param used as the LEFT of @ is a gather SOURCE (`buf, indexed); every other
 / param is an `elem index (auto-loaded at d). All args are placements passed
 / positionally as x/y/z; the output length = the first index's length. Pipeline
 / cached by (source|g|#inputs). (Host-vector auto-upload of free names + the
 / +/x@W matrix reduce are the next sub-steps; here both operands are placed.)
-kkGMiss: {[fn;bufN;elemN;nb;key] p: gpu.compileCompute[shader.gmap[fn;bufN;elemN]; nb+1]; kkCache[key]:: p; p}
 kkPlanGath: {[fn;args;nIn]
   src:   kkGathSrc[]                        / names left-of-@ (Cst set by kkPlanBuild's lamOf)
   pn:    nIn # `x`y`z
@@ -139,8 +136,9 @@ kkPlanGath: {[fn;args;nIn]
   elemN: pn @ & ~ pn in src
   nb:    #args
   key:   `$ ($fn),"|g|",($nIn)
-  pipe:  $[key in !kkCache; kkCache key; kkGMiss[fn;bufN;elemN;nb;key]]
-  [kind:`gath; pipe:pipe; bufN:bufN; elemN:elemN]}
+  pipe:  $[key in !kkCache; kkCache key
+           [p: gpu.compileCompute[shader.gmap[fn;bufN;elemN]; nb+1]; kkCache[key]:: p; p]]
+  (kind:`gath; pipe:pipe; bufN:bufN; elemN:elemN)}
 kkRunGath: {[plan;args]
   pn:    (#args) # `x`y`z
   na:    pn ! args                          / param name → its descriptor
@@ -153,14 +151,13 @@ kkRunGath: {[plan;args]
   bufH:  {[d] d`gpu}' na bufN
   elemH: {[d] d`gpu}' na elemN
   gpu.dispatch[plan`pipe; bufH,elemH,ob; n]
-  [gpu: ob; t: `f; n: n; s: i0`s]}
+  (gpu: ob; t: `f; n: n; s: i0`s)}
 
 / +/x@W matrix gather-reduce: src (left-of-@) and mat (the k×n index matrix, right-
 / of-@) are both `buf; k,n come from mat's descriptor shape and are baked into the
 / kernel (GRk/GRn → xRedGather), so the cache key carries them. Output length = n.
 / elemNames must be an empty SYMBOL vector (0#`), not !0: joining `x`y with an
 / empty INT vector upcasts to a boxed general list and breaks the env dict lookup.
-kkGMMiss: {[fn;ops;k;n;key] GRk::k; GRn::n; p: gpu.compileCompute[shader.gmap[fn;ops;0#`]; (#ops)+1]; kkCache[key]:: p; p}
 / Resolve a gather operand NAME → its device descriptor: a param (x/y/z) reads the
 / passed placement; any other name is a host global numeric vector/matrix that gets
 / auto-uploaded read-only (kk2 §2.1-2), so walk.k's `W`,`I` can travel as globals.
@@ -179,8 +176,9 @@ kkPlanGathMat: {[fn;args;nIn]
   k:   msh 0; n: msh 1
   GRk:: k; GRn:: n
   key: `$ ($fn),"|m|",($k),"|",($n)
-  pipe: $[key in !kkCache; kkCache key; kkGMMiss[fn;ops;k;n;key]]
-  [kind:`gm; pipe:pipe; ops:ops; n:n]}
+  pipe: $[key in !kkCache; kkCache key
+          [GRk::k; GRn::n; p: gpu.compileCompute[shader.gmap[fn;ops;0#`]; (#ops)+1]; kkCache[key]:: p; p]]
+  (kind:`gm; pipe:pipe; ops:ops; n:n)}
 kkRunGathMat: {[plan;args]
   pn:  (#args) # `x`y`z
   na:  pn ! args
@@ -191,13 +189,12 @@ kkRunGathMat: {[plan;args]
   ob:  gpu.buffer[(kkPad n)#0.]
   bufH: {[d] d`gpu}' (sd; md)               / (src; mat) handles in binding order
   gpu.dispatch[plan`pipe; bufH,ob; n]
-  [gpu: ob; t: `f; n: n; s: ,n]}
+  (gpu: ob; t: `f; n: n; s: ,n)}
 / Amend-scatter @[x;I;:;v]: one thread per interior index; out[I[d]] = v (v reads
 / x through the neighbour matrix W). I is padded to the ×64 grid with a sentinel
 / index (= full length) that lands in out's padding, so over-dispatched threads
 / don't clobber a live cell. Output = a COPY of x with the I positions rewritten
 / (a single Jacobi step); iterate with kk.loop for the ping-pong solve.
-kkAMiss: {[fn;src;mat;idx;k;n;key] GRk::k; GRn::n; p: gpu.compileCompute[shader.amend[fn;src;mat;idx]; 4]; kkCache[key]:: p; p}
 / Prep the padded I buffer + a fresh out buffer that copies xbuf and reserves a
 / sentinel-padding tail. Returns (idBuf; outBuf; xn). n=#I, xn=full length.
 kkAmendBufs: {[idxName; xbuf; xn; n]
@@ -207,7 +204,8 @@ kkAmendBufs: {[idxName; xbuf; xn; n]
   (idBuf; outBuf)}
 kkAmendPipe: {[fn;srcName;matName;idxName;k;n]
   key: `$ ($fn),"|a|",($k),"|",($n)
-  $[key in !kkCache; kkCache key; kkAMiss[fn;srcName;matName;idxName;k;n;key]]}
+  $[key in !kkCache; kkCache key
+    [GRk::k; GRn::n; p: gpu.compileCompute[shader.amend[fn;srcName;matName;idxName]; 4]; kkCache[key]:: p; p]]}
 kkPlanAmend: {[fn;args;nIn]
   info: kkAmendInfo[]                       / (srcName; idxName)
   srcName: info 0; idxName: info 1
@@ -218,7 +216,7 @@ kkPlanAmend: {[fn;args;nIn]
   msh: md`s; k: msh 0; n: msh 1
   GRk:: k; GRn:: n
   pipe: kkAmendPipe[fn;srcName;matName;idxName;k;n]
-  [kind:`amend; pipe:pipe; srcName:srcName; matName:matName; idxName:idxName; mn:n]}
+  (kind:`amend; pipe:pipe; srcName:srcName; matName:matName; idxName:idxName; mn:n)}
 kkRunAmend: {[plan;args]
   pn: (#args) # `x`y`z
   na: pn ! args
@@ -229,7 +227,7 @@ kkRunAmend: {[plan;args]
   bufs: kkAmendBufs[plan`idxName; sd`gpu; xn; n]
   idBuf: bufs 0; out: bufs 1
   gpu.dispatch[plan`pipe; (sd`gpu; md`gpu; idBuf; out); n]
-  [gpu: out; t:`f; n: xn; s: sd`s]}
+  (gpu: out; t:`f; n: xn; s: sd`s)}
 
 / Scatter-add @[x;I;+;v]: one thread per index; acc[I[d]] += v atomically. x is
 / expected zero-initialised; I is padded with a sentinel into acc's padding tail so
@@ -245,7 +243,6 @@ kkScatForceI:: 0                          / 1 → always use the i32 path
 kkFA:: -1                                 / cached caps.atomicFadd (−1 = not yet queried)
 kkQFA:  {[] kkFA:: `i$ (gpu.caps[0])`atomicFadd; kkFA}
 kkUseFA: {[] $[kkScatForceI; 0; kkFA > -1; kkFA; kkQFA[]]}
-kkSMiss: {[fn;vbn;fa;key] p: gpu.compileCompute[$[fa; shader.scataddf[fn;vbn]; shader.scatadd[fn;vbn]]; 2 + #vbn]; kkCache[key]:: p; p}
 kkIvals: {[idxName; idd; pn] $[idxName in pn; gpu.read idd`gpu; `f$ . idxName]}
 kkPlanScat: {[fn;args;nIn]
   info: kkScatInfo[]; accName: info 0; idxName: info 1
@@ -256,8 +253,9 @@ kkPlanScat: {[fn;args;nIn]
   GRk:: 0; GRn:: idd`n
   fa: kkUseFA[]                             / native f32 atomics available (and not forced off)?
   key: `$ ($fn),"|s|",($#vbn),$[fa;"f";"i"]
-  pipe: $[key in !kkCache; kkCache key; kkSMiss[fn;vbn;fa;key]]
-  [kind:`scat; pipe:pipe; accName:accName; idxName:idxName; vbn:vbn; fa:fa]}
+  pipe: $[key in !kkCache; kkCache key
+          [p: gpu.compileCompute[$[fa; shader.scataddf[fn;vbn]; shader.scatadd[fn;vbn]]; 2 + #vbn]; kkCache[key]:: p; p]]
+  (kind:`scat; pipe:pipe; accName:accName; idxName:idxName; vbn:vbn; fa:fa)}
 kkRunScat: {[plan;args]
   pn: (#args) # `x`y`z
   na: pn ! args
@@ -270,7 +268,7 @@ kkRunScat: {[plan;args]
   acc: gpu.buffer[(an + 64) # 0.]           / accumulator (zeros) + slack; f32 or i32 by fa
   vHnd: $[0=#vbn; !0; ,(kkResolve[vbn 0; na; pn])`gpu]
   gpu.dispatch[plan`pipe; (acc; idBuf), vHnd; n]
-  [gpu: acc; t:$[fa;`f;`i]; n: an; s: ad`s]}
+  (gpu: acc; t:$[fa;`f;`i]; n: an; s: ad`s)}
 / kk.loop[f; x0; niter] — iterate an amend `f:{@[x;I;:;v]}` niter times on the GPU
 / with a ping-pong: two full-size buffers, each pass reads one and writes the other
 / (Jacobi needs the previous sweep's values). Runs in ONE encoder (gpu.dispatchLoop,
@@ -293,7 +291,7 @@ kk.loop: {[f; x0; niter]
   / pass 0 (config A) writes B, pass 1 (config B) writes A, … → odd niter lands in
   / B, even in A (verified against a single f-step).
   res: $[0 = niter mod 2; A; B]
-  [gpu: res; t:`f; n: xn; s: x0`s]}
+  (gpu: res; t:`f; n: xn; s: x0`s)}
 
 / kk.converge[f; x0; tol; maxIter] — device-side converge (kk2 §6): iterate the
 / amend sweep `f` in batches on the GPU, and every CVstride sweeps measure the
@@ -328,19 +326,17 @@ kk.converge: {[f; x0; tol; maxIter]
   CVa:: A; CVsnap:: snap; CVpipe:: pipe; CVn:: n
   CVca:: (A; md0`gpu; idBuf; B); CVcb:: (B; md0`gpu; idBuf; A)
   CVtol:: tol; CVmax:: maxIter; CVxn:: xn; CVs:: x0`s
-  CVcur:: [gpu: A; t: `f; n: xn; s: x0`s]
-  CVsnp:: [gpu: snap; t: `f; n: xn; s: x0`s]
+  CVcur:: (gpu: A; t: `f; n: xn; s: x0`s)
+  CVsnp:: (gpu: snap; t: `f; n: xn; s: x0`s)
   fin: cvCond cvBody/ (0; tol + 1.)               / while maxΔ>tol & sweeps<maxIter
   CVlast:: fin                                    / (sweepsDone; finalMaxΔ) — observability
-  [gpu: A; t: `f; n: xn; s: x0`s]}
+  (gpu: A; t: `f; n: xn; s: x0`s)}
 / Placed-table map (kk2 §2.5): the referenced column names come from the CST
 / (kkTableColNames). Layout is chosen at placement (gpu.holdT) and recorded on the
 / descriptor's `lay key; the SAME lambda compiles under either:
 /   planar:      bind only the columns the body reads (nc+1 bindings).
 /   interleaved: bind the one data buffer + output (2 bindings), positions baked.
 / The cache key carries the layout tag so the two never collide.
-kkTMiss:  {[fn;tn;cn;nc;key] p: gpu.compileCompute[shader.table[fn;tn;cn]; nc+1]; kkCache[key]:: p; p}
-kkTIMiss: {[fn;tn;allCols;key] p: gpu.compileCompute[shader.tableI[fn;tn;allCols]; 2]; kkCache[key]:: p; p}
 kkPlanTable: {[fn;args;nIn]
   td: args 0
   cn: kkTableColNames[]                      / distinct columns actually read
@@ -349,33 +345,34 @@ kkPlanTable: {[fn;args;nIn]
 kkPlanTableP: {[fn;td;cn;tn]
   nc: #cn
   key: `$ ($fn),"|t|",(","/$'cn)
-  pipe: $[key in !kkCache; kkCache key; kkTMiss[fn;tn;cn;nc;key]]
-  [kind:`tp; pipe:pipe; cn:cn]}
+  pipe: $[key in !kkCache; kkCache key
+          [p: gpu.compileCompute[shader.table[fn;tn;cn]; nc+1]; kkCache[key]:: p; p]]
+  (kind:`tp; pipe:pipe; cn:cn)}
 kkRunTableP: {[plan;args]
   td: args 0
   n: td`n
   colH: (td`hand) (td`cols) ? plan`cn        / handles for the referenced columns
   ob: gpu.buffer[(kkPad n)#0.]
   gpu.dispatch[plan`pipe; colH, ob; n]
-  [gpu: ob; t:`f; n: n; s: ,n]}
+  (gpu: ob; t:`f; n: n; s: ,n)}
 kkPlanTableI: {[fn;td;tn]
   allCols: td`cols                           / full ordering — positions in the row
   key: `$ ($fn),"|ti|",(","/$'allCols)
-  pipe: $[key in !kkCache; kkCache key; kkTIMiss[fn;tn;allCols;key]]
-  [kind:`ti; pipe:pipe]}
+  pipe: $[key in !kkCache; kkCache key
+          [p: gpu.compileCompute[shader.tableI[fn;tn;allCols]; 2]; kkCache[key]:: p; p]]
+  (kind:`ti; pipe:pipe)}
 kkRunTableI: {[plan;args]
   td: args 0
   n: td`n
   ob: gpu.buffer[(kkPad n)#0.]
   gpu.dispatch[plan`pipe; (td`hand; ob); n]
-  [gpu: ob; t:`f; n: n; s: ,n]}
+  (gpu: ob; t:`f; n: n; s: ,n)}
 / kk.compile = plan then run. An unsupported body returns kkWarn's err value from
 / kk.plan (never cached); pass it straight through instead of dispatching it.
 kk.compile: {[fn; args] p: kk.plan[fn;args]; $[(@p)~`"!"; p; kk.run[p;args]]}
 / Placed-dict gather (kk2 §2.5): bind each referenced key as a gather source (used
 / left of @) or index/value; output extent = the primary index key's length. The
 / same keyed buffers a dict placed (gpu.holdD) drop in by name.
-kkDMiss: {[fn;dn;srcKeys;elemKeys;key] p: gpu.compileCompute[shader.dict[fn;dn;srcKeys;elemKeys]; (#srcKeys)+(#elemKeys)+1]; kkCache[key]:: p; p}
 kkPlanDict: {[fn;args;nIn]
   dd: args 0
   dn: kkTableName[]                          / the dict var (same (D`k) apposit shape)
@@ -384,19 +381,20 @@ kkPlanDict: {[fn;args;nIn]
   elemKeys: refKeys @ & ~ refKeys in srcKeys
   keys: srcKeys, elemKeys                    / binding order: sources then indices
   key: `$ ($fn),"|dg|",(","/$'keys)
-  pipe: $[key in !kkCache; kkCache key; kkDMiss[fn;dn;srcKeys;elemKeys;key]]
-  [kind:`dict; pipe:pipe; elemKeys:elemKeys; keys:keys]}
+  pipe: $[key in !kkCache; kkCache key
+          [p: gpu.compileCompute[shader.dict[fn;dn;srcKeys;elemKeys]; (#srcKeys)+(#elemKeys)+1]; kkCache[key]:: p; p]]
+  (kind:`dict; pipe:pipe; elemKeys:elemKeys; keys:keys)}
 kkRunDict: {[plan;args]
   dd: args 0
   n: (dd`lens) (dd`keys) ? *(plan`elemKeys)  / output length = primary index length
   handles: (dd`hand) (dd`keys) ? (plan`keys)
   ob: gpu.buffer[(kkPad n)#0.]
   gpu.dispatch[plan`pipe; handles, ob; n]
-  [gpu: ob; t:`f; n: n; s: ,n]}
+  (gpu: ob; t:`f; n: n; s: ,n)}
 kkPlanMap: {[fn;args;nIn]
   bad: kkClassify fn
   $[(bad~`) & ~3<nIn
-    ; [kind:`map; pipe: kkMapPipe[fn;nIn]]
+    ; (kind:`map; pipe: kkMapPipe[fn;nIn])
     ; kkWarn[bad;nIn]]}
 
 / ── Whole-buffer reduce (kk2 §6): +/d over a placement → a host scalar ─────────
@@ -408,10 +406,10 @@ kkPlanMap: {[fn;args;nIn]
 / Float reduction reorders the sum, so the result matches CPU +/ to a relative
 / tolerance, not bit-for-bit (integer/exact reductions do match).
 kkRedP:: 256
-kkRedMiss: {[op;key] p: gpu.compileComputeU[shader.reduce[op]; 2]; kkCache[key]:: p; p}
 kkRedPipe: {[op]
   key: `$ "reduce|",$op
-  $[key in !kkCache; kkCache key; kkRedMiss[op;key]]}
+  $[key in !kkCache; kkCache key
+    [p: gpu.compileComputeU[shader.reduce[op]; 2]; kkCache[key]:: p; p]]}
 / Two-dispatch FALLBACK reduce (grid-strided serial per thread).
 kkReduceFb: {[op; d]
   pipe: kkRedPipe op
@@ -429,8 +427,10 @@ kkReduceFb: {[op; d]
 / folds each workgroup with one OpGroupNonUniformFAdd → G partials; stage 2 folds the
 / G partials with a single workgroup. Same numeric contract as the fallback (reordered
 / float sums → CPU parity to a tolerance). Selected when gpu.caps sgArith is set.
-kkRedSgMiss: {[op;S;key] p: gpu.compileComputeU[shader.reduceSg[op;S]; 2]; kkCache[key]:: p; p}
-kkRedSgPipe: {[op;S] key: `$ "reduceSg|",($op),"|",($S); $[key in !kkCache; kkCache key; kkRedSgMiss[op;S;key]]}
+kkRedSgPipe: {[op;S]
+  key: `$ "reduceSg|",($op),"|",($S)
+  $[key in !kkCache; kkCache key
+    [p: gpu.compileComputeU[shader.reduceSg[op;S]; 2]; kkCache[key]:: p; p]]}
 kkReduceSg: {[op; d; S]
   pipe: kkRedSgPipe[op; S]
   n: d`n
@@ -484,7 +484,7 @@ kk.scan: {[op; d]
   gpu.dispatch[pP; (bt; bo); P]
   u2: gpu.uniform[(`i$ck; 0; 0; 0)]
   gpu.dispatch[pA; (ob; bo; u2); P]
-  [gpu: ob; t: `f; n: n; s: d`s]}
+  (gpu: ob; t: `f; n: n; s: d`s)}
 kk.sums:  {[d] kk.scan[`sum; d]}
 kk.maxs:  {[d] kk.scan[`max; d]}
 kk.mins:  {[d] kk.scan[`min; d]}
@@ -495,16 +495,16 @@ kk.mins:  {[d] kk.scan[`min; d]}
 / index into its slot (shader.compact). Returns a placement of the (float) indices,
 / length = true count — so `kk.where mask` mirrors `&mask` on the CPU. Value
 / compaction `x@&mask` composes for free: kk.compile[{x@y}; (x; kk.where mask)].
-kkWhereMiss: {[key] p: gpu.compileComputeU[shader.compact[]; 3]; kkCache[key]:: p; p}
 kk.where: {[d]
   n: d`n
   incl: kk.sums d                                / inclusive prefix scan of the mask
   total: `i$ kk.sum d                            / count of trues (syncs → incl is final)
-  pipe: $[`compact in !kkCache; kkCache `compact; kkWhereMiss[`compact]]
+  pipe: $[`compact in !kkCache; kkCache `compact
+          [p: gpu.compileComputeU[shader.compact[]; 3]; kkCache[`compact]:: p; p]]
   ob: gpu.buffer[(total + 64) # 0.]              / true-count elements + sentinel slack
   u:  gpu.uniform[(`i$n; `i$total; 0; 0)]        / i32 counts (exact to 2^31; exact past 2^24)
   gpu.dispatch[pipe; (d`gpu; incl`gpu; ob; u); n]
-  [gpu: ob; t: `f; n: total; s: ,total]}
+  (gpu: ob; t: `f; n: total; s: ,total)}
 
 / ── Histogram #'=d (kk2 tier-2): bucket counts via one scatter-add dispatch ─────
 / kk.freq[d; nb] counts how many of the integer indices in d fall in each of nb
@@ -555,4 +555,4 @@ kk.group: {[d; nb]
   g:   gpu.buffer[(`f$ n) , 63 # 0.]         / g[0] = element count (over-dispatch guard)
   perm: gpu.buffer[(kkPad n) # 0.]           / output permutation (padding parks OOB writes)
   gpu.dispatch[kkGrpPipe; (cur; dd`gpu; off`gpu; g; perm); n]
-  [gpu: perm; t: `f; n: n; s: ,n; off: off; cnt: cnt]}
+  (gpu: perm; t: `f; n: n; s: ,n; off: off; cnt: cnt)}

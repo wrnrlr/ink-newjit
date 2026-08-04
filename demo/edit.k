@@ -148,8 +148,8 @@ hlBuild:{[] HLR:: syn.hl[LANG; rope.text BUF]; HLREV::REV}
 hlSync:{[] $[HLREV=REV; 0; hlBuild[]]}
 
 / ── editing ─────────────────────────────────────────────────────────────────
-/ Every op is a named function: a $[…] branch holds one expression, and `[a;b]` in
-/ branch position parses as a dict literal, so $ only ever dispatches.
+/ Every op is a named function, so $ only ever dispatches. (A $[…] branch can now
+/ hold a `[stmt;stmt]` progn — see doc/reference.md — so these could be inlined.)
 docLen:{[] rope.len BUF}
 row:{[] rope.rowOf[BUF;CO]}
 col:{[] CO-rope.lineStart[BUF;row[]]}

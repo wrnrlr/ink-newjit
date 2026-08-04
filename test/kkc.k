@@ -31,19 +31,19 @@ histc: {@[x;HI;+;1.]}             / count
 histw: {@[x;HI;+;HV]}             / weighted sum
 
 / placed table (kk2 §2.5): named equal-length columns as a structured GPU buffer
-TT: [[]px:`f$!64; py:0.5*`f$!64; vx:(`f$!64)-8.; vy:`f$64-!64]
+TT: ([]px:`f$!64; py:0.5*`f$!64; vx:(`f$!64)-8.; vy:`f$64-!64)
 / wide table (9 columns) — under `auto layout it can't fit MAX_BIND planar (9+1>8),
 / so gpu.holdT interleaves it into one buffer automatically.
-TW: [[]c0:`f$!32; c1:1.+`f$!32; c2:2.+`f$!32; c3:3.+`f$!32; c4:4.+`f$!32; c5:5.+`f$!32; c6:6.+`f$!32; c7:7.+`f$!32; c8:8.+`f$!32]
+TW: ([]c0:`f$!32; c1:1.+`f$!32; c2:2.+`f$!32; c3:3.+`f$!32; c4:4.+`f$!32; c5:5.+`f$!32; c6:6.+`f$!32; c7:7.+`f$!32; c8:8.+`f$!32)
 / placed dict (CSR-style ragged bundle): data (8) + off (4), differing lengths.
 DDdata: `f$ 10 20 30 40 50 60 70 80
 DDoff:  `f$ 0 3 5 7
-DD: [data: DDdata; off: DDoff]
+DD: (data: DDdata; off: DDoff)
 / cloth edge table: 7 fields per edge (i,j,l0,al,w0,w1,wt) — clothgpu's kCon reads
 / these as a stride-7 packed array e[7*ee+k]; interleaving the table builds that.
 ETi: `f$ 0 1 2 3; ETj: `f$ 1 2 3 0; ETl0: `f$ 10 11 12 13
 ETal: `f$ 1 1 1 1; ETw0: `f$ 2 2 2 2; ETw1: `f$ 3 3 3 3; ETwt: `f$ 4 4 4 4
-ET: [[]i:ETi; j:ETj; l0:ETl0; al:ETal; w0:ETw0; w1:ETw1; wt:ETwt]
+ET: ([]i:ETi; j:ETj; l0:ETl0; al:ETal; w0:ETw0; w1:ETw1; wt:ETwt)
 ETpacked: 0. + ,/ +(ETi;ETj;ETl0;ETal;ETw0;ETw1;ETwt)
 
 / Helpers are TOP-LEVEL globals: an inner lambda can't see demo's locals (ink

@@ -28,7 +28,7 @@ Newton's method, finding the angle that zeros one off-diagonal entry of `A'A`.
 ```k
 kyte `%x` (monadic sqrt)            / → ink `sqrt x`
 kyte `f.list` (multi-arg apply)     / → ink `f[a;b;c]`, brackets required
-kyte `[stmt;stmt;val]` inside $[;;] / → a helper (svdRot); ink has no blocks there
+kyte `[stmt;stmt;val]` inside $[;;] / → the same; a $[…] branch takes a progn
 kyte complex conj/imag              / → dropped; real matrices only
 kyte lambdas closing over scope     / → ink lambdas DO NOT; every helper is global
 ```
@@ -59,24 +59,18 @@ svdJ:{[x;y;z]
 /   new_x = c*x - s*y    new_y = s*x + c*y
 svdR:{[c;s;x;y]((x*c)-y*s;(x*s)+y*c)}
 
-/ Update A and V at column indices ik by one Jacobi rotation.
-/ Factored out of svdP because ink's $[;;] branches must be single expressions.
-svdRot:{[A;V;ik;z]
-  r:svdJ[A@ik@0;A@ik@1;z]
-  nc:svdR[r@0;r@1;A@ik@0;A@ik@1]
-  nA:@[@[A;ik@0;:;nc@0];ik@1;:;nc@1]
-  nv:svdR[r@0;r@1;V@ik@0;V@ik@1]
-  nV:@[@[V;ik@0;:;nv@0];ik@1;:;nv@1]
-  (nA;nV)
-}
-
 / One Jacobi step on state (A;V) for column pair ik.
 / Threshold 1e-6: f32 machine epsilon is ~1.19e-7; using 1e-14 (f64-era) would
 / never converge in f32 arithmetic, causing infinite iteration.
 svdP:{[st;ik]
   A:st@0; V:st@1
   z:svdD[A@ik@0;A@ik@1]
-  $[1e-6<abs z;svdRot[A;V;ik;z];st]
+  $[1e-6<abs z
+    [ r:svdJ[A@ik@0;A@ik@1;z]                  / one Givens rotation, applied to A and V
+      nc:svdR[r@0;r@1;A@ik@0;A@ik@1]
+      nv:svdR[r@0;r@1;V@ik@0;V@ik@1]
+      (@[@[A;ik@0;:;nc@0];ik@1;:;nc@1];@[@[V;ik@0;:;nv@0];ik@1;:;nv@1])]
+    st]
 }
 
 / All unordered column pairs (i,k) with i<k — no nested lambdas needed.

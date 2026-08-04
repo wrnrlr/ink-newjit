@@ -98,12 +98,12 @@ gm: gpu.kernel[{[mb;sb;x;g;i]
 / the dump covers: math built-ins, vector literals + OpConstantComposite, splat
 / broadcasting, composite extract, chained $[] with the <=/>= peepholes, bool
 / ops, texture sampling, varyings, uniform blocks, and the no-varying vertex.
-ck["fragPlanes"; shader.fragment[[nor:`v3; out:`v4]; {[nor]
+ck["fragPlanes"; shader.fragment[(nor:`v3; out:`v4); {[nor]
   amb: 0.15
   ld: normalize 0.6 0.8 0.4
   br: amb+smoothstep[0.0;0.1;dot[nor;ld]]
   (nor[0]*br; nor[1]*br; nor[2]*br; 1.0)}]]
-ck["fragSky"; shader.fragment[[uv:`v2; out:`v4]; {[uv]
+ck["fragSky"; shader.fragment[(uv:`v2; out:`v4); {[uv]
   t: uv[1]
   sr: mix[0.22; 0.88; t]; sg: mix[0.45; 0.68; t]; sb: mix[0.92; 0.35; t]
   px: uv[0]*10.0; py: uv[1]*5.0
@@ -122,11 +122,11 @@ ck["fragSky"; shader.fragment[[uv:`v2; out:`v4]; {[uv]
   g: pow[clamp[mix[sg; 1.0; cld]; 0.; 1.];0.4545]
   b: pow[clamp[mix[sb; 1.0; cld]; 0.; 1.];0.4545]
   (r; g; b; 1.0)}]]
-ck["fragCond"; shader.fragment[[uv:`v2; out:`f32]; {[uv]
+ck["fragCond"; shader.fragment[(uv:`v2; out:`f32); {[uv]
   a: uv+0.5
   ok: (uv[0]<0.9) & ~(uv[1]>0.8)
   $[uv[0]<=uv[1]; a[0]; uv[0]>=0.75; fract[sin[dot[uv; 127.1 311.7]]*43758.5]; ok; 0.5; 0.0]}]]
-ck["fragTex"; shader.fragmentTexN[[uv:`v2; out:`v4]; 2; {[uv]
+ck["fragTex"; shader.fragmentTexN[(uv:`v2; out:`v4); 2; {[uv]
   c0: sample[0; uv]
   c1: sample[1; uv]
   (mix[c0[0];c1[0];0.5]; c0[1]; c1[2]; 1.0)}]]
@@ -134,7 +134,7 @@ ck["fragTex"; shader.fragmentTexN[[uv:`v2; out:`v4]; 2; {[uv]
 / 4-lane reorder, the rgba alias, a repeat (splat), a narrowing v4→v2, and the
 / single-lane form that reuses OpCompositeExtract instead of a shuffle. Here mainly
 / for the spirv-val rung — test/kkswz.k pins the lane operands themselves.
-ck["fragSwizzle"; shader.fragment[[uv:`v2; out:`v4]; {[uv]
+ck["fragSwizzle"; shader.fragment[(uv:`v2; out:`v4); {[uv]
   c: (uv[0]; uv[1]; 0.5; 1.0)
   rev: (c`z`y`x`w)
   dup: (c`x`x`x`x)
@@ -143,7 +143,7 @@ ck["fragSwizzle"; shader.fragment[[uv:`v2; out:`v4]; {[uv]
 / Component writes: in SSA a rebind, not a mutation — one lane is OpCompositeInsert,
 / two or more a two-source OpVectorShuffle whose selector reaches past the first
 / vector's width for the written lanes. A scalar right-hand side broadcasts.
-ck["fragCompWrite"; shader.fragment[[uv:`v2; out:`v4]; {[uv]
+ck["fragCompWrite"; shader.fragment[(uv:`v2; out:`v4); {[uv]
   c: (uv[0]; uv[1]; 0.5; 1.0)
   c[`y]:    0.25                / single lane  → OpCompositeInsert
   c[`x`z]:  (0.5; 0.75)         / two lanes    → OpVectorShuffle
@@ -152,7 +152,7 @@ ck["fragCompWrite"; shader.fragment[[uv:`v2; out:`v4]; {[uv]
   c}]]
 / Vertex shaders are vertex-PULLED now (shader.vertexPull): geometry rides a stride-N
 / storage buffer read at N*vid, and uniforms ride a second buffer (uCam/uPan → ub).
-ck["vtxPlanes"; shader.vertexPull[[vNor:`v3]; {[vb;vid]
+ck["vtxPlanes"; shader.vertexPull[(vNor:`v3); {[vb;vid]
   b:6.*vid; px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.5
   py0: (c45*px)+(s45*pz)
@@ -161,7 +161,7 @@ ck["vtxPlanes"; shader.vertexPull[[vNor:`v3]; {[vb;vid]
   px2: (s30*py)+(c30*py2)
   ((sc*py0; sc*px1; 0.5-px2*sc*0.5; 1.0); (vb[b+3.];vb[b+4.];vb[b+5.]))}]]
 ck["vtxBare"; shader.vertexPull[()!(); {[vb;vid] b:3.*vid; (vb[b];vb[b+1.];vb[b+2.];1.0)}]]
-ck["vtxSword"; shader.vertexPull[[wNor:`v3;wMat:`v4;wLit:`f32]; {[vb;ub;vid]
+ck["vtxSword"; shader.vertexPull[(wNor:`v3;wMat:`v4;wLit:`f32); {[vb;ub;vid]
   b:11.*vid; px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]; nx:vb[b+3.]; ny:vb[b+4.]; nz:vb[b+5.]
   ca:ub[0.]; sa:ub[1.]; xca:ub[2.]; xsa:ub[3.]
   zoom:ub[4.]; cx:ub[5.]; cz:ub[6.]

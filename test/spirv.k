@@ -171,7 +171,7 @@ chk[64; +/ inDomain' allThreadPts; "all thread pts in domain"]
 / Call shader.fragment with a trivial passthrough lambda and inspect the binary.
 
 fn1: {[x] x}
-wds: shader.fragment[[x:`f32; out:`f32]; fn1]
+wds: shader.fragment[(x:`f32; out:`f32); fn1]
 
 / Structural headers
 chk[0x07230203; wds[0]; "SPIR-V magic number"]
@@ -186,7 +186,7 @@ chk[1;          wds[6]; "Capability Shader = 1"]
 
 / Constant-bearing shader: x + 1.0 introduces OpConstant with 1.0 bit pattern
 fn2: {[x] x+1.0}
-wds2: shader.fragment[[x:`f32; out:`f32]; fn2]
+wds2: shader.fragment[(x:`f32; out:`f32); fn2]
 chk[0x07230203; wds2[0]; "x+1.0 magic number"]
 chk[125; #wds2; "x+1.0 module = 125 words (9 more for OpConstant, 12 for v3 types)"]
 chk[1b; |/wds2=0x3F800000; "1.0 bit pattern present in module"]
@@ -230,7 +230,7 @@ chk[7; #opCons4[Tv4;30;10;11;12;13]; "opCons4 is 7 words"]
 / x*2 — the literal 2 must become 2.0f (OpConstant %float) not an i32.
 / If it stays i32, Dawn rejects the shader: "FMul operand index 3" type mismatch.
 
-wdsInt: shader.fragment[[x:`f32; out:`f32]; {[x] x*2}]
+wdsInt: shader.fragment[(x:`f32; out:`f32); {[x] x*2}]
 chk[1b; |/wdsInt=`I$2.0; "integer literal 2 coerced to f32 in f32 context"]
 
 / ══ 6. shader.fragment v2→v4 via compApply + compList ════════════════════════
@@ -238,7 +238,7 @@ chk[1b; |/wdsInt=`I$2.0; "integer literal 2 coerced to f32 in f32 context"]
 / Compiles {[uv] (uv[0]; uv[1]; 0.5; 1.0)} : v2 → v4
 / Tests: component extract (OpCompositeExtract) + construct (OpCompositeConstruct)
 
-wds3: shader.fragment[[uv:`v2; out:`v4]; {[uv] (uv[0]; uv[1]; 0.5; 1.0)}]
+wds3: shader.fragment[(uv:`v2; out:`v4); {[uv] (uv[0]; uv[1]; 0.5; 1.0)}]
 chk[0x07230203; wds3[0]; "v2→v4 magic number"]
 chk[141; #wds3; "v2→v4 module = 141 words (12 more for v3 types)"]
 chk[1b; |/wds3=0x3F000000; "0.5 constant in v2→v4 shader"]
@@ -249,7 +249,7 @@ chk[1b; |/wds3=0x00050051; "opXtract opword in v2→v4 shader"]
 / ══ 6b. vector ⊕ scalar broadcast (bug fix) ═════════════════════════════════
 / `uv + 0.5` is v2 + scalar: the scalar must be splatted to v2 (OpCompositeConstruct)
 / so OpFAdd sees two v2 operands — otherwise the module is invalid SPIR-V.
-wbc: shader.fragment[[uv:`v2; out:`v2]; {[uv] uv+0.5}]
+wbc: shader.fragment[(uv:`v2; out:`v2); {[uv] uv+0.5}]
 chk[1b; |/wbc=0x00050050; "v2+scalar splats scalar via OpCompositeConstruct"]
 chk[1b; |/wbc=0x00050081; "v2+scalar adds two v2 via OpFAdd"]
 
@@ -290,36 +290,36 @@ chk[1b; |/cwds=0x00050085; "OpFMul present (x*2 body)"]
 /   - <= / >= peephole         a<=b → ~(a>b)         (ink has no <= token)
 
 / Vector literal → OpConstantComposite (opword 0x2C, word-count 5 for v2)
-wvec: shader.fragment[[uv:`v2; out:`f32]; {[uv] dot[uv; 127.1 311.7]}]
+wvec: shader.fragment[(uv:`v2; out:`f32); {[uv] dot[uv; 127.1 311.7]}]
 chk[1b; |/wvec=0x0005002C;   "vector literal emits OpConstantComposite"]
 chk[1b; |/wvec=`I$127.1;     "127.1 constant present in module"]
 chk[1b; |/wvec=0x00050094;   "OpDot present (dot of vector literal)"]
 
 / Monadic `floor px` must emit Floor (GLSL 8), NOT FNegate (0x7F)
-wflr: shader.fragment[[x:`f32; out:`f32]; {[x] floor x}]
+wflr: shader.fragment[(x:`f32; out:`f32); {[x] floor x}]
 chk[1b; |/wflr=8;            "floor px emits GLSL Floor (ext-inst 8)"]
 chk[0b; |/wflr=0x0004007F;   "floor px does NOT emit OpFNegate"]
 
 / a<=b → ~(a>b): expect OpFOrdGreaterThan (0xBA) + OpLogicalNot (0xA8)
-wle: shader.fragment[[uv:`v2; out:`f32]; {[uv] $[uv[0]<=uv[1]; 1.0; 0.0]}]
+wle: shader.fragment[(uv:`v2; out:`f32); {[uv] $[uv[0]<=uv[1]; 1.0; 0.0]}]
 chk[1b; |/wle=0x000500BA;    "a<=b emits OpFOrdGreaterThan"]
 chk[1b; |/wle=0x000400A8;    "a<=b emits OpLogicalNot"]
 
 / a>=b → ~(a<b): expect OpFOrdLessThan (0xB8) + OpLogicalNot (0xA8)
-wge: shader.fragment[[uv:`v2; out:`f32]; {[uv] $[uv[0]>=uv[1]; 1.0; 0.0]}]
+wge: shader.fragment[(uv:`v2; out:`f32); {[uv] $[uv[0]>=uv[1]; 1.0; 0.0]}]
 chk[1b; |/wge=0x000500B8;    "a>=b emits OpFOrdLessThan"]
 chk[1b; |/wge=0x000400A8;    "a>=b emits OpLogicalNot"]
 
 / ══ 9. Polysemic &/| — min/max on floats, logical on bools ═══════════════════
 / float&float → OpFMin (GLSL ext-inst 37 via OpExtInst 0x0007000C), NOT OpLogicalAnd.
-wmin: shader.fragment[[uv:`v2; out:`f32]; {[uv] uv[0] & uv[1]}]
+wmin: shader.fragment[(uv:`v2; out:`f32); {[uv] uv[0] & uv[1]}]
 chk[1b; |/wmin=0x0007000C;   "float&float emits OpExtInst"]
 chk[1b; |/wmin=37;           "float&float emits GLSL FMin (ext-inst 37)"]
 chk[0b; |/wmin=0x000500A7;   "float&float does NOT emit OpLogicalAnd"]
 / float|float → OpFMax (GLSL ext-inst 40).
-wmax: shader.fragment[[uv:`v2; out:`f32]; {[uv] uv[0] | uv[1]}]
+wmax: shader.fragment[(uv:`v2; out:`f32); {[uv] uv[0] | uv[1]}]
 chk[1b; |/wmax=40;           "float|float emits GLSL FMax (ext-inst 40)"]
 chk[0b; |/wmax=0x000500A6;   "float|float does NOT emit OpLogicalOr"]
 / bool&bool (two comparisons) still → OpLogicalAnd (0xA7).
-wand: shader.fragment[[uv:`v2; out:`f32]; {[uv] $[(uv[0]>0.5) & (uv[1]>0.5); 1.0; 0.0]}]
+wand: shader.fragment[(uv:`v2; out:`f32); {[uv] $[(uv[0]>0.5) & (uv[1]>0.5); 1.0; 0.0]}]
 chk[1b; |/wand=0x000500A7;   "bool&bool still emits OpLogicalAnd"]

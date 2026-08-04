@@ -41,7 +41,6 @@ Pure k — loads on the first reference to any `llm.*` name.
 
   / ── env + providers ───────────────────────────────────────────────────────
   env:{[name] (`env[])@`s$name}
-  / NB: keep each value list on ONE line — a newline inside (...) injects a null.
   aurl: "https://api.anthropic.com/v1/messages"
   xurl: "https://api.x.ai/v1/chat/completions"
   anthropic:{[model] (`prov`url`model`key`max)!(`anthropic; llm.aurl; model; llm.env"ANTHROPIC_API_KEY"; 4096)}
@@ -62,10 +61,12 @@ Pure k — loads on the first reference to any `llm.*` name.
 
   / ── JSON-string helpers (SSE delta extraction) ────────────────────────────
   / index of first occurrence of pat in s, or -1.  Adverbs (not nested lambdas)
-  / so nothing captures the enclosing s/pat; a helper keeps the search out of a
-  / $[…] branch (bracketed statement blocks in a branch break the parser).
-  idxm:{[s;pat;n;m] h:&pat~/:s@(!1+m-n)+\:!n; $[#h; *h; -1]}
-  idx:{[s;pat] $[(#pat)>#s; -1; llm.idxm[s;pat;#pat;#s]]}
+  / so nothing captures the enclosing s/pat.
+  idx:{[s;pat]
+    n:#pat
+    $[n>#s; :-1; ]
+    h:&pat~/:s@(!1+(#s)-n)+\:!n
+    $[#h; *h; -1]}
   / decode one escaped char (the char AFTER a backslash)
   unesc1:{[c] $[c="n"; llm.nl; c="t"; `c$9; c="r"; `c$13; c]}
   / read a JSON string body (t begins just after the opening quote), unescaping
@@ -80,14 +81,16 @@ Pure k — loads on the first reference to any `llm.*` name.
     i:llm.idx[s;pat]; $[i<0; ""; llm.readstr (i+#pat)_s]}
 
   / ── SSE line processing (the http callback delivers one complete line) ────
-  / Split across helpers so no $[…] branch holds a bracketed statement block.
-  emit:{[t] $[0<#t; llm.out t; 0]}
-  out:{[t] `stdout 1: t; llm.acc:: llm.acc,t; 0}
-  keyfor:{$[llm.pv~`anthropic; "text"; "content"]}
-  data2:{[b] $[b~"[DONE]"; 0; llm.emit llm.jstr[b; llm.keyfor[]]]}
-  / one SSE line → maybe print+accumulate a delta
-  dataline:{[ln] $[5>#ln; 0; ~"data:"~5#ln; 0; llm.data2 llm.trim 5_ln]}
   trim:{[s] $[(0<#s)&" "=*s; 1_s; s]}
+  / one SSE line → maybe print+accumulate a delta.  Always returns 0.
+  dataline:{[ln]
+    $[5>#ln; :0; ]
+    $[~"data:"~5#ln; :0; ]
+    b:llm.trim 5_ln
+    $[b~"[DONE]"; :0; ]
+    t:llm.jstr[b; $[llm.pv~`anthropic; "text"; "content"]]
+    $[0<#t; [`stdout 1: t; llm.acc:: llm.acc,t]; ]
+    0}
 
   / ── streaming chat: messages → assistant text (printed live) ──────────────
   stream:{[cfg;msgs]

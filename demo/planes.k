@@ -25,7 +25,7 @@ mkPlane: {[n]
 verts: ,/ mkPlane'1.0*=3
 
 / Fragment shader: color by world-space normal (R=YZ, G=XZ, B=XY).
-frag: shader.fragment[[nor:`v3; out:`v4]; {[nor]
+frag: shader.fragment[(nor:`v3; out:`v4); {[nor]
   amb: 0.15
   ld: normalize 0.6 0.8 0.4
   br: amb+smoothstep[0.0;0.1;dot[nor;ld]]
@@ -35,7 +35,7 @@ frag: shader.fragment[[nor:`v3; out:`v4]; {[nor]
 / Vertex shader: 45° Y-rotation then isometric X-tilt, scale by 0.5.
 / c30=cos(35.26°)=√(2/3), s30=sin(35.26°)=1/√3 — equal rhombuses for all planes.
 / Vertex pulling: stride-6 geometry (pos, nor) in a resident buffer, read at 6*vid.
-vert: shader.vertexPull[[vNor:`v3]; {[vb;vid]
+vert: shader.vertexPull[(vNor:`v3); {[vb;vid]
   b:6.*vid
   px:vb[b]; py:vb[b+1.]; pz:vb[b+2.]
   c45:0.7071; s45:0.7071; c30:0.8165; s30:0.5774; sc:0.5

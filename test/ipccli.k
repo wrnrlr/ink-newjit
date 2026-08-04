@@ -27,9 +27,9 @@ ok["projection sent"; 13=(rt[10+]) 3]
 / dicts, tables and keyed tables travel structurally, not as text
 d: `a`b!(1 2;"xy")
 ok["dict";        d~rt d]
-tb: [[]a:1 2;b:`x`y]        / not `t` — a global named `t` hangs, .plan/triage.md #27
+tb: ([]a:1 2;b:`x`y)        / not `t` — a global named `t` hangs, .plan/triage.md #27
 ok["table";       tb~rt tb]
-kt: [[i:1 2]v:`x`y]
+kt: ([i:1 2]v:`x`y)
 ok["keyed table"; kt~rt kt]
 
 / ── runtime services ────────────────────────────────────────────────────────

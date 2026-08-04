@@ -68,9 +68,9 @@ bfc.step: {[search]
   k1:   ?rc
   k2:   k1@&(#ra)=ra?k1                  / keys not seen before
   nw:   cand@rc?k2                       / one exact representative each
-  [expand:expand; key:key; seen:seen,nw; frontier:nw]}
+  (expand:expand; key:key; seen:seen,nw; frontier:nw)}
 bfc: {[expand;key;seed]                  / breadth-first closure
-  search: [expand:expand; key:key; seen:,seed; frontier:,seed]
+  search: (expand:expand; key:key; seen:,seed; frontier:,seed)
   ({0<#x`frontier}step/search)`seen}
 
 / §2a  the reflection group: expand = frontier · the 3 generator matrices.

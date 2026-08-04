@@ -17,7 +17,7 @@
 / smoothstep gives a 1px anti-aliased edge.
 / Output: white on black, v4 rgba.
 
-spirvWds: shader.fragment[[uv:`v2; out:`v4]; {[uv]
+spirvWds: shader.fragment[(uv:`v2; out:`v4); {[uv]
   ux:((uv[0]*2.0)-1.0)*4.0%3.0
   uy:(uv[1]*2.0)-1.0
   d:sqrt[(sqr ux)+(sqr uy)]-0.45

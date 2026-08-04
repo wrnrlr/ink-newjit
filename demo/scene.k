@@ -47,7 +47,7 @@ icoMesh:: ,/ sphVert' icoTris2          / flat stride-6 (pos , nor=pos)
 / remainder.  Position gets model spin+scale+translate then camera; the normal
 / gets model spin + camera rotate/tilt only (uniform scale leaves it intact).
 NV:: 960.                                 / 320 tris × 3 verts (baked into the shader)
-sceneVtx: shader.vertexPull[[wNor:`v3;wMat:`v4;wLit:`f32]; {[vb;ib;vid]
+sceneVtx: shader.vertexPull[(wNor:`v3;wMat:`v4;wLit:`f32); {[vb;ib;vid]
   inst: floor[vid % NV]
   v6:   6.*vid - inst*NV
   p0:vb[v6]; p1:vb[v6+1.]; p2:vb[v6+2.]
@@ -76,7 +76,7 @@ N:: 8
 hue:: (!N)%N                                  / 0 .. 1 around the ring
 th0:: (2.*PI)*hue
 rad0:: N#2.3
-ent:: [[]id:1+!N; theta:th0; orbit:0.5+0.7*hue; rad:rad0; phase:(2.*PI)*hue; px:rad0*cos th0; py:N#0.; pz:rad0*sin th0; scl:N#0.45; r:0.5+0.4*cos (2.*PI)*hue; g:0.5+0.4*cos (2.*PI)*(hue+0.33); b:0.5+0.4*cos (2.*PI)*(hue+0.66); rough:N#0.35]
+ent:: ([]id:1+!N; theta:th0; orbit:0.5+0.7*hue; rad:rad0; phase:(2.*PI)*hue; px:rad0*cos th0; py:N#0.; pz:rad0*sin th0; scl:N#0.45; r:0.5+0.4*cos (2.*PI)*hue; g:0.5+0.4*cos (2.*PI)*(hue+0.33); b:0.5+0.4*cos (2.*PI)*(hue+0.66); rough:N#0.35)
 
 / ── Systems (vectorised column amends over the whole table) ────────────────────
 / orbit: advance each entity's angle, recompute its ring position

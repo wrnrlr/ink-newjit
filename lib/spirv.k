@@ -38,12 +38,12 @@ Nfixed:  20 / first dynamic id
 
 / ── Type ID lookup tables ─────────────────────────────────────────────────────
 / ioType symbol → SPIR-V type ID
-Tid:    [f32:Tf32; v4:Tv4; v2:Tv2; v3:Tv3; bool:Tbool; i32:Ti32; void:Tvoid]
+Tid:    (f32:Tf32; v4:Tv4; v2:Tv2; v3:Tv3; bool:Tbool; i32:Ti32; void:Tvoid)
 / ioType symbol → input/output pointer type ID
-PtrIn:  [f32:PinF32; v4:PinV4; v2:PinV2; v3:PinV3]
-PtrOut: [f32:PoutF32; v4:PoutV4; v2:PoutV2; v3:PoutV3]
+PtrIn:  (f32:PinF32; v4:PinV4; v2:PinV2; v3:PinV3)
+PtrOut: (f32:PoutF32; v4:PoutV4; v2:PoutV2; v3:PoutV3)
 / AST literal type name → SPIR-V type ID
-LitTid: [float:Tf32; int:Ti32; bool:Tbool]
+LitTid: (float:Tf32; int:Ti32; bool:Tbool)
 
 / ── Stencil functions (copy-and-patch templates) ─────────────────────────────
 / Convention: t=result_type  r=result_id  a b=operand ids

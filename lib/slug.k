@@ -133,7 +133,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
   / A clip-space rect → 6 verts of (clipX,clipY, u,v) (stride 4); uv spans the full
   / glyph [0,1]² regardless of where the rect sits on screen.
   quad:{[x0;y0;x1;y1] x0,y0,0.,0., x1,y0,1.,0., x1,y1,1.,1., x0,y0,0.,0., x1,y1,1.,1., x0,y1,0.,1.}
-  VTX: shader.vertexPull[[wUv:`v2]; {[qb;vid]
+  VTX: shader.vertexPull[(wUv:`v2); {[qb;vid]
     b:4.*vid; px:qb[b]; py:qb[b+1.]
     / z=0 (near plane): a 2D overlay must pass depth (LESS_OR_EQUAL) over any 3D behind it.
     ((px;py;0.;1.0); (qb[b+2.]; qb[b+3.]))}]
@@ -143,7 +143,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
   / points cancel by sign, x_cross from full quadratic B_x → smooth at any zoom); LINE
   / path (a≈0, ill-conditioned) uses the linear root + half-open-y rule (vertex/
   / horizontal-safe). clamp(|Σ signed|) = nonzero-winding fill (holes work).
-  FRAG: shader.fragmentTexN[[wUv:`v2; out:`v4]; 1; {[wUv]
+  FRAG: shader.fragmentTexN[(wUv:`v2; out:`v4); 1; {[wUv]
     px: wUv[0]; py: wUv[1]
     band: clamp[floor[py*slugNB]; 0.; slugNB-1.]
     vrow: (band+0.5)%slugNB
@@ -217,9 +217,9 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
   / same process, gpu.gen bumped) invalidates them, so drop the caches to 0/empty and let the lazy
   / builders below recompile. Without this a 2nd context renders blank (reuses dead handles).
   SCGEN: -1
-  newDevice:{[] SCPIPE::0; SCPIPEI::0; SCENEV::(0;0); SCQPV::(0#0;0#0); SLFR::0; SCGEN::gpu.gen 0}
   sceneBegin:{[]
-    $[SCGEN=gpu.gen 0; 0; newDevice[]]
+    $[SCGEN=gpu.gen 0; 0
+      [SCPIPE::0; SCPIPEI::0; SCENEV::(0;0); SCQPV::(0#0;0#0); SLFR::0; SCGEN::gpu.gen 0]]
     SCACC:: 0#0.; SCQI:: 0
     SLFR:: (SLFR+1)mod SCNF
     $[SCPIPE=0; SCPIPE:: mesh.compilePull[VTXF; FRAGF]; 0]
@@ -244,8 +244,8 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
     offs[emp]:-1.; offs}
   mergeFill:{[p;b] $[0=#b; 0#0.; p,b]}
   sceneFlush:{[] gpu.write[SCENE; (SCCAP&#SCACC)#SCACC]} / upload the whole frame's curves
-  scGrow:{[] SCQPOOL:: SCQPOOL,gpu.buffer[48#0.]; SCQPV[SLFR]:: SCQPOOL}   / grow + persist this parity's pool
-  scNext:{[] $[SCQI<#SCQPOOL; 0; scGrow[]]; b:SCQPOOL SCQI; SCQI::SCQI+1; b}
+  / grow + persist this parity's pool when it runs dry
+  scNext:{[] $[SCQI<#SCQPOOL; 0; [SCQPOOL:: SCQPOOL,gpu.buffer[48#0.]; SCQPV[SLFR]:: SCQPOOL]]; b:SCQPOOL SCQI; SCQI::SCQI+1; b}
   / stride-8 vertex [clipX clipY u v fx fy off aa]: clip pos for gl_Position, uv for
   / coverage, (fx,fy) = SCREEN/framebuffer pos for the paint & scissor matrices, off, aa.
   fillVert:{[cp;sp;u;v;off;aa] ((cp 0),(cp 1),u,v),((sp 0),(sp 1),off,aa)}
@@ -260,7 +260,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
     gpu.write[vb; fillQuad[clip;scr;off;aa]]
     mesh.drawPull[SCPIPE; (vb;SCENE); 6]}
   / Vertex pulls the stride-8 quad from binding 0; scene buffer (binding 1) unused here.
-  VTXF: shader.vertexPull[[wUvA:`v4; wPos:`v4]; {[qbuf; sbuf; vid]
+  VTXF: shader.vertexPull[(wUvA:`v4; wPos:`v4); {[qbuf; sbuf; vid]
     b:8.*vid
     / z=0 (near plane): a 2D overlay must pass depth (LESS_OR_EQUAL) over any 3D behind it.
     ((qbuf[b]; qbuf[b+1.]; 0.; 1.0); (qbuf[b+2.]; qbuf[b+3.]; qbuf[b+7.]; qbuf[b+6.]); (qbuf[b+4.]; qbuf[b+5.]; 0.; 0.))}]
@@ -269,7 +269,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
   / and the gradient/solid paint at (fx,fy) — the NanoVG uber-shader paint math, now
   / self-hosted here in dye — and fold into the alpha. So gradients, box/radial paints,
   / and clip all come "for free" per fill.
-  FRAGF: shader.fragmentBuf[[wUvA:`v4; wPos:`v4; out:`v4]; 2; {[wUvA; wPos; qbuf; sbuf]
+  FRAGF: shader.fragmentBuf[(wUvA:`v4; wPos:`v4; out:`v4); 2; {[wUvA; wPos; qbuf; sbuf]
     px: wUvA[0]; py: wUvA[1]; aa: wUvA[2]
     fx: wPos[0]; fy: wPos[1]
     / off is one integer/quad passed as an interpolated varying — barycentric fp gives
@@ -376,7 +376,7 @@ slugPS:  44.       / scene-buffer per-fill PAINT-block stride (NanoVG FragUnifor
   / Same scene-buffer coverage + scissor as FRAGF, but the colour is an IMAGE sampled at
   / paintMat·(fx,fy)/extent (extent = image w,h) and tinted by innerCol. Used ONLY for
   / type-1 (image) fills — solid/gradient/text stay on FRAGF (no per-draw texture bind).
-  FRAGFI: shader.fragmentBufTex[[wUvA:`v4; wPos:`v4; out:`v4]; 2; 1; {[wUvA; wPos; qbuf; sbuf]
+  FRAGFI: shader.fragmentBufTex[(wUvA:`v4; wPos:`v4; out:`v4); 2; 1; {[wUvA; wPos; qbuf; sbuf]
     px: wUvA[0]; py: wUvA[1]; aa: wUvA[2]
     fx: wPos[0]; fy: wPos[1]
     off: floor[wUvA[3]+0.5]
