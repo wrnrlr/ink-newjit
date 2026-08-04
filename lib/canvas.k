@@ -95,8 +95,7 @@ Pure k — loads on the first reference to any `canvas.*` name.
   xform:{[m] CTM::mul[CTM;m]}
 
   / ── Path building (local coordinates; a quad seg = [x0 y0 cx cy x1 y1]) ───────
-  doFlush:{[] PATH::PATH,(,CUR); CUR::0#0.}
-  flushSub:{[] $[0<#CUR; doFlush[]; 0]}
+  flushSub:{[] $[0<#CUR; [PATH::PATH,(,CUR); CUR::0#0.]; 0]}
   appendSeg:{[seg] CUR::CUR,seg}
   moveTo:{[x;y] flushSub[]; PEN::x,y; SUB0::x,y}
   lineTo:{[x;y] appendSeg[,/(PEN; 0.5*PEN+x,y; x,y)]; PEN::x,y}
@@ -109,8 +108,7 @@ Pure k — loads on the first reference to any `canvas.*` name.
     ql:0.25*((3.*a+d)-(P0+m))
     qr:0.25*((3.*g+e)-(m+P3))
     appendSeg[,/(P0;ql;m)]; appendSeg[,/(m;qr;P3)]; PEN::P3}
-  doClose:{[] appendSeg[,/(PEN; 0.5*PEN+SUB0; SUB0)]; flushSub[]; PEN::SUB0}
-  close:{[] $[0<#CUR; doClose[]; 0]}
+  close:{[] $[0<#CUR; [appendSeg[,/(PEN; 0.5*PEN+SUB0; SUB0)]; flushSub[]; PEN::SUB0]; 0]}
 
   / ── Convenience shape paths (all record into the current path, like moveTo/lineTo) ──
   / Axis-aligned rectangle as a closed subpath.
@@ -157,14 +155,19 @@ Pure k — loads on the first reference to any `canvas.*` name.
   NFACE: 16
   NSIZE: 1024
   GCAP:  4096                                   / cached glyphs before a sweep
-  regFace:{[f] nm:`s$font.fullName f; i:TXFIDS?nm; $[i<#TXFIDS; i; regFaceAdd[f;nm]]}
-  regFaceAdd:{[f;nm] $[NFACE>#TXFIDS; facePush[f;nm]; NFACE-1]}
-  facePush:{[f;nm] TXFIDS::TXFIDS,nm; TXFACES::TXFACES,,f; (#TXFIDS)-1}
-  regSize:{[s] i:TXSIZES?s; $[i<#TXSIZES; i; regSizeAdd s]}
-  regSizeAdd:{[s] $[NSIZE>#TXSIZES; sizePush s; NSIZE-1]}
-  sizePush:{[s] TXSIZES::TXSIZES,s; (#TXSIZES)-1}
-  gcSweep:{[] $[(GCAP<#GKEY)|(NSIZE-1)<#TXSIZES; gcReset[]; 0]}
-  gcReset:{[] GKEY::0#0; GBLOB::(); GRECT::(); TXSIZES::0#0.; TXFIDS::0#`; TXFACES::()}
+  regFace:{[f]
+    nm:`s$font.fullName f; i:TXFIDS?nm
+    $[i<#TXFIDS;     i
+      NFACE>#TXFIDS; [TXFIDS::TXFIDS,nm; TXFACES::TXFACES,,f; (#TXFIDS)-1]
+      NFACE-1]}
+  regSize:{[s]
+    i:TXSIZES?s
+    $[i<#TXSIZES;    i
+      NSIZE>#TXSIZES;[TXSIZES::TXSIZES,s; (#TXSIZES)-1]
+      NSIZE-1]}
+  gcSweep:{[] $[(GCAP<#GKEY)|(NSIZE-1)<#TXSIZES
+                [GKEY::0#0; GBLOB::(); GRECT::(); TXSIZES::0#0.; TXFIDS::0#`; TXFACES::()]
+                0]}
   slugText:{[face;sz;gids;paint]
     n:#gids; sc:font.scale[face;sz]; adv:(face`hmtx)`adv; na:#adv
     advPx: sc*adv@(gids & na-1)

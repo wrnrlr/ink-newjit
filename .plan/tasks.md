@@ -1,5 +1,21 @@
 # Tasks
 
+## Migrate the editor tooling to the new brackets → see .plan/tools-bracket-migration.md
+Follow-up to the 2026-08-03 bracket change. `tools/tree-sitter-ink` is migrated
+but uncommitted; its Zed-side query files still name the deleted `[[]` / `[[`
+node types, which fails the whole query file and kills ink highlighting in Zed
+rather than degrading it. Also: push + re-pin the grammar submodule, decide what
+`tools/zed-ink/grammars/` is for, and audit `tools/lsp.k` for binds that now sit
+under a `progn` parent instead of the root.
+
+## Refactor lib/ onto progn + early return → see .plan/lib-progn-refactor.md
+`$[…]` branches had to be single expressions, so multi-statement arms became
+top-level lambdas that — since ink lambdas don't capture — took every value as
+an explicit parameter. A progn opens no scope, so those inline away. Eight
+confirmed sites carry a comment naming the old limitation (`lib/svd.k`,
+`lib/dye.k` ×3, `lib/llm.k` ×2, `lib/uitest.k` ×2). Behaviour-preserving; read
+the "What NOT to inline" list before starting.
+
 ## kk next increments → see .plan/kk-next.md
 Detailed per-task briefs (context, files, gotchas, acceptance oracles) for a
 fresh session: bits v1 (IR→FusedMap CPU backend, generated nn references),

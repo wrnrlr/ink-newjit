@@ -48,7 +48,7 @@ the escape hatch — kk's assembly layer.
   as kVal TIMES kF — a bare op-glyph after a name is dyadic, use `kF1`;
   `$[]` branches are single expressions → per-op helper lambdas; no closures →
   compiler state in prefixed globals, save/restore for reentrancy; dict
-  literal `[k:v;…]` works as a lambda tail; ink has **no signal verb** — dye
+  literal `(k:v;…)` works as a lambda tail; ink has **no signal verb** — dye
   errors are stdout warnings + NaN bakes (see §8, open question).
 
 ## 2. Tier-1 rewrites: `walk.k` verbatim (increment 5)
@@ -227,7 +227,7 @@ buffer. Kernels then read named fields:
 / today (clothgpu.k): 7-float packed records, layout in a comment
 pi:e[base]; pj:e[base+1.]; l0:e[base+2.]; al:e[base+3.]; …
 / placed table: self-documenting, no stride arithmetic
-E: 9: [[]i:ei; j:ej; l0:l0; al:al; w0:w0; w1:w1; wt:w0+w1]
+E: 9: ([]i:ei; j:ej; l0:l0; al:al; w0:w0; w1:w1; wt:w0+w1)
 … (E`l0) + (E`al) % sdt*sdt …
 ```
 
@@ -249,7 +249,7 @@ E: 9: [[]i:ei; j:ej; l0:l0; al:al; w0:w0; w1:w1; wt:w0+w1]
   interleave when #bindings would exceed the cap; later a per-kernel knob.
 - **Placed dicts** (the companion idea): a dict of placed arrays of
   *differing* lengths as one named binding group — CSR ragged data
-  (`[data: …; off: …]`, exactly lib/shp.k's CPU convention), state+params
+  (`(data: …; off: …)`, exactly lib/shp.k's CPU convention), state+params
   pairs. Same name-resolution machinery, no equal-length constraint.
 - **Tensors are NOT tables.** Shapes (`%x`/`s`) and columns are orthogonal
   axes that compose: dense homogeneous dims (NN weights, grids) stay shaped

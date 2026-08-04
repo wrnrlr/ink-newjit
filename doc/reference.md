@@ -63,24 +63,65 @@ verb_io   = digit , ":" ;                                   (* 0: 1: 2: *)
 adverb    = [ ":" ] , ( "'" | "/" | "\" ) , [ ":" ] ;       (* ' / \ ': /: \: *)
 (* Nouns *)
 noun      = literal | name | group | list | lambda
-          | dict | table | ktable | apply | amend | cond ;
+          | dict | table | ktable | progn | apply | amend | cond ;
 group     = "(" , statement , ")" ;                         (* precedence grouping *)
 list      = "(" , [ seq ] , ")" ;                           (* (1;2;3)  () *)
+progn     = "[" , [ seq ] , "]" ;                           (* [a:1;b:2;a+b] → 3 *)
 apply     = phrase , "[" , [ seq ] , "]" ;                  (* f[x;y]  m[k] *)
 amend     = ( "@" | "." ) , "[" , seq , "]" ;               (* @[x;i;f]  .[x;i;f;y] *)
 cond      = "$[" , statement , { div , statement } , "]" ;  (* $[c;t;…;e] *)
 lambda    = "{" , [ params ] , [ seq ] , "}" ;              (* {x+y}  {[a;b] a+b} *)
 params    = "[" , [ name , { div , name } ] , "]" ;
 (* Dictionaries and tables *)
-dict      = "[" , [ items ] , "]" ;                         (* [a:1;b:2]  [] *)
-table     = "[[]" , [ items ] , "]" ;                       (* [[]a:1 2;b:3 4] *)
-ktable    = "[[" , items , "]" , [ items ] , "]" ;          (* keyed table *)
+dict      = "(" , items , ")" ;                             (* (a:1;b:2) *)
+table     = "(" , "[" , "]" , [ items ] , ")" ;             (* ([]a:1 2;b:3 4) *)
+ktable    = "(" , "[" , items , "]" , [ items ] , ")" ;     (* ([k:1 2]v:3 4) *)
 items     = item , { div , item } ;
 item      = name , ":" , [ statement ] ;
 
+ret       = ":" , [ statement ] ;                           (* early return, stmt position *)
 seq       = statement , { div , statement } ;
 div       = ";" | newline ;
 ```
+
+### Round brackets vs square brackets
+
+Round brackets build **values**; square brackets **sequence statements** and index.
+
+A `(` becomes a dict the moment its first item reads `key:` (and not `key::`);
+every remaining item must then be `key:value`, so both `(a:1;2)` and `(1;a:2)`
+are parse errors rather than quietly meaning something else. `([` opens a table
+(`([]…)`) or a keyed table (`([key:…]…)`). Everything else is a group or a list.
+
+Consequently an assignment may not be a top-level item of `(…)` — put it in a
+progn. There is no empty-dict literal; write `()!()`, which is also how one
+prints.
+
+| you write | you get |
+|---|---|
+| `(a:1 2 3;b:4 5 6)` | dict |
+| `(a:1)` | one-key dict |
+| `([]a:1 2;b:3 4)` | table |
+| `([a:1 2]b:3 4)` | keyed table |
+| `()!()` | empty dict |
+| `(1;2)` / `(x)` / `()` | list / group / empty list |
+| `[a:1;b:2;a+b]` | progn — every statement runs, the last one's value is the block's |
+| `f[x;y]` | apply — `[` after a noun is still a call |
+
+### Early return
+
+In **statement position** — a lambda body, a progn, a `$[…]` branch — a leading
+`:` returns from the enclosing lambda:
+
+```k
+{$[x<0; :0; x*2]}      / -5 → 0, 5 → 10
+{[a] [t:a*2; :t+1]}    / 10 → 21
+{:}                    / returns null
+```
+
+Everywhere else `:` keeps its verb reading, so `@[v;`px;:;99.]` still passes the
+assign verb as an argument. Outside any lambda there is no frame to unwind and
+`:x` is plain identity.
 
 ## Operational Semantics
 
@@ -199,11 +240,11 @@ implemented (see the note at the end of this file / doc/design).
 
 ### Mapping Types
 - **Dict**
-  - The syntax `` [a:1; b:2; c: 3] `` is equivalent to `` `a`b`c!1 2 3 ``
+  - The syntax `` (a:1; b:2; c: 3) `` is equivalent to `` `a`b`c!1 2 3 ``
   - Empty dict `` [] ``
   - Type symbol `` `m ``
 - **Table**
-  - The syntax `` [[]a:1 2; b:3 4] `` is equivalent to `` `a`b`c!1 2 3 ``
+  - The syntax `` ([]a:1 2; b:3 4) `` is equivalent to `` `a`b`c!1 2 3 ``
   - Type symbol `` `M ``.
 
 ### Error Values
@@ -280,15 +321,15 @@ while assigment of globals in a lambda happen with a double colon `::`
 - `x,y` **Join** - join atoms/lists; merge dictionaries (right-side wins). `x,()` (empty list on the right) is identity and preserves x's type — a typed vector stays typed (`` `a`b,() `` → `` `S ``), an atom enlists to its typed 1-vector (`1,()` → `,1`). (The left form `(),x` still boxes into a general list `` `L ``.)
 
 ### Mappping Verbs
-- `+d` **Pivot** - table to dict-of-lists and vice versa. `` +[[]n:`b`c;i:2 3] `` → `` [n:`b`c;i:2 3] ``
+- `+d` **Pivot** - table to dict-of-lists and vice versa. `` +([]n:`b`c;i:2 3) `` → `` (n:`b`c;i:2 3) ``
 - `.d` **Value** - extract dictionary values
-- `<m` **Ascend** - Sort dict by ascending values. `` <`a`b`c!3 1 2 `` → `` [b:1;c:2;a:3] ``
+- `<m` **Ascend** - Sort dict by ascending values. `` <`a`b`c!3 1 2 `` → `` (b:1;c:2;a:3) ``
 - `>m` **Decend** - Sort dict by decending values
-- `<t` **Ascend** - Indices that sort table t's rows ascending, comparing the columns left to right, so `t@<t` sorts. `` <[[]a:3 1 2;b:`x`y`z] `` → `1 2 0`
+- `<t` **Ascend** - Indices that sort table t's rows ascending, comparing the columns left to right, so `t@<t` sorts. `` <([]a:3 1 2;b:`x`y`z) `` → `1 2 0`
 - `>t` **Decend** - Indices that sort table t's rows decending. A keyed table is an `m`, so it follows the dict rule instead: reordered by its value rows, with the key rows following along.
 - `=d` **Group** - group d by its values: each distinct value → the list of keys carrying it. `` =`a`b`c`d!1 0 1 0 `` → `` 0 1!(`b`d;`a`c) ``. Same verb as `=X`, with a dict's keys standing in where a vector's indices would be, so `==X` inverts a group.
-- `|d` **Reverse** - reverse the entry order, keys and values together. `` |`a`b`c!1 2 3 `` → `` [c:3;b:2;a:1] ``. A keyed table reverses its rows.
-- `x@d` **Apply** - index x through d's values, keys unchanged: `(x@d)[k]` is `x@d[k]`. `` 1 2 3 4@`x`y!(0 2;1) `` → `` [x:1 3;y:2] ``
+- `|d` **Reverse** - reverse the entry order, keys and values together. `` |`a`b`c!1 2 3 `` → `` (c:3;b:2;a:1) ``. A keyed table reverses its rows.
+- `x@d` **Apply** - index x through d's values, keys unchanged: `(x@d)[k]` is `x@d[k]`. `` 1 2 3 4@`x`y!(0 2;1) `` → `` (x:1 3;y:2) ``
 - `x!y` **Key** - dictionary creation
 - `X#d` **TakeKeys** - filter dictionary d to keys X
 - `X_d` **DropKeys** - remove keys X from dictionary d
@@ -353,7 +394,7 @@ The IO system is organized around file descriptors (filename, port number, etc.)
 - `` 2: y `` **LoadCode** - used for importing other files
 - `` 2: h `` **Receive** - on a connection handle, block for one binary message
 - `` h 2: y `` **Send** - on a connection handle, send `y` as one binary message
-- `` 9: x `` **Place** — upload x to the GPU; returns a placed-array descriptor dict `[gpu:handle;t;n;s]`.
+- `` 9: x `` **Place** — upload x to the GPU; returns a placed-array descriptor dict `(gpu:handle;t;n;s)`.
 - `` d 9: x `` **PlaceInto** — overwrite placement `d`'s buffer in place (no realloc); returns `d`
 - `` 8: d `` **Fetch** — sync + read a placed array back to the host, reshaped to its `s`; a `tbl` descriptor reads every column and rebuilds the table
 - `` n 8: d `` **FetchN** — first n elements (trims the ×64 dispatch padding)
@@ -362,7 +403,7 @@ The IO system is organized around file descriptors (filename, port number, etc.)
 An adverb is one of the glyphs: `` ' / \ ': /: \: `` when it is used as a modifier 
 of how the verb on the right-hand side is applied to the verb on the left hand argument.
 The verb can be a operator, partial or lambda.
-- `f'` **Each** - apply f to each item. `` #'("abc";3 4 5 6) `` → `3 4`. A dict maps over its values and stays keyed (`` (+/)'`a`b!(1 2;3 4) `` → `` [a:3;b:7] ``, so `` (|/)'score@=player `` reports a max per player); a table maps over its rows.
+- `f'` **Each** - apply f to each item. `` #'("abc";3 4 5 6) `` → `3 4`. A dict maps over its values and stays keyed (`` (+/)'`a`b!(1 2;3 4) `` → `` (a:3;b:7) ``, so `` (|/)'score@=player `` reports a max per player); a table maps over its rows.
 - `x F'` **Zip** - elementwise dyad. `` 2 3#'"ab" `` → `("aa";"bbb")`
 - `F/` **Fold** - left fold. `+/1 2 3` → `6`
 - `F\` **Scan** - running fold. `+\1 2 3` → `1 3 6`
@@ -394,8 +435,8 @@ Adverbs are polysemic, there behaviour depends on the unique combination of the 
 Some adverbs are digrams, like While `f f/` and Stencil `i f'`, they have 2 left-hand arguments.
 
 ## Tables, Queries & Joins
-- Create table `` [[]id:1 2 3; age:20 43 7] ``
-- Created keyes table `` [[]id:1 2 3; age:20 43 7] ``
+- Create table `` ([]id:1 2 3; age:20 43 7) ``
+- Create keyed table `` ([id:1 2 3]age:20 43 7) ``
 
 ### Math Functions (prelude names, not grammar keywords)
 `sqrt sqr log exp sin cos abs` and the inverse trig `asin acos atan atan2` are **not**

@@ -282,12 +282,12 @@ shader.vertexPull: {[varyTypes; fn]
 
 
 / ── Type helpers ─────────────────────────────────────────────────────────────
-LitSym: [float:`f32; int:`i32; bool:`bool]
+LitSym: (float:`f32; int:`i32; bool:`bool)
 
 isVecTy: {[ty] (ty~`v4) | (ty~`v2) | (ty~`v3)}
 
 / Component count for join result type: f32=1, v2=2, v3=3, v4=4
-ncVec: [f32:1; v2:2; v3:3; v4:4]
+ncVec: (f32:1; v2:2; v3:3; v4:4)
 jnRty: {[a;b] n: ncVec[a]+ncVec[b]; $[n=2;`v2;n=3;`v3;`v4]}
 
 / ── Swizzle lane names (dye.md §swizzle) ─────────────────────────────────────
@@ -408,14 +408,16 @@ emitW:   emitBuf
 / The value is encoded exactly as opConst does (f32 → bit pattern); the key
 / carries t too, so i32 0 and f32 0.0 (both encode to word 0) never collide.
 / Match both key columns with a boolean mask (Find on a vector key would search
-/ element-wise). constMiss emits+caches a miss (each $[] arm is one expression).
-constMiss: {[t;v;e] r:newId[]; emitCon opConst[t;r;v]; ConKeyT,:: t; ConKeyV,:: e; ConVal,:: r; r}
+/ element-wise). A miss emits the constant and caches it.
 constId: {[t;v]
   e: $[t=Tf32; `I$v; v]
   / Where over the match mask (Find of 1b is broken); guard the empty cache, since
   / ()=t is a general list that & rejects. w = indices of matching cached constants.
   w: $[#ConKeyT; &((ConKeyT=t) & (ConKeyV=e)); !0]
-  $[#w; ConVal w 0; constMiss[t;v;e]]}
+  $[#w; ConVal w 0
+    [ r:newId[]; emitCon opConst[t;r;v]
+      ConKeyT,:: t; ConKeyV,:: e; ConVal,:: r
+      r]]}
 
 / One OpMemberDecorate Offset for uniform member i (std140: vec4 at byte i*16).
 memberDecOne: {[i] (0x00050048; UTuni; i; 35; i*16)}
@@ -1933,18 +1935,21 @@ xVary1: {[el; ty; vid; env] rp: xNode[el; env; ty]; xEmit[`vstore; ty; ,rp 0; vi
 / ── IR optimizations ─────────────────────────────────────────────────────────
 / Const-fold f32 scalar arith / a few unary math whose operands are all const.
 xSetConst: {[k;v] xOp[k]::`const; xVal[k]::v; xArg[k]::()}
-/ Each $[] branch must be ONE expression, so the multi-statement arith/math folds
-/ live in helpers. `sqrt@a etc. run on the host (dye is the CPU compiler).
-xFoldArith: {[k] args:xArg k; g:xVal k; a:xVal args 0; b:xVal args 1; v:$[g~`"+";a+b;g~`"-";a-b;g~`"*";a*b;g~`"%";a%b;0n]; $[^v;0;xSetConst[k;v]]}
-xFoldMath:  {[k] args:xArg k; nm:xVal k; a:xVal args 0; v:$[nm~`sqrt;`sqrt@a;nm~`sqr;a*a;nm~`abs;`abs@a;nm~`sin;`sin@a;nm~`cos;`cos@a;nm~`floor;`floor@a;0n]; $[^v;0;xSetConst[k;v]]}
+/ `sqrt@a etc. run on the host (dye is the CPU compiler).
 xFoldOne: {[k]
   op:xOp k; args:xArg k
   $[0=#args; 0
     ~&/{[j](xOp j)~`const}'args; 0
     op~`neg; xSetConst[k; -xVal args 0]
     ~(xTy k)~`f32; 0
-    op~`arith; xFoldArith[k]
-    op~`math;  xFoldMath[k]
+    op~`arith
+    [ g:xVal k; a:xVal args 0; b:xVal args 1
+      v:$[g~`"+";a+b;g~`"-";a-b;g~`"*";a*b;g~`"%";a%b;0n]
+      $[^v;0;xSetConst[k;v]]]
+    op~`math
+    [ nm:xVal k; a:xVal args 0
+      v:$[nm~`sqrt;`sqrt@a;nm~`sqr;a*a;nm~`abs;`abs@a;nm~`sin;`sin@a;nm~`cos;`cos@a;nm~`floor;`floor@a;0n]
+      $[^v;0;xSetConst[k;v]]]
     0]}
 xFold: {[] {[k] xFoldOne k}' !#xOp; 0}
 / DCE: mark nodes reachable from root; lowering skips the rest (one high→low pass,
@@ -1999,8 +2004,9 @@ xMathW: {[name;ty;r;ids;at]
     name~`mod; $[ty~`i32; opSrem[Ti32;r;ids 0;ids 1]; opFmod[at;r;ids 0;ids 1]]
     name~`clamp;opClamp[at;r;ids 0;ids 1;ids 2]; name~`mix;opMix[at;r;ids 0;ids 1;ids 2]
     name~`smoothstep;opSS[at;r;ids 0;ids 1;ids 2]; opFneg[at;r;ids 0]]}
-/ One helper per op (each $[] branch must be a single expression). Each allocates
-/ an id, emits its op* words (into Con for constants, else Buf), and records xId[k].
+/ One lowerer per op — a dispatch table (xLowerOne), kept uniform on purpose rather
+/ than inlined. Each allocates an id, emits its op* words (into Con for constants,
+/ else Buf), and records xId[k].
 xLoConst:   {[k] xId[k]:: constId[Tid[xTy k]; xVal k]}
 xLoCons:    {[k] r:newId[]; emitBuf xConsW[xTy k;r;xId@xArg k]; xId[k]::r}
 / Vector literal: OpConstantComposite 44 into the constants section (like compVecLit;

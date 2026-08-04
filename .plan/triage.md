@@ -95,3 +95,123 @@ routing through the same `permute` path sort.zig already uses.
 
 Found while writing test/tables.k; not fixed there because it is a separate gap
 from the row-gather work that test covers.
+
+## `([])` builds an empty dict, not an empty table
+
+`([])` (and, before the bracket change, `[[]]`) compiles to `+(()!())` — flip of
+an empty dict — and `+` on an empty dict hands back an `m`, so `@([])` is `` `m ``
+where it should be `` `M ``. Every non-empty form is fine (`@([]a:1 2)` is `` `M ``),
+so this is only the degenerate case: an empty table cannot currently be spelled.
+
+Pre-existing — the old `[[]]` spelling had the identical result, since both go
+through compileDict's `n == 0` branch with `is_table` set. Fix belongs in the
+monadic `+` kernel (flip of an empty dict should yield an empty table), not in
+the compiler.
+
+## Out-of-range index is `!length`, not a null fill — `y@!#x` does not port from k
+
+In ngn/k (and k9) an index outside a list's bounds yields a **null of the source's
+type** rather than an error, which is what makes `y@!#x` the standard "pad-or-truncate
+y to `#x` items" idiom. Ink raises instead, for every type and both index shapes:
+
+```
+(1 2 3)@5        → !length      (1. 2. 3.)@0 1 5 → !length
+(1 2 3)@-1       → !length      "abc"@5          → !length
+(1.;`x)@5        → !length
+```
+
+So the readme's `plot` example — `` ax:`lo`hi`tk`px{x!y@!#x}/:(x;y) `` — cannot run
+here. The whole point of that line is that a caller may write `-3.14 3.14 1.57` and
+leave `px` off; the moment they do, `y@!4` errors instead of padding with a null. It
+is line 1 of the snippet, so nothing after it is reachable. Porting the example to
+`lib/plot.k` needed an explicit `plot.pad4:{[v] f:0.+v; f,(0|4-#f)#0n}` in its place.
+`#` take is not a substitute: it repeats cyclically (`4#1 2 3` → `1 2 3 1`), not with
+nulls.
+
+"Absent" already answers two different ways: a missing DICT key returns `blank`
+(`` (`a`b!1. 2.)`z `` prints nothing, `@` of it is the empty symbol), while an
+out-of-range index errors. In k both are the typed null, so `^` fill and the
+null-propagating arithmetic downstream keep working on either.
+
+The bounds checks all live in `src/primitive/verb/pick.zig` — `pickAtom` (:265),
+`pickTypedVec` (:106), `pickIntVec`'s generic-list branch (:130) and `pickVec` (:277),
+each returning `.{ .err = .length }`; a fill would write the source type's null there
+instead. Whether to change it is a real design call — erroring does catch off-by-one
+bugs that k silently turns into nulls, and ink is not bound to k's choice. But if the
+error stays, it should be stated in `doc/reference.md` and `AGENT.md` under `@`,
+because every k programmer arrives expecting the fill and the failure is a hard stop
+rather than a wrong number.
+
+Side finding while diagnosing this: **monadic `$` on an error collapses it to
+`!type`** — `$(1 2 3)@5` is `!type` while the value itself prints `!length`. `$` has
+no `err` entry so it falls through to the default `.type`. That masks the real error
+class in exactly the situation where a script is trying to report one, and it sent
+this investigation down the wrong path for a while. Small, separable fix: `$` on an
+err should render its symbol, like `format.zig` already does.
+
+---
+
+## An elided *middle* item in `$[…]` is dropped, not nulled — silent wrong branch
+
+`$[c; ; x]` does not mean "if c then null else x". The empty item is **removed**,
+so the form collapses to the two-item cond `$[c; x]` and a **true** `c` runs `x`:
+
+```k
+{[c] $[c; ; :99]; 7} 1b     / → 99   (expected 7)
+{[c] $[c; ; :99]; 7} 0b     / → 7
+{[c] $[c; :99; ]; 7} 1b     / → 99   (trailing elide: correct)
+{[c] $[c; :99; ]; 7} 0b     / → 7
+```
+
+This contradicts the documented rule (CLAUDE.md, `doc/reference.md`): "only `;;`
+and a trailing `;` inject a null element (the intended way to elide)". The
+*trailing* elide behaves as documented; the *middle* one does not.
+
+It matters now that `$[…]` branches can hold statements, because the natural
+inverted guard — "if the precondition holds, fall through; else return early" —
+is written exactly this way. It fails **silently**: no parse error, no runtime
+error, just the wrong branch. Hit while refactoring `lib/regex.k` onto early
+return (26 of 40 regex assertions went red from one such guard). The workaround
+is to negate and use the trailing form, `$[~c; :x; ]`, which is what the code
+now does everywhere.
+
+Fix should either inject the null as documented, or make a middle elide a parse
+error. Silently changing the arity of a cond is the worst of the three.
+
+---
+
+## `lib/svd.k` is broken by the prelude migration — `sqrt+/x*x` is a seeded fold
+
+`svd` returns garbage today: `svd (3. 0.;0. 2.)` yields a matrix where the
+singular-value vector `3.0 2.0` should be.
+
+Cause is line 100, `s:{sqrt+/x*x}'A2`. Since the math functions became prelude
+*names* rather than grammar keywords, a bare op-glyph directly after one is
+**dyadic** — so `sqrt+/…` parses as the seeded fold `sqrt +/ (x*x)` with the
+`sqrt` function itself as the seed, not as `sqrt[+/x*x]`:
+
+```k
+{sqrt+/x*x} 3. 0.      / → 9.0 0.0   (wrong)
+{sqrt[+/x*x]} 3. 0.    / → 3.0       (right)
+```
+
+One-character fix (`sqrt[+/x*x]`), deliberately NOT applied here: the progn
+refactor of that file was required to be behaviour-preserving and there is no
+test for svd to re-baseline against. `lib/svd.k` has no coverage in `test/` at
+all, which is why this went unnoticed — worth a `test/svd.k` alongside the fix
+(reconstruction `A ≈ U·diag(s)·V'` and orthogonality `U'U ≈ I` both make good
+assertions, and the module header already sketches them).
+
+Same trap class as the `noun`-before-`+/` seeded-fold gotcha in `AGENT.md`; a
+sweep of `lib/` for `<preludeName><opglyph>` would be worthwhile.
+
+---
+
+## `test/ir.k` does not terminate (times out well past its documented ~60s)
+
+`.plan/lib-progn-refactor.md` lists `./zig-out/bin/ink test/ir.k` as "slow, ~60s".
+It now runs past a 300s timeout, on an unmodified tree as well as a refactored
+one. It prints all 15 of its `ok` lines — the last being `circle SDF via IR →
+valid SPIR-V header` — and then hangs after the final assertion rather than
+exiting, so the assertions themselves still pass. Pre-existing; unrelated to the
+progn refactor (byte-identical output before and after).

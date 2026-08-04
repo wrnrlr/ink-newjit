@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-08-03 — Round brackets for literals, square brackets for statements
+
+`[…]` was doing two unrelated jobs — dict literal and, after a noun, apply — and
+`(…)` was doing statement sequencing that nothing else needed. Swapped them, so
+each bracket has one meaning.
+
+- **Dicts, tables and keyed tables move to round brackets.** `(a:1 2 3;b:4 5 6)`,
+  `([]a:1 2;b:3 4)`, `([a:1 2]b:3 4)`. A `(` commits to a dict the moment its
+  first item reads `key:` (and not `key::`); every remaining item must then be
+  `key:value`. That makes both mixed shapes — `(a:1;2)` and `(1;a:2)` — parse
+  errors instead of quietly meaning a list of assignments. It also means an
+  assignment can no longer be a top-level item of `(…)`; that is now
+  `error.AssignInParens`, which points at the progn.
+- **`[…]` in noun position is a progn.** `[0;1;2;3]` → `3`. Every statement runs,
+  the last one's value is the block's, and it opens no scope — so the names it
+  binds are the enclosing function's locals. Multi-statement `$[]` branches work
+  directly now; they used to need a helper function. `[` directly after a noun is
+  still apply/index, so `f[x;y]` is unchanged.
+- **`:x` in statement position is an early return.** From the enclosing lambda,
+  in a body, a progn or a `$[]` branch: `{$[x<0;:0;x*2]}`, `{[a] [t:a*2; :t+1]}`,
+  and `{:}` returns null. In *value* position — a call argument, a list element —
+  `:` keeps its verb reading, so `@[v;`px;:;99.]` still passes the assign verb.
+  Outside a lambda there is no frame to unwind and `:x` stays plain identity.
+- **The `[[` and `[[]` lexer tokens are gone.** They had to be, or `[[1;2];3]`
+  could not parse as a nested progn. Their removal also retires the
+  `f[[dict;…];…]` apply-with-dict special case in the parser — that call spells
+  as `f[(k:v;…);…]` now, an ordinary argument.
+- **There is no empty-dict literal.** `[]` used to be one; write `()!()`, which is
+  also what an empty dict prints as. The `` `t@[] `` niladic-call idiom is
+  unaffected — `[]` there is an empty progn, i.e. null.
+- The printer, the `parse` CST (`progn` and `ret` kinds, plus `utable` children,
+  which were never emitted), `lib/syntax.k` highlighting, the tree-sitter grammar
+  and its highlight queries all follow. The ~180 literals across `lib/ demo/
+  test/ tools/ bench/` were migrated mechanically.
+
 ## 2026-07-31 — IPC: caller identity, timers, functions on the wire
 
 The transport worked; the process model didn't. A handler was handed only the

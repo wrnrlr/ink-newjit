@@ -95,7 +95,7 @@ Applying a symbol to a vector-typed value selects lanes by name — GLSL's `v.xz
 spelled `` v`x`z ``, in the juxtaposed or the bracketed form (`` v[`x`z] ``):
 
 ```k
-shader.fragment[[uv:`v2; out:`v4]; {[uv]
+shader.fragment[(uv:`v2; out:`v4); {[uv]
   c: (uv[0]; uv[1]; 0.5; 1.0)
   bgr: (c`b`g`r)          / rgba aliases xyzw — lanes 2 1 0
   (bgr[0]; bgr[1]; bgr[2]; c`w)}]

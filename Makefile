@@ -54,6 +54,7 @@ test:
 	$(INK) test/usd.k
 	zig build json
 	$(INK) test/gltf.k
+	$(INK) test/lsp.k
 	zig build crypto
 	$(INK) test/crypto.k
 	zig build compress

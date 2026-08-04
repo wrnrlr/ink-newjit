@@ -242,7 +242,7 @@ canvas.k no longer calls `gpu.tessellate`/`gpu.fill`. Tasks 1–3 below are DONE
   global, never a nested closure.
 - **`f[;a;b]` open-slot projection fixes the FIRST arg**, not the empty slot — a
   documented trap. Use each-multi instead.
-- **`[name:v; …]` inside a `$[...]` branch is a dict literal**, not a block. A
+- **`(name:v; …)` inside a `$[...]` branch is a dict literal**; a `[…]` block there is a progn. A
   diagnostic like `$[c; [`0 0:x; done::1]; 0]` is a *parse error* → the whole file
   produces no output. Use a named helper fn for multi-statement branches.
 - **`xf2`-style helpers**: `{… (…) ; (…)}` with `;` is TWO statements returning the

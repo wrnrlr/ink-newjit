@@ -77,7 +77,7 @@ record work, `8:` is the sync point. `walk3.k`'s `gpu.dispatchLoop` ping-pong
 becomes invisible: `(N*N) f/ 9: x0` records N passes; nothing runs until `8:`.
 
 **The placed array value.**
-- v1 (pure k, no runtime change): a dict `[gpu:handle; t:`f; n:count; s:shape]`
+- v1 (pure k, no runtime change): a dict `(gpu:handle; t:`f; n:count; s:shape)`
   produced by `gpu.hold`/consumed by `gpu.fetch` in `lib/gpu.k`; `9:`/`8:` sugar
   onto these once the verb wiring lands.
 - v2 (runtime): a dedicated class so verb dispatch can see placement — `d+e` on
@@ -238,7 +238,7 @@ be **queried, not assumed** (MoltenVK caps vary by Metal version/hardware):
 on the M1 Pro / MoltenVK:
 
 ```
-[api:1.2;subgroup:32;sgArith:1;sgBallot:1;sgShuffle:1;descIndex:1;runtimeArray:1;bda:1;f16:1;atomicFadd:1]
+(api:1.2;subgroup:32;sgArith:1;sgBallot:1;sgShuffle:1;descIndex:1;runtimeArray:1;bda:1;f16:1;atomicFadd:1)
 ```
 
 **Every capability in the table is present** — subgroup reductions/scans,
@@ -309,7 +309,7 @@ Each increment independently shippable; oracle in parentheses.
 4. **Placed arrays + `9:`/`8:`** — ◐ verb surface DONE (2026-07-14): `8:`
    added to the grammar (`9:` was reserved), both wired as thin trampolines in
    `io.zig` (`callGlobal` → `Call.apply`) to `gpu.hold`/`holdInto`/`fetch`/
-   `fetchN` in lib/gpu.k; descriptor = `[gpu:handle;t;n]`; `!io` when gpu.k
+   `fetchN` in lib/gpu.k; descriptor = `(gpu:handle;t;n)`; `!io` when gpu.k
    isn't loaded, so the core stays GPU-free. Verified: upload/fetch/overwrite/
    trimmed-fetch roundtrip on-device. ◐ ADOPTED (2026-07-17): the kk oracles
    (kkc/kkred/walkgpu) now spell placement/fetch with the verbs (`E: 8:

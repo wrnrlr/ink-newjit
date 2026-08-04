@@ -128,6 +128,10 @@ doc.subEnd:{[t;i] d:(t`depth)@i; n:#t`depth; j:i+1+!n-i+1
 doc.owner:{[t;i] p:(t`parent)@i; $[p<1; -1; `lambda~(t`kind)@p; p; doc.owner[t;p]]}
 
 / ── type / arity of a bound value ───────────────────────────────────────────
+/ No `progn` row on purpose: `f:[a:1;a+1]` yields whatever its last statement
+/ evaluates to, which is not knowable from the CST — `expr` is the honest answer.
+/ `ret` needs none either: a top-level `f: :3` parses as a `right`, which
+/ doc.valNode already steps through, and doc.k only documents top-level binds.
 doc.KK:`int`float`bool`char`symbol`string`ints`floats`bools`chars`symbols`list`dict`table`utable`lambda`op`term
 doc.KT:   `i`f    `b   `c  `s     `C     `I  `F     `B   `C    `S      `L  `m   `M    `M     `fn    `verb`verb
 doc.ktype:{[k] i:doc.KK?k; $[i<#doc.KK; doc.KT@i; `expr]}

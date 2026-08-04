@@ -120,6 +120,8 @@ make docs-check    # which modules still have no documented API
 - `_` is always the Drop/WeedOut/Delete verb; never a name character.
 - Evaluation is strictly right-to-left; no operator precedence.
 - Newlines separate items inside `(...)` `[...]` `$[...]` just like `;`, but never inject a null — items can be written one-per-line, with or without a trailing `;`, and blank lines are ignored. Only `;;` and a trailing `;` inject a null element (the intended way to elide). (This was fixed in "Fix bracket and newline syntax"; a multi-line `$[...]` no longer hangs either.)
+- **Round brackets build values, square brackets sequence statements.** `(a:1;b:2)` is a dict, `([]a:1 2;b:3 4)` a table, `([k:1 2]v:3 4)` a keyed table, `()!()` the empty dict (there is no empty-dict literal). A `(` commits to a dict as soon as its first item reads `key:` and not `key::`; every remaining item must then be `key:value`, so `(a:1;2)` and `(1;a:2)` are both parse errors and an assignment may not be a top-level item of `(…)`. `[a;b;c]` is a **progn**: every statement runs, the last one's value is the block's — that is where assignments and multi-statement `$[]` branches go. `[` directly after a noun is still apply/index.
+- **`:x` in statement position returns from the enclosing lambda** (`{$[x<0;:0;x*2]}`, `{[a] [t:a*2; :t+1]}`, `{:}` returns null). In value position — a call argument or list element — `:` keeps its verb reading, so `@[v;`px;:;99.]` is unchanged. At top level, with no frame to unwind, `:x` is plain identity.
 - `,/()` returns a unit, not an empty list — use `$[#x;,/x;!0]` when folding possibly-empty lists.
 - Lambdas do **not** close over parent scope. Use `/:` patterns instead of nested closures.
 - Namespaces: `\d ns` opens namespace `ns` (all members public); `\d ns a b` makes only `a`,`b` public (rest private, reachable only within `ns`); bare `\d` resets to global. Resolution is compile-time — names mangle to `ns.member` global keys (zero runtime cost). A bare name inside `ns` resolves to `ns.name` if that member exists, else the global.
@@ -145,5 +147,6 @@ Extensions are shared libraries loaded at runtime via `src/ffi.zig`. Available: 
 - `.plan/tasks.md` — future work 
 - `.plan/ideas.md` — Open questions and research ideas
 
-- `tools/zed-ink/` — Zed IDE extension
-- `tools/prosemirror-ink/` — Prosemirror grammar and syntax queries
+- `tools/zed-ink/` — Zed IDE extension (submodule); pins the grammars by commit in `extension.toml`
+- `tools/tree-sitter-ink/` — tree-sitter grammar + reference queries (submodule); `tools/zed-ink/languages/ink/highlights.scm` mirrors `queries/highlights.scm`
+- `tools/tree-sitter-ink-repl/` — grammar for REPL transcripts (submodule)

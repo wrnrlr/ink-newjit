@@ -47,7 +47,7 @@ dctStep: {[i]
   0}
 
 / ── native M table (recs.k's system idiom: a whole-column amend) ────────────
-tabInit: {[n] T:: [[]px:`f$!n; py:`f$!n; vx:n#1.0; vy:n#2.0]; 0}
+tabInit: {[n] T:: ([]px:`f$!n; py:`f$!n; vx:n#1.0; vy:n#2.0); 0}
 tabStep: {[i]
   T:: @[T;`vy;:;(T`vy) + GR*DT]
   T:: @[T;`px;:;(T`px) + (T`vx)*DT]
