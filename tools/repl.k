@@ -31,8 +31,8 @@ repl.PEND: ""                     / bytes read from stdin but not yet consumed
 repl.EOF:  0                      / 1 once stdin has reported end of input
 
 / append the next chunk of input; at EOF close the pending line off with a newline
-repl.feed:{[b] d: 1:`stdin; $[0=#d; [repl.EOF:: 1; b,"\n"]; b,d]}
-repl.fill:{[b] {(~repl.EOF)&(#x)=x?"\n"}repl.feed/b}
+repl.feed:{[b]d:1:`stdin;$[0=#d;[repl.EOF::1;b,"\n"];b,d]}
+repl.fill:{[b]{(~repl.EOF)&(#x)=x?"\n"}repl.feed/b}
 
 / one physical line, without its newline
 repl.readln:{[ignore]

@@ -151,6 +151,6 @@ Extensions are shared libraries loaded at runtime via `src/ffi.zig`. Available: 
 - `.plan/tasks.md` — future work 
 - `.plan/ideas.md` — Open questions and research ideas
 
-- `tools/zed-ink/` — Zed IDE extension (submodule); pins the grammars by commit in `extension.toml`
+- `tools/zed-ink/` — Zed IDE extension (submodule); pins the grammars by commit in `extension.toml`. After bumping a pin run `sh tools/zed-ink/build-grammars.sh` — Zed refetches the grammar clone on reload but does **not** recompile it, and a missing `grammars/<name>.wasm` kills ink highlighting outright. Never delete `grammars/` without rerunning it. See that repo's README.
 - `tools/tree-sitter-ink/` — tree-sitter grammar + reference queries (submodule); `tools/zed-ink/languages/ink/highlights.scm` mirrors `queries/highlights.scm`
 - `tools/tree-sitter-ink-repl/` — grammar for REPL transcripts (submodule)
