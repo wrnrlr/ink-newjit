@@ -1,17 +1,9 @@
 / tools/repl.k — the interactive read-eval-print loop.
-/ Run by `ink` when it is given no script and stdin is a terminal, and by the
-/ explicit `ink repl`.  Reads an entry, evaluates it with `. src`, prints the
-/ result unless it is null, repeats until `\q`, `exit` or end of input.
-/
+
 / Two runtime primitives carry the parts that cannot live in k: `. src` evaluates
 / ink source in the global scope (a failure arrives as an error VALUE, so a bad
 / entry prints like any other result) and `` `show x `` renders a value the way
-/ the REPL prints it.  The multi-line dict / table / keyed-table grids are laid
-/ out here, on top of `$` for the individual cells.
-/
-/ Fully qualified names, no `\d`: a namespace would mangle nothing useful here and
-/ every global this file defines is visible to whatever the user types.  Module
-/ auto-loading is deliberately NOT run on repl input — use `\l foo` or `2:"foo"`.
+/ the REPL prints it.
 /
 / Two parse rules shape the style below: a lambda cannot close over a caller's
 / locals (so helpers take their context as leading parameters and vary the LAST
@@ -19,23 +11,21 @@
 / (so `" "/f'x` would derive a verb from `" "/f` — every each/fold lands on its
 / own line instead).
 
-repl.PROMPT: "  "                 / also the continuation prompt, as in the old Zig loop
-repl.WS:     " \t\r\n"
-repl.BS:     `c$92                / a lone backslash; tools/lsp.k names it the same way
+repl.PROMPT:"  ";repl.WS:" \t\r\n";repl.BS:"\\"
 
 / ── stdin ───────────────────────────────────────────────────────────────────
 / `1:`stdin` hands back whatever bytes are available (blocking for at least one,
 / "" at end of input), so lines are re-assembled here.
 
-repl.PEND: ""                     / bytes read from stdin but not yet consumed
-repl.EOF:  0                      / 1 once stdin has reported end of input
+repl.PEND::""                     / bytes read from stdin but not yet consumed
+repl.EOF::0b                      / 1 once stdin has reported end of input
 
 / append the next chunk of input; at EOF close the pending line off with a newline
-repl.feed:{[b]d:1:`stdin;$[0=#d;[repl.EOF::1;b,"\n"];b,d]}
+repl.feed:{[b]d:1:`stdin;$[0=#d;[repl.EOF::1b;b,"\n"];b,d]}
 repl.fill:{[b]{(~repl.EOF)&(#x)=x?"\n"}repl.feed/b}
 
 / one physical line, without its newline
-repl.readln:{[ignore]
+repl.readln:{[]
   repl.PEND:: repl.fill repl.PEND
   i: repl.PEND?"\n"
   r: i#repl.PEND
@@ -50,7 +40,7 @@ repl.readln:{[ignore]
 / State: 0 code, 1 multi-line string, 2 single-line string, 3 comment,
 /        4/5 the character escaped by a backslash inside 1/2.
 
-repl.CLOSE: ("\n\t ;()[]{}"),repl.BS,"%!&+*|<>=~,^#_$?@./-:"
+repl.CLOSE:("\n\t ;()[]{}"),repl.BS,"%!&+*|<>=~,^#_$?@./-:"
 
 repl.sstep:{[s;p]
   a: p 0                          / previous character
@@ -69,7 +59,7 @@ repl.open:{[x] w: 3':" ",x," "; 1=0 repl.sstep/w}
 
 / one logical entry: physical lines joined until no string is left open
 repl.more:{[b] `stdout 1: repl.PROMPT; b,(repl.readln 0),"\n"}
-repl.entry:{[ignore] b: (repl.readln 0),"\n"; {(~repl.EOF)&repl.open x}repl.more/b}
+repl.entry:{[] b: (repl.readln 0),"\n"; {(~repl.EOF)&repl.open x}repl.more/b}
 
 / ── text helpers ────────────────────────────────────────────────────────────
 / indices of the non-blank characters.  `?` on a one-element vector answers with
@@ -87,30 +77,21 @@ repl.lines:{[ls] "\n"/ls}
 / everything else in its ordinary single-line form.  Always a char VECTOR — a
 / list of char atoms would collapse into one string when rows are assembled.
 
-repl.syms:{[v] s: $'v; n: 1_'s; " "/n}
-repl.cell:{[v] t: @v
-  $[t~`C; v
-   ;t~`c; ,v
-   ;t~`S; repl.syms v
-   ;t~`s; 1_$v
+repl.syms:{[v] s:$'v; n: 1_'s; " "/n}
+repl.cell:{[v] t:@v
+  $[t~`C;v
+   ;t~`c;,v
+   ;t~`S;repl.syms v
+   ;t~`s;1_$v
    ;$v]}
 
-/ ── grids ───────────────────────────────────────────────────────────────────
-/ A table renders as header / dashes / rows, each column padded to its widest
-/ cell.  Numeric columns are right-aligned (k9 convention), everything else left.
-/ grid → (headers; cells by column; widths; right-aligned?; row count)
-
-repl.colcells:{[c] repl.cell'c}
-repl.colwidth:{[cs] n: #'cs; 0|/n}
-repl.colright:{[c] (@c) in `I`F`B}
-
-repl.grid:{[t]
-  h:  repl.cell'!t
-  c:  .t
-  s:  repl.colcells'c
-  hw: #'h
-  cw: repl.colwidth's
-  (h; s; hw|cw; repl.colright'c; $[0=#c; 0; #*c])}
+/ A table renders as grid, columns padded to its widest cell, numbers right-aligned
+repl.grid:{[t] c:.t
+  h:repl.cell'!t
+  s:{repl.cell'x}'c
+  hw:#'h;cw:{n: #'x; 0|/n}'s
+  ra:{[c] (@c) in `I`F`B}'c / right aligned
+  (h;s;hw|cw;ra; $[0=#c; 0; #*c])}
 
 / one padded field of a row; `p` pads the last column too (a keyed table's key
 / half, so the `|` after it lines up)
@@ -173,18 +154,18 @@ repl.emit:{[s] $[0<#s; `stdout 1: s,"\n"; 0]}
 / Returns `ok to keep going, `eof to stop.  A null result prints nothing, as in
 / ngn/k — assignments, `\d`, the side-effecting verbs and `::` all yield one.
 
-repl.once:{[ignore]
+repl.once:{[]
   `stdout 1: repl.PROMPT
   e: repl.entry 0
   grid: $[0=#e; 1; ~(*e) in " \t"]
   s: repl.trim e
   $[repl.EOF&0=#s; :`eof; 0]
   $[(s~"\\q")|s~"exit"; :`eof; 0]
-  r: $[0=#s; ::; . s]
+  r:$[0=#s;::;.s]
   $[r~::; 0; repl.emit repl.rtrim repl.fmt[grid; r]]
   $[repl.EOF; `eof; `ok]}
 
-repl.run:{[ignore] {x~`ok}repl.once/`ok}
+repl.run:{[] {x~`ok}repl.once/`ok}
 
 / Running this file IS the repl.  Bind the loop's terminal `eof so a bare
 / expression statement's value is not echoed.  test/repl.k sets `repl.TEST` first
