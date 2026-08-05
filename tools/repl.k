@@ -10,6 +10,11 @@
 / one under a projection), and an adverb binds to the whole phrase on its left
 / (so `" "/f'x` would derive a verb from `" "/f` — every each/fold lands on its
 / own line instead).
+/
+/ Definitions carry their `repl.` prefix; INSIDE a member's body a bare name is
+/ resolved against the enclosing namespace first, so the prefix is dropped there
+/ (`trim e`, `PEND:: …`).  A parameter or local of the same name still wins, and
+/ a name with no matching member (`show`, `in`) still reaches the global.
 
 repl.PROMPT:"  ";repl.WS:" \t\r\n";repl.BS:"\\"
 
@@ -21,15 +26,15 @@ repl.PEND::""                     / bytes read from stdin but not yet consumed
 repl.EOF::0b                      / 1 once stdin has reported end of input
 
 / append the next chunk of input; at EOF close the pending line off with a newline
-repl.feed:{[b]d:1:`stdin;$[0=#d;[repl.EOF::1b;b,"\n"];b,d]}
-repl.fill:{[b]{(~repl.EOF)&(#x)=x?"\n"}repl.feed/b}
+repl.feed:{[b]d:1:`stdin;$[0=#d;[EOF::1b;b,"\n"];b,d]}
+repl.fill:{[b]{(~EOF)&(#x)=x?"\n"}feed/b}
 
 / one physical line, without its newline
 repl.readln:{[]
-  repl.PEND:: repl.fill repl.PEND
-  i: repl.PEND?"\n"
-  r: i#repl.PEND
-  repl.PEND:: (i+1)_repl.PEND
+  PEND:: fill PEND
+  i: PEND?"\n"
+  r: i#PEND
+  PEND:: (i+1)_PEND
   r}
 
 / ── an unfinished entry keeps the prompt coming ─────────────────────────────
@@ -51,8 +56,8 @@ repl.sstep:{[s;p]
   $[s=4; 1
    ;s=5; 2
    ;s=3; $[c="\n"; 0; 3]
-   ;s=1; $[c~repl.BS; 4; (c="\"")&n in repl.CLOSE; 0; 1]
-   ;s=2; $[c~repl.BS; 5; (c="\"")&n in repl.CLOSE; 0; c="\n"; 0; 2]
+   ;s=1; $[c~BS; 4; (c="\"")&n in CLOSE; 0; 1]
+   ;s=2; $[c~BS; 5; (c="\"")&n in CLOSE; 0; c="\n"; 0; 2]
    ;c="\""; $[n="\n"; 1; 2]
    ;(c="/")&a in " \t\n;"; 3
    ;0]}
@@ -63,25 +68,25 @@ repl.sstep:{[s;p]
 repl.OPENB:"([{"
 repl.SHUTB:")]}"
 repl.depth:{[st;x] c: 0=st
-  o: +/c&(#repl.OPENB)>repl.OPENB?x
-  s: +/c&(#repl.SHUTB)>repl.SHUTB?x
+  o: +/c&(#OPENB)>OPENB?x
+  s: +/c&(#SHUTB)>SHUTB?x
   o-s}
-repl.open:{[x] $[0=#x; 0; repl.opens x]}
+repl.open:{[x] $[0=#x; 0; opens x]}
 repl.opens:{[x] w: 3':" ",x," "
-  st: 0 repl.sstep\w                / the state each character leaves behind
-  ((*|st) in 1 4)|0<repl.depth[st;x]}
+  st: 0 sstep\w                     / the state each character leaves behind
+  ((*|st) in 1 4)|0<depth[st;x]}
 
 / one logical entry: physical lines joined until no string is left open
-repl.more:{[b] `stdout 1: repl.PROMPT; b,(repl.readln 0),"\n"}
-repl.entry:{[] b: (repl.readln 0),"\n"; {(~repl.EOF)&repl.open x}repl.more/b}
+repl.more:{[b] `stdout 1: PROMPT; b,(readln 0),"\n"}
+repl.entry:{[] b: (readln 0),"\n"; {(~EOF)&open x}more/b}
 
 / ── text helpers ────────────────────────────────────────────────────────────
 / indices of the non-blank characters.  `?` on a one-element vector answers with
 / an ATOM, and monadic `&` on an atom counts rather than locates, so the mask is
 / reshaped back to the string's length first.
-repl.keep: {[s] m: (#repl.WS)=repl.WS?s; &(#s)#m}
-repl.trim: {[s] i: repl.keep s; $[0=#i; ""; (*i)_(1+*|i)#s]}
-repl.rtrim:{[s] i: repl.keep s; $[0=#i; ""; (1+*|i)#s]}   / a grid may open with padding
+repl.keep: {[s] m: (#WS)=WS?s; &(#s)#m}
+repl.trim: {[s] i: keep s; $[0=#i; ""; (*i)_(1+*|i)#s]}
+repl.rtrim:{[s] i: keep s; $[0=#i; ""; (1+*|i)#s]}        / a grid may open with padding
 repl.lpad: {[w;s] ((w-#s)#" "),s}
 repl.rpad: {[w;s] s,(w-#s)#" "}
 repl.lines:{[ls] "\n"/ls}
@@ -96,73 +101,73 @@ repl.syms:{[v] s:$'v; n: 1_'s; " "/n}
 repl.cell:{[v] t:@v
   $[t~`C;v
    ;t~`c;,v
-   ;t~`S;repl.syms v
+   ;t~`S;syms v
    ;t~`s;1_$v
    ;$v]}
 
 / A table renders as grid, columns padded to its widest cell, numbers right-aligned
 repl.grid:{[t] c:.t
-  h:repl.cell'!t
-  s:{repl.cell'x}'c
-  hw:#'h;cw: repl.colwidth's
+  h:cell'!t
+  s:{cell'x}'c
+  hw:#'h;cw: colwidth's
   ra:{[c] (@c) in `I`F`B}'c / right aligned
   (h;s;hw|cw;ra; $[0=#c; 0; #*c])}
 
 / one padded field of a row; `p` pads the last column too (a keyed table's key
 / half, so the `|` after it lines up)
 repl.field:{[s;w;r;p;i] v: s i
-  $[r i; repl.lpad[w i; v]
-   ;p|i<(#s)-1; repl.rpad[w i; v]
+  $[r i; lpad[w i; v]
+   ;p|i<(#s)-1; rpad[w i; v]
    ;v]}
-repl.row:{[w;r;p;s] f: repl.field[s;w;r;p]'!#s; " "/f}
+repl.row:{[w;r;p;s] f: field[s;w;r;p]'!#s; " "/f}
 repl.dashes:{[w] d: {[n] n#"-"}'w; " "/d}
 repl.cellrow:{[s;i] {[j;c] c j}[i]'s}
 
 / every row of a grid, as already-padded text
-repl.rows:{[g;p] rs: repl.cellrow[g 1]'!g 4; repl.row[g 2; g 3; p]'rs}
+repl.rows:{[g;p] rs: cellrow[g 1]'!g 4; row[g 2; g 3; p]'rs}
 
-repl.table:{[t] g: repl.grid t
-  hd: (repl.row[g 2; g 3; 0] g 0; repl.dashes g 2)
-  rs: repl.rows[g; 0]
-  repl.lines $[0=#rs; hd; hd,rs]}
+repl.table:{[t] g: grid t
+  hd: (row[g 2; g 3; 0] g 0; dashes g 2)
+  rs: rows[g; 0]
+  lines $[0=#rs; hd; hd,rs]}
 
 / a keyed table is a dict of two tables sharing rows, joined on a `|`
 repl.pipe:{[k;v;i] (k i),"|",v i}
 repl.keyed:{[d]
-  kg: repl.grid[!d]                / bracketed: a bare `!` after a name reads as DYADIC
+  kg: grid[!d]                     / bracketed: a bare `!` after a name reads as DYADIC
   vt: .d
-  vg: repl.grid vt
-  h:  (repl.row[kg 2; kg 3; 1] kg 0),"|",repl.row[vg 2; vg 3; 0] vg 0
-  sp: (repl.dashes kg 2),"|",repl.dashes vg 2
+  vg: grid vt
+  h:  (row[kg 2; kg 3; 1] kg 0),"|",row[vg 2; vg 3; 0] vg 0
+  sp: (dashes kg 2),"|",dashes vg 2
   hd: (h; sp)
   n:  (kg 4)&vg 4
-  rs: repl.pipe[repl.rows[kg; 1]; repl.rows[vg; 0]]'!n
-  repl.lines $[0=n; hd; hd,rs]}
+  rs: pipe[rows[kg; 1]; rows[vg; 0]]'!n
+  lines $[0=n; hd; hd,rs]}
 
 / a dict renders one `key|value` line per entry.  A one-entry dict holds its
 / value unwrapped, so re-enlist it before rendering.
-repl.entryline:{[w;k;c;i] (repl.rpad[w; k i]),"|",c i}
+repl.entryline:{[w;k;c;i] (rpad[w; k i]),"|",c i}
 repl.dict:{[d]
-  k: repl.cell'!d
+  k: cell'!d
   v: .d
-  c: $[1=#k; ,repl.cell v; repl.cell'v]
-  w: repl.colwidth k
-  ls: repl.entryline[w; k; c]'!#k
-  repl.lines ls}
+  c: $[1=#k; ,cell v; cell'v]
+  w: colwidth k
+  ls: entryline[w; k; c]'!#k
+  lines ls}
 
 / ── printing ────────────────────────────────────────────────────────────────
 / An entry that begins with whitespace asks for the raw k literal instead of the
 / grid — the same escape hatch the Zig loop had.
 
-repl.showtable:{[v] $[0=#!v; `show v; repl.table v]}
+repl.showtable:{[v] $[0=#!v; `show v; table v]}
 repl.showdict:{[v] k: !v; w: .v
-  $[(`M~@k)&`M~@w; repl.keyed v; 0=#k; `show v; repl.dict v]}
+  $[(`M~@k)&`M~@w; keyed v; 0=#k; `show v; dict v]}
 repl.pretty:{[v] t: @v
-  $[t~`M; repl.showtable v
-   ;t~`m; repl.showdict v
+  $[t~`M; showtable v
+   ;t~`m; showdict v
    ;`show v]}
 
-repl.fmt:{[grid;v] $[grid; repl.pretty v; `show v]}
+repl.fmt:{[grid;v] $[grid; pretty v; `show v]}
 repl.emit:{[s] $[0<#s; `stdout 1: s,"\n"; 0]}
 
 / ── the loop ────────────────────────────────────────────────────────────────
@@ -170,17 +175,17 @@ repl.emit:{[s] $[0<#s; `stdout 1: s,"\n"; 0]}
 / ngn/k — assignments, `\d`, the side-effecting verbs and `::` all yield one.
 
 repl.once:{[]
-  `stdout 1: repl.PROMPT
-  e: repl.entry 0
-  grid: $[0=#e; 1; ~(*e) in " \t"]
-  s: repl.trim e
-  $[repl.EOF&0=#s; :`eof; 0]
+  `stdout 1: PROMPT
+  e: entry 0
+  g: $[0=#e; 1; ~(*e) in " \t"]
+  s: trim e
+  $[EOF&0=#s; :`eof; 0]
   $[(s~"\\q")|s~"exit"; :`eof; 0]
   r:$[0=#s;::;.s]
-  $[r~::; 0; repl.emit repl.rtrim repl.fmt[grid; r]]
-  $[repl.EOF; `eof; `ok]}
+  $[r~::; 0; emit rtrim fmt[g; r]]
+  $[EOF; `eof; `ok]}
 
-repl.run:{[] {x~`ok}repl.once/`ok}
+repl.run:{[] {x~`ok}once/`ok}
 
 / Running this file IS the repl.  Bind the loop's terminal `eof so a bare
 / expression statement's value is not echoed.  test/repl.k sets `repl.TEST` first

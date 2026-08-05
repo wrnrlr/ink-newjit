@@ -306,6 +306,31 @@ and a variable declared inside a lambda is a local variable.
 Assignmet of globals and locals at the top level happens with the singe colon `:`,
 while assigment of globals in a lambda happen with a double colon `::`
 
+### Partially qualified names
+A name that is not a local or a parameter is resolved against the namespaces
+**enclosing** it before it is read as a global. Two things enclose: the `\d ns`
+in force, and — inside a lambda bound to a name — that binding's own qualified
+name. Each is tried innermost-first and peeled one segment at a time, so the
+prefix a name is written with may be *partial*:
+
+```k
+prefix:"Xyz"
+foo.prefix:"Abc"
+foo.format:{prefix,x}   / `foo.format.prefix`? no. `foo.prefix`? yes.
+foo.format "!"          / "Abc!"
+```
+
+A prefix only captures the name when that member actually exists, so an
+unrelated global is never shadowed (`{show x}` inside `foo.format` still reaches
+the global `show` unless `foo.show` is defined). Members are registered for the
+whole file before it runs, so a member may be referenced above its definition.
+
+The same rule applies to a `::` inside such a lambda: `PEND::x` inside
+`repl.readln` writes `repl.PEND`, the member a read of `PEND` in that same body
+would see. A single-colon `name:value` inside a lambda is still a plain local,
+and a definition is still written out in full (`repl.readln:{…}`) — only
+*references* are shortened.
+
 ### General Verbs
 - `@x` **Type** - Type of x. `` @(1;2.3;`c;"Hi")  / `i`f`s`C ``
 - `#x` **Tally** - Count number of elements in x. `` #(1 2;3 4)  / 2 ``

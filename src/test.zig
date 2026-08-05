@@ -1762,6 +1762,35 @@ test "membership across types is false, not a type error" {
   try t.check("(1;`a) in `a`b", "01b");
 }
 
+test "a name resolves against the namespaces enclosing it" {
+  var t = try Tester.init();
+  defer t.deinit();
+  // Inside the lambda bound to `foo.format`, a bare `prefix` peels the binding
+  // name one segment at a time — `foo.format.prefix` (no), `foo.prefix` (yes) —
+  // so the module's own member wins over the same name at global scope.
+  try t.check("prefix:\"Xyz\"; foo.prefix:\"Abc\"; foo.format:{prefix,x}; foo.format \"!\"", "\"Abc!\"");
+  // Only an EXISTING member captures the name; anything else is still the global.
+  try t.check("g:\"G\"; foo.useg:{g,x}; foo.useg \"!\"", "\"G!\"");
+  // Every prefix is tried, so a nested member reaches a shallower sibling…
+  try t.check("a.b.p:\"deep\"; a.b.f:{p,x}; a.b.f \"!\"", "\"deep!\"");
+  // …and a PARTIALLY qualified dotted name resolves the same way.
+  try t.check("a.b.q:\"dq\"; a.top:{b.q,x}; a.top \"!\"", "\"dq!\"");
+  // A member may be referenced above its definition (the whole file is prescanned).
+  try t.check("z.f:{tag,x}; z.tag:\"T\"; z.f \"!\"", "\"T!\"");
+  // A parameter or local of the same name still wins.
+  try t.check("h.v:\"member\"; h.f:{[v;w] v,w}; h.f[\"local\";\"!\"]", "\"local!\"");
+  // A member shadows a prelude intrinsic alias only inside its own namespace.
+  try t.check("m.sqrt:{\"shadowed\"}; m.g:{sqrt x}; m.g 4.", "\"shadowed\"");
+  try t.check("sqrt 4.", "2.0");
+  // `::` writes the member a read of the same name in that body would see — the
+  // two must not diverge (`c.n`, never a fresh global `n`).
+  try t.check("c.n::0; c.bump:{n::n+1; n}; c.bump 0; c.bump 0", "2");
+  try t.check("c.n", "2");
+  // A single colon inside a lambda is still a plain local.
+  try t.check("c.loc:{n:99; n}; c.loc 0", "99");
+  try t.check("c.n", "2");
+}
+
 test {
   // Pull in the sibling modules whose own unit tests would otherwise not be
   // reachable from this root.

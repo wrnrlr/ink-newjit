@@ -78,9 +78,11 @@ pub const Compiler = struct {
   // Implicit function namespace. While compiling a lambda BOUND to name `F`, this
   // is set to `F` (its fully-qualified assign name), so a bare reference in the
   // body resolves to the member `F.that` when such a global exists — e.g. inside
-  // `group` a bare `expand` reaches `group.expand`. Distinct from `\d`: it affects
-  // REFERENCE resolution only (never assignment), and only captures a name when the
-  // qualified member actually exists, so it never shadows an unrelated global.
+  // `group` a bare `expand` reaches `group.expand`. `F` and every PREFIX of it is
+  // tried, innermost first, so inside `foo.format` a bare `prefix` also reaches
+  // `foo.prefix` (see memberUnder). Distinct from `\d`: it only captures a name
+  // when the qualified member actually exists, so it never shadows an unrelated
+  // global.
   fn_namespace: ?[]const u8 = null,
   namespaces: std.StringHashMap(NsPolicy),
   // Fully-qualified names (`ns.member`, interned) declared private by their
@@ -92,7 +94,9 @@ pub const Compiler = struct {
   // straight to Apply1(Op1.sin) (fusable) instead of a lambda call. A `::`
   // (double-bind = variable) or any non-matching rebind clears the entry, and a
   // local/param of the same name is skipped — so user shadowing is respected. This
-  // is the payoff of the strict single/double-bind = constant/variable rule.
+  // is the payoff of the strict single/double-bind = constant/variable rule. Keyed by
+  // the RESOLVED global name (assignKey / refKey), so a namespace member never picks
+  // up an alias of the same bare name from another namespace.
   intrinsic_alias: std.StringHashMap(Op1),
   // General `:`-constant propagation. A GLOBAL-scope SINGLE-bind (`:` = constant) to
   // a pure LITERAL (scalar / vector / string / symbol — not a var or expression) is
@@ -100,7 +104,8 @@ pub const Compiler = struct {
   // inline instead of a Global load, so downstream arithmetic constant-folds and const
   // scalars bake into fused kernels. A `::` (variable), a compound/indexed rebind, or a
   // non-literal rhs clears the entry; a local/param of the same name is skipped. Keys
-  // are interned (stable); VALUES are ast nodes owned by the CURRENT unit's tree, so
+  // are the RESOLVED global name, interned (stable) — see intrinsic_alias — and the
+  // VALUES are ast nodes owned by the CURRENT unit's tree, so
   // the map is cleared at the start of every top-level compile (see compile()).
   // Relies on the single/double-bind contract: a `:`-global is never reassigned.
   const_globals: std.StringHashMap(*ast.Node),
@@ -491,7 +496,7 @@ pub const Compiler = struct {
     // shadowed, so this needs no scope analysis. See src/primitive/intrinsic.zig.
     if (n == 1 and ap.f.* == .literal and ap.f.literal == .@"var") {
       const nm = ap.f.literal.@"var";
-      if (!self.isLocalName(nm) and !self.hasFnMember(nm)) if (self.intrinsic_alias.get(nm)) |o1| {
+      if (!self.isLocalName(nm)) if (self.intrinsic_alias.get(try self.refKey(nm))) |o1| {
         const a = try self.compileNode(seq[0], false);
         return try self.emitOpWithArg(.Apply1, @intFromEnum(o1), &.{a});
       };
@@ -605,7 +610,7 @@ pub const Compiler = struct {
     // here — re-emitting the literal — so downstream arithmetic folds and the Global
     // load is elided. Skipped when a local/param of the same name shadows it. The rhs
     // is always a non-var literal, so this recurses at most once into compileLiteral.
-    if (!self.isLocalName(name)) if (self.const_globals.get(name)) |rhs| {
+    if (!self.isLocalName(name)) if (self.const_globals.get(try self.refKey(name))) |rhs| {
       // Inside a lambda the folded literal outlives this unit; remember the slot
       // so a later `::` to it is refused rather than silently ignored.
       if (self.scope.is_lambda) try self.folded_consts.put(try self.resolveGlobalRef(name), {});
@@ -741,17 +746,18 @@ pub const Compiler = struct {
         // (`+:`), an indexed rebind, or any other rhs clears both — a variable can't
         // be folded. Relies on the single/double-bind contract (a `:`-global is const).
         if (!scope.is_lambda) {
-          _ = self.const_globals.remove(name);
-          _ = self.intrinsic_alias.remove(name);
+          const key = try self.assignKey(name);
+          _ = self.const_globals.remove(key);
+          _ = self.intrinsic_alias.remove(key);
           const is_double = b.a != null and b.a.?.* == .right;
           const compound = b.f != null and !std.mem.eql(u8, b.f.?, ":");
           // A name the unit mutates anywhere (`::` / indexed, even inside a lambda)
           // is not a constant, so never record it.
           if (!is_double and !compound and !self.mutated.contains(name)) if (b.a) |rhs| {
             if (rhs.* == .literal and rhs.literal != .@"var") {
-              try self.const_globals.put(try self.interned(name), rhs);
+              try self.const_globals.put(key, rhs);
             } else if (monoIntrinsicWrapper(rhs)) |op1| {
-              try self.intrinsic_alias.put(try self.interned(name), op1);
+              try self.intrinsic_alias.put(key, op1);
             }
           };
         }
@@ -962,7 +968,7 @@ pub const Compiler = struct {
     // same name. See intrinsic_alias.
     if (ap.f.* == .literal and ap.f.literal == .@"var") {
       const nm = ap.f.literal.@"var";
-      if (!self.isLocalName(nm) and !self.hasFnMember(nm)) if (self.intrinsic_alias.get(nm)) |o1| {
+      if (!self.isLocalName(nm)) if (self.intrinsic_alias.get(try self.refKey(nm))) |o1| {
         const a = try self.compileNode(ap.a, false);
         return try self.emitOpWithArg(.Apply1, @intFromEnum(o1), &.{a});
       };
@@ -1329,33 +1335,62 @@ pub const Compiler = struct {
     return policy.all_public or policy.publics.contains(member);
   }
 
+  // ── Partially qualified names ────────────────────────────────────────────
+  // A name is resolved against the namespaces ENCLOSING it, innermost first, and
+  // each enclosing namespace is peeled one segment at a time. Both `\d ns` and the
+  // implicit function namespace (the qualified name a lambda is bound to) enclose.
+  // So in
+  //     foo.prefix:"Abc"
+  //     foo.format:{prefix,x}
+  // the body's `prefix` tries `foo.format.prefix`, then `foo.prefix` — a hit — and
+  // never reaches a global `prefix`. A prefix only captures the name when that
+  // member already exists as a global (prescanGlobals registers the whole file's
+  // members up front), so an unrelated global is never shadowed.
+
+  // The first of `p.name`, `<p minus its last segment>.name`, … that exists as a
+  // global; null when none does. Every variable reference probes this, and most
+  // probes MISS, so the candidate is built in a stack buffer and only interned
+  // once it hits — interning each miss would fill the symbol pool with names that
+  // do not exist. (`pre` slices `p`, never the buffer, so reusing it is safe.)
+  fn memberUnder(self: *Compiler, p: []const u8, name: []const u8) !?[]const u8 {
+    var buf: [256]u8 = undefined;
+    var pre: []const u8 = p;
+    while (true) {
+      const q = std.fmt.bufPrint(&buf, "{s}.{s}", .{ pre, name }) catch return null;
+      if (self.globals.contains(q)) return try self.interned(q);
+      const dot = std.mem.lastIndexOfScalar(u8, pre, '.') orelse return null;
+      pre = pre[0..dot];
+    }
+  }
+
+  // The enclosing member a reference to `name` picks up, or null for one that
+  // resolves to its own absolute/global reading.
+  fn enclosingMember(self: *Compiler, name: []const u8) !?[]const u8 {
+    if (self.fn_namespace) |fns| if (try self.memberUnder(fns, name)) |q| return q;
+    if (self.namespace) |ns| if (try self.memberUnder(ns, name)) |q| return q;
+    return null;
+  }
+
+  // The global key a reference to `name` resolves to. Keeps the constant/alias
+  // maps (keyed by resolved name) in step with resolveGlobalRef.
+  fn refKey(self: *Compiler, name: []const u8) ![]const u8 {
+    if (try self.enclosingMember(name)) |q| return q;
+    return self.interned(name);
+  }
+
   // Resolve a variable *reference* to a global slot, applying namespace rules.
-  //   qualified `a.m`   → resolved RELATIVE to the current namespace first
-  //                       (`cur.a.m`) when such a member exists, so inside
-  //                       `\d font` a `cff2.outline` reaches `font.cff2.outline`;
-  //                       otherwise the absolute `a.m`, with a strict-privacy
+  //   enclosing member  → the innermost `ns…/fn…` prefix that has such a member,
+  //                       which covers both a bare `m` inside `ns` (→ `ns.m`) and
+  //                       a partially qualified `a.m` (inside `\d font`,
+  //                       `cff2.outline` reaches `font.cff2.outline`).
+  //   qualified `a.m`   → otherwise the absolute `a.m`, with a strict-privacy
   //                       error if it is private and referenced from outside `a`.
-  //   bare `m` in `ns`  → `ns.m` if that member exists, else global `m`.
-  //   bare `m` globally → global `m`.
+  //   bare `m`          → otherwise global `m`.
   fn resolveGlobalRef(self: *Compiler, name: []const u8) !u16 {
+    if (try self.enclosingMember(name)) |q| return self.getOrAddGlobal(q);
     if (nsOf(name)) |ns| {
-      if (self.namespace) |cur| {
-        const rel = try self.qualify(cur, name);
-        if (self.globals.contains(rel)) return self.getOrAddGlobal(rel);
-      }
       const inside = if (self.namespace) |cur| std.mem.eql(u8, cur, ns) else false;
       if (!inside and self.private_members.contains(name)) return error.PrivateName;
-      return self.getOrAddGlobal(name);
-    }
-    // Implicit function namespace (innermost): a bare `expand` inside `group`
-    // resolves to `group.expand` when that member exists, else falls through.
-    if (self.fn_namespace) |fns| {
-      const q = try self.qualify(fns, name);
-      if (self.globals.contains(q)) return self.getOrAddGlobal(q);
-    }
-    if (self.namespace) |ns| {
-      const q = try self.qualify(ns, name);
-      if (self.globals.contains(q)) return self.getOrAddGlobal(q);
     }
     return self.getOrAddGlobal(name);
   }
@@ -1369,14 +1404,15 @@ pub const Compiler = struct {
     return self.interned(name);
   }
 
-  // True if bare `name` names a member of the active implicit function namespace
-  // (`fn_namespace.name` exists as a global). Used to let such a member shadow a
-  // prelude intrinsic-alias fast-path within its own function body.
-  fn hasFnMember(self: *Compiler, name: []const u8) bool {
-    if (nsOf(name) != null) return false;
-    const fns = self.fn_namespace orelse return false;
-    const q = self.qualify(fns, name) catch return false;
-    return self.globals.contains(q);
+  // The global key an *assignment* to `name` targets — resolveGlobalAssign without
+  // its private-member bookkeeping. A `::` inside a lambda writes the enclosing
+  // member when there is one, so the write lands where a read of the same name in
+  // the same body looks (`repl.PEND` inside `repl.readln`, not a fresh `PEND`).
+  fn assignKey(self: *Compiler, name: []const u8) ![]const u8 {
+    if (nsOf(name) != null) return self.interned(name);
+    if (self.namespace) |ns| return self.qualify(ns, name);
+    if (self.fn_namespace) |fns| if (try self.memberUnder(fns, name)) |q| return q;
+    return self.interned(name);
   }
 
   // Resolve an *assignment* target to a global slot. A bare name inside a
@@ -1389,6 +1425,7 @@ pub const Compiler = struct {
       if (!self.isPublic(ns, name)) try self.private_members.put(q, {});
       return self.getOrAddGlobal(q);
     }
+    if (self.fn_namespace) |fns| if (try self.memberUnder(fns, name)) |q| return self.getOrAddGlobal(q);
     return self.getOrAddGlobal(name);
   }
 

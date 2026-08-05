@@ -267,3 +267,16 @@ answers `"ab"`. Note this is NOT the multi-line string form — ink opens one on
 when the quote is the last character on the line (`s:"` then the text), which the
 repl handles by keeping the entry open. The one-line case is what is broken.
 Either keep the whole span or make it a parse error.
+
+## `9:` placed tables lose their column data (3 failures in `test/kkc.k`)
+
+`ink test/kkc.k` → `41 ok, 3 fail`, all three on the placed-table path: `table
+(px)+(vx)`, `table (px)*(vy)+(py)`, and `8: table reassembles`. So a table put on
+the device with monadic `9:` (`gpu.holdT`, class `M`) neither computes column
+arithmetic correctly nor round-trips back through `8:`. Column *pruning* still
+passes (`3 = #kkTableColNames[]`), so the binding/prune step is fine and the
+suspect is the placement or the read-back itself.
+
+Pre-existing (identical on `c6a056b`, found while changing name resolution — the
+compiler change is not involved). Every other kk oracle passes, so this is the
+only red patch in `test/oracles.sh`.
