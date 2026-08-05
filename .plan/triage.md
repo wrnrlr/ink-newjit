@@ -255,3 +255,15 @@ element, so `&(#w)=w?x` silently switches meaning between a 1-char string and a
 2-char one. It cost a wrong answer in `tools/repl.k` (`repl.keep`, which now
 reshapes the mask with `(#s)#m` first). Worth deciding whether monadic `&` on a
 boolean atom should locate (`0b`→`!0`, `1b`→`,0`) rather than count.
+
+## An unterminated string literal loses its last character
+
+`x:"abc` (no closing quote, end of line) binds `"ab"` — `#x` is 2, not 3. The
+lexer ends the token at the newline but takes the span one byte short, so the
+final character is dropped instead of the literal being reported as unterminated.
+
+Pre-existing (identical on `c08ba78`), and visible at the prompt: typing `"abc`
+answers `"ab"`. Note this is NOT the multi-line string form — ink opens one only
+when the quote is the last character on the line (`s:"` then the text), which the
+repl handles by keeping the entry open. The one-line case is what is broken.
+Either keep the whole span or make it a parse error.

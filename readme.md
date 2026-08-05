@@ -25,6 +25,7 @@ Functional programming with APL2
 - [InfiniteDiffusion: Open-World Terrain Generation](https://xandergos.github.io/terrain-diffusion/)
 - [Writing Bindless GPU Abstraction layer](https://www.kevin-gibson.com/blog/writing-a-bindless-gpu-abstraction-layer/)
 - [ALP: Adaptive Lossless Floating-Point Compression](https://github.com/cwida/ALP)
+- [Harness Engineering for Self-Improvement](https://lilianweng.github.io/posts/2026-07-04-harness/)
 
 ```
  M:2 2#!4

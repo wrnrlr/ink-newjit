@@ -26,6 +26,12 @@ rule.
   `runNested`, which pushes a frame above the caller's stack the way `2:` does.
 - **A tool is resolved once**, by `runTool` — `ink <tool>`, `ink repl` and the
   bare-`ink` terminal path share it.
+- **Multi-line entries.** The Zig loop only kept reading while a *string* was
+  left open, so `f:{` ⏎ `x+1}` evaluated the two halves separately and answered
+  `!type`. The k loop counts brackets as well — `f:{`, `(1;`, `$[1;` and
+  `g:{[a;b]` all keep the prompt coming until they close. Brackets inside
+  strings and comments do not count, and a stray closer (`x+1}`) is still a
+  complete entry rather than a wait for input that never ends.
 - **`src/cmd/repl.zig` → `src/cmd/eval.zig`, `Repl` → `Eval`.** Nothing outside
   `tools/repl.k` is called "repl" any more: what is left evaluates a source text
   statement by statement, printing as it goes (`stream`, for scripts and piped
