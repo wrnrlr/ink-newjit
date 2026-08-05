@@ -32,11 +32,13 @@ repl.readln:{[]
   repl.PEND:: (i+1)_repl.PEND
   r}
 
-/ ── unterminated strings keep the entry open ────────────────────────────────
-/ A `"` at the very end of a line opens a MULTI-LINE string (the lexer's rule is
-/ that the quote is followed by a newline), and only that keeps the REPL reading;
-/ an unclosed single-line string is a complete, if broken, entry.  A `"` inside a
-/ string closes it only when the next character is one that can follow a noun.
+/ ── an unfinished entry keeps the prompt coming ─────────────────────────────
+/ Two things leave an entry unfinished: an open multi-line string, and a bracket
+/ that has not been closed yet — so `f:{` and `(1;` read on, while a stray closer
+/ (`x+1}`) does not.  A `"` at the very end of a line opens a MULTI-LINE string
+/ (the lexer's rule is that the quote is followed by a newline); an unclosed
+/ single-line string is a complete, if broken, entry.  A `"` inside a string
+/ closes it only when the next character is one that can follow a noun.
 / State: 0 code, 1 multi-line string, 2 single-line string, 3 comment,
 /        4/5 the character escaped by a backslash inside 1/2.
 
@@ -55,7 +57,19 @@ repl.sstep:{[s;p]
    ;(c="/")&a in " \t\n;"; 3
    ;0]}
 
-repl.open:{[x] w: 3':" ",x," "; 1=0 repl.sstep/w}
+/ Brackets are counted only where the scan says the text is code, so a `{` in a
+/ string or a comment does not hold the entry open.  The tally is a plain total:
+/ a closer with nothing to close leaves it at or below zero, and the entry ends.
+repl.OPENB:"([{"
+repl.SHUTB:")]}"
+repl.depth:{[st;x] c: 0=st
+  o: +/c&(#repl.OPENB)>repl.OPENB?x
+  s: +/c&(#repl.SHUTB)>repl.SHUTB?x
+  o-s}
+repl.open:{[x] $[0=#x; 0; repl.opens x]}
+repl.opens:{[x] w: 3':" ",x," "
+  st: 0 repl.sstep\w                / the state each character leaves behind
+  ((*|st) in 1 4)|0<repl.depth[st;x]}
 
 / one logical entry: physical lines joined until no string is left open
 repl.more:{[b] `stdout 1: repl.PROMPT; b,(repl.readln 0),"\n"}
@@ -71,6 +85,7 @@ repl.rtrim:{[s] i: repl.keep s; $[0=#i; ""; (1+*|i)#s]}   / a grid may open with
 repl.lpad: {[w;s] ((w-#s)#" "),s}
 repl.rpad: {[w;s] s,(w-#s)#" "}
 repl.lines:{[ls] "\n"/ls}
+repl.colwidth:{[ls] n: #'ls; 0|/n}        / widest of a list of cells (0 when empty)
 
 / ── cells ───────────────────────────────────────────────────────────────────
 / A grid cell is raw text: char data unquoted, symbols without their backtick,
@@ -89,7 +104,7 @@ repl.cell:{[v] t:@v
 repl.grid:{[t] c:.t
   h:repl.cell'!t
   s:{repl.cell'x}'c
-  hw:#'h;cw:{n: #'x; 0|/n}'s
+  hw:#'h;cw: repl.colwidth's
   ra:{[c] (@c) in `I`F`B}'c / right aligned
   (h;s;hw|cw;ra; $[0=#c; 0; #*c])}
 

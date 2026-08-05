@@ -32,12 +32,21 @@ run: {[]
   eq["trim: single char";    repl.trim "3"; ,"3"]
   eq["rtrim: keeps padding"; repl.rtrim "  a  "; "  a"]
 
-  / ── entry still open? only an unterminated MULTI-line string continues ────
+  / ── entry still open? an unclosed bracket or MULTI-line string continues ──
   chk["open: complete expression"; ~repl.open "1+2\n"]
   chk["open: quote at end of line"; repl.open ("x:",Q,"\nabc\n")]
   chk["open: closed again";        ~repl.open ("x:",Q,"\nabc",Q,"\n")]
   chk["open: single-line string";  ~repl.open ("x:",Q,"abc\n")]
   chk["open: quote inside a comment"; ~repl.open (" / a ",Q," quote\n")]
+  chk["open: unclosed lambda";     repl.open "f:{\n"]
+  chk["open: lambda closed";       ~repl.open "f:{\nx+1}\n"]
+  chk["open: unclosed paren";      repl.open "(1;\n"]
+  chk["open: unclosed bracket";    repl.open "f[1;\n"]
+  chk["open: nested, one closed";  repl.open "{a:(1;2)\n"]
+  chk["open: stray closer ends it"; ~repl.open "x+1}\n"]
+  chk["open: bracket inside a string";  ~repl.open ("x:",Q,"{",Q,"\n")]
+  chk["open: bracket inside a comment"; ~repl.open "1 / a { brace\n"]
+  chk["open: empty entry";         ~repl.open ""]
 
   / ── cells ─────────────────────────────────────────────────────────────────
   eq["cell: chars are unquoted"; repl.cell "ab"; "ab"]
