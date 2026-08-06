@@ -45,6 +45,16 @@ fn isKeywordOp(s: []const u8) bool {
 // Part of speech can be a prase, noun, or a verb
 const Tag = enum { phrase, noun, verb };
 
+// True if everything from `i` to the end of its line is spaces/tabs (or EOF). The
+// block-comment delimiters `/` and `\` must be alone on their line, but trailing
+// whitespace after them is invisible in an editor and must not change the meaning
+// of the whole file — an unclosed block silently swallows the code below it.
+fn restOfLineBlank(src: []const u8, i: u32) bool {
+  var j = i;
+  while (j < src.len and (src[j] == ' ' or src[j] == '\t')) j += 1;
+  return j >= src.len or src[j] == '\n';
+}
+
 // True if the line directly above the '/' at `open` is itself a line comment
 // (its first non-blank character is '/'). Such a '/' is a blank divider inside a
 // run of comments, not a block-comment opener — this keeps a lone '/' among
@@ -66,7 +76,7 @@ fn blockClosePresent(src: []const u8, open: u32) bool {
   while (i < src.len and src[i] != '\n') i += 1; // end of the opening '/' line
   while (i < src.len) {
     i += 1; // step past '\n' -> column 0 of next line
-    if (i < src.len and src[i] == '\\' and (i + 1 >= src.len or src[i + 1] == '\n'))
+    if (i < src.len and src[i] == '\\' and restOfLineBlank(src, i + 1))
       return true;
     while (i < src.len and src[i] != '\n') i += 1;
   }
@@ -139,12 +149,13 @@ pub const Lexer = struct {
     if (c == '/' and (had_space or self.tag == .phrase)) {
       // Block comment: a line consisting of exactly '/' opens a block that runs
       // until a line consisting of exactly '\'. Both delimiters must sit in
-      // column 0 and be alone on their line. A lone '/' is NOT a block opener
-      // (it stays an ordinary empty line comment) when either the line above it
-      // is itself a comment — the blank '/' divider idiom inside a run of
-      // comments — or no matching '\' close follows.
+      // column 0 and be alone on their line — bar trailing spaces/tabs, which are
+      // invisible and must not stop a delimiter from delimiting. A lone '/' is NOT
+      // a block opener (it stays an ordinary empty line comment) when either the
+      // line above it is itself a comment — the blank '/' divider idiom inside a
+      // run of comments — or no matching '\' close follows.
       const at_col0 = (start == 0 or self.src[start - 1] == '\n');
-      const slash_alone = (start + 1 >= self.src.len or self.src[start + 1] == '\n');
+      const slash_alone = restOfLineBlank(self.src, start + 1);
       if (at_col0 and slash_alone and
         !prevLineIsComment(self.src, start) and blockClosePresent(self.src, start)) {
         self.adv(); // consume '/'
@@ -153,7 +164,7 @@ pub const Lexer = struct {
           self.adv(); // consume '\n' -> now at column 0 of next line
           const ls = self.i;
           const term = (ls < self.src.len and self.src[ls] == '\\') and
-            (ls + 1 >= self.src.len or self.src[ls + 1] == '\n');
+            restOfLineBlank(self.src, ls + 1);
           while (self.i < self.src.len and self.CR() != '\n') self.adv();
           if (term) break;
         }
@@ -582,6 +593,37 @@ test "lexer block comment" {
   try std.testing.expectEqualStrings("/\nignored 1 2 3\nstill \"ignored\n\\", t1.slice(src));
   try std.testing.expectEqual(TT.sep, lex.next().tt);
   try std.testing.expectEqual(TT.int, lex.next().tt);
+}
+
+test "lexer block comment delimiters tolerate trailing whitespace" {
+  // A stray space after the '/' or the '\' is invisible in an editor; it must not
+  // turn the opener into an empty line comment, nor stop the '\' from closing —
+  // which used to run one block on into the next and swallow the code between.
+  const src = "/ \nblk\n\\\t\nval:5";
+  var lex = Lexer.init(src);
+  const t1 = lex.next();
+  try std.testing.expectEqual(TT.comment, t1.tt);
+  try std.testing.expectEqualStrings("/ \nblk\n\\\t", t1.slice(src));
+  try std.testing.expectEqual(TT.sep, lex.next().tt);
+  try std.testing.expectEqual(TT.iden, lex.next().tt); // val
+  try std.testing.expectEqual(TT.@":", lex.next().tt);
+  try std.testing.expectEqual(TT.int, lex.next().tt);  // 5
+}
+
+test "lexer two block comments do not merge" {
+  // The first block's close must end it, leaving the code between the two blocks
+  // as real code rather than comment body.
+  const src = "/\none\n\\ \na:1\n/\ntwo\n\\\nb:2";
+  var lex = Lexer.init(src);
+  try std.testing.expectEqual(TT.comment, lex.next().tt); // block one
+  try std.testing.expectEqual(TT.sep, lex.next().tt);
+  try std.testing.expectEqual(TT.iden, lex.next().tt);    // a
+  try std.testing.expectEqual(TT.@":", lex.next().tt);
+  try std.testing.expectEqual(TT.int, lex.next().tt);     // 1
+  try std.testing.expectEqual(TT.sep, lex.next().tt);
+  try std.testing.expectEqual(TT.comment, lex.next().tt); // block two
+  try std.testing.expectEqual(TT.sep, lex.next().tt);
+  try std.testing.expectEqual(TT.iden, lex.next().tt);    // b
 }
 
 test "lexer unterminated block is a line comment" {

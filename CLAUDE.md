@@ -87,7 +87,8 @@ CST, `ink tools/doc.k` writes it to `doc/api/`, and `tools/lsp.k` serves the sam
 as editor hover.
 
 **Module header** — a **block comment holding markdown**: a line that is exactly `/`
-opens it, a line that is exactly `\` closes it (both alone in column 0). The first
+opens it, a line that is exactly `\` closes it (both alone in column 0; trailing
+spaces/tabs after the delimiter are ignored). The first
 heading names the module, the line under it is a one-sentence summary that has to read
 on its own (it becomes the index row), and the last line says how to load it.
 
