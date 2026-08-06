@@ -145,8 +145,12 @@ pub const Lexer = struct {
       return .{ .tt = .sep, .start = start, .end = self.i };
     }
 
-    // Comment: / with whitespace before it (or at start / after sep)
-    if (c == '/' and (had_space or self.tag == .phrase)) {
+    // Comment: / with whitespace before it, or first on its line. Being at phrase
+    // start is NOT enough: an opening bracket also starts a phrase, and there
+    // `(/)` is the fold adverb as a VALUE, exactly as `(\)` and `(')` already are
+    // — reading it as a comment silently ate the rest of the line.
+    const at_col0 = (start == 0 or self.src[start - 1] == '\n');
+    if (c == '/' and (had_space or at_col0)) {
       // Block comment: a line consisting of exactly '/' opens a block that runs
       // until a line consisting of exactly '\'. Both delimiters must sit in
       // column 0 and be alone on their line — bar trailing spaces/tabs, which are
@@ -154,7 +158,6 @@ pub const Lexer = struct {
       // a block opener (it stays an ordinary empty line comment) when either the
       // line above it is itself a comment — the blank '/' divider idiom inside a
       // run of comments — or no matching '\' close follows.
-      const at_col0 = (start == 0 or self.src[start - 1] == '\n');
       const slash_alone = restOfLineBlank(self.src, start + 1);
       if (at_col0 and slash_alone and
         !prevLineIsComment(self.src, start) and blockClosePresent(self.src, start)) {
@@ -231,6 +234,15 @@ pub const Lexer = struct {
       if (self.ch(0) == ':') self.adv();
       self.tag = .verb;
       return .{ .tt = .adverb, .start = start, .end = self.i };
+    }
+
+    // adverb_val: / as noun value. Only reachable at phrase start with no space
+    // and not first on the line — i.e. straight after `(`, `[`, `{` or `;`, where
+    // the comment rule above no longer claims it. Mirrors `'` and `\`.
+    if (c == '/') {
+      self.adv();
+      self.tag = .noun;
+      return .{ .tt = .adverb_val, .start = start, .end = self.i };
     }
 
     // Special bracket sequences
@@ -573,6 +585,39 @@ test "lexer comment" {
   try std.testing.expectEqual(TT.sep, t2.tt);
   const t3 = lex.next();
   try std.testing.expectEqual(TT.int, t3.tt);
+}
+
+test "lexer slash after an open bracket is the fold value, not a comment" {
+  // `(/)` is the fold adverb as a value, like `(\)` and `(')`. An open bracket
+  // starts a phrase but is not a line start, so the comment rule must not claim
+  // the '/' — it used to, silently eating `fold:(/);scan:(\);join:,` from the ';' on.
+  for ([_][]const u8{ "fold:(/);scan:1", "f[/;1]", "{/}", "a:1;/" }) |src| {
+    var lex = Lexer.init(src);
+    var saw_adverb_val = false;
+    while (true) {
+      const t = lex.next();
+      if (t.tt == .eof) break;
+      try std.testing.expect(t.tt != .comment);
+      if (t.tt == .adverb_val and std.mem.eql(u8, "/", t.slice(src))) saw_adverb_val = true;
+    }
+    try std.testing.expect(saw_adverb_val);
+  }
+}
+
+test "lexer comment still wins with a space or at line start" {
+  // The two ways a '/' IS a comment must survive the rule above.
+  const src = "f:(1) / spaced\n/ at line start\n2";
+  var lex = Lexer.init(src);
+  try std.testing.expectEqual(TT.iden, lex.next().tt);    // f
+  try std.testing.expectEqual(TT.@":", lex.next().tt);
+  try std.testing.expectEqual(TT.@"(", lex.next().tt);
+  try std.testing.expectEqual(TT.int, lex.next().tt);
+  try std.testing.expectEqual(TT.@")", lex.next().tt);
+  try std.testing.expectEqual(TT.comment, lex.next().tt); // / spaced
+  try std.testing.expectEqual(TT.sep, lex.next().tt);
+  try std.testing.expectEqual(TT.comment, lex.next().tt); // / at line start
+  try std.testing.expectEqual(TT.sep, lex.next().tt);
+  try std.testing.expectEqual(TT.int, lex.next().tt);     // 2
 }
 
 test "lexer inline comment" {
